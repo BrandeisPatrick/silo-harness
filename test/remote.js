@@ -227,6 +227,17 @@ function seedSession(store, title, extra = []) {
     const meta = await r5.json();
     check('api/new → runtime.create({ foreground: false }) and its meta', r5.status === 200 && typeof meta.id === 'string' && meta.title && JSON.stringify(calls.at(-1)) === JSON.stringify(['create', { foreground: false }]), meta);
     check('api/new leaves the foreground alone', app.runtime.foregroundId() === s1.id);
+
+    // A browser card reaches the phone whole (its kind, site and amber note), answered through api/approve like any
+    // card; the Browser pane's permission bar and download bar have no route: only the Mac's window answers them.
+    const { remoteEvent } = require(path.join(projectDir, 'dist/main/remote/sanitize.js'));
+    const card = { type: 'approval_request', id: 'ap-b', name: 'browser_click', detail: 'Click "Sign in" on login.example.com\nTo reach the dashboard', mode: 'ask', alwaysLabel: '', projectLabel: '', note: 'This looks like a sign-in site', browser: { card: 'sensitive', site: 'login.example.com' } };
+    const out = remoteEvent(card);
+    check('a browser card passes to the phone with its browser { card, site } and its note', out && JSON.stringify(out.browser) === JSON.stringify(card.browser) && out.note === card.note && out.detail === card.detail && out.alwaysLabel === '', out);
+    for (const route of ['api/permission', 'api/permissions', 'api/answerPermission', 'api/download', 'api/downloads', 'api/browser']) {
+      const r = await post(base, route, { id: 'x', answer: 'always' });
+      check(`no route answers the browser's bars (${route} → 404)`, r.status === 404, r.status);
+    }
   }
 
   // --- validation ---------------------------------------------------------------------------------------------

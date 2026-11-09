@@ -255,6 +255,12 @@ h1, h2 { margin: 0; }
 .card-reason svg { flex: none; margin-top: 2px; color: var(--warn); }
 .card-body { padding: 12px 14px 0; }
 .card-body .out { max-height: 260px; color: var(--text-100); }
+/* A browser card: the action, the model's reason in grey under it, a browser_eval's code, the amber note */
+.card-action { margin: 0; font-size: 14.5px; line-height: 21px; color: var(--text-100); overflow-wrap: anywhere; }
+.card-why { margin: 4px 0 0; font-size: 13px; line-height: 18px; color: var(--text-400); overflow-wrap: anywhere; }
+.card-action + .out, .card-why + .out { margin-top: 10px; }
+.card-note { display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0; font-size: 13px; line-height: 18px; color: var(--warn); }
+.card-note svg { flex: none; margin-top: 2px; }
 .card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px; }
 .card.decided { box-shadow: none; border-color: var(--border-subtle); background: transparent; }
 .card.decided .card-actions { display: none; }

@@ -75,6 +75,7 @@
     alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     question: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
     shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
     plan: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     list: '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/>',
     think: '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.6 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.6 1.5"/><path d="M18 18a4 4 0 0 0 2-7.46"/><path d="M6 18a4 4 0 0 1-2-7.46"/><path d="M6 18a4 4 0 0 0 6 2 4 4 0 0 0 6-2"/>',
@@ -504,6 +505,24 @@
     else body.append(h('pre', 'out' + (t.bad ? ' error' : ''), esc(t.result || '(no output)')));
   }
 
+  /**
+   * A browser tool's card (approval_request.browser: the kind and the site), worded as the desktop words it
+   * (tool-labels.ts browserApproval): the site's first approval, an act on a sensitive site, a browser_eval, a purchase,
+   * a new account. null for any other card.
+   */
+  function browserCard(ev) {
+    const b = ev && ev.browser && typeof ev.browser === 'object' && typeof ev.browser.card === 'string' ? ev.browser : null;
+    if (!b) return null;
+    const site = (typeof b.site === 'string' && b.site.trim()) || 'this page';
+    switch (b.card) {
+      case 'sensitive': return { title: 'Act on a sensitive site?', site };
+      case 'eval': return { title: `Run JavaScript on ${site}?`, site };
+      case 'purchase': return { title: 'Make a purchase?', site };
+      case 'account': return { title: 'Create an account?', site };
+      default: return { title: /^[~/]/.test(site) ? 'Let the agent read a local file?' : `Let the agent use ${site}?`, site };
+    }
+  }
+
   function approvalTitle(name) {
     if (name === 'bash' || name === 'terminal_run') return 'Run this command?';
     if (name === 'write_file') return 'Write this file?';
@@ -513,16 +532,39 @@
     return `Allow ${name}?`;
   }
 
+  /**
+   * A browser card's body, as the desktop draws it: the action, the model's reason in grey under it, a browser_eval's
+   * code after a blank line (the detail's own layout), then the amber note of a sensitive or sign-in page.
+   */
+  function browserBody(ev) {
+    const detail = typeof ev.detail === 'string' ? ev.detail : '';
+    const gap = detail.indexOf('\n\n');
+    const [line, ...rest] = (gap < 0 ? detail : detail.slice(0, gap)).split('\n');
+    const why = rest.join(' ').trim();
+    const code = gap < 0 ? '' : detail.slice(gap + 2);
+    const note = typeof ev.note === 'string' ? ev.note.trim() : '';
+    return (
+      `<p class="card-action">${esc(line || '')}</p>` +
+      (why ? `<p class="card-why">${esc(why)}</p>` : '') +
+      (code.trim() ? `<pre class="out">${esc(code)}</pre>` : '') +
+      (note ? `<p class="card-note">${icon('alert', 14)}<span>${esc(note)}</span></p>` : '')
+    );
+  }
+
   function approvalEl(ev) {
     const card = h('div', 'card approval');
+    const browser = browserCard(ev);
+    if (browser) card.classList.add('browser');
+    // An empty label is a card without that answer (a purchase, an account, a tool's own question): Allow and Deny only
+    const sessionLabel = typeof ev.alwaysLabel === 'string' ? ev.alwaysLabel.trim() : 'Allow for this session';
     card.innerHTML =
-      `<div class="card-head"><span class="card-icon">${icon('shield', 16)}</span><div class="card-heading">` +
-      `<span class="card-kicker">Waiting for you</span><span class="card-title">${esc(approvalTitle(ev.name))}</span></div></div>` +
+      `<div class="card-head"><span class="card-icon">${icon(browser ? 'globe' : 'shield', 16)}</span><div class="card-heading">` +
+      `<span class="card-kicker">Waiting for you</span><span class="card-title">${esc(browser ? browser.title : approvalTitle(ev.name))}</span></div></div>` +
       (ev.reason ? `<div class="card-reason">${icon('alert', 14)}<span>${esc(ev.reason[0].toUpperCase() + ev.reason.slice(1))}</span></div>` : '') +
-      `<div class="card-body"><pre class="out">${esc(ev.detail || '')}</pre></div>` +
+      `<div class="card-body">${browser ? browserBody(ev) : `<pre class="out">${esc(ev.detail || '')}</pre>`}</div>` +
       `<div class="card-actions">` +
       `<button type="button" class="btn" data-a="deny">Deny</button>` +
-      `<button type="button" class="btn" data-a="session">${esc(ev.alwaysLabel || 'Allow for this session')}</button>` +
+      (sessionLabel ? `<button type="button" class="btn" data-a="session">${esc(sessionLabel)}</button>` : '') +
       `<button type="button" class="btn primary" data-a="once">Allow</button></div>`;
     card.addEventListener('click', async (e) => {
       const b = e.target.closest('button[data-a]');
@@ -540,14 +582,24 @@
         }
       }
     });
+    if (browser) card.dataset.site = browser.site;
     return card;
+  }
+
+  /** What a browser card's answer reads as, as on the desktop: "Allowed once on example.com", "Denied on example.com". */
+  function browserDecision(site, ok, scope) {
+    if (!ok) return `Denied on ${site}`;
+    if (scope === 'session') return `Allowed ${site} for this session`;
+    if (scope === 'project') return `Always allowed ${site}`;
+    return `Allowed once on ${site}`;
   }
 
   /** ok null: someone answered it elsewhere (on the Mac) */
   function decideApproval(card, ok, scope) {
     if (card.classList.contains('decided')) return;
     card.classList.add('decided');
-    const text = ok === null ? 'Answered on your Mac' : ok ? (scope === 'once' ? 'Allowed' : scope === 'project' ? 'Allowed for this project' : 'Allowed for this session') : 'Denied';
+    const site = card.dataset.site;
+    const text = ok === null ? 'Answered on your Mac' : site ? browserDecision(site, ok, scope) : ok ? (scope === 'once' ? 'Allowed' : scope === 'project' ? 'Allowed for this project' : 'Allowed for this session') : 'Denied';
     const line = h('div', 'decision', ok === null ? '' : `<span class="${ok ? 'ok' : 'no'}">${icon(ok ? 'check' : 'x', 14)}</span>`);
     line.append(document.createTextNode(text));
     card.querySelector('.card-reason')?.remove();
