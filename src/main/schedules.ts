@@ -47,7 +47,7 @@ export function setupSchedules(app: App, opts: SchedulerOptions = {}): Scheduler
     source: 'app',
     run: () => {
       const all = svc.list();
-      if (!all.length) return { notice: 'No schedules yet. Ask the agent to schedule something, e.g. "every weekday at 9, summarise new issues".' };
+      if (!all.length) return { notice: 'No schedules yet.' };
       const t = now();
       return { notice: `${all.length} schedule${all.length === 1 ? '' : 's'}:\n${all.map((s) => scheduleLine(s, t)).join('\n')}` };
     },

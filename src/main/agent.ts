@@ -545,7 +545,7 @@ export class Agent {
     if (!out?.block) return null;
     const event = parent ? 'SubagentStop' : 'Stop';
     if (continues >= MAX_STOP_CONTINUES) {
-      this.emit({ type: 'error', kind: 'notice', message: `A ${event} hook kept blocking the end of the run; it was let end after ${MAX_STOP_CONTINUES} more rounds.` });
+      this.emit({ type: 'error', kind: 'notice', message: `A ${event} hook kept blocking, so the run ended after ${MAX_STOP_CONTINUES} more rounds.` });
       return null;
     }
     if (active && !out.jsonBlock) return null;
@@ -592,7 +592,7 @@ export class Agent {
     const out = await this.fireHook('UserPromptSubmit', fields);
     if (!out) return { ok: true, context: [] };
     if (out.block) {
-      this.emit({ type: 'error', kind: 'notice', message: `A UserPromptSubmit hook blocked this message, so it was not sent: ${plainReason(out.block)}` });
+      this.emit({ type: 'error', kind: 'notice', message: `A UserPromptSubmit hook blocked this message: ${plainReason(out.block)}` });
       return { ok: false, context: [] };
     }
     return { ok: true, context: out.context };
@@ -953,7 +953,7 @@ export class Agent {
       // Folding the conversation cannot help when the prompt and tools alone fill the window.
       if (!this.smallWindowNoticed.has(s.id)) {
         this.smallWindowNoticed.add(s.id);
-        this.emit({ type: 'error', kind: 'notice', message: `The system prompt and tool definitions take about ${Math.round(base / 1000)}k of the ${Math.round(limit / 1000)}k-token context window, so the conversation cannot be compacted. Raise the context size in Settings or disconnect MCP servers you do not need.` });
+        this.emit({ type: 'error', kind: 'notice', message: `Can't compact: the prompt and tools fill ${Math.round(base / 1000)}k of the ${Math.round(limit / 1000)}k context. Raise it in Settings or remove MCP servers.` });
       }
       return;
     }
@@ -1038,7 +1038,7 @@ export class Agent {
       if (cfg.pruneToolResults !== false) {
         const cleared = this.prune(PRUNE_HARD, false);
         if (cleared > 0 && !over()) {
-          this.emit({ type: 'error', kind: 'notice', message: `Cleared ${formatTokens(cleared)} tokens of old tool output in the current turn to stay inside the context window.` });
+          this.emit({ type: 'error', kind: 'notice', message: `Cleared ${formatTokens(cleared)} tokens of old tool output in this turn.` });
           return { ok: true };
         }
       }
@@ -1064,7 +1064,7 @@ export class Agent {
         const summary = await this.summarize(cfg, client, model, folded, instructions, signal);
         if (signal.aborted) throw new Error('Compaction was stopped.');
         const brief = compactedPreamble(summary, filesTouched(folded), this.requestToCarry(folded));
-        if (estimateMessageTokens({ role: 'user', content: brief }) >= estimateTokens(folded)) throw new Error('The summary was not smaller than the messages it would replace.');
+        if (estimateMessageTokens({ role: 'user', content: brief }) >= estimateTokens(folded)) throw new Error('The summary was not smaller than the messages.');
         const info = this.fold(cut, brief, summary, { reason, before, pruned, stage: 'summary' });
         await this.fireHook('PostCompact', { trigger: reason, compact_summary: summary }, { match: [reason] });
         return { ok: true, info };
@@ -1080,10 +1080,10 @@ export class Agent {
     } else if (!cut) error = 'Nothing to compact yet.';
     if (!over()) return pruned > 0 ? { ok: true } : { ok: false, error: error ?? 'Nothing to compact yet.' };
     // Never leave the session over the limit: shorten every old tool result, then drop the oldest messages.
-    const why = trySummary && error ? `The summary could not be produced (${error.replace(/\.$/, '')})` : this.autoCompactFailed ? 'A summary could not be produced earlier in this run' : 'Nothing could be summarised';
+    const why = trySummary && error ? `Couldn't summarise: ${error.replace(/\.$/, '')}` : this.autoCompactFailed ? "Couldn't summarise earlier in this run" : 'Nothing to summarise';
     const hard = cfg.pruneToolResults !== false ? this.prune(PRUNE_HARD, false) : 0;
     if (hard > 0 && !over()) {
-      this.emit({ type: 'error', kind: 'notice', message: `${why}, so old tool output was shortened further instead (${formatTokens(hard)} tokens cleared).` });
+      this.emit({ type: 'error', kind: 'notice', message: `${why}. Cleared ${formatTokens(hard)} more tokens of old tool output instead.` });
       return { ok: true };
     }
     let dropAt = this.cutFor(tail, limit);
@@ -1095,13 +1095,13 @@ export class Agent {
       // Told once until the conversation has grown: every turn of the run would end up here again.
       if (this.stuckAt < 0 || s.messages.length >= this.stuckAt + 4) {
         this.stuckAt = s.messages.length;
-        this.emit({ type: 'error', kind: 'notice', message: `${why}, and nothing older is left to drop: the next request may not fit the context window. Raise the context size in Settings or start a new session.` });
+        this.emit({ type: 'error', kind: 'notice', message: `${why}. The next request may not fit, so raise the context size or start a new session.` });
       }
       return { ok: false, error: error ?? 'Nothing to compact yet.' };
     }
     const folded = dropped;
     const info = this.fold(dropAt, note, `${count} earlier message${count === 1 ? ' was' : 's were'} dropped because a summary could not be produced.`, { reason, before, pruned: pruned + hard, stage: 'dropped' });
-    this.emit({ type: 'error', kind: 'notice', message: `${why}, so the ${count} oldest message${count === 1 ? ' was' : 's were'} dropped to stay inside the context window.` });
+    this.emit({ type: 'error', kind: 'notice', message: `${why}. Dropped the ${count} oldest message${count === 1 ? '' : 's'}.` });
     return { ok: true, info };
   }
 

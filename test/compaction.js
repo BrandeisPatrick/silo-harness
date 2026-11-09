@@ -359,7 +359,7 @@ function cleanCut(msgs, cut) {
   await agent.run('Now read d, e, f and g.');
   // The newest outputs stay whole: the last two at the last prune, which comes a read earlier or later as the tool
   // definitions grow; everything before them is cut
-  check('8a: the summary failed, so old tool output was shortened further, and the run went on', runEnd().reason === 'done' && notices().some((n) => /summary could not be produced.*shortened further/.test(n)) && !agent.session.compactions && agent.session.messages.filter((m) => m.role === 'tool').slice(0, -3).every((m) => m.content.length < 600), notices());
+  check('8a: the summary failed, so old tool output was shortened further, and the run went on', runEnd().reason === 'done' && notices().some((n) => /^Couldn't summarise.*Cleared .* more tokens of old tool output/.test(n)) && !agent.session.compactions && agent.session.messages.filter((m) => m.role === 'tool').slice(0, -3).every((m) => m.content.length < 600), notices());
   check('8a: the summary is not retried on every turn of the run', events.filter((e) => e.type === 'compact_start').length === 1 && notices().length >= 2);
   // (b) drop the oldest messages (no pruning allowed)
   fresh({ pruneToolResults: false });
@@ -369,7 +369,7 @@ function cleanCut(msgs, cut) {
   state.replies.push({ content: 'done' });
   await agent.run('Now read a.txt, b.txt and c.txt.');
   const c8 = agent.session.compactions && agent.session.compactions[0];
-  check('8b: the summary failed and nothing could be pruned, so the oldest messages were dropped', runEnd().reason === 'done' && c8 && c8.stage === 'dropped' && c8.folded.length === 4 && /dropped because a summary could not be produced/.test(agent.session.messages[0].content) && agent.session.messages[1].content.startsWith('Now read') && notices().some((n) => /oldest messages were dropped/.test(n)), notices());
+  check('8b: the summary failed and nothing could be pruned, so the oldest messages were dropped', runEnd().reason === 'done' && c8 && c8.stage === 'dropped' && c8.folded.length === 4 && /dropped because a summary could not be produced/.test(agent.session.messages[0].content) && agent.session.messages[1].content.startsWith('Now read') && notices().some((n) => /Dropped the \d+ oldest messages/.test(n)), notices());
   check('8b: the dropped messages still show in the transcript above the divider', toTranscript(agent.session).findIndex((i) => i.role === 'compaction') === 3);
   state.summaryFails = false;
 
@@ -411,7 +411,7 @@ function cleanCut(msgs, cut) {
   state.replies.push({ content: 'AWORD BWORD CWORD DWORD EWORD FWORD' });
   await agent.run('Read a.txt to f.txt, one at a time.');
   const res13 = agent.session.messages.filter((m) => m.role === 'tool');
-  check('13: a single turn over the limit: old results in it are shortened (heads kept), no summary needed', runEnd().reason === 'done' && !events.some((e) => e.type === 'compact_start') && notices().some((n) => /Cleared .* tokens of old tool output in the current turn/.test(n)) && /^1\| A-START/.test(res13[0].content) && res13[0].content.length < 600 && res13[res13.length - 1].content.length > 5000, { notices: notices(), first: res13[0].content.slice(0, 40), len: res13.map((m) => m.content.length) });
+  check('13: a single turn over the limit: old results in it are shortened (heads kept), no summary needed', runEnd().reason === 'done' && !events.some((e) => e.type === 'compact_start') && notices().some((n) => /Cleared .* tokens of old tool output in this turn/.test(n)) && /^1\| A-START/.test(res13[0].content) && res13[0].content.length < 600 && res13[res13.length - 1].content.length > 5000, { notices: notices(), first: res13[0].content.slice(0, 40), len: res13.map((m) => m.content.length) });
   fresh({ pruneToolResults: false });
   const request13 = 'Read a.txt to h.txt, one at a time.';
   for (const f of 'abcdefgh') state.replies.push(read(`${f}.txt`));

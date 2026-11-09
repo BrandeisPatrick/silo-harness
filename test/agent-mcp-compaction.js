@@ -200,7 +200,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.replies.push({ content: 'end' });
   await agent.run('go');
   // Changed on purpose: over the limit, a failed summary falls back (here: nothing worth dropping) and says so in a notice.
-  check('H: failed auto compaction tried once per run', state.requests.filter((q) => q.url === '/api/chat' && q.payload.stream === false).length === 1 && events.filter((e) => e.type === 'compact_end').length === 1 && events.filter((e) => e.type === 'error' && e.kind === 'notice' && /summary could not be produced/.test(e.message)).length === 1 && events.find((e) => e.type === 'run_end').reason === 'done', events.filter((e) => e.type === 'error'));
+  check('H: failed auto compaction tried once per run', state.requests.filter((q) => q.url === '/api/chat' && q.payload.stream === false).length === 1 && events.filter((e) => e.type === 'compact_end').length === 1 && events.filter((e) => e.type === 'error' && e.kind === 'notice' && /Couldn't summarise/.test(e.message)).length === 1 && events.find((e) => e.type === 'run_end').reason === 'done', events.filter((e) => e.type === 'error'));
   state.summaryFails = false;
   // auto-compact off
   reset();

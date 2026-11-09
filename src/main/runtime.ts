@@ -193,12 +193,12 @@ export class SessionRuntime {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
-    if (agent.compacting) return { ok: false, error: 'The context is being compacted; send the message again in a moment.' };
+    if (agent.compacting) return { ok: false, error: 'Compacting the context. Send again in a moment.' };
     if (agent.running) {
       const queued = agent.enqueue(text, attachments, { ...opts, origin: opts.origin ?? 'queue' });
       return { ok: true, queued: true, id: queued.id };
     }
-    if (this.running().length >= MAX_RUNNING) return { ok: false, error: `${MAX_RUNNING} sessions are already running. Wait for one to finish, or stop one, then send again.` };
+    if (this.running().length >= MAX_RUNNING) return { ok: false, error: `${MAX_RUNNING} sessions are already running. Stop or wait for one, then send again.` };
     agent.run(text, attachments, opts).catch((err: unknown) => console.error('[agent] run failed', err));
     return { ok: true };
   }

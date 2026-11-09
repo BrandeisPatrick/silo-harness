@@ -23,7 +23,7 @@ export interface CompletionHost {
 }
 
 export function noToolsNotice(model: string): string {
-  return `${model} does not support tools, so this run is a plain chat: it can see your message and images but cannot read files, run commands or browse.`;
+  return `${model} doesn't support tools, so it can't read files, run commands or browse.`;
 }
 
 /** Folds one chunk's usage into the running counts (gateways may repeat or split the counts across chunks). */

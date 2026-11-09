@@ -22,15 +22,15 @@ export function subagentCommands(svc: Subagents): Command[] {
   return [
     {
       name: 'spawn',
-      description: 'Start a sub-session with this task; it runs in the background and reports here',
+      description: 'Start a sub-session with this task',
       source: 'app',
       argsHint: '<task>',
       run: (args, { sessionId }) => {
         const task = args.trim();
-        if (!task) return { error: 'Usage: /spawn <task>. The task is the sub-session\'s whole brief.' };
+        if (!task) return { error: 'Usage: /spawn <task>' };
         try {
           const meta = svc.spawn(sessionId, { title: titleFromTask(task), prompt: task });
-          return { notice: `Started sub-session "${meta.title}". It runs in the background and reports here when it finishes a turn.` };
+          return { notice: `Started sub-session "${meta.title}". It reports back here.` };
         } catch (err) {
           return refused(err);
         }
@@ -50,7 +50,7 @@ export function subagentCommands(svc: Subagents): Command[] {
             const ready = svc.mergeable(sessionId);
             if (!ready.length) {
               const running = [...svc.children(sessionId), ...svc.forks(sessionId)].filter((s) => !s.mergedInto).length;
-              return { notice: running ? 'Nothing to merge yet: the sub-sessions and forks of this session are still running.' : 'Nothing to merge: this session has no unmerged sub-sessions or forks.' };
+              return { notice: running ? 'Nothing to merge yet: its sub-sessions and forks are still running.' : 'Nothing to merge.' };
             }
             if (ready.length > 1) return { notice: `${ready.length} sessions can be merged; name one with /merge <title or id>:\n${ready.map((s) => `${s.id}  "${s.title}"  ${svc.relation(sessionId, s)}`).join('\n')}` };
             src = ready[0];
@@ -65,7 +65,7 @@ export function subagentCommands(svc: Subagents): Command[] {
     },
     {
       name: 'sessions',
-      description: 'List the sub-sessions, forks and parent of this session, or find sessions by name',
+      description: 'List related sessions, or find one by name',
       source: 'app',
       argsHint: '[name]',
       run: (args, { sessionId }) => {
@@ -80,7 +80,7 @@ export function subagentCommands(svc: Subagents): Command[] {
           if (rel.parent) add(rel.parent.id, 'parent');
           for (const c of rel.children) add(c.id, 'sub-session');
           for (const f of rel.forks) add(f.id, 'fork');
-          if (!rows.length) return { notice: 'This session has no parent, sub-sessions or forks. Start one with /spawn <task>.' };
+          if (!rows.length) return { notice: 'No related sessions. Start one with /spawn <task>.' };
           return { notice: `${rows.length} related session${rows.length === 1 ? '' : 's'}:\n${rows.join('\n')}` };
         } catch (err) {
           return refused(err);
@@ -116,12 +116,12 @@ export function subagentCommands(svc: Subagents): Command[] {
         if (target.id === sessionId) return { error: 'That is this session.' };
         const r = svc.message(sessionId, target.id, message);
         if (!r.ok) return { error: r.error ?? 'The message could not be delivered.' };
-        return { notice: `Sent to "${target.title}"${r.held ? ' (held until its plan is decided)' : r.queued ? ' (queued behind its current run)' : ''}.` };
+        return { notice: `Sent to "${target.title}"${r.held ? ', held until its plan is decided' : r.queued ? ', queued after its current run' : ''}.` };
       },
     },
     {
       name: 'rename',
-      description: 'Rename this session; other sessions can then find it by that name',
+      description: 'Rename this session',
       source: 'app',
       argsHint: '[new name]',
       run: (args, { sessionId }) => {
