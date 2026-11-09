@@ -323,21 +323,27 @@ export function siteDecision(input: SiteDecisionInput): SiteDecision {
 
 // ---------- The eval guard ----------
 
+const SENDS = 'sends data from the page';
+
 const EVAL_RULES: ReadonlyArray<[RegExp, string]> = [
   [/\b(localStorage|sessionStorage|indexedDB|caches|cookieStore)\b|\bdocument\s*\.\s*cookie\b/, "reads the site's cookies or storage"],
   [/\bnavigator\s*\.\s*credentials\b/, "asks for the user's saved credentials"],
-  [/\b(fetch|import)\s*\(|\b(XMLHttpRequest|sendBeacon|WebSocket|EventSource|postMessage|importScripts)\b/, 'sends data from the page'],
+  [/\b(fetch|import)\s*\(|\b(XMLHttpRequest|sendBeacon|WebSocket|EventSource|postMessage|importScripts|RTCPeerConnection|serviceWorker)\b/, SENDS],
   [/password|passwd|token|secret|credential/i, 'looks for a password, token or secret'],
-  [/\.value\b/, "reads a form field's value"],
+  [/\.value\b|\bFormData\b|\.\s*(?:forms|elements)\b|\bdefaultValue\b/, "reads a form field's value"],
   [/\b(?:document\s*\.\s*)?location(?:\s*\.\s*(?:href|search|pathname|host|hostname|protocol))?\s*\+?=(?!=)|\blocation\s*\.\s*(?:assign|replace)\s*\(|\bwindow\s*\.\s*open\s*\(/, 'navigates away'],
+  // An image, a link, a form or a frame pointed somewhere new carries data out in its URL (after location's own rule)
+  [/\.\s*(?:src|href|action|srcdoc)\s*\+?=(?!=)/, SENDS],
   [/\beval\s*\(|\bFunction\s*\(|<script\b|\b(?:inner|outer)HTML\s*\+?=(?!=)|\binsertAdjacentHTML\s*\(|\bdocument\s*\.\s*write(?:ln)?\s*\(/i, 'runs code in the page'],
 ];
 
 /**
  * Why a browser_eval should pause for the user in auto mode, in the command guard's words, or null when the code
  * only reads the page (document.title, querySelectorAll(…).length, innerText). It is a plain text match, not a
- * parser: it catches the agent reaching for cookies, storage, the network, credentials, a field's value, another
- * page or code injection, not a determined attempt to hide one.
+ * parser: it catches the agent reaching for cookies, storage, the network (a request, a peer connection, a service
+ * worker, or an element's src, href, action or srcdoc set to a new URL), credentials, a field's value (also through
+ * FormData, document.forms, a form's elements or defaultValue), another page or code injection, not a determined
+ * attempt to hide one. Reading a link's href is not sending anything.
  */
 export function evalGuard(code: string): string | null {
   const text = String(code ?? '');
@@ -449,6 +455,18 @@ export function actionOf(toolName: string, args: Record<string, unknown> = {}): 
   if (toolName === 'browser_tabs') return args?.action === 'new' ? 'navigate' : 'read';
   if (toolName === 'browser_eval') return 'eval';
   return READ_ONLY_BROWSER_TOOLS.has(toolName) ? 'read' : 'act';
+}
+
+/** Every card a browser tool call can show: siteDecision's three, and a click's purchase and account cards. */
+export type BrowserCard = SiteCard | 'purchase' | 'account';
+
+/**
+ * The page a password field's question is remembered under once the user allowed acting on it: the site's key and
+ * the path without the query (`login?next=/a` and `login?next=/b` are one sign-in page). null for a page with no site.
+ */
+export function signInPageKey(url: string): string | null {
+  const site = siteOf(url);
+  return site ? `${site.key}${site.scheme === 'file' ? '' : site.path.replace(/\?.*$/, '')}` : null;
 }
 
 /** The site card's wider answers: "Allow example.com for this session", "Always allow example.com" (saved on this Mac). */
