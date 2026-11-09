@@ -263,7 +263,9 @@ export class BrowserController {
 
   /** The active tab's view has the pane's bounds and shows while the pane does; the others keep their size, hidden. */
   private layout(): void {
-    const b = this.rounded();
+    // A hidden pane (a dialog, a page, another pane tab) also takes the views' size away, as before tabs: a dialog
+    // must never sit under a page, whatever setVisible does in a window that is covered or not yet painted.
+    const b = this.visible ? this.rounded() : { x: 0, y: 0, width: 0, height: 0 };
     for (const tab of this.tabs) {
       tab.view.setBounds(b);
       tab.view.setVisible(tab === this.activeTab && this.visible);
