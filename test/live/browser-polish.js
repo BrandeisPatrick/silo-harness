@@ -203,8 +203,8 @@ const REFUSAL = 'Not permitted: passwords, one-time codes and card details are f
     // send for the element at that point of the page (read from the page). The handler, the template and the tab's
     // history are the real ones; the native menu is built but not popped up in a hidden window.
     await go(OPENER);
-    const MENU_MODULE = JSON.stringify(path.join(app.root, 'dist', 'main', 'browser', 'context-menu.js'));
-    const lastMenu = () => mainEval(`process.mainModule.require(${MENU_MODULE}).lastContextMenu()`);
+    // The module the running app loaded: beside its main script (inside the bundle for a packaged app), not the repo's dist
+    const lastMenu = () => mainEval(`(() => { const r = process.mainModule.require; const p = r('path'); return r(p.join(r('electron').app.getAppPath(), 'dist', 'main', 'browser', 'context-menu.js')).lastContextMenu(); })()`);
     const rightClick = async (x, y) => {
       const at = await evalAt(await app.pageTarget(OPENER), `(() => { const e = document.elementFromPoint(${x}, ${y}); const a = e && e.closest('a[href]'); const img = e && e.closest('img'); const sel = String(getSelection()); return { linkURL: a ? a.href : '', srcURL: img ? img.src : '', mediaType: img ? 'image' : 'none', selectionText: sel, isEditable: Boolean(e && (e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName))) }; })()`);
       const params = { x, y, ...at, misspelledWord: '', dictionarySuggestions: [], editFlags: { canCut: false, canCopy: Boolean(at.selectionText), canPaste: false, canSelectAll: true } };
