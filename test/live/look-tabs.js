@@ -1,7 +1,7 @@
 // Live checks of the look tabs of Settings → Mods (Background, Chat bar, Conversation, Theme), in the real window:
 // each tab's preview shows what is in use; a click on another version previews it there and leaves the window as it
 // is; Use applies it to the window; Default undoes it; the first Use of a look of yours asks once (and Cancel leaves
-// everything as it was); "Use the whole set" applies a set's parts together; New ⌄ → From a template writes a look
+// everything as it was); "Use the set" applies a set's parts together; New ⌄ → From a template writes a look
 // that shows previewed, not applied, and Ask the agent… fills the composer; the chat card of a new look offers
 // Preview (its tab, with it previewed) and Use.
 // Screenshots: each look tab in light and dark (one of them with another version previewed), the Use confirmation,
@@ -219,12 +219,12 @@ function writeMod(root, id, manifest, files) {
     await rpc('mods.use', { background: null, composer: null, conversation: null });
     await openTab('backgrounds');
     await clickCard('backgrounds', 'hyperspace/starfield');
-    check('a set shows "Use the whole set" next to Use', /Use the whole set/.test((await headText('backgrounds')) || '') && (await app.exists('.sp-look-tab[data-subtab="backgrounds"] .sp-look-use')));
-    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the whole set"]');
+    check('a set shows "Use the set" next to Use', /Use the set/.test((await headText('backgrounds')) || '') && (await app.exists('.sp-look-tab[data-subtab="backgrounds"] .sp-look-use')));
+    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the set"]');
     await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo' && document.querySelector('#chatbar').dataset.look === 'hyperspace/cockpit' && document.documentElement.classList.contains('mod-bg')`, 10_000, 'the whole set in the window').catch(() => {});
     const L1 = await layout();
-    check('"Use the whole set" applies its background, chat bar look and conversation look together', L1.background === 'hyperspace/starfield' && L1.looks.composer === 'hyperspace/cockpit' && L1.looks.conversation === 'hyperspace/holo' && L1.theme === null, L1);
-    check('… and the tab shows it in use, with no set left to use', !(await st('backgrounds')).previewing && !/Use the whole set/.test((await headText('backgrounds')) || ''));
+    check('"Use the set" applies its background, chat bar look and conversation look together', L1.background === 'hyperspace/starfield' && L1.looks.composer === 'hyperspace/cockpit' && L1.looks.conversation === 'hyperspace/holo' && L1.theme === null, L1);
+    check('… and the tab shows it in use, with no set left to use', !(await st('backgrounds')).previewing && !/Use the set/.test((await headText('backgrounds')) || ''));
 
     // ---------- New ⌄: from a template (previewed, not applied), Ask the agent ----------
     await openTab('chat-bar');

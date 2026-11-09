@@ -368,7 +368,7 @@ const js = (v) => JSON.stringify(v);
     await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo'`, 5000).catch(() => {});
     check('using the Holo conversation look applies it', (await layoutNow()).looks.conversation === 'hyperspace/holo' && (await app.evaluate(`document.querySelector('#messages').dataset.look`)) === 'hyperspace/holo');
     await sleep(300);
-    check('with all three in use, the whole set is not offered again', !(await app.exists('.sp-look-tab[data-subtab="conversation"] .sp-look-acts button[aria-label^="Use the whole set"]')));
+    check('with all three in use, the whole set is not offered again', !(await app.exists('.sp-look-tab[data-subtab="conversation"] .sp-look-acts button[aria-label^="Use the set"]')));
     // The whole set, from the Chat bar tab
     await app.evaluate(`window.oc.rpc('mods.use', { background: null, composer: null, conversation: null })`);
     await sleep(400);
@@ -377,11 +377,11 @@ const js = (v) => JSON.stringify(v);
     await tabTo('chat-bar');
     await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-card[data-ref="hyperspace/cockpit"]');
     await sleep(300);
-    check('… and Cockpit previewed on the Chat bar tab offers "Use the whole set"', await shown('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the whole set"]'));
-    await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the whole set"]');
+    check('… and Cockpit previewed on the Chat bar tab offers "Use the set"', await shown('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the set"]'));
+    await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the set"]');
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hyperspace/starfield')`, 10_000).catch(() => {});
     L = await layoutNow();
-    check('"Use the whole set" applies the conversation look, the chat bar look and the background', L.background === 'hyperspace/starfield' && L.looks.conversation === 'hyperspace/holo' && L.looks.composer === 'hyperspace/cockpit', L);
+    check('"Use the set" applies the conversation look, the chat bar look and the background', L.background === 'hyperspace/starfield' && L.looks.conversation === 'hyperspace/holo' && L.looks.composer === 'hyperspace/cockpit', L);
     const inUse = (await Promise.all(['conversation', 'chat-bar', 'backgrounds'].map(looks))).map((x) => x.current).join();
     check('… and the tabs follow', inUse === 'hyperspace/holo,hyperspace/cockpit,hyperspace/starfield', inUse);
     // Theme: the themes are versions, one in use, no switches

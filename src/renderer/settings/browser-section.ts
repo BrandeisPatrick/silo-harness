@@ -34,15 +34,15 @@ export function browserSection(ctx: Ctx): Section {
   const keepCookies = ctx.switchField({
     id: 'browser-keepCookies',
     title: 'Keep cookies after quitting',
-    desc: 'Stay signed in to sites in the Browser pane from one launch to the next. Off: its cookies and site data are cleared when Silo Harness quits.',
+    desc: 'Stay signed in to sites between launches.',
     keywords: 'cookies sign in signed session site data profile quit browser pane',
     field: 'browser.keepCookies',
   });
 
   const clearRow = row(
-    { id: 'browser-clearData', title: 'Clear browsing data', desc: "Sign out of every site in the Browser pane: its cookies, site data, cache and saved HTTP sign-ins are removed, and open tabs reload. Your sessions and settings stay.", keywords: 'clear cookies cache history sign out reset browsing data browser' },
+    { id: 'browser-clearData', title: 'Clear browsing data', desc: 'Sign out of every site in the Browser pane.', keywords: 'clear cookies cache history sign out reset browsing data browser' },
     button('Clear…', async (b) => {
-      const ok = await ctx.confirm({ title: 'Clear browsing data?', description: 'You will be signed out of every site in the Browser pane. Its cookies, site data, cache and saved HTTP sign-ins are removed, and open tabs reload. This cannot be undone.', confirmLabel: 'Clear', danger: true });
+      const ok = await ctx.confirm({ title: 'Clear browsing data?', description: 'This signs you out of every site and cannot be undone.', confirmLabel: 'Clear', danger: true });
       if (!ok) return;
       b.disabled = true;
       try {
@@ -75,8 +75,7 @@ export function browserSection(ctx: Ctx): Section {
   // The main window's window-open handler reads it (browser/feature.ts openChatLink)
   const chatLinks = ctx.switchField({
     id: 'browser-openChatLinksInPane',
-    title: 'Open links from the chat in the Browser pane',
-    desc: 'Web links in replies open in a new tab of the pane beside the conversation instead of your default browser.',
+    title: 'Open chat links in the Browser pane',
     keywords: 'links chat replies open default browser pane safari chrome',
     field: 'browser.openChatLinksInPane',
   });
@@ -151,9 +150,9 @@ export function browserSection(ctx: Ctx): Section {
     id: 'browser-alwaysAllowed',
     field: 'alwaysAllowed',
     title: 'Sites the agent may always use',
-    empty: 'None yet. "Always allow" on a site card adds the site here.',
+    empty: 'None yet.',
     addTitle: 'Add a site',
-    addDesc: 'The agent reads and acts on it without a card, in every session. A sensitive site still asks.',
+    addDesc: 'The agent uses it without asking, unless it is sensitive.',
     placeholder: 'example.com',
     keywords: 'always allow allowed sites agent approve approval card trust browser',
   });
@@ -164,7 +163,7 @@ export function browserSection(ctx: Ctx): Section {
     title: 'Sites that always ask',
     empty: 'None of your own.',
     addTitle: 'Add a site that always asks',
-    addDesc: 'Every action the agent takes there asks first, in every mode but Bypass. "login." covers every host that starts with it.',
+    addDesc: 'Every action there asks first, except in Bypass.',
     placeholder: 'mybank.example',
     keywords: 'sensitive always ask bank email sign in login financial payment sites agent browser',
     prefixes: true,
@@ -184,7 +183,7 @@ export function browserSection(ctx: Ctx): Section {
     title: 'Exempt hosts',
     empty: 'None of your own.',
     addTitle: 'Add an exempt host',
-    addDesc: 'Your own servers under development: the agent uses them without a card and may type test passwords there. A folder path makes the files in it exempt.',
+    addDesc: 'Your dev servers; the agent may type test passwords there.',
     placeholder: 'myapp.local:8080',
     keywords: 'exempt localhost development dev server local hosts folder files agent browser',
     folders: true,
@@ -196,7 +195,7 @@ export function browserSection(ctx: Ctx): Section {
 
   const permsEl = h('div', { class: 'sp-rows' });
   const resetAll = button('Reset all', async (b) => {
-    const ok = await ctx.confirm({ title: 'Reset every permission?', description: 'Sites will ask again the next time they want the camera, notifications or anything else.', confirmLabel: 'Reset all' });
+    const ok = await ctx.confirm({ title: 'Reset every permission?', description: 'Every site asks again next time.', confirmLabel: 'Reset all' });
     if (!ok) return;
     b.disabled = true;
     try {
@@ -229,7 +228,7 @@ export function browserSection(ctx: Ctx): Section {
       r.el.title = p.key;
       permsEl.append(r.el);
     });
-    if (!list.length) permsEl.append(note('No saved answers. "Allow every time" and "Don\'t allow" on the permission bar are kept here.'));
+    if (!list.length) permsEl.append(note('No saved permissions.'));
     resetAllRow.el.hidden = !list.length;
     ctx.refreshSearch();
   }
@@ -262,7 +261,7 @@ export function browserSection(ctx: Ctx): Section {
   function renderDir(cfg: AppConfig): void {
     const own = lists(cfg).downloadsDir;
     const shown = own || builtIns?.downloadsDir || '';
-    dirRow.setDesc(shown ? `${tildePath(shown)}${own ? '' : ' (the Downloads folder)'}` : 'The Downloads folder');
+    dirRow.setDesc(shown ? `${tildePath(shown)}${own ? '' : ', the default'}` : 'The Downloads folder');
     dirRow.descEl.title = shown;
     resetDir.hidden = !own;
   }
