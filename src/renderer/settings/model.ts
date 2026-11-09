@@ -123,11 +123,6 @@ export function parseText(text: string): Parsed<string> {
   return { ok: true, value: String(text ?? '').trim() };
 }
 
-export function parseRequired(text: string, what: string): Parsed<string> {
-  const t = String(text ?? '').trim();
-  return t ? { ok: true, value: t } : { ok: false, error: `Enter ${what}.` };
-}
-
 // ---------- Config paths ----------
 
 /** The value at "portkey.model" in the config. */
@@ -323,10 +318,6 @@ export const LOOK_TABS: LookTabInfo[] = [
   { tab: 'conversation', kind: 'conversation', title: 'Conversation', noun: 'conversation look', prompt: 'Make a conversation look that ', row: 'look-conversation' },
   { tab: 'themes', kind: 'theme', title: 'Theme', noun: 'theme', prompt: 'Make a theme that ', row: 'look-theme' },
 ];
-
-export function lookTabOfKind(kind: LookKind): LookTabInfo {
-  return LOOK_TABS.find((t) => t.kind === kind)!;
-}
 
 export function lookTabOf(tab: ModTab): LookTabInfo | null {
   return LOOK_TABS.find((t) => t.tab === tab) ?? null;

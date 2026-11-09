@@ -10,8 +10,6 @@ import { formatBytes } from '../artifacts';
 import type { Msg, Session } from '../sessions';
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, type ImageKind } from './sniff';
 
-/** The stored copies' names; nothing else in an images folder is ever served. */
-export const IMAGE_FILE = /^img-(\d+)\.(png|jpg|webp|gif|svg)$/;
 const MAX_IMAGES = 500;
 const MAX_CAPTION = 300;
 /** What a successful show_image result starts with (toTranscript turns those calls into images) */
