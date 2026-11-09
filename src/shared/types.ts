@@ -283,6 +283,18 @@ export interface AppConfig {
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */
 export type ApprovalScope = 'session' | 'project';
 
+/**
+ * A browser tool's approval card (approval_request.browser): `site` is the first approval of a site, with "Allow
+ * <site> for this session" and "Always allow <site>" (saved on this Mac, not per project); `sensitive` an act on a
+ * sign-in, email or financial site; `eval` a browser_eval; `purchase` and `account` a click that buys something or
+ * makes an account. All but `site` have Allow and Deny only.
+ */
+export interface BrowserCardInfo {
+  card: 'site' | 'sensitive' | 'eval' | 'purchase' | 'account';
+  /** The site as the card names it (example.com, localhost:3000, a file's path with ~) */
+  site: string;
+}
+
 export interface StoredRules {
   /** Programs (first word of a command: git, npm, …) that run without asking */
   programs?: string[];
@@ -380,8 +392,11 @@ export type AgentEvent =
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text
    * for the "allow … for this session" button (e.g. "Allow git for this session", "Allow edits for this session").
+   * A browser tool's card names its kind and the site in `browser`, and may carry `note`, the amber line ("This looks
+   * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
+   * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */

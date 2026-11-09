@@ -1,7 +1,8 @@
 // Approval card, as Claude Code draws it: the question as the title in a header band; what the call does (its own
 // description) and why it stopped to ask in muted text; the command or the change; Deny and "Allow once ⌘↵" on the
 // right, with ⌄ for the wider scopes. ⌘↵ allows once, Esc denies, A and P pick the scopes. Once decided the card goes
-// and the call's own row says what was decided (a call without a row keeps a one-line decided card).
+// and the call's own row says what was decided (a call without a row keeps a one-line decided card). A browser card
+// shows the action, the model's reason in grey under it, a browser_eval's code, and the amber note of a sensitive site.
 
 import type { AgentEvent, AppConfig, PermissionMode, QuestionAnswer, SiloHarnessApi } from '../shared/types';
 import { lineDiff, numberRows, parseEditPreview, renderDiff } from './diff.js';
@@ -10,7 +11,7 @@ import { highlight } from './highlight.js';
 import { icon } from './icons.js';
 import { closeMenu, isMenuOpen, menuAnchoredTo, openMenu } from './popover.js';
 import { createQuestionCard } from './questions.js';
-import { agentApproval } from './tool-labels.js';
+import { agentApproval, browserApproval, browserDecision } from './tool-labels.js';
 import { approvalTitle, displayPath, editStartLine, fileLines, linkPath, mcpParts, type ToolCard } from './tools.js';
 
 export interface ApprovalsDeps {
@@ -52,6 +53,8 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     allow: () => void;
     resolved: (ok: boolean, scope: 'once' | 'session' | 'project') => void;
     dispose: () => void;
+    /** A browser purchase or account card: the user answers it, in every mode */
+    userOnly: boolean;
   } | null = null;
   /** The ask_user card waiting for an answer, if any */
   let pendingQuestion: { id: string; el: HTMLElement; cancel: () => void; dispose: () => void } | null = null;
@@ -88,24 +91,42 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     el.setAttribute('role', 'group');
     el.setAttribute('aria-labelledby', `${uid}-title`);
     const mcp = mcpParts(ev.name);
+    // A browser tool's card: the site, a sensitive site's act, a browser_eval, a purchase or an account
+    const browser = ev.browser && typeof ev.browser === 'object' && typeof ev.browser.card === 'string' ? ev.browser : null;
     // A tool's own question (sub-sessions, messages, schedules): its wording comes from the detail the main process sent
-    const agent = mcp ? null : agentApproval(ev.name, ev.detail);
-    if (agent) card?.noteApproval(ev.detail);
+    const agent = mcp ? null : browser ? browserApproval(browser) : agentApproval(ev.name, ev.detail);
+    if (agent && !browser) card?.noteApproval(ev.detail);
     if (mcp) el.classList.add('mcp');
-    el.innerHTML = `<div class="prompt-head"><div class="title" id="${uid}-title">${escapeHtml(approvalTitle(ev.name, ev.detail, card?.args))}</div></div>`;
+    el.innerHTML = `<div class="prompt-head"><div class="title" id="${uid}-title">${escapeHtml(approvalTitle(ev.name, ev.detail, card?.args, browser ?? undefined))}</div></div>`;
     const body = document.createElement('div');
     body.className = 'approval-body prompt-body';
     body.id = `${uid}-body`;
     // What the call does in its own words (a command's description), then why it asks when the mode would not have
     const said = typeof card?.args.description === 'string' ? card.args.description.replace(/\s+/g, ' ').trim() : '';
     if (said) body.insertAdjacentHTML('beforeend', `<p class="prompt-text">${escapeHtml(said)}</p>`);
-    const custom = typeof ev.alwaysLabel === 'string' && !ev.alwaysLabel.trim() && typeof ev.projectLabel === 'string' && !ev.projectLabel.trim();
+    // A purchase or an account card says what it saw as written; a browser_eval's reason reads like a guard's
+    const custom = browser ? browser.card === 'purchase' || browser.card === 'account' : typeof ev.alwaysLabel === 'string' && !ev.alwaysLabel.trim() && typeof ev.projectLabel === 'string' && !ev.projectLabel.trim();
     if (reason) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note">${escapeHtml(stopNote(ev.mode, reason, custom))}</p>`);
-    if (said || reason) el.setAttribute('aria-describedby', body.id);
+    if (said || reason || browser) el.setAttribute('aria-describedby', body.id);
     let subject = ev.name;
     /** The decided line (a call without a row) names the action in words rather than a tool name or a path */
     let prose = false;
-    if (agent) {
+    if (browser && agent) {
+      // The detail: the action, the model's reason on the next line (grey, under it), browser_eval's code after a blank line
+      subject = agent.subject;
+      prose = true;
+      const detail = typeof ev.detail === 'string' ? ev.detail : '';
+      const gap = detail.indexOf('\n\n');
+      const [line, ...rest] = (gap < 0 ? detail : detail.slice(0, gap)).split('\n');
+      const pre = document.createElement('pre');
+      pre.className = 'args prose';
+      pre.textContent = line;
+      body.appendChild(pre);
+      const why = rest.join(' ').trim();
+      if (why) body.insertAdjacentHTML('beforeend', `<p class="prompt-text">${escapeHtml(why)}</p>`);
+      const code = gap < 0 ? '' : detail.slice(gap + 2);
+      if (code.trim()) body.insertAdjacentHTML('beforeend', `<div class="cmd"><code>${highlight(code, 'js')}</code></div>`);
+    } else if (agent) {
       subject = agent.subject;
       prose = true;
       const pre = document.createElement('pre');
@@ -144,6 +165,9 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       pre.textContent = ev.name === 'write_file' || ev.name === 'edit_file' ? ev.detail.replace(/^[^\n]+/, (line) => displayPath(line)) : ev.detail;
       body.appendChild(pre);
     }
+    // The amber line under the rest: "This looks like a sign-in site"
+    const note = typeof ev.note === 'string' ? ev.note.trim() : '';
+    if (note) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note warn">${escapeHtml(note)}</p>`);
 
     // An empty label (a tool's own question) means the card has no such answer: only Allow once and Deny.
     const noAlways = typeof ev.alwaysLabel === 'string' && !ev.alwaysLabel.trim();
@@ -155,6 +179,8 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     const scopes: { label: string; key: string; kind: Answer }[] = [];
     if (!noAlways) scopes.push({ label: alwaysLabel, key: 'A', kind: 'session' });
     if (!noProject) scopes.push({ label: projectLabel, key: 'P', kind: 'project' });
+    /** What the answer reads as on the row (a browser card names its site) */
+    const words = (ok: boolean, kind: Answer): string => (browser ? browserDecision(browser, ok, kind) : decisionWords(ok, kind, alwaysLabel, projectLabel));
 
     const foot = document.createElement('div');
     foot.className = 'row prompt-foot';
@@ -214,7 +240,7 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       if (settled) return;
       settled = true;
       const kind: Answer = ok ? answer : 'once';
-      settle(decisionWords(ok, kind, alwaysLabel, projectLabel), ok);
+      settle(words(ok, kind), ok);
       if (running()) setStatusText(baseVerb());
       if (synthetic) return;
       const before = currentMode();
@@ -271,6 +297,7 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       id: ev.id,
       el,
       name: ev.name,
+      userOnly: browser?.card === 'purchase' || browser?.card === 'account',
       cancel: (why: string) => {
         if (settled) return;
         settled = true;
@@ -282,7 +309,7 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       resolved: (ok: boolean, scope: Answer) => {
         if (settled) return;
         settled = true;
-        settle(decisionWords(ok, ok ? scope : 'once', alwaysLabel, projectLabel), ok);
+        settle(words(ok, ok ? scope : 'once'), ok);
         if (running()) setStatusText(baseVerb());
       },
       // The card left the screen with its session (a switch): it stays unanswered for when the session comes back.
@@ -384,8 +411,10 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     pending: () => pendingApproval,
     /** A card (approval or question) waits for the user */
     waiting: () => Boolean(pendingApproval || pendingQuestion),
-    /** The mode became Bypass: the waiting approval goes through */
-    allowPending: () => pendingApproval?.allow(),
+    /** The mode became Bypass: the waiting approval goes through (not a purchase or an account, which bypass asks for too) */
+    allowPending: () => {
+      if (pendingApproval && !pendingApproval.userOnly) pendingApproval.allow();
+    },
     /** Answered here, on the phone, or ended by a stop: the question card goes */
     questionResolved: (id: string) => {
       if (pendingQuestion?.id === id) pendingQuestion.cancel();

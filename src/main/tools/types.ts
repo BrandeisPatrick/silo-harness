@@ -1,6 +1,7 @@
 import type { AppConfig, ArtifactInfo, PermissionMode, PlanInfo, QuestionAnswer, TaskItem, UserQuestion } from '../../shared/types';
 import type { ArtifactInput } from '../artifacts';
 import type { BrowserController } from '../browser';
+import type { BrowserCard, Site } from '../browser/policy';
 import type { Skill } from '../skills';
 import type { TerminalManager } from '../terminal';
 import type { App } from '../app';
@@ -14,6 +15,25 @@ export interface ApproveOptions {
   custom?: boolean;
   /** With custom: ask even in bypass mode */
   alwaysAsk?: boolean;
+  /**
+   * A browser tool's card, after the browser policy decided it asks (so it is asked in every mode it reaches the rules
+   * in): the site card has the wider answers "Allow <site> for this session" and "Always allow <site>", the others
+   * Allow and Deny only.
+   */
+  browser?: BrowserApproval;
+}
+
+/** What a browser card is about (ApproveOptions.browser). */
+export interface BrowserApproval {
+  /** The site the call concerns: the active tab's, or where a navigation goes */
+  site: Site;
+  card: BrowserCard;
+  /** The amber line: "This looks like a sign-in site" */
+  note?: string;
+  /** Why the policy asks, in its words: the eval guard's ("reads the site's cookies or storage") or a click's ('"Pay now" looks like a purchase') */
+  reason?: string;
+  /** For a sensitive card: the sign-in page its answer is remembered for (signInPageKey) */
+  page?: string;
 }
 
 /** Outcome of asking for permission: denied actions carry the message the model should read. */
@@ -39,6 +59,10 @@ export interface ToolContext {
    * of the change); `target` is the absolute file path for write/edit tools so the guard can check it.
    */
   approve(toolName: string, detail: string, target?: string, opts?: ApproveOptions): Promise<ApprovalResult>;
+  /** The site keys the user allowed for the rest of this session ("Allow example.com for this session", and "Always") */
+  sitesAllowed?(): ReadonlySet<string>;
+  /** The sign-in pages (signInPageKey) the user allowed an action on this session: their password field asks no more */
+  signInPagesAllowed?(): ReadonlySet<string>;
   /** Call before changing a file so the Diff pane can show (and revert) the change */
   beforeChange(absPath: string): void;
   /** Plan mode: hand the proposed plan to the user */

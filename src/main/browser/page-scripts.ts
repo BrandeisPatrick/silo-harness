@@ -141,6 +141,60 @@ export function fieldKindScript(field: string): string {
   `);
 }
 
+/**
+ * Runs inside the page (in the safety world), changing nothing: what a click on the ref'd element, or at a viewport
+ * point, lands on, for the click rules (policy.ts clickRule). A span inside a button counts as the button. inCaptcha:
+ * the element or an ancestor (across shadow roots) has an id, class or src naming reCAPTCHA, hCaptcha or Turnstile,
+ * which covers a click on such a frame. formHasCardFields: a card field in its form (fields tied to it by form= too);
+ * formActionHost: the host its form (or the button's formaction) posts to, when one is set. Built-ins are called from
+ * the prototypes, so a form field named "action" or "querySelectorAll" cannot hide what the form holds. null: nothing there.
+ */
+export function clickTargetScript(target: { ref: string } | { x: number; y: number }): string {
+  const find = 'ref' in target ? `document.querySelector(${JSON.stringify(`[${REF_ATTR}="${target.ref}"]`)})` : `document.elementFromPoint(${Number(target.x) || 0}, ${Number(target.y) || 0})`;
+  return inSafetyWorld(`
+    const hit = ${find};
+    if (!hit) return null;
+    const E = Element.prototype;
+    const attr = (e, n) => E.getAttribute.call(e, n) || '';
+    const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+    const CAPTCHA = /recaptcha|h-?captcha|turnstile/i;
+    let inCaptcha = false;
+    for (let e = hit; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
+      if (e.nodeType === 1 && CAPTCHA.test([e.id, attr(e, 'class'), attr(e, 'src')].join(' '))) { inCaptcha = true; break; }
+    }
+    const el = E.closest.call(hit, 'button, a[href], input, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"]') || hit;
+    const tag = el.tagName.toLowerCase();
+    const type = clean(attr(el, 'type')).toLowerCase();
+    const isInputButton = tag === 'input' && /^(submit|button|reset|image)$/.test(type);
+    const own = tag === 'input' ? (isInputButton && !S.check(el) ? el.value : '') : (el.innerText || el.textContent);
+    const text = clean(own || attr(el, 'aria-label') || attr(el, 'title') || attr(el, 'alt')).slice(0, 200);
+    const form = ((tag === 'button' || tag === 'input') && el.form) || E.closest.call(el, 'form');
+    let formHasCardFields = false;
+    let formActionHost = null;
+    if (form) {
+      const fields = [...E.querySelectorAll.call(form, 'input, select, textarea')];
+      if (form.id) fields.push(...document.querySelectorAll('[form="' + CSS.escape(form.id) + '"]'));
+      formHasCardFields = fields.some((f) => S.check(f) === 'card');
+      const action = clean(attr(el, 'formaction') || attr(form, 'action'));
+      if (action) { try { formActionHost = new URL(action, location.href).host || null; } catch (e) {} }
+    }
+    return { text, role: clean(attr(el, 'role')).toLowerCase(), tag, type, inCaptcha, formHasCardFields, formActionHost };
+  `);
+}
+
+/**
+ * Runs inside the page (in the safety world), changing nothing: whether it shows a password field (S.check, so a
+ * field typed into as one counts after "Show password"), in the document or an open shadow root. The sign-in page signal.
+ */
+export function passwordFieldScript(): string {
+  return inSafetyWorld(`
+    const shown = (el) => { const r = el.getBoundingClientRect(); if (!r.width || !r.height) return false; const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none'; };
+    const roots = [document];
+    for (let i = 0; i < roots.length && i < 64; i++) for (const el of roots[i].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+    return roots.some((r) => [...r.querySelectorAll('input, textarea')].some((el) => S.check(el) === 'password' && shown(el)));
+  `);
+}
+
 /** Runs inside the page: briefly outlines the element the agent is about to act on, so the user can follow along. */
 export function flashScript(ref: string): string {
   return `(() => {

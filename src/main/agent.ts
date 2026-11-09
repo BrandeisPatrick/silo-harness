@@ -34,7 +34,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type Tool, type ToolContext, type ToolResult } from './tools';
+import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
@@ -71,10 +71,13 @@ const MIN_COMPACT_MESSAGES = 2;
 
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'bash', 'terminal_run']);
 
-/** What answering an approval card changes besides the pending call: a mode switch, or a rule to save for the project. */
+/**
+ * What answering an approval card changes besides the pending call: a mode switch, or a rule to save for the project
+ * (kind 'site': a site key for AppConfig.browser.alwaysAllowed, saved on this Mac rather than for the project).
+ */
 export interface ApprovalOutcome {
   setMode?: PermissionMode;
-  rule?: { kind: 'program' | 'reason' | 'edits' | 'mcp'; values: string[] };
+  rule?: { kind: 'program' | 'reason' | 'edits' | 'mcp' | 'site'; values: string[] };
 }
 
 interface PendingApproval {
@@ -84,7 +87,12 @@ interface PendingApproval {
   reason: string | null;
   /** A tool's own question (ApproveOptions.custom): no "always" answers */
   custom?: boolean;
+  /** A browser tool's card: what its answer allows (the site, or the sign-in page) */
+  browser?: BrowserApproval;
 }
+
+/** Browser cards a PreToolUse hook's "allow" does not skip: money and accounts are the user's, as in bypass mode. */
+const USER_ONLY_CARDS = new Set(['purchase', 'account']);
 
 /** How a run's user message was sent (Agent.run, Agent.enqueue). */
 export interface SendOptions {
@@ -140,6 +148,10 @@ export class Agent {
   private maxOutput: number | undefined;
   /** Per session: MCP servers the user allowed for the rest of the session. */
   private mcpAllowed = new Map<string, Set<string>>();
+  /** Per session: browser sites (policy.ts Site.key) the user allowed for the rest of the session, or always. */
+  private allowedSites = new Map<string, Set<string>>();
+  /** Per session: sign-in pages (signInPageKey) the user allowed an act on; their password field asks no more. */
+  private signInPages = new Map<string, Set<string>>();
   /** Tokens the tool specs take on every request (measured at the start of each run). */
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
@@ -299,6 +311,20 @@ export class Agent {
     this.pendingApprovals.delete(id);
     const out: ApprovalOutcome = {};
     if (p.custom) always = false;
+    if (p.browser) {
+      // A site card's "for this session" allows the site for the session; "Always" also saves it for this Mac (the
+      // caller adds it to the browser's always-allowed list). An allowed act on a sign-in page stops its password
+      // field from asking again this session.
+      const b = p.browser;
+      if (ok && b.card === 'sensitive' && b.page) this.sessionSet(this.signInPages).add(b.page);
+      if (ok && always && b.card === 'site' && b.site.key) {
+        this.sessionSet(this.allowedSites).add(b.site.key);
+        if (scope === 'project') out.rule = { kind: 'site', values: [b.site.key] };
+      }
+      p.resolve(ok ? { ok: true } : { ok: false, message: DENIED });
+      this.emit({ type: 'approval_resolved', id, ok, scope: ok && always ? scope : 'once' });
+      return out;
+    }
     if (ok && always) {
       const isMcp = p.name.startsWith('mcp__') && !!p.programs[0];
       const isCmd = p.name === 'bash' || p.name === 'terminal_run';
@@ -366,7 +392,7 @@ export class Agent {
   /**
    * Decides, per permission mode, whether an action runs, asks, or is refused (the rules are in agent/permissions.ts).
    * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown (what the mode refuses outright, plan
-   * mode's edits, stays refused).
+   * mode's edits, stays refused, and a browser purchase or account card still asks, as it does in bypass mode).
    */
   private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
@@ -384,24 +410,26 @@ export class Agent {
       },
     });
     if (decision.kind === 'refuse') return Promise.resolve({ ok: false, message: decision.message });
-    if (decision.kind === 'allow' || hookAllowed) return Promise.resolve({ ok: true });
-    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom);
+    if (decision.kind === 'allow' || (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? ''))) return Promise.resolve({ ok: true });
+    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom, opts.browser);
   }
 
-  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false): Promise<ApprovalResult> {
+  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval): Promise<ApprovalResult> {
     const id = randomUUID();
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
+    // A browser card names its kind and site for the renderer's wording, and carries the amber note
+    const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
     if (custom) {
       // Only Allow and Deny: the renderer hides the buttons whose label is empty.
       return new Promise((resolve) => {
-        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true });
-        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: '', projectLabel: '' });
+        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true, browser });
+        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: '', projectLabel: '', ...extra });
       });
     }
-    const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs);
+    const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs, browser?.card === 'site' ? browser.site : undefined);
     return new Promise((resolve) => {
-      this.pendingApprovals.set(id, { resolve, name, programs, reason });
-      this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel });
+      this.pendingApprovals.set(id, { resolve, name, programs, reason, browser });
+      this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel, ...extra });
     });
   }
 
@@ -634,6 +662,8 @@ export class Agent {
         skills,
         terminal: this.terminal,
         approve: (name, detail, target, approveOpts) => this.requestApproval(name, detail, target, approveOpts),
+        sitesAllowed: () => this.sessionSet(this.allowedSites),
+        signInPagesAllowed: () => this.sessionSet(this.signInPages),
         beforeChange: (abs) => {
           snapshotBeforeChange(this.session, abs);
           if (this.currentTurn) turnSnapshot(this.currentTurn, abs);
