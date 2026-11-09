@@ -41,6 +41,7 @@ const SCRIPTS = [
   { name: 'type-scale' },
   { name: 'mods-protocol', shots: 'none' },
   { name: 'looks', shots: 'env' },
+  { name: 'look-tabs' },
   { name: 'palette' },
   { name: 'glass' },
   { name: 'dreaming' },
