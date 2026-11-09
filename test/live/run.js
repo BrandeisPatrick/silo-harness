@@ -40,6 +40,7 @@ const SCRIPTS = [
   { name: 'mods-look', shots: 'env' },
   { name: 'type-scale' },
   { name: 'mods-protocol', shots: 'none' },
+  { name: 'mods-panes' },
   { name: 'looks', shots: 'env' },
   { name: 'look-tabs' },
   { name: 'palette' },
