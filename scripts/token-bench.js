@@ -13,7 +13,17 @@
 //   B  reading a local fixture page in the built-in browser, then a screenshot and a follow-up (bypass mode,
 //      screenshots sent to the model)
 //   L  a six-turn conversation on one task, to see how the history grows (Auto mode)
-// Session titles are on, so their calls are counted too.
+// Session titles are on, so their calls are counted too. Those four are tier 1, the quick check.
+//
+// Tier 2 (scenario W, --tier 2) is a realistic working session: one Auto-mode session of 19 user turns, sent one after
+// another, in a copy of this repository at a fixed commit (git archive, so without node_modules, dist and release;
+// tens of thousands of lines of real code). It asks how approvals work, makes a small change in guard.ts with a plain
+// node test, refines it, looks things up across the codebase, runs git status and diff, reads the project's website
+// in the browser, asks about something read earlier, and goes on past an automatic compaction (the context window is
+// set to --window tokens, default 180000, with the compaction threshold at --threshold, default 0.5: compaction at about
+// 90K tokens, under Haiku's 100K price step, before pruning starts at 60%). Its report is per turn: each
+// request's input split by part, the side calls next to it, a bar per turn of how the parts grow, and flags for what
+// cost the most (the tool results carried longest, files read again, the safety check's growing input).
 //
 // The split of a request's input into parts uses the provider's prompt_tokens as the total: images are estimated
 // from their pixel size (width x height / 750, after the API's resize), and the rest is shared out by characters,
@@ -28,7 +38,8 @@
 //
 //   npm run build
 //   set -a; . /path/to/api.env; set +a
-//   node scripts/token-bench.js [--runs 2] [--scenarios Q,E,B,L] [--out DIR] [--label baseline] [--native]
+//   node scripts/token-bench.js [--tier 1|2|all] [--runs 2] [--scenarios Q,E,B,L,W] [--out DIR] [--label baseline]
+//                               [--native] [--window 180000] [--threshold 0.5] [--repo-commit be2ee39]
 //
 // Writes report.md (the tables), results.json (every request's record, without bodies) and requests.jsonl (the
 // request bodies, for a closer look) to the output folder (default: a new temp folder), and prints the report.
@@ -57,11 +68,17 @@ const KINDS = [
 // ---------- Arguments ----------
 
 function parseArgs(argv) {
-  const o = { runs: 1, scenarios: ['Q', 'E', 'B', 'L'], out: '', label: '', native: false, model: LIVE_MODEL };
+  const o = { runs: 1, scenarios: ['Q', 'E', 'B', 'L'], out: '', label: '', native: false, model: LIVE_MODEL, window: 180000, threshold: 0.5, repoCommit: 'be2ee39' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
     if (a === '--runs') o.runs = Math.max(1, Number(next()) || 1);
+    else if (a === '--tier') {
+      const t = next();
+      o.scenarios = t === '2' ? ['W'] : t === 'all' ? ['Q', 'E', 'B', 'L', 'W'] : ['Q', 'E', 'B', 'L'];
+    } else if (a === '--window') o.window = Math.max(16000, Number(next()) || 180000);
+    else if (a === '--threshold') o.threshold = Math.min(0.95, Math.max(0.5, Number(next()) || 0.5));
+    else if (a === '--repo-commit') o.repoCommit = next();
     else if (a === '--scenarios') o.scenarios = next().split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
     else if (a === '--out') o.out = path.resolve(next());
     else if (a === '--label') o.label = next();
@@ -212,7 +229,7 @@ function startProxy(state) {
     });
     state.inflight++;
     state.lastAt = Date.now();
-    const rec = { seq: ++state.seq, at: new Date().toISOString(), run: state.run, scenario: state.scenario, method: req.method, path: req.url, model: body?.model ?? null, stream: Boolean(body?.stream) };
+    const rec = { seq: ++state.seq, at: new Date().toISOString(), run: state.run, scenario: state.scenario, turn: state.turn, method: req.method, path: req.url, model: body?.model ?? null, stream: Boolean(body?.stream) };
     let text = '';
     try {
       const up = await fetch(UPSTREAM + req.url, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : raw, signal: ctl.signal });
@@ -246,7 +263,7 @@ function startProxy(state) {
       rec.cost = cost(rec.usage);
       state.perToolByHash.set(a.toolsHash, a.perTool);
       state.systems.set(rec.seq, a.system);
-      state.bodies.push(scrub(JSON.stringify({ seq: rec.seq, run: rec.run, scenario: rec.scenario, kind: a.kind, body })));
+      state.bodies.push(scrub(JSON.stringify({ seq: rec.seq, run: rec.run, scenario: rec.scenario, turn: rec.turn, kind: a.kind, body })));
     } else rec.kind = 'non-chat';
     state.records.push(rec);
   });
@@ -464,12 +481,38 @@ It also adds <code>truncateWords(text, n)</code>, which cuts a text after n word
 <footer><a href="/docs">Documentation</a> · <a href="/changelog">Full changelog</a> · <a href="/issues">Report an issue</a></footer>
 </body></html>`;
 
-function startSite() {
+/** The fixture page, or with `root` the files of that folder (tier 2 serves the project's own website, docs/). */
+function startSite(root) {
+  const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
   const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(req.url === '/' ? PAGE : `<!doctype html><title>${req.url}</title><p>Nothing here yet: ${req.url}</p>`);
+    const url = decodeURIComponent((req.url || '/').split('?')[0]);
+    if (root) {
+      const file = path.join(root, url === '/' ? 'index.html' : url);
+      if (file.startsWith(root + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
+        res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' });
+        res.end(fs.readFileSync(file));
+        return;
+      }
+    }
+    res.writeHead(root ? 404 : 200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(!root && url === '/' ? PAGE : `<!doctype html><title>${url}</title><p>Nothing here: ${url}</p>`);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
+}
+
+/** Tier 2's project: this repository at `commit` (tracked files only), as a git repository of its own with one commit. */
+function makeRepoCopy(commit) {
+  const { execFileSync } = require('node:child_process');
+  const root = path.join(__dirname, '..');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-bench-repo-'));
+  const tar = execFileSync('git', ['archive', '--format=tar', commit], { cwd: root, maxBuffer: 512 * 1024 * 1024 });
+  execFileSync('tar', ['-x', '-C', dir], { input: tar });
+  for (const junk of ['node_modules', 'dist', 'release']) fs.rmSync(path.join(dir, junk), { recursive: true, force: true });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=Token Bench', '-c', 'user.email=bench@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  git('add', '-A');
+  git('commit', '-q', '-m', `Silo Harness at ${commit}`);
+  return dir;
 }
 
 // ---------- Scenarios ----------
@@ -503,6 +546,34 @@ const SCENARIOS = {
       'Summarise what we changed in two sentences.',
     ],
   },
+  W: {
+    mode: 'auto',
+    tier: 2,
+    name: 'W: a working session in this repository (Auto mode, tier 2)',
+    project: 'repo',
+    site: 'docs',
+    turns: (site) => [
+      "How does this app decide whether a tool call needs the user's approval? Give me a short overview and name the files involved.",
+      'In Auto mode, what exactly does the safety check send to its model for each action? Show me the code that builds it.',
+      "Let's make a small change. In src/main/guard.ts, make isReadOnlyCommand treat `git whatchanged` and `git range-diff` as read-only. Add a plain node test at test/guard-read-only.js that requires ../src/main/guard.ts directly (node runs .ts files here), checks both, and checks that `git push` is still not read-only. Run it with node.",
+      'Also `git -C some/dir log` should count as read-only. Add a check for it and run the test again; fix guard.ts if it fails.',
+      'Make the test print one line per check, like `ok  git whatchanged`, and exit with code 1 when a check fails.',
+      'Where else in the codebase is isReadOnlyCommand used? List the call sites with a line each on why.',
+      'Run git status and git diff and summarise what we have changed so far.',
+      'Now src/main/browser/policy.ts: does isPaymentHost recognise pay.google.com? If not, add it to the payment patterns, and add a plain node test test/payment-host.js in the same style as the other new test.',
+      'Rename the helper that prints the checks in the two new tests to `report`, so both read the same, and run them.',
+      `Open the project's website at http://127.0.0.1:${site}/ in the browser and tell me how it describes Auto mode.`,
+      'Earlier you looked at how approvals are decided. Which function chooses between showing an approval card and running the safety check in Auto mode, and what does it return?',
+      'How does src/main/agent.ts decide when to compact the conversation? Walk me through the part of the run loop that does it.',
+      'List the ten largest TypeScript files under src by line count.',
+      'Search the codebase for TODO, FIXME and XXX comments and tell me which ones look important.',
+      'Explain how src/main/compact.ts decides which old tool results to prune.',
+      'Add one sentence to docs/reference.md, where it describes the commands Auto mode or plan mode treat as read-only, saying that git whatchanged and git range-diff are read-only too.',
+      'Run both new tests again and show me git diff --stat.',
+      'What was the first change we made in this session, and which test covers it?',
+      'Summarise everything we changed in this session as a short list I can paste into a commit message.',
+    ],
+  },
 };
 
 /** Did the agent do the job? A cheap check per scenario, so a saving is not bought with a worse agent. */
@@ -528,6 +599,16 @@ function outcome(id, project, replies) {
       const added = /undefined|null|empty/i.test(fs.readFileSync(path.join(project, 'test.js'), 'utf8').split('const tests')[1] || '');
       return v === '' && tests() && added ? 'ok' : `slugify(undefined) = ${JSON.stringify(v)}, tests ${tests() ? 'pass' : 'fail'}, test added: ${added}`;
     }
+    if (id === 'W') {
+      const run = (args) => spawnSync(process.execPath, args, { cwd: project, encoding: 'utf8', timeout: 30_000 });
+      const ro = run(['-e', "const g = require('./src/main/guard.ts'); console.log(JSON.stringify([g.isReadOnlyCommand('git whatchanged'), g.isReadOnlyCommand('git range-diff a b c'), g.isReadOnlyCommand('git push')]))"]).stdout.trim();
+      const pay = run(['-e', "console.log(require('./src/main/browser/policy.ts').isPaymentHost('pay.google.com'))"]).stdout.trim();
+      const t1 = fs.existsSync(path.join(project, 'test', 'guard-read-only.js')) && run(['test/guard-read-only.js']).status === 0;
+      const t2 = fs.existsSync(path.join(project, 'test', 'payment-host.js')) && run(['test/payment-host.js']).status === 0;
+      const doc = /whatchanged/.test(fs.readFileSync(path.join(project, 'docs', 'reference.md'), 'utf8'));
+      const ok = ro === '[true,true,false]' && pay === 'true' && t1 && t2 && doc;
+      return ok ? 'ok' : `guard ${ro || '?'}, payment ${pay || '?'}, tests ${t1}/${t2}, docs ${doc}`;
+    }
   } catch (err) {
     return `check failed: ${err.message}`;
   }
@@ -547,6 +628,12 @@ async function turn(app, text, counters) {
       counters.approvals++;
       await app.approve('allow');
     }
+    // A question from ask_user: the first option of each question, as a user in a hurry would
+    if (await app.exists('.question-card .q-option')) {
+      counters.questions++;
+      await app.evaluate(`(() => { const c = document.querySelector('.question-card'); for (const q of c.querySelectorAll('.q-options, fieldset, .q-question') ) { const o = q.querySelector('.q-option'); if (o) o.click(); } if (!c.querySelector('.q-option.selected, .q-option[aria-checked="true"]')) c.querySelector('.q-option')?.click(); c.querySelector('.submit')?.click(); })()`);
+      await sleep(500);
+    }
     if (!(await app.evaluate(BUSY))) break;
     if (Date.now() > until) throw new Error(`turn timed out: ${text.slice(0, 60)}`);
     await sleep(300);
@@ -565,22 +652,32 @@ async function settle(state) {
 
 async function runScenario(id, run, opts, state) {
   const sc = SCENARIOS[id];
-  const project = makeProject();
-  const site = id === 'B' ? await startSite() : null;
+  const project = sc.project === 'repo' ? makeRepoCopy(opts.repoCommit) : makeProject();
+  const site = sc.site === 'docs' ? await startSite(path.join(project, 'docs')) : id === 'B' ? await startSite() : null;
   state.run = run;
   state.scenario = id;
-  const counters = { approvals: 0 };
+  state.turn = 0;
+  const counters = { approvals: 0, questions: 0 };
   const replies = [];
   const config = {
-    portkey: { baseURL: `http://127.0.0.1:${state.port}/v1`, apiKey: '', model: opts.model, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 200000 },
+    portkey: { baseURL: `http://127.0.0.1:${state.port}/v1`, apiKey: '', model: opts.model, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: sc.tier === 2 ? opts.window : 200000 },
     autoTitles: true,
+    ...(sc.tier === 2 ? { compactThreshold: opts.threshold } : {}),
     ...(sc.config || {}),
   };
   const app = await launch({ mode: sc.mode, project, config });
   let error = null;
+  const turnTimes = [];
   try {
     if (!app.live) throw new Error('The rig is on the mock model: set ANTHROPIC_API_KEY');
-    for (const t of sc.turns(site?.port)) replies.push(await turn(app, t, counters));
+    const turns = sc.turns(site?.port);
+    for (const [i, t] of turns.entries()) {
+      state.turn = i + 1;
+      const t0 = Date.now();
+      replies.push(await turn(app, t, counters));
+      turnTimes.push(Math.round((Date.now() - t0) / 1000));
+      if (sc.tier === 2) process.stderr.write(`${i + 1} `);
+    }
     await settle(state);
   } catch (err) {
     error = scrub(err.message);
@@ -588,9 +685,21 @@ async function runScenario(id, run, opts, state) {
     await app.close();
     site?.server.close();
   }
-  const result = { id, run, name: sc.name, mode: sc.mode, approvals: counters.approvals, outcome: error ? `error: ${error}` : outcome(id, project, replies), replies: replies.map((r) => scrub(r).slice(0, 400)) };
+  const result = {
+    id,
+    run,
+    name: sc.name,
+    mode: sc.mode,
+    approvals: counters.approvals,
+    questions: counters.questions,
+    turnTimes,
+    turns: sc.turns(site?.port ?? 0),
+    outcome: error ? `error: ${error}` : outcome(id, project, replies),
+    replies: replies.map((r) => scrub(r).slice(0, 400)),
+  };
   fs.rmSync(project, { recursive: true, force: true });
   state.scenario = null;
+  state.turn = 0;
   return result;
 }
 
@@ -708,8 +817,8 @@ function tables(records, results, ids) {
       }
   }
   if (results) {
-    lines.push('', '| Scenario | Outcome | Approvals answered |', '|---|---|--:|');
-    for (const r of results) lines.push(`| ${r.id} | ${r.outcome.replace(/\|/g, '/')} | ${r.approvals} |`);
+    lines.push('', '| Scenario | Outcome | Approvals answered | Questions answered |', '|---|---|--:|--:|');
+    for (const r of results) lines.push(`| ${r.id} | ${r.outcome.replace(/\|/g, '/')} | ${r.approvals} | ${r.questions} |`);
   }
   return lines;
 }
@@ -784,6 +893,178 @@ function nativeTable(replay, records) {
   return lines;
 }
 
+// ---------- Tier 2: the session, turn by turn ----------
+
+const k1 = (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
+
+/** A tool call in a few words: its name and the argument that says what it touched. */
+function callLabel(name, argsText) {
+  let a = {};
+  try {
+    a = JSON.parse(argsText || '{}');
+  } catch {
+    a = {};
+  }
+  const short = (s, n = 70) => {
+    const t = String(s).replace(/\/[^\s'"]*token-bench-repo-[^/]+\//g, '').replace(/\s+/g, ' ').trim();
+    return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+  };
+  const what = a.path ?? a.command ?? a.pattern ?? a.url ?? a.code ?? a.query ?? a.name ?? '';
+  return `${name}${what ? ` ${short(what)}` : ''}`.replace(/\|/g, '/');
+}
+
+/** The files a call reads whole or in part: read_file's path, or cat / head / tail / sed -n / nl in a command. */
+function filesRead(name, argsText) {
+  let a = {};
+  try {
+    a = JSON.parse(argsText || '{}');
+  } catch {
+    return [];
+  }
+  const norm = (p) => String(p).replace(/^.*token-bench-repo-[^/]+\//, '').replace(/^\.\//, '');
+  if (name === 'read_file' && a.path) return [norm(a.path)];
+  if (name !== 'bash' || typeof a.command !== 'string') return [];
+  const out = [];
+  for (const m of a.command.matchAll(/\b(?:cat|head|tail|nl|sed\s+-n\s+'[^']*'|sed\s+-n\s+"[^"]*"|sed\s+-n\s+\S+)\s+(?:-\S+\s+)*([\w./-]+\.(?:ts|js|json|md|css|html))/g)) out.push(norm(m[1]));
+  return out;
+}
+
+function sessionReport(id, run, recs, bodies, result) {
+  const lines = [];
+  const turns = [...new Set(recs.map((r) => r.turn))].filter((t) => t > 0).sort((a, b) => a - b);
+  const agent = recs.filter((r) => r.kind === 'agent');
+  const bodyOf = new Map(bodies.map((b) => [b.seq, b.body]));
+  const ratioOf = (r) => r.split?.charsPerToken || 3;
+
+  // Every tool call by id: what it was and when it was made; every tool result: its size each time it was sent
+  const calls = new Map();
+  const carried = new Map();
+  let prevResults = new Map();
+  const prunes = [];
+  for (const r of agent) {
+    const body = bodyOf.get(r.seq);
+    if (!body) continue;
+    const now = new Map();
+    for (const m of body.messages) {
+      if (m.role === 'assistant') for (const tc of m.tool_calls ?? []) if (!calls.has(tc.id)) calls.set(tc.id, { name: tc.function.name, args: tc.function.arguments, turn: r.turn });
+      if (m.role !== 'tool') continue;
+      const len = contentText(m.content).text.length;
+      now.set(m.tool_call_id, len);
+      const c = carried.get(m.tool_call_id) || { tokens: 0, requests: 0, first: len / ratioOf(r), turn: r.turn };
+      c.tokens += len / ratioOf(r);
+      c.requests++;
+      carried.set(m.tool_call_id, c);
+    }
+    let shortened = 0;
+    let saved = 0;
+    for (const [idc, len] of now) {
+      const before = prevResults.get(idc);
+      if (before !== undefined && len < before) {
+        shortened++;
+        saved += before - len;
+      }
+    }
+    if (shortened) prunes.push({ turn: r.turn, seq: r.seq, shortened, saved: saved / ratioOf(r) });
+    prevResults = now;
+  }
+
+  // Per turn
+  lines.push(`### ${id}, run ${run}: turn by turn`, '', 'Agent input is the sum over the turn\'s agent requests; history is the user and assistant messages, tool results are separate. Side calls are shown as count / input tokens.', '');
+  lines.push('| Turn | Prompt | Agent req. | Agent input | Tools | System | History | Tool results | Images | Check | Title | Compaction | Output | Cost | Biggest new tool result |', '|--:|---|--:|--:|--:|--:|--:|--:|--:|---|---|---|--:|--:|---|');
+  const seenResults = new Set();
+  for (const t of turns) {
+    const tr = recs.filter((r) => r.turn === t);
+    const ag = tr.filter((r) => r.kind === 'agent');
+    const s = sum(ag);
+    const side = (kind) => {
+      const x = tr.filter((r) => r.kind === kind);
+      return x.length ? `${x.length} / ${k1(sum(x).input)}` : '';
+    };
+    let biggest = null;
+    for (const r of ag) {
+      const body = bodyOf.get(r.seq);
+      for (const m of body?.messages ?? []) {
+        if (m.role !== 'tool' || seenResults.has(m.tool_call_id)) continue;
+        seenResults.add(m.tool_call_id);
+        const tok = contentText(m.content).text.length / ratioOf(r);
+        if (!biggest || tok > biggest.tok) biggest = { tok, call: calls.get(m.tool_call_id) };
+      }
+    }
+    const prompt = (result?.turns?.[t - 1] || '').replace(/http:\/\/127\.0\.0\.1:\d+\//, 'http://127.0.0.1/').replace(/\|/g, '/');
+    const all = sum(tr);
+    lines.push(
+      `| ${t} | ${prompt.length > 48 ? `${prompt.slice(0, 47)}…` : prompt} | ${ag.length} | ${n0(s.input)} | ${n0(s.parts.tools)} | ${n0(s.parts.system)} | ${n0(s.parts.user + s.parts.assistant)} | ${n0(s.parts.toolResults)} | ${n0(s.parts.images)} | ${side('classifier')} | ${side('title')} | ${side('compaction')} | ${n0(all.output)} | ${usd(all.cost)} | ${biggest && biggest.tok >= 200 ? `${callLabel(biggest.call?.name ?? 'tool', biggest.call?.args)} (${k1(biggest.tok)})` : ''} |`,
+    );
+  }
+  const tot = sum(recs);
+  const ag = sum(agent);
+  lines.push(`| all | | ${agent.length} | ${n0(ag.input)} | ${n0(ag.parts.tools)} | ${n0(ag.parts.system)} | ${n0(ag.parts.user + ag.parts.assistant)} | ${n0(ag.parts.toolResults)} | ${n0(ag.parts.images)} | ${tot.classifier} / ${k1(sum(recs.filter((r) => r.kind === 'classifier')).input)} | ${tot.title} / ${k1(sum(recs.filter((r) => r.kind === 'title')).input)} | ${tot.compaction} / ${k1(sum(recs.filter((r) => r.kind === 'compaction')).input)} | ${n0(tot.output)} | ${usd(tot.cost)} | |`);
+
+  // Growth: the last agent request of each turn, as a bar (█ tools, ▓ system, ▒ history, ░ tool results, · images)
+  lines.push('', `How a request grows over the session (the last agent request of each turn; one character is 2,000 tokens: █ tools, ▓ system prompt, ▒ history, ░ tool results, · images):`, '');
+  lines.push('| Turn | Tools | System | History | Tool results | Images | Total | |', '|--:|--:|--:|--:|--:|--:|--:|---|');
+  for (const t of turns) {
+    const last = agent.filter((r) => r.turn === t).pop();
+    if (!last?.split) continue;
+    const p = last.split;
+    const hist = p.user + p.assistant;
+    const bar = (v, ch) => ch.repeat(Math.round(v / 2000));
+    lines.push(`| ${t} | ${n0(p.tools)} | ${n0(p.system)} | ${n0(hist)} | ${n0(p.toolResults)} | ${n0(p.images)} | ${n0(last.usage.prompt_tokens)} | \`${bar(p.tools, '█')}${bar(p.system, '▓')}${bar(hist, '▒')}${bar(p.toolResults, '░')}${bar(p.images, '·')}\` |`);
+  }
+
+  // Where the session's input went
+  const sideIn = sum(recs.filter((r) => r.kind !== 'agent')).input;
+  const total = tot.input || 1;
+  const pc = (v) => `${Math.round((100 * v) / total)}%`;
+  lines.push('', `Where the session's ${n0(tot.input)} input tokens went: tool definitions ${n0(ag.parts.tools)} (${pc(ag.parts.tools)}), system prompt ${n0(ag.parts.system)} (${pc(ag.parts.system)}), history ${n0(ag.parts.user + ag.parts.assistant)} (${pc(ag.parts.user + ag.parts.assistant)}), tool results ${n0(ag.parts.toolResults)} (${pc(ag.parts.toolResults)}), images ${n0(ag.parts.images)}, side calls ${n0(sideIn)} (${pc(sideIn)}). The fixed part every agent request repeats (tools and system prompt) is ${pc(ag.parts.tools + ag.parts.system)} of the session's input.`);
+
+  // Flags
+  lines.push('', '#### What cost the most', '', 'Tool results carried longest (a result is sent again with every later request until it is pruned or compacted away):', '', '| Tool call | Turn | Size | Requests that carried it | Total input tokens |', '|---|--:|--:|--:|--:|');
+  for (const [idc, c] of [...carried.entries()].sort((a, b) => b[1].tokens - a[1].tokens).slice(0, 10)) {
+    const call = calls.get(idc);
+    lines.push(`| ${callLabel(call?.name ?? 'tool', call?.args)} | ${c.turn} | ${k1(c.first)} | ${c.requests} | ${n0(c.tokens)} |`);
+  }
+  const reads = new Map();
+  for (const call of calls.values()) for (const f of filesRead(call.name, call.args)) reads.set(f, [...(reads.get(f) ?? []), call.turn]);
+  const again = [...reads.entries()].filter(([, t]) => t.length > 1).sort((a, b) => b[1].length - a[1].length);
+  lines.push('', again.length ? 'Files read more than once (read_file, or cat / head / tail / sed in a command):' : 'No file was read more than once.', '');
+  if (again.length) {
+    lines.push('| File | Reads | In turns |', '|---|--:|---|');
+    for (const [f, t] of again.slice(0, 12)) lines.push(`| ${f} | ${t.length} | ${t.join(', ')} |`);
+  }
+  const checks = recs.filter((r) => r.kind === 'classifier');
+  if (checks.length) {
+    lines.push('', "Auto mode's safety check, per call (what it was sent):", '', '| Turn | Input | User messages | Earlier tool calls | Action |', '|--:|--:|--:|--:|---|');
+    for (const r of checks) {
+      const body = bodyOf.get(r.seq);
+      const text = contentText(body?.messages?.[1]?.content).text;
+      const msgs = (text.match(/<message[ >]/g) || []).length;
+      const tc = /<tool_calls>\n([\s\S]*?)\n<\/tool_calls>/.exec(text)?.[1] ?? '';
+      const n = tc === '(none yet)' ? 0 : tc.split('\n').filter(Boolean).length;
+      const action = /<action>\ntool: (\S+)\n(?:arguments|detail): ([^\n]*)/.exec(text);
+      lines.push(`| ${r.turn} | ${n0(r.usage?.prompt_tokens ?? 0)} | ${msgs} | ${n} | ${action ? callLabel(action[1], action[2]) : ''} |`);
+    }
+  }
+  const comps = recs.filter((r) => r.kind === 'compaction');
+  lines.push('');
+  if (comps.length) {
+    for (const c of comps) {
+      const before = agent.filter((r) => r.seq < c.seq).pop();
+      const after = agent.find((r) => r.seq > c.seq);
+      lines.push(`Compaction in turn ${c.turn}: the summary request took ${n0(c.usage?.prompt_tokens ?? 0)} input and ${n0(c.usage?.completion_tokens ?? 0)} output tokens; the agent's request went from ${n0(before?.usage?.prompt_tokens ?? 0)} before to ${n0(after?.usage?.prompt_tokens ?? 0)} after.`);
+    }
+  } else lines.push('No compaction happened in this session.');
+  for (const p of prunes) lines.push(`Old tool output was shortened before a request in turn ${p.turn}: ${p.shortened} result(s), about ${n0(p.saved)} tokens.`);
+  const big = [...agent].sort((a, b) => (b.usage?.prompt_tokens ?? 0) - (a.usage?.prompt_tokens ?? 0)).slice(0, 3);
+  lines.push('', `Largest agent requests: ${big.map((r) => `turn ${r.turn}, ${n0(r.usage?.prompt_tokens ?? 0)} tokens`).join('; ')}.`);
+  if (result) lines.push('', `Outcome: ${result.outcome}. Approval cards answered: ${result.approvals}; questions answered: ${result.questions}. Seconds per turn: ${result.turnTimes.join(', ')}.`);
+  return lines;
+}
+
+function replayCost(replay) {
+  return (replay ?? []).filter((r) => !r.error).reduce((a, r) => a + (r.input * PRICES.input + r.write * PRICES.cacheWrite + r.read * PRICES.cacheRead + PRICES.output) / 1e6, 0);
+}
+
 // ---------- Main ----------
 
 (async () => {
@@ -793,7 +1074,7 @@ function nativeTable(replay, records) {
   if (unknown.length) throw new Error(`Unknown scenario(s): ${unknown.join(', ')}`);
   const out = opts.out || fs.mkdtempSync(path.join(os.tmpdir(), 'token-bench-'));
   fs.mkdirSync(out, { recursive: true });
-  const state = { seq: 0, run: 0, scenario: null, inflight: 0, lastAt: 0, records: [], bodies: [], perToolByHash: new Map(), systems: new Map(), port: 0 };
+  const state = { seq: 0, run: 0, scenario: null, turn: 0, inflight: 0, lastAt: 0, records: [], bodies: [], perToolByHash: new Map(), systems: new Map(), port: 0 };
   const proxy = await startProxy(state);
   state.port = proxy.port;
   const results = [];
@@ -826,8 +1107,15 @@ function nativeTable(replay, records) {
     `Prices (USD per million tokens, Claude Haiku 5.5, prompts up to 100K): input ${PRICES.input}, output ${PRICES.output}, cache write ${PRICES.cacheWrite}, cache read ${PRICES.cacheRead}. Characters per token in these requests: ${ratios.length ? `${Math.min(...ratios).toFixed(2)}–${Math.max(...ratios).toFixed(2)} (median ${ratios.sort((a, b) => a - b)[Math.floor(ratios.length / 2)].toFixed(2)})` : 'n/a'}.`,
     '',
   ];
+  const parsedBodies = state.bodies.map((l) => JSON.parse(l));
   for (let run = 1; run <= opts.runs; run++) {
     md.push(`## Run ${run}`, '', ...tables(chatRecs.filter((r) => r.run === run), results.filter((r) => r.run === run), opts.scenarios), '');
+    for (const id of opts.scenarios.filter((s) => SCENARIOS[s].tier === 2)) {
+      const recs = chatRecs.filter((r) => r.run === run && r.scenario === id);
+      md.push(...sessionReport(id, run, recs, parsedBodies.filter((b) => b.run === run && b.scenario === id), results.find((r) => r.run === run && r.id === id)), '');
+    }
+    const spent = chatRecs.filter((r) => r.run === run).reduce((a, r) => a + (r.cost || 0), 0);
+    md.push(`Run ${run} cost ${usd(spent)} in the app's requests.`, '');
   }
   if (opts.runs > 1) {
     md.push('## Across runs (mean, min–max)', '', '| Scenario | Requests | Input | Output | Cost |', '|---|--:|--:|--:|--:|');
@@ -844,7 +1132,8 @@ function nativeTable(replay, records) {
   }
   md.push('## Prefix stability', '', ...prefixReport(chatRecs, state), '');
   md.push('## Tool definitions', ...toolTable(state), '');
-  if (replay) md.push('## Native prompt caching (replay through the Messages API)', '', ...nativeTable(replay, chatRecs), '');
+  if (replay) md.push('## Native prompt caching (replay through the Messages API)', '', ...nativeTable(replay, chatRecs), '', `The replay itself cost ${usd(replayCost(replay))}.`, '');
+  md.push(`This benchmark cost ${usd(chatRecs.reduce((a, r) => a + (r.cost || 0), 0) + replayCost(replay))} in all (app requests${replay ? ' and replay' : ''}).`, '');
   const nonChat = state.records.filter((r) => r.kind === 'non-chat');
   if (nonChat.length) md.push(`Other requests through the proxy: ${nonChat.map((r) => `${r.method} ${r.path} (${r.status})`).join(', ')}`, '');
 
