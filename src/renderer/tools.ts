@@ -7,7 +7,7 @@ import { highlight, langFromPath } from './highlight.js';
 import { icon, type IconName } from './icons.js';
 import { artifactIcon } from './artifacts.js';
 import { cleanTasks, taskProgress, taskSnapshot, taskSummary } from './tasks.js';
-import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, isDeniedResult } from './tool-labels.js';
+import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, browserApproval, isDeniedResult, type BrowserCardRef } from './tool-labels.js';
 import { homeDir, tilde } from './home.js';
 import { answeredBody, answerMeta, questionsOf } from './questions.js';
 
@@ -1024,7 +1024,9 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
 }
 
 /** Title for the approval card. */
-export function approvalTitle(name: string, detail: string, args?: Args): string {
+export function approvalTitle(name: string, detail: string, args?: Args, browser?: BrowserCardRef): string {
+  // A browser card: "Let the agent use example.com?", "Run JavaScript on example.com?", "Make a purchase?" …
+  if (browser && typeof browser === 'object') return browserApproval(browser).title;
   const target = (args && str(args, 'path')) || detail.split('\n')[0] || '';
   if (name === 'bash') return 'Allow Silo Harness to run this command?';
   if (name === 'terminal_run') return 'Allow Silo Harness to run this command in the terminal?';

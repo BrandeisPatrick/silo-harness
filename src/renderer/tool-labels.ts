@@ -1,7 +1,7 @@
 // Rows for the agent's own tools beyond files, shell and browser: sub-sessions (session_*), schedules (schedule_*),
 // mod_check and submit_plan. What the row says (verb, argument), the summary on its right, the status line while it
-// runs, and the approval card's wording. Pure (no DOM, type imports only), so test/tool-labels.js loads it headless;
-// tools.ts and renderer.ts render what it returns.
+// runs, and the approval card's wording, the browser tools' cards included. Pure (no DOM, type imports only), so
+// test/tool-labels.js loads it headless; tools.ts and renderer.ts render what it returns.
 //
 // The wording matches the phone page (remote/): Sub-session, Message, Sessions, Read session, Merge, Rename session, Schedule,
 // Schedules, Update schedule, Delete schedule, Check mod.
@@ -285,6 +285,39 @@ export interface AgentApproval {
   /** What the decided line names after "Allowed ·" / "Denied ·" */
   subject: string;
   icon: IconName;
+}
+
+/** A browser tool's card as the main process names it (approval_request.browser). */
+export interface BrowserCardRef {
+  card: 'site' | 'sensitive' | 'eval' | 'purchase' | 'account';
+  site: string;
+}
+
+/**
+ * A browser tool's approval card: its question, and what its decided line names (the site). The site card asks once
+ * per site, reading included; the others name what is at stake on a site already allowed.
+ */
+export function browserApproval(b: BrowserCardRef): AgentApproval {
+  const site = (typeof b.site === 'string' && b.site.trim()) || 'this page';
+  switch (b.card) {
+    case 'sensitive': return { title: 'Act on a sensitive site?', subject: site, icon: 'triangle-alert' };
+    case 'eval': return { title: `Run JavaScript on ${site}?`, subject: `JavaScript on ${site}`, icon: 'code' };
+    case 'purchase': return { title: 'Make a purchase?', subject: `a purchase on ${site}`, icon: 'globe' };
+    case 'account': return { title: 'Create an account?', subject: `an account on ${site}`, icon: 'globe' };
+    default: return { title: `Let the agent use ${site}?`, subject: site, icon: 'globe' };
+  }
+}
+
+/**
+ * What a browser card's answer reads as, on the call's row or the decided line: "Allowed once on example.com",
+ * "Allowed example.com for this session", "Always allowed example.com", "Denied on example.com".
+ */
+export function browserDecision(b: BrowserCardRef, ok: boolean, scope: 'once' | 'session' | 'project'): string {
+  const site = (typeof b.site === 'string' && b.site.trim()) || 'this page';
+  if (!ok) return `Denied on ${site}`;
+  if (scope === 'session') return `Allowed ${site} for this session`;
+  if (scope === 'project') return `Always allowed ${site}`;
+  return `Allowed once on ${site}`;
 }
 
 /**
