@@ -492,6 +492,12 @@ export interface ModsRpc {
   'mods.install': (source: string) => ModInfo;
   /** Moves a user mod's folder to the Trash */
   'mods.remove': (key: string) => ModInfo[];
+  /**
+   * Moves every mod of yours (the folders in <configDir>/mods, whatever their state) to the Trash and forgets what was
+   * granted, approved, set and in use for them; built-in mods and a project's are left alone. Returns the ids that
+   * went and the new list.
+   */
+  'mods.removeAll': () => { removed: string[]; mods: ModInfo[] };
   'mods.reveal': (key: string) => void;
   /** Lets the user pick a picture for the background; returns the layout (unchanged when cancelled) */
   'mods.chooseBackgroundImage': () => ModLayout;

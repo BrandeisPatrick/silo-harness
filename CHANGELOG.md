@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Delete all sessions.** Settings → History has the row: after a confirmation that says how many sessions there are, every one of them goes the way a deleted session goes, into the trash for as long as Keep deleted sessions for says (and away at once when it is Off). Running sessions are stopped first, and the window opens on a fresh session.
+- **Delete all custom mods.** Settings → Mods has the row, under the list: after a confirmation that names them, every mod of yours (the folders in `~/.silo-harness/mods`) moves to the macOS Trash, where it can be recovered. What was granted or set for them is forgotten, a look of theirs in use goes back to Default, and the rail, the tabs and the list follow at once. Built-in mods and a project’s mods stay.
 
 ## 0.9.0
 
