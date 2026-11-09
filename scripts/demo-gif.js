@@ -308,6 +308,8 @@ async function main() {
   fs.writeFileSync(path.join(F.HOME, '.zprofile'), `export PATH=${js(process.env.PATH)}\n`);
   F.seedSessions(profile);
   const mock = await startMock();
+  // Auto mode's safety check passes everything the scenes do
+  mock.state.classifierDefault = { decision: 'allow', reason: '[Local Work] part of the task' };
   mock.state.ollamaPromptTokens = 8000;
   mock.state.ollamaModels = ['qwen3:8b', 'qwen3:14b'];
   // Every call has its own id, so the mod's panel finds the test run under its own name in the transcript
