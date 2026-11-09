@@ -73,15 +73,20 @@ const { check, done } = checker();
     await app.screenshotOf(path.join(shots, 'oauth-1-three-popups.png'), '#side-pane', 0);
 
     // ---------- Move, close through the RPC, close through the bar ----------
+    // The refused popup put the blocked-popup strip under the URL bar, which takes its height out of the page's slot:
+    // the pane the cards are kept in is the slot as it is now.
+    await app.waitFor(`window.__oc_debug.mods.browser().bounds.y > ${paneBounds.y}`, 5000, 'the slot under the blocked-popup strip').catch(() => undefined);
+    const slot = (await dbg()).bounds;
+    check('the blocked-popup strip takes its height out of the page\'s slot', slot.y > paneBounds.y && Math.round(paneBounds.y + paneBounds.height) === Math.round(slot.y + slot.height), { before: paneBounds, after: slot });
     const moving = list[0];
-    await app.evaluate(`oc.rpc('browser.movePopup', ${JSON.stringify(moving.id)}, ${paneBounds.x + 10}, ${paneBounds.y + 10})`);
+    await app.evaluate(`oc.rpc('browser.movePopup', ${JSON.stringify(moving.id)}, ${slot.x + 10}, ${slot.y + 10})`);
     await sleep(150);
     let moved = (await popups()).find((q) => q.id === moving.id);
-    check('browser.movePopup puts the card where the bar\'s corner was dragged to', moved && moved.bounds.x === Math.round(paneBounds.x + 10) && moved.bounds.y === Math.round(paneBounds.y + 10) + 32, moved && moved.bounds);
+    check('browser.movePopup puts the card where the bar\'s corner was dragged to', moved && moved.bounds.x === Math.round(slot.x + 10) && moved.bounds.y === Math.round(slot.y + 10) + 32, moved && moved.bounds);
     await app.evaluate(`oc.rpc('browser.movePopup', ${JSON.stringify(moving.id)}, 99999, 99999)`);
     await sleep(150);
     moved = (await popups()).find((q) => q.id === moving.id);
-    check('… and keeps it inside the pane', moved && moved.bounds.x + moved.bounds.width <= paneBounds.x + paneBounds.width && moved.bounds.y + moved.bounds.height <= paneBounds.y + paneBounds.height, moved && moved.bounds);
+    check('… and keeps it inside the pane', moved && moved.bounds.x + moved.bounds.width <= slot.x + slot.width && moved.bounds.y + moved.bounds.height <= slot.y + slot.height, moved && moved.bounds);
     await app.evaluate(`oc.rpc('browser.closePopup', ${JSON.stringify(moving.id)})`);
     await waitPopups(2, 'the card closed through the RPC');
     check('browser.closePopup closes a card', (await popups()).every((q) => q.id !== moving.id));
