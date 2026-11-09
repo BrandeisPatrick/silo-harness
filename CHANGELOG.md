@@ -393,4 +393,4 @@ OpenAgent becomes Open Harness: everything beside the chat is now a mod, several
 
 ## 0.1.0 — 2026-10-30
 
-First public release, as OpenAgent.
+First public release, as OpenAgent: an open-source coding agent for the Mac in the style of Claude Code, running local models through Ollama or any provider through Portkey.
