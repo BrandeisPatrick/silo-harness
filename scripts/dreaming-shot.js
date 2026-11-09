@@ -1,6 +1,6 @@
-// Makes the screenshot of Dreaming: Settings → Dreaming with a dream of ~/code/atlas-api opened to its suggestions (a
-// skill for a chore asked for twice, a memory line for a stated preference, a small mod), waiting for Apply or
-// Dismiss. In light and in dark.
+// Makes the screenshot of Dreaming: the Dreaming page on Suggestions, with a dream of ~/code/atlas-api's suggestions (a
+// skill for a chore asked for twice, a memory line for a stated preference, a small mod) waiting for Apply or Dismiss,
+// the whole window. In light and in dark.
 //
 // Like scripts/readme-shots.js, whose project, sessions and PNG helpers it uses: the built app runs hidden on a
 // throwaway profile against the scripted model. A few past sessions of the project are seeded with their history
@@ -174,7 +174,7 @@ async function main() {
     await app.waitFor(`document.querySelector('.session-item.active')?.dataset.id === ${js(ids.main)}`, 10_000, 'the main session');
     await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); })()`);
 
-    // The dream, run by hand as the run icon does
+    // The dream, run by hand as Run a dream does
     scriptDream(mock, past);
     await ev(`oc.rpc('dreaming.run')`);
     const d = await app.waitFor(`(async () => { const s = await oc.rpc('dreaming.get'); return !s.running && s.dreams[0] && s.dreams[0].status !== 'running' ? s.dreams[0] : null; })()`, 60_000, 'the dream to end');
@@ -184,38 +184,24 @@ async function main() {
     // Once a day, as it would be set in use (turned on only now, so no missed-run dream starts at launch)
     await ev(`oc.rpc('dreaming.set', { daily: true })`);
 
-    // Settings → Dreaming, the dream opened, scrolled so the Dreams list starts at the top
+    // The Dreaming page, on Suggestions: the dream's three suggestions waiting for Apply or Dismiss
     await app.click('#dreaming-row');
-    await app.waitFor(`window.__oc_debug.settings.state().open && window.__oc_debug.settings.state().section === 'dreaming'`, 10_000, 'Settings at Dreaming');
-    await app.waitFor(`Boolean(document.querySelector('#dream-list .dream-head'))`, 10_000, 'the dream row');
-    await ev(`document.querySelector('#dream-list .dream-head').click()`);
-    await app.waitFor(`document.querySelectorAll('#dream-list .proposal-card').length === 3`, 5000, 'the suggestions');
-    // The Dreams heading near the top, and no line of the page above it cut by the top edge
-    await ev(`(() => {
-      const title = document.querySelector('#dream-list .sp-group-title');
-      let p = title.parentElement;
-      while (p && p.scrollHeight <= p.clientHeight + 1) p = p.parentElement;
-      const top = p.getBoundingClientRect().top;
-      const cut = () => [...p.querySelectorAll('.sp-row, .sp-row-text > *, .sp-group-title, p, .sp-note')].some((e) => { const b = e.getBoundingClientRect(); return b.height && b.top < top - 0.5 && b.bottom > top + 0.5; });
-      for (const gap of [28, 20, 12, 6, 2]) {
-        p.scrollTop += title.getBoundingClientRect().top - top - gap;
-        if (!cut()) break;
-      }
-      document.activeElement && document.activeElement.blur();
-    })()`);
+    await app.waitFor(`document.querySelector('#page-view')?.dataset.page === 'dreaming' && !!document.querySelector('.pg-tab[data-tab="suggestions"]')`, 10_000, 'the Dreaming page');
+    await app.click('.pg-tab[data-tab="suggestions"]');
+    await app.waitFor(`document.querySelectorAll('#dream-suggestions .proposal-card').length === 3`, 5000, 'the suggestions');
+    await ev(`(() => { document.querySelector('#page-view').scrollTop = 0; document.activeElement && document.activeElement.blur(); })()`);
     await sleep(1500);
-    const text = await ev(`document.querySelector('#settings').innerText`);
+    const text = await ev(`document.querySelector('#page-view').innerText`);
     const leak = /\/var\/folders|\/private\/|oh-dream|atlas-home|\bmock\b/.exec(text);
     if (leak) console.log(`WARN: "${leak[0]}" on screen`);
 
     for (const theme of ['light', 'dark']) {
       await ev(`document.documentElement.dataset.theme = ${js(theme)}`);
       await sleep(700);
-      const box = await ev(`(() => { const r = document.querySelector('#settings').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       await F.mainEval(inspect, `(async () => { const w = ${WIN}; for (let i = 0; i < 3; i++) { w.webContents.invalidate(); await w.webContents.capturePage(); } return true; })()`);
       await sleep(150);
       const cap = await app.cdp('Page.captureScreenshot', { format: 'png' });
-      const png = F.cropPng(Buffer.from(cap.data, 'base64'), Math.floor(box.x) * 2, Math.floor(box.y) * 2, Math.ceil(box.width) * 2, Math.ceil(box.height) * 2);
+      const png = Buffer.from(cap.data, 'base64');
       const file = path.join(OUT, theme === 'dark' ? 'dreaming-dark.png' : 'dreaming.png');
       fs.writeFileSync(file, png);
       console.log(`wrote ${file} (${Math.round(png.length / 1024)} KB)`);

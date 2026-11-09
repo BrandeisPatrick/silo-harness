@@ -4011,6 +4011,7 @@ const SHORTCUTS: [string, string[], string[]?][] = [
   ['Focus the composer', ['⌘', 'K']],
   ['Clear the terminal (in a terminal)', ['⌘', 'K']],
   ['Search sessions', ['⌘', 'F']],
+  ['Back a page (Scheduled tasks, Dreaming)', ['⌘', '[']],
   ['Rename session', ['F2']],
   ['New line in the composer', ['⇧', '↵']],
   ['Previous or next message you sent', ['⌘', '↑'], ['⌘', '↓']],

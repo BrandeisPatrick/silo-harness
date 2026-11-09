@@ -152,7 +152,12 @@ after the switch reply. The renderer buffers the session's events between the tw
 - `renderer.ts`: events of the session on screen go to `handleEvent` as before; others update the sidebar status
   (spinner, `.status-dot.attention`, `.status-dot.unread` inside `.trail`). `showSession(id)` renders transcript +
   LiveState. Hook a feature up under its marker in the "Feature wiring" block above `// ---------- Init ----------`
-  (`// [feature:mods]`, `settings`, `sidebar`, `tasks`, `images`, `history`, `schedules`, `subagents`, `remote`, `dreaming`).
+  (`// [feature:mods]`, `pages`, `settings`, `sidebar`, `tasks`, `images`, `history`, `schedules`, `subagents`, `remote`, `dreaming`).
+- `pages.ts`: pages in the main column in place of the session (`.shell.page-open` hides `.content` and the top bar's
+  title and buttons, and the native browser view). A route (`scheduled`, `task`, `dreaming`, `project`) is rendered by
+  a page module (scheduled-page.ts, dreaming-page.ts) into `#page-view`, which returns its breadcrumb for the top bar
+  (`#page-crumbs`). `'session-shown'` closes the page; `⌘[` goes back. The pure words, filters, templates and the New
+  task form's rhythm are in pages-model.ts (checked headless by test/pages.js). Debug: `__oc_debug.pages`.
 
 ## Dreaming (src/main/dreaming.ts, src/main/dreaming/)
 
@@ -167,5 +172,5 @@ names.ts    the defaults and the proposal tool names (src/shared is types only; 
 
 A dream is a session with `origin: 'dream'`, `Session.dream = { id, waiting }` (the sidebar reads `SessionMeta.dream`) and
 `Session.tools` set to the reading and proposal tools, so it stays a dream after a restart. Services: `app.service<Dreaming>('dreaming')`;
-it reads logs through `HistoryService.read`. RPC: `dreaming.get|set|run|stop|list|apply|dismiss|applyAll|revert`, push
+it reads logs through `HistoryService.read`. RPC: `dreaming.get|set|run|stop|list|projects|apply|dismiss|applyAll|revert`, push
 `dreaming:changed`. Nothing for mods through the bridge yet.

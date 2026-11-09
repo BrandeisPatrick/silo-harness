@@ -10,7 +10,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { launch, checker, sleep } = require('./rig.js');
 
-const SECTIONS = ['general', 'model', 'permissions', 'context', 'mods', 'mcp', 'skills', 'scheduled', 'remote', 'history', 'appearance', 'files', 'about'];
+// Scheduled and Dreaming are pages of their own now (test/live/pages.js); a search finds them under Pages
+const SECTIONS = ['general', 'model', 'permissions', 'context', 'mods', 'mcp', 'skills', 'remote', 'history', 'appearance', 'files', 'about'];
 const now = Date.now();
 const MOCK = {
   info: {
@@ -37,7 +38,7 @@ const js = (v) => JSON.stringify(v);
   const { check, done } = checker();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-settings-profile-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-settings-project-'));
-  // A schedule and a skill so those sections have rows to look at.
+  // A skill so its section has rows to look at.
   fs.mkdirSync(path.join(project, '.silo-harness', 'skills', 'release-notes'), { recursive: true });
   fs.writeFileSync(path.join(project, '.silo-harness', 'skills', 'release-notes', 'SKILL.md'), '---\nname: release-notes\ndescription: Write release notes from the merged pull requests since the last tag.\n---\nSteps…\n');
 
@@ -54,7 +55,6 @@ const js = (v) => JSON.stringify(v);
     for (const size of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) {
       for (const theme of ['light', 'dark']) {
         app = await launch({ mock: true, size, project, config: { theme } });
-        await app.evaluate(`window.oc.rpc('schedules.create', { name: 'Morning summary', prompt: 'Summarise what changed since yesterday.', when: { kind: 'cron', expr: '0 9 * * 1-5' } })`);
         await app.evaluate(`window.__oc_debug.settings.mock(${js(MOCK)})`);
         await app.evaluate(`window.__oc_debug.rules.mock({ cwd: ${js(project)}, programs: ['git', 'npm'], reasons: ['uses sudo'], edits: true, mcp: [] })`);
         for (const s of SECTIONS) {
@@ -197,6 +197,10 @@ const js = (v) => JSON.stringify(v);
     await app.screenshot(path.join(shots, 'search-key.png'));
     s = await searchFor('sleep');
     check('search "sleep" finds Keep awake', s.rows.includes('keepAwake') && s.rows.length <= 3, s.rows);
+    s = await searchFor('dream');
+    check('search "dream" finds the Dreaming page (no longer a section), listed first', s.rows[0] === 'page-dreaming' && s.rows.includes('page-dreaming-daily'), s.rows);
+    s = await searchFor('cron');
+    check('search "cron" finds the Scheduled tasks page', s.rows.includes('page-scheduled'), s.rows);
     s = await searchFor('zqxv blorf');
     check('nonsense says nothing matches', s.empty && s.rows.length === 0, s);
     await app.screenshot(path.join(shots, 'search-none.png'));

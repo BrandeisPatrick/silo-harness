@@ -1,8 +1,8 @@
 // Live check of Dreaming in the real window. A profile seeded with past sessions in which the user twice asks for the
 // same multi-step chore and states a preference; the mock model is scripted to call the proposal tools. A dream in
-// each mode: the sidebar row and its dot, the page and its run icon, the cards, Apply, Dismiss and Revert against the
-// files on disk, the plan approval, the sidebar rule for dream sessions, and that a dream session offers no shell or
-// edit tool. Then one dream with the real API on the same seed (when a key is set): it ends without an error, every
+// each mode: the sidebar row and its dot, the Dreaming page (its banner, settings, Run a dream, the project's page and
+// Suggestions), the cards, Apply, Dismiss and Revert against the files on disk, the plan approval, the sidebar rule for
+// dream sessions, and that a dream session offers no shell or edit tool. Then one dream with the real API on the same seed (when a key is set): it ends without an error, every
 // proposal cites sessions that exist, and nothing is written in Approve mode before Apply.
 // Run: npm run build && node test/live/dreaming.js [shots-dir]
 const fs = require('node:fs');
@@ -114,27 +114,45 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
   };
   try {
     // ---- the row and the page ----
+    const pick = async (label) => {
+      await app.waitFor(`[...document.querySelectorAll('.popover .pop-item')].some((b) => b.querySelector('.pop-title')?.textContent === ${JSON.stringify(label)})`, 5000, `the menu item ${label}`);
+      await app.evaluate(`[...document.querySelectorAll('.popover .pop-item')].find((b) => b.querySelector('.pop-title')?.textContent === ${JSON.stringify(label)}).click()`);
+    };
+    const openPage = async () => {
+      await app.click('#dreaming-row');
+      await app.waitFor(`document.querySelector('#page-view')?.dataset.page === 'dreaming' && !!document.querySelector('#dreaming-body')`, 10_000, 'the Dreaming page');
+    };
+    const openProject = async () => {
+      await openPage();
+      await app.waitFor(`!!document.querySelector('.project-card')`, 10_000, 'the project card');
+      await app.click('.project-card');
+      await app.waitFor(`document.querySelector('#page-view')?.dataset.page === 'project'`, 5000, "the project's page");
+    };
     await app.waitFor(`!document.querySelector('#dreaming-row').hidden`, 10_000, 'the Dreaming row');
     check('sidebar: the Dreaming row is under Customize, with the moon', await app.evaluate(`(() => { const r = document.querySelector('#dreaming-row'); return r.previousElementSibling.id === 'customize-row' && !!r.querySelector('.nav-icon svg') && r.innerText.trim() === 'Dreaming'; })()`));
     check('sidebar: no dot while nothing waits', await app.evaluate(`document.querySelector('#dreaming-dot').hidden`));
     await app.screenshotOf(path.join(SHOTS, '1-sidebar-row.png'), '.sidebar-nav', 8);
-    await app.click('#dreaming-row');
-    await app.waitFor(`window.__oc_debug.settings.state().open && window.__oc_debug.settings.state().section === 'dreaming'`, 10_000, 'Settings at Dreaming');
-    check('page: the row opens Settings → Dreaming', true);
-    const run = await app.evaluate(`(() => { const b = document.querySelector('#dream-run'); return b && { label: b.getAttribute('aria-label'), tip: b.dataset.tip, svg: !!b.querySelector('svg'), text: b.innerText.trim() }; })()`);
-    check('page: the run control is an icon button with a play glyph, a tooltip and an aria-label', run && run.label === 'Run a dream' && run.tip === 'Run a dream' && run.svg && run.text === '', run);
-    const page = await app.evaluate(`document.querySelector('section.sp-section[data-section="dreaming"]').innerText`);
-    check('page: daily, mode, what to look for, privacy and cost', /Dream every day/.test(page) && /Auto/.test(page) && /Approve/.test(page) && /Plan/.test(page) && /Skills/.test(page) && /Mods/.test(page) && /Memory/.test(page) && /sends parts of your past conversations/.test(page) && /uses tokens/.test(page), page.slice(0, 600));
-    check('page: the mode line says what Approve does', /each suggestion waits for you to apply or dismiss it/.test(page));
-    check('page: off by default; no dreams yet', !(await app.evaluate(`document.querySelector('#dream-daily').checked`)) && /No dreams yet/.test(page));
-    await shotOf(app, '2-page-off');
-    await app.evaluate(`document.querySelector('#dream-daily').click()`);
+    await openPage();
+    check('page: the row opens the Dreaming page in the main column, not Settings', !(await app.evaluate(`document.querySelector('#settings').open`)) && (await app.evaluate(`document.querySelector('#dreaming-row').classList.contains('active')`)));
+    const run = await app.evaluate(`(() => { const b = document.querySelector('#dream-run'); return b && { text: b.innerText.trim(), menu: b.getAttribute('aria-haspopup') }; })()`);
+    check('page: a "Run a dream" button with a menu', run && run.text === 'Run a dream' && run.menu === 'menu', run);
+    const bannerText = await app.text('#dreaming-banner');
+    check('page: the banner says the daily dream is off, and what a dream sends and costs', /daily dream is off/.test(bannerText) && /sends parts of your past sessions to the model you configured/.test(bannerText) && /uses tokens/.test(bannerText), bannerText);
+    await app.click('#dream-settings-btn');
+    await app.waitFor(`!!document.querySelector('#dream-settings[open]')`, 5000, 'the settings dialog');
+    const page = await app.evaluate(`document.querySelector('#dream-settings').innerText`);
+    check('settings: daily, mode, what to look for, privacy and cost', /Daily dream/.test(page) && /Auto/.test(page) && /Approve/.test(page) && /Plan/.test(page) && /Skills/.test(page) && /Mods/.test(page) && /Memory/.test(page) && /sends parts of your past sessions/.test(page) && /uses tokens/.test(page), page.slice(0, 600));
+    check('settings: the mode line says what Approve does', /each suggestion waits for you to apply or dismiss it/.test(page));
+    check('settings: off by default', !(await app.evaluate(`document.querySelector('#dream-dlg-daily').checked`)));
+    await shotOf(app, '2-settings-off');
+    await app.evaluate(`document.querySelector('#dream-dlg-daily').click()`);
     await app.waitFor(`oc.getConfig().then((c) => c.dreaming.daily === true)`, 5000, 'daily on');
-    await app.waitFor(`/Next: /.test(document.querySelector('#sp-row-dreaming-daily').innerText)`, 5000, 'the next run');
-    check('page: turning daily on saves it and shows the next run', await app.evaluate(`document.querySelector('#dream-time').value === '03:00'`));
-    await shotOf(app, '3-page-on');
-    await app.evaluate(`document.querySelector('#dream-daily').click()`);
+    await app.waitFor(`/Next: /.test(document.querySelector('#dream-dlg-daily-note')?.innerText || '')`, 5000, 'the next run');
+    check('settings: turning daily on saves it and shows the next run', await app.evaluate(`document.querySelector('#dream-dlg-time').value === '03:00'`));
+    await shotOf(app, '3-settings-on');
+    await app.evaluate(`document.querySelector('#dream-dlg-daily').click()`);
     await app.waitFor(`oc.getConfig().then((c) => c.dreaming.daily === false)`, 5000, 'daily off again');
+    await app.key('Escape');
 
     // ---- Approve mode ----
     dreamReply({ toolCalls: [call(1, 'propose_skill', skillArgs), call(2, 'propose_memory', memArgs), call(3, 'propose_mod', modArgs)] });
@@ -142,8 +160,10 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
     dreamReply({ content: 'I propose a release skill, one memory line and a small status mod.' });
     const reqsBefore = app.mock.state.requests.length;
     await app.click('#dream-run');
+    await pick('Every project with new activity');
     let d = await waitDream(app);
     check('approve: the dream ended with three proposals waiting', d.status === 'done' && d.proposals.length === 3 && d.proposals.every((p) => p.state === 'waiting'), d.proposals.map((p) => [p.kind, p.state, p.error]));
+    check('approve: a dream started from the page is by hand', d.trigger === 'manual', d.trigger);
     check('approve: nothing written before Apply', !fs.existsSync(skillFile) && !fs.existsSync(memFile) && !fs.existsSync(modDir) && !fs.existsSync(path.join(project, 'hacked')));
     const dreamReqs = app.mock.state.requests.slice(reqsBefore).filter((r) => r.url === '/v1/chat/completions' && isDreamReq(r.payload));
     const offered = dreamReqs[0]?.payload.tools.map((t) => t.function.name) ?? [];
@@ -152,43 +172,51 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
     check('approve: a shell call in a dream is refused as unknown', bashResult && /^Error: unknown tool "bash"/.test(bashResult.result), bashResult);
     await app.waitFor(`!document.querySelector('#dreaming-dot').hidden`, 5000, 'the dot');
     check('sidebar: a quiet dot while proposals wait', true);
-    await app.waitFor(`/Waiting for you · 3/.test(document.querySelector('#dream-list').innerText)`, 5000, 'the dream row');
-    check('page: the dream says it waits, with the count', true);
-    await app.evaluate(`document.querySelector('#dream-list .dream-head').click()`);
-    await app.waitFor(`document.querySelectorAll('#dream-list .proposal-card').length === 3`, 5000, 'the cards in the page');
-    await app.evaluate(`document.querySelector('#dream-list .sp-group-title').scrollIntoView({ block: 'start' })`);
-    check('page: opened, the dream shows its three proposals and Apply all', await app.exists('#dream-list .dream-apply-all'));
-    await shotOf(app, '4-page-dream-open');
-    const cardBtn = (kind, action) => `document.querySelector('#dream-list .proposal-card[data-kind="${kind}"] [data-action="${action}"]').click()`;
+    await app.waitFor(`/3 suggestions waiting/.test(document.querySelector('.project-card .pg-card-foot')?.innerText || '')`, 5000, 'the project card');
+    check('page: the project card says what waits', /I propose a release skill/.test(await app.text('.project-card .pg-card-text')));
+    await app.click('.project-card');
+    await app.waitFor(`/Waiting for you · 3/.test(document.querySelector('.dream-row')?.innerText || '')`, 5000, 'the dream row');
+    check("page: the project's History says the dream waits, with the count", true);
+    await shotOf(app, '4-project-page');
+    await app.click('#dreaming-row');
+    await app.waitFor(`!!document.querySelector('.pg-tab[data-tab="suggestions"]')`, 5000, 'the tabs');
+    await app.click('.pg-tab[data-tab="suggestions"]');
+    await app.waitFor(`document.querySelectorAll('#dream-suggestions .proposal-card').length === 3`, 5000, 'the cards in the page');
+    check('page: Suggestions shows the three proposals and Apply all', await app.exists('#dream-suggestions .dream-apply-all'));
+    await shotOf(app, '4-suggestions');
+    const cardBtn = (kind, action, where = '#dream-suggestions') => `document.querySelector('${where} .proposal-card[data-kind="${kind}"] [data-action="${action}"]').click()`;
     await app.evaluate(cardBtn('skill', 'apply'));
-    await app.waitFor(`document.querySelector('#dream-list .proposal-card[data-kind="skill"]').dataset.state === 'applied'`, 5000, 'skill applied');
+    await app.waitFor(`oc.rpc('dreaming.get').then((s) => s.dreams[0].proposals.find((p) => p.kind === 'skill').state === 'applied')`, 5000, 'skill applied');
     const skillText = fs.existsSync(skillFile) ? fs.readFileSync(skillFile, 'utf8') : '';
     check('apply: the skill file is on disk with its frontmatter', /^---\nname: release-chore\ndescription: Bump the version/.test(skillText) && /pnpm test/.test(skillText), skillText.slice(0, 200));
+    await app.waitFor(`!document.querySelector('#dream-suggestions .proposal-card[data-kind="skill"]')`, 5000, 'the applied card to leave Suggestions');
     await app.evaluate(cardBtn('memory', 'dismiss'));
-    await app.waitFor(`document.querySelector('#dream-list .proposal-card[data-kind="memory"]').dataset.state === 'dismissed'`, 5000, 'memory dismissed');
+    await app.waitFor(`oc.rpc('dreaming.get').then((s) => s.dreams[0].proposals.find((p) => p.kind === 'memory').state === 'dismissed')`, 5000, 'memory dismissed');
     check('dismiss: the memory line is not written', !fs.existsSync(memFile));
+    await app.waitFor(`!!document.querySelector('#dream-suggestions .proposal-card[data-kind="mod"]')`, 5000, 'the mod card');
     await app.evaluate(cardBtn('mod', 'apply'));
-    await app.waitFor(`document.querySelector('#dream-list .proposal-card[data-kind="mod"]').dataset.state === 'applied'`, 5000, 'mod applied');
+    await app.waitFor(`oc.rpc('dreaming.get').then((s) => s.dreams[0].proposals.find((p) => p.kind === 'mod').state === 'applied')`, 5000, 'mod applied');
     check('apply: the mod folder is written', fs.existsSync(path.join(modDir, 'mod.json')) && fs.existsSync(path.join(modDir, 'panel.html')));
     const modState = await app.evaluate(`oc.rpc('mods.list').then((l) => (l.find((m) => m.id === 'release-status') || {}).state)`).catch(() => null);
     check('apply: the new mod stays off', modState !== 'on', modState);
-    await app.evaluate(cardBtn('skill', 'revert'));
-    await app.waitFor(`document.querySelector('#dream-list .proposal-card[data-kind="skill"]').dataset.state === 'reverted'`, 5000, 'skill reverted');
-    check('revert: the skill file is gone again', !fs.existsSync(skillFile));
     await app.waitFor(`document.querySelector('#dreaming-dot').hidden`, 5000, 'the dot to go');
-    check('sidebar: the dot goes once nothing waits', true);
+    check('sidebar: the dot goes once nothing waits', /Nothing waits for you/.test(await app.text('#dream-suggestions')));
 
     // ---- the dream's session ----
-    await app.evaluate(`document.querySelector('#dream-list .dream-open').click()`);
+    await openProject();
+    await app.click('.dream-row');
     await app.waitFor(`oc.sessions.current().then((m) => m.id === ${JSON.stringify(d.sessionId)})`, 10_000, 'the dream session on screen');
     await app.waitFor(`document.querySelectorAll('#messages .proposal-card').length === 3`, 10_000, 'the cards in the transcript');
-    check('session: "Open" brings the dream session on screen with a card per proposal', !(await app.evaluate(`window.__oc_debug.settings.state().open`)));
+    check("session: the dream's row brings its session on screen with a card per proposal", !(await app.evaluate(`document.querySelector('.shell').classList.contains('page-open')`)));
+    await app.evaluate(cardBtn('skill', 'revert', '#messages'));
+    await app.waitFor(`document.querySelector('#messages .proposal-card[data-kind="skill"]').dataset.state === 'reverted'`, 5000, 'skill reverted');
+    check('revert: from its card in the session, the skill file is gone again', !fs.existsSync(skillFile));
     const t = await app.evaluate(`(() => ({ label: document.querySelector('#messages .msg.user .msg-origin')?.innerText, folded: !!document.querySelector('#messages .msg.user .bubble.folded'), states: [...document.querySelectorAll('#messages .proposal-card')].map((c) => c.dataset.state), links: [...document.querySelectorAll('#messages .proposal-card .proposal-session')].map((a) => a.dataset.session), toolRows: [...document.querySelectorAll('#messages .tool')].map((r) => r.innerText) }))()`);
     check('session: the digest is a labelled, folded message', /dreaming/.test(t.label ?? '') && t.folded, t);
     check('session: the cards show their state and link the sessions they came from', JSON.stringify(t.states) === JSON.stringify(['reverted', 'dismissed', 'applied']) && t.links.includes('s-release-1') && t.links.includes('s-release-2'), t);
     const rows = await app.evaluate(`window.__oc_debug.sidebar.state().rows.filter((r) => r.kind === 'session')`);
     const dreamRow = rows.find((r) => r.id === d.sessionId);
-    check('sidebar: the dream session shows while on screen, marked with the moon', dreamRow && dreamRow.indicator === 'kind' && (await app.evaluate(`!!document.querySelector('.session-item[data-id="${d.sessionId}"] .trail-meta.dream svg')`)), dreamRow);
+    check('sidebar: the dream session shows while on screen, the moon in front of its title', dreamRow && dreamRow.lead === 'dream' && (await app.evaluate(`!!document.querySelector('.session-item[data-id="${d.sessionId}"] .lead.dream svg')`)), dreamRow);
     await app.evaluate(`document.querySelector('#messages .msg.user').scrollIntoView({ block: 'start' })`);
     await shotOf(app, '5-dream-session-top-light');
     await app.evaluate(`document.querySelector('#messages .msg.user').scrollIntoView({ block: 'start' })`);
@@ -263,16 +291,12 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
     await app.evaluate(`oc.rpc('dreaming.run')`);
     d = await waitDream(app);
     check('a dream with nothing to propose ends done, with no proposals', d.status === 'done' && d.proposals.length === 0);
-    await app.click('#dreaming-row');
-    await app.waitFor(`document.querySelectorAll('#dream-list .dream-item').length >= 5`, 10_000, 'the dream list');
-    const statuses = await app.evaluate(`[...document.querySelectorAll('#dream-list .dream-status')].map((e) => e.innerText)`);
-    check('page: the dreams newest first, each with its state', statuses[0] === 'Nothing to suggest' && statuses[1] === 'Waiting for you · 1' && statuses.length === 5, statuses);
-    await app.evaluate(`(() => { const items = document.querySelectorAll('#dream-list .dream-item'); for (const i of items) if (i.classList.contains('open')) i.querySelector('.dream-head').click(); })()`);
-    await app.evaluate(`document.querySelectorAll('#dream-list .dream-item')[1].querySelector('.dream-head').click()`);
-    await app.waitFor(`document.querySelectorAll('#dream-list .proposal-card').length === 1`, 5000, 'the waiting dream opened');
-    await app.evaluate(`document.querySelector('#dream-list .sp-group-title').scrollIntoView({ block: 'start' })`);
-    await shotOf(app, '8-page-dreams');
-    await shotOf(app, '9-page-dreams-dark', 'dark');
+    await openProject();
+    await app.waitFor(`document.querySelectorAll('.dream-row').length >= 5`, 10_000, 'the dreams');
+    const statuses = await app.evaluate(`[...document.querySelectorAll('.dream-row .pg-row-state')].map((e) => e.innerText)`);
+    check("page: the project's dreams newest first, each with its state", statuses[0] === 'Nothing to suggest' && statuses[1] === 'Waiting for you · 1' && statuses.length === 5, statuses);
+    await shotOf(app, '8-project-dreams');
+    await shotOf(app, '9-project-dreams-dark', 'dark');
     await app.evaluate(`document.documentElement.dataset.theme = 'light'`);
     await app.key('Escape');
   } catch (err) {

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Scheduled tasks and Dreaming, as pages
+
+- **Pages of their own.** Scheduled and Dreaming in the sidebar no longer open Settings: each opens a page in the main column, in place of the session, as Claude Code's Scheduled row does. The row shows selected while it is open; choosing a session in the sidebar brings the chat back, and ⌘[ goes back a page. Settings no longer has the two sections, and a search there still finds them, with rows that open the pages.
+- **Scheduled tasks.** Your tasks as cards: the name, where each run goes (a new session or the same one), the prompt, and whether it is active, paused or done with its rhythm ("Active · Weekdays at 08:30"). Search by name or prompt, filter by Active or Paused, sort by next run, name or last run. A banner says what is true of them: they run only while Silo Harness is open and the Mac awake, and a run missed while it was closed or asleep happens once when it is back, if it was due less than a day before.
+- **Templates.** A nightly dependency audit, a weekly changelog draft, a morning summary, a daily test run and a weekly TODO sweep, each a click away from a filled-in New task form.
+- **The New task form.** Name, instructions, the folder, the schedule (once at a date and time, every hour, every few minutes, hours or days, every day, weekdays, every week on a day, every month, or a custom cron rhythm) with its first run shown as you type, and whether each run starts a new session or continues one you pick. The same form edits a task. The side pane's Scheduled tab opens it for New, and has an Open page button.
+- **A task's page.** Run now and an Active switch to pause and resume it; Edit and Delete in the menu of the breadcrumb at the top; and its History: every run, newest first, with the session it made or continued, when, and whether it is running, waiting for you, done, failed or stopped. A run opens its session in the chat view, where you can keep talking in it. Beside it, what the task does, where, how often and under which permission mode.
+- **The lightning bolt.** A session made by a scheduled run sits in the sidebar with the others, by date, with a lightning bolt in front of its title (in place of the clock at the end of the row). A dream's session, while it is listed, has the moon in front of its title in the same way. The running, waiting and unread marks stay at the end.
+- **Dreaming.** The same layout: a card per project that has dreams or that the next dream reads, with the mode, its last dream's report and what waits ("Daily at 03:00 · 2 suggestions waiting"), and a Suggestions tab with every proposal that waits, to apply or dismiss, as in the dream's session. Run a dream ⌄ dreams about every project with new activity or the one you pick. A project's page has Run a dream now, its dreams newest first, each opening its session, and the settings beside them: the daily dream and its time, the mode, and what to look for. The banner says whether the daily dream is on and that a dream sends parts of your past sessions to the model you configured.
+- **For mods:** `harness.ui.openPage('scheduled' | 'dreaming', { form: 'new' })` opens a page (and the New task form), and `harness.ui.openSettings('scheduled')` or `('dreaming')` opens the page instead of the old section.
+
 ## 0.8.0
 
 Closer to Claude Code: hooks in Claude Code's own format, from settings.json and from mods; the permission prompt and a new question card drawn as Claude Code draws them; one quiet line per tool call; and the rail, the footer and the status line laid out like Claude Code's.

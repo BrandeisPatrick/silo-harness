@@ -113,7 +113,7 @@ function seed(profile) {
     check('sub-sessions nest under their parent', JSON.stringify(order.slice(fb, fb + 3)) === '["fam-b","fam-b-s1","fam-b-s2"]' && ss[fb + 1].depth === 1 && ss[fb + 1].parent === 'fam-b');
     check('families ordered by newest activity (Today: the new session first, then the payment family)', order.indexOf('today-1') < fa ? true : order[0] !== 'fam-a', order.slice(0, 6));
     check('the unread session has the blue dot', ss.find((r) => r.id === 'today-1')?.indicator === 'unread' && (await app.exists(`${row('today-1')} .status-dot.unread`)));
-    check('a parent shows the fork glyph; a scheduled run its own', ss.find((r) => r.id === 'fam-a')?.indicator === 'family' && ss.find((r) => r.id === 'd5-1')?.indicator === 'kind');
+    check('a parent shows the fork glyph; a scheduled run the lightning in front of its title, nothing at the end', ss.find((r) => r.id === 'fam-a')?.indicator === 'family' && ss.find((r) => r.id === 'd5-1')?.lead === 'schedule' && ss.find((r) => r.id === 'd5-1')?.indicator === null && ss.find((r) => r.id === 'fam-a')?.lead === null);
     check('the long title ends in an ellipsis inside the row', await app.evaluate(`(() => { const l = document.querySelector('${row('today-2')} .label'); return l.scrollWidth > l.clientWidth && l.getBoundingClientRect().right <= document.querySelector('${row('today-2')}').getBoundingClientRect().right; })()`));
     // The merge mark: sessions.merge (another feature) is what sets mergedInto; until it lands the meta does not carry
     // it, so the debug overlay supplies it.
@@ -253,6 +253,14 @@ function seed(profile) {
     await shot('footer', '.sidebar-foot', 4);
     const navs = await app.evaluate(`[...document.querySelectorAll('.sidebar-nav .nav-row')].filter((b) => !b.hidden).map((b) => b.innerText.split('\\n')[0])`);
     check('navigation rows', navs[0] === 'New session' && navs[1] === 'Search' && navs.includes('Scheduled') && navs.includes('Customize'), navs);
+    // Scheduled opens its page in the main column, the row selected and no session; a session row takes the column back
+    await app.click('#scheduled-row');
+    await app.waitFor(`document.querySelector('.shell').classList.contains('page-open')`, 5000, 'the Scheduled page');
+    check('Scheduled: the page in the main column, its row selected, no session selected', await app.evaluate(`document.querySelector('#scheduled-row').classList.contains('active') && document.querySelector('#scheduled-row').getAttribute('aria-current') === 'page' && !document.querySelector('.session-item.active') && document.querySelector('#page-title')?.textContent === 'Scheduled tasks'`));
+    await shot('scheduled-row-selected', '.sidebar', 0);
+    await app.click(row('today-2'));
+    await app.waitFor(`!document.querySelector('.shell').classList.contains('page-open')`, 5000, 'the chat view');
+    check('a session chosen in the sidebar takes the column back', await app.evaluate(`document.querySelector('.session-item.active')?.dataset.id === 'today-2' && !document.querySelector('#scheduled-row').classList.contains('active')`));
 
     // ---- the task card: the session's tasks under its latest message ----
     await app.click(row('today-1'));
