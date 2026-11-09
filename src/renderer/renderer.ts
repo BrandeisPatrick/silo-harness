@@ -2,10 +2,8 @@ import type {
   AgentEvent,
   AppConfig,
   ArtifactInfo,
-  BrowserState,
   ChangeDiff,
   ChangeEntry,
-  ChangesApi,
   CommandInfo,
   CommandResult,
   CompactionInfo,
@@ -29,7 +27,6 @@ import type {
   SessionMeta,
   SessionStatus,
   TaskItem,
-  TerminalApi,
   TerminalTabInfo,
   TranscriptItem,
 } from '../shared/types';
@@ -38,13 +35,11 @@ import { basename, byId, copyWithFeedback, escapeHtml, formatCount, isTextField,
 import { renderMarkdown } from './markdown.js';
 import { lineDiff, numberRows, parseEditPreview, renderDiff, setDiffBaseDir, statHtml } from './diff.js';
 import { highlight } from './highlight.js';
-import { approvalTitle, asArgs, createToolCard, displayPath, editStartLine, fileLines, forgetFile, linkPath, mcpParts, resetFileCache, setToolCwd, statusVerb, type ToolCard } from './tools.js';
+import { approvalTitle, asArgs, createToolCard, displayPath, editStartLine, fileLines, linkPath, mcpParts, resetFileCache, setToolCwd, statusVerb, type ToolCard } from './tools.js';
 import { closeMenu, initTooltips, isMenuOpen, menuAnchoredTo, openMenu, type MenuItem, type MenuSection } from './popover.js';
 import { createQuestionCard } from './questions.js';
 import { MODE_CHIP_CLASSES, MODE_CYCLE, MODES, modeOf, nextMode } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
-import { createChangesPane, mockChangesSource } from './changes.js';
-import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { attachmentLabel, createAttachmentTray, dataUrlToBlob, imageType, type AddResult, type ImageInput } from './attachments.js';
 import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './artifacts.js';
 import { createQueueList } from './queue.js';
@@ -75,7 +70,7 @@ import { bus } from './bus.js';
 import { onPush, rpc } from './rpc.js';
 import { setTranscriptSink, transcriptItemRenderer, type ExtraTranscriptItem } from './transcript-items.js';
 import { PROPOSAL_TOOLS, proposalEnded, setupDreamingView } from './dreaming.js';
-import { createModsHost, type ModPaneTabs } from './mods-host.js';
+import { createModsHost } from './mods-host.js';
 import { createSettingsPage } from './settings-page.js';
 import { createPages, navOf, type PageRoute, type PagesView } from './pages.js';
 import { createScheduledPage } from './scheduled-page.js';
@@ -88,6 +83,7 @@ import { activeProvider, allProviders, usesOllama } from './provider-view.js';
 import { createShortcutsSheet } from './shortcuts.js';
 import { createSlashMenu } from './slash-menu.js';
 import { createConfirmDialog } from './confirm.js';
+import { createSidePane, type PaneTab } from './side-pane.js';
 
 declare global {
   interface Window {
@@ -175,30 +171,10 @@ const slashMenu = $('slash-menu');
 const mentionMenu = $('mention-menu');
 const settingsDialog = $<HTMLDialogElement>('settings');
 const shortcutsDialog = $<HTMLDialogElement>('shortcuts');
-const sidePane = $('side-pane');
-const browserPane = $('browser-pane');
-const diffPane = $('diff-pane');
-const paneTabBrowser = $<HTMLButtonElement>('pane-tab-browser');
-const paneTabDiff = $<HTMLButtonElement>('pane-tab-diff');
-const diffToggle = $<HTMLButtonElement>('diff-toggle');
-const diffCountBadges = [$('diff-count'), $('pane-diff-count')];
-const terminalPaneEl = $('terminal-pane');
-const paneTabTerminal = $<HTMLButtonElement>('pane-tab-terminal');
-const terminalToggle = $<HTMLButtonElement>('terminal-toggle');
-const terminalBusyDots = [$('terminal-busy'), $('pane-terminal-busy')];
 const browsingPill = $('browsing-pill');
 const confirmDialog = $<HTMLDialogElement>('confirm-dialog');
 const statusHint = $('status-hint');
 const browserView = $('browser-view');
-const urlEl = $<HTMLInputElement>('url');
-const backBtn = $<HTMLButtonElement>('back-btn');
-const fwdBtn = $<HTMLButtonElement>('fwd-btn');
-const reloadBtn = $<HTMLButtonElement>('reload-btn');
-const openExternalBtn = $<HTMLButtonElement>('open-external-btn');
-const browserTitle = $('browser-title');
-const browserToggle = $<HTMLButtonElement>('browser-toggle');
-const resizer = $('pane-resizer');
-const placeholder = browserView.querySelector<HTMLElement>('.browser-placeholder');
 const attachBtn = $<HTMLButtonElement>('attach-btn');
 const attachInput = $<HTMLInputElement>('attach-input');
 const attachNote = $('attach-note');
@@ -2125,11 +2101,11 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       if (ev.name.startsWith('browser_')) {
         browsingTools.add(id);
         browsingPill.hidden = false;
-        if (paneVisible && paneTab !== 'browser') showPaneTab('browser');
+        if (pane.visible() && pane.tab() !== 'browser') showPaneTab('browser');
       } else if (ev.name.startsWith('terminal_')) {
         // Same rule as the browser: a visible pane comes to the Terminal tab (without opening a shell of its own;
         // terminal_run opens the agent's tab); a hidden pane stays hidden.
-        if (paneVisible && paneTab !== 'terminal') {
+        if (pane.visible() && pane.tab() !== 'terminal') {
           terminalPane.holdAutoOpen();
           showPaneTab('terminal');
         }
@@ -3106,16 +3082,6 @@ async function switchFolder(dir: string, chip: HTMLButtonElement): Promise<void>
   if (!dialogOpen()) inputEl.focus();
 }
 
-/** Keeps the native browser view glued to its slot while something animates the layout. */
-function trackBounds(ms: number): void {
-  const end = performance.now() + ms;
-  const step = () => {
-    reportBounds();
-    if (performance.now() < end) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
 function toggleSidebar(): void {
   shell.classList.toggle('sidebar-collapsed');
   try {
@@ -3393,350 +3359,24 @@ const { hideSlashMenu, updateSlashMenu, moveSlashSelection, acceptSlashSelection
 
 // ---------- Side pane: Browser, Diff and Terminal tabs, then the mods' tabs ----------
 
-/** A built-in tab, or a mod's tab view as 'mod:<mod key>/<view id>' (mods-host.ts makes those). */
-type PaneTab = 'browser' | 'diff' | 'terminal' | `mod:${string}`;
-let paneVisible = true;
-let paneTab: PaneTab = 'browser';
-const PANE_TABS: readonly (readonly [PaneTab, HTMLButtonElement])[] = [
-  ['browser', paneTabBrowser],
-  ['diff', paneTabDiff],
-  ['terminal', paneTabTerminal],
-];
-/** The mod tabs, once the mod host is up (feature wiring below) */
-let paneMods: ModPaneTabs | null = null;
-/** A mod tab that was in front at the last quit: it comes back once its mod has loaded, unless another tab was chosen first */
-let pendingModTab: PaneTab | null = null;
-try {
-  const saved = localStorage.getItem('paneTab');
-  if (saved?.startsWith('mod:')) pendingModTab = saved as PaneTab;
-} catch {
-  /* ignore */
-}
-
-const modTabKey = (tab: PaneTab): string | null => (tab.startsWith('mod:') ? tab.slice(4) : null);
-
-/** Every tab in strip order with its button: the built-in ones, then the mods'. */
-function paneTabList(): (readonly [PaneTab, HTMLButtonElement])[] {
-  return [...PANE_TABS, ...(paneMods?.buttons() ?? []).map(({ key, el }) => [`mod:${key}` as PaneTab, el] as const)];
-}
-
-function browserShown(): boolean {
-  return paneVisible && paneTab === 'browser' && !pageOpen();
-}
-
-/** What was last sent to the native browser view (for the live checks: __oc_debug.mods.browser()) */
-const browserSent = { bounds: null as { x: number; y: number; width: number; height: number } | null, visible: false };
-
-function reportBounds(): void {
-  if (shell.classList.contains('browser-hidden') || pageOpen()) return;
-  const r = browserView.getBoundingClientRect();
-  browserSent.bounds = { x: r.left, y: r.top, width: r.width, height: r.height };
-  oc.browser.setBounds(browserSent.bounds);
-}
-new ResizeObserver(reportBounds).observe(browserView);
-
-function setBrowserVisible(v: boolean): void {
-  browserSent.visible = v;
-  oc.browser.setVisible(v);
-}
-
-/** The native browser view floats above the page: it is shown only while its tab is on screen and no dialog is open. */
-function syncBrowserView(): void {
-  if (browserShown() && !dialogOpen()) {
-    reportBounds();
-    setBrowserVisible(true);
-    requestAnimationFrame(reportBounds);
-  } else setBrowserVisible(false);
-}
-
-// A dialog's own 'close' event is delivered with the next painted frame, and a window that is hidden or covered
-// may not paint one for a long time: the view it hid would stay hidden. The attribute change is reported at once.
-for (const d of [settingsDialog, shortcutsDialog, confirmDialog, lightbox]) {
-  new MutationObserver(() => {
-    if (!d.open) syncBrowserView();
-  }).observe(d, { attributes: true, attributeFilter: ['open'] });
-}
-
-function applyPane(persist = true): void {
-  // A mod tab whose mod went off or away: back to the Browser.
-  if (modTabKey(paneTab) && !paneMods?.has(modTabKey(paneTab)!)) paneTab = 'browser';
-  const showBrowser = browserShown();
-  const showDiff = paneVisible && paneTab === 'diff';
-  const showTerminal = paneVisible && paneTab === 'terminal';
-  if (!showBrowser) setBrowserVisible(false);
-  // Focus would be lost with a hidden terminal: hand it back to the composer.
-  if (!showTerminal && terminalPaneEl.contains(document.activeElement)) inputEl.focus();
-  shell.classList.toggle('pane-hidden', !paneVisible);
-  shell.classList.toggle('browser-hidden', !showBrowser);
-  browserPane.hidden = paneTab !== 'browser';
-  diffPane.hidden = paneTab !== 'diff';
-  terminalPaneEl.hidden = paneTab !== 'terminal';
-  for (const [tab, el] of PANE_TABS) {
-    el.classList.toggle('active', paneTab === tab);
-    el.setAttribute('aria-selected', String(paneTab === tab));
-    el.tabIndex = paneTab === tab ? 0 : -1;
-  }
-  paneMods?.apply(modTabKey(paneTab), paneVisible);
-  browserToggle.classList.toggle('active', showBrowser);
-  browserToggle.setAttribute('aria-pressed', String(showBrowser));
-  diffToggle.classList.toggle('active', showDiff);
-  diffToggle.setAttribute('aria-pressed', String(showDiff));
-  terminalToggle.classList.toggle('active', showTerminal);
-  terminalToggle.setAttribute('aria-pressed', String(showTerminal));
-  changesPane.setVisible(showDiff);
-  terminalPane.setVisible(showTerminal);
-  if (showBrowser) syncBrowserView();
-  if (persist) {
-    try {
-      localStorage.setItem('pane', paneVisible ? 'shown' : 'hidden');
-      localStorage.setItem('paneTab', paneTab);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-/** The top-bar toggles: show the pane on that tab, or hide it when that tab is already showing. */
-function togglePane(tab: PaneTab): void {
-  pendingModTab = null;
-  if (paneVisible && paneTab === tab) paneVisible = false;
-  else {
-    paneVisible = true;
-    paneTab = tab;
-  }
-  applyPane();
-}
-
-function showPaneTab(tab: PaneTab): void {
-  pendingModTab = null;
-  if (paneVisible && paneTab === tab) return;
-  if (modTabKey(tab) && !paneMods?.has(modTabKey(tab)!)) return;
-  paneVisible = true;
-  paneTab = tab;
-  applyPane();
-}
-
-/** The mod tabs changed: a tab remembered from the last run comes back once it exists; a vanished one falls back. */
-function paneTabsChanged(): void {
-  const key = pendingModTab ? modTabKey(pendingModTab) : null;
-  if (key && paneMods?.has(key)) {
-    paneTab = pendingModTab!;
-    pendingModTab = null;
-  }
-  applyPane(false);
-}
-
-/** The rail between the transcript and the pane opened, closed or was resized. */
-function paneLayoutChanged(): void {
-  const stored = sidePane.style.getPropertyValue('--browser-w');
-  if (stored) setBrowserWidth(parseFloat(stored));
-  reportBounds();
-  requestAnimationFrame(reportBounds);
-}
-
-browserToggle.onclick = () => togglePane('browser');
-diffToggle.onclick = () => togglePane('diff');
-terminalToggle.onclick = () => toggleTerminal();
-paneTabBrowser.onclick = () => showPaneTab('browser');
-paneTabDiff.onclick = () => showPaneTab('diff');
-paneTabTerminal.onclick = () => showPaneTab('terminal');
-$('pane-close').onclick = () => {
-  paneVisible = false;
-  applyPane();
-};
-// ←/→ move between the pane tabs (the mods' ones too), wrapping around.
-sidePane.querySelector('.pane-tabs')!.addEventListener('keydown', (e) => {
-  const ke = e as KeyboardEvent;
-  if ((ke.key !== 'ArrowLeft' && ke.key !== 'ArrowRight') || !(ke.target as HTMLElement).matches('[role="tab"]')) return;
-  ke.preventDefault();
-  const list = paneTabList();
-  const at = Math.max(0, list.findIndex(([tab]) => tab === paneTab));
-  const [next, nextEl] = list[(at + (ke.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length];
-  showPaneTab(next);
-  nextEl.focus();
-});
-
-// Diff tab
-let debugChanges: ChangesApi | null = null;
-
-function changesSource(): ChangesApi | null {
-  if (debugChanges) return debugChanges;
-  const api = oc.changes;
-  return api && typeof api.list === 'function' && typeof api.diff === 'function' ? api : null;
-}
-
-function setChangeCount(n: number): void {
-  const count = Math.max(0, Math.floor(Number(n) || 0));
-  for (const badge of diffCountBadges) {
-    badge.textContent = String(count);
-    badge.hidden = count === 0;
-  }
-  const files = `${count} changed file${count === 1 ? '' : 's'}`;
-  diffToggle.dataset.tip = count ? `Toggle diff · ${files}` : 'Toggle diff';
-  paneTabDiff.setAttribute('aria-label', count ? `Diff, ${files}` : 'Diff');
-}
-
-
 const { confirmAction } = createConfirmDialog({ dialog: confirmDialog, hideBrowser: () => oc.browser.setVisible(false), afterClose: () => syncBrowserView() });
 
-const changesPane = createChangesPane({
-  root: diffPane,
-  list: $('change-list'),
-  detail: $('change-detail'),
-  empty: $('changes-empty'),
-  source: changesSource,
-  onCount: setChangeCount,
-  onError: showInlineError,
+const pane = createSidePane({
+  shell,
+  content: contentEl,
+  browserView,
+  dialogs: [settingsDialog, shortcutsDialog, confirmDialog, lightbox],
+  browser: oc.browser,
+  changesApi: () => oc.changes,
+  terminalApi: () => oc.terminal,
+  dialogOpen,
+  pageOpen,
+  focusComposer: () => inputEl.focus(),
+  showError: showInlineError,
+  cleanError,
   confirm: confirmAction,
-  cleanError,
-  onReverted: (entry) => forgetFile(entry.path),
 });
-
-// Terminal tab
-let debugTerminal: MockTerminalSource | null = null;
-
-function terminalSource(): TerminalApi | null {
-  if (debugTerminal) return debugTerminal;
-  const api = oc.terminal;
-  return api && typeof api.list === 'function' && typeof api.create === 'function' && typeof api.onData === 'function' && typeof api.onTabs === 'function' ? api : null;
-}
-
-function setTerminalBusy(n: number): void {
-  const count = Math.max(0, Math.floor(Number(n) || 0));
-  for (const dot of terminalBusyDots) dot.hidden = count === 0;
-  terminalToggle.dataset.tip = count ? `Toggle terminal · ${count} running` : 'Toggle terminal';
-  paneTabTerminal.setAttribute('aria-label', count ? `Terminal, ${count} running` : 'Terminal');
-}
-
-/** A link clicked in a terminal opens in the Browser pane. */
-function openTerminalLink(url: string): void {
-  showPaneTab('browser');
-  void oc.browser.navigate(url).catch((err: unknown) => showInlineError(paneTabBrowser, `Couldn't open the link: ${cleanError(err)}`));
-}
-
-const terminalPane = createTerminalPane({
-  root: terminalPaneEl,
-  strip: $('terminal-tabs'),
-  newButton: $<HTMLButtonElement>('terminal-new'),
-  host: $('terminal-host'),
-  empty: $('terminal-empty'),
-  source: terminalSource,
-  onBusy: setTerminalBusy,
-  onOpenUrl: openTerminalLink,
-  onError: showInlineError,
-  cleanError,
-});
-
-/** ⌘⇧T and the top-bar toggle: show the terminal with the cursor in it, or hide it. */
-function toggleTerminal(): void {
-  togglePane('terminal');
-  if (paneVisible && paneTab === 'terminal') terminalPane.focus();
-}
-
-/** ⌘T: a new shell tab (the Terminal pane is shown first). */
-function openNewTerminal(): void {
-  showPaneTab('terminal');
-  void terminalPane.newTab();
-}
-
-const BROWSER_MIN = 360;
-const TRANSCRIPT_MIN = 320;
-function clampBrowserWidth(px: number): number {
-  // The mods' rail sits between the transcript and the pane: what it takes is not the pane's to have.
-  const rail = document.getElementById('mod-rail');
-  const railW = rail && !rail.hidden ? rail.offsetWidth : 0;
-  return Math.round(Math.max(BROWSER_MIN, Math.min(px, contentEl.clientWidth - TRANSCRIPT_MIN - resizer.offsetWidth - railW)));
-}
-function setBrowserWidth(px: number | null): void {
-  if (px === null) sidePane.style.removeProperty('--browser-w');
-  else sidePane.style.setProperty('--browser-w', `${clampBrowserWidth(px)}px`);
-}
-window.addEventListener('resize', () => {
-  const stored = sidePane.style.getPropertyValue('--browser-w');
-  if (stored) setBrowserWidth(parseFloat(stored));
-  reportBounds();
-});
-
-resizer.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  e.preventDefault();
-  resizer.setPointerCapture(e.pointerId);
-  resizer.classList.add('dragging');
-  document.body.classList.add('resizing');
-  const startX = e.clientX;
-  const startW = sidePane.getBoundingClientRect().width;
-  const move = (ev: PointerEvent) => {
-    setBrowserWidth(startW + (startX - ev.clientX));
-    reportBounds();
-  };
-  const up = (ev: PointerEvent) => {
-    if (resizer.hasPointerCapture(ev.pointerId)) resizer.releasePointerCapture(ev.pointerId);
-    resizer.removeEventListener('pointermove', move);
-    resizer.removeEventListener('pointerup', up);
-    resizer.removeEventListener('pointercancel', up);
-    resizer.classList.remove('dragging');
-    document.body.classList.remove('resizing');
-    reportBounds();
-    try {
-      localStorage.setItem('browserWidth', String(Math.round(sidePane.getBoundingClientRect().width)));
-    } catch {
-      /* ignore */
-    }
-  };
-  resizer.addEventListener('pointermove', move);
-  resizer.addEventListener('pointerup', up);
-  resizer.addEventListener('pointercancel', up);
-});
-resizer.addEventListener('dblclick', () => {
-  setBrowserWidth(null);
-  try {
-    localStorage.removeItem('browserWidth');
-  } catch {
-    /* ignore */
-  }
-  requestAnimationFrame(reportBounds);
-});
-
-function applyBrowserState(s: BrowserState): void {
-  const blank = !s.url || s.url === 'about:blank';
-  if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
-  browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
-  backBtn.disabled = !s.canGoBack;
-  fwdBtn.disabled = !s.canGoForward;
-  openExternalBtn.disabled = blank;
-  browserPane.classList.toggle('loading', s.loading);
-  if (placeholder) placeholder.hidden = !blank;
-}
-oc.browser.onState(applyBrowserState);
-urlEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    void oc.browser.navigate(urlEl.value);
-    urlEl.blur();
-  } else if (e.key === 'Escape') {
-    e.stopPropagation();
-    urlEl.blur();
-    void oc.browser.state().then(applyBrowserState);
-  }
-});
-urlEl.addEventListener('focus', () => urlEl.select());
-document.querySelector('.url-pill')!.addEventListener('mousedown', (e) => {
-  if (e.target !== urlEl) {
-    e.preventDefault();
-    urlEl.focus();
-  }
-});
-backBtn.onclick = () => void oc.browser.back();
-fwdBtn.onclick = () => void oc.browser.forward();
-reloadBtn.onclick = () => void oc.browser.reload();
-openExternalBtn.onclick = async () => {
-  try {
-    if (typeof oc.browser.openExternal !== 'function') throw new Error('No handler registered');
-    await oc.browser.openExternal();
-  } catch (err) {
-    showInlineError(openExternalBtn, `Couldn't open the page: ${cleanError(err)}`);
-  }
-};
+const { changesPane, terminalPane, terminalSource, showPaneTab, togglePane, toggleTerminal, openNewTerminal, paneTabsChanged, paneLayoutChanged, syncBrowserView, setBrowserVisible, reportBounds, trackBounds, applyBrowserState } = pane;
 
 // ---------- Settings ----------
 
@@ -3894,16 +3534,13 @@ window.__oc_debug = {
     handleEvent(ev, true);
   },
   mockChanges(list: ChangeEntry[] | null, diffs: Record<string, Partial<ChangeDiff>> = {}) {
-    debugChanges = list ? mockChangesSource(list, diffs) : null;
-    changesPane.reset();
+    pane.mockChanges(list, diffs);
   },
   terminal: {
     screen: (id?: string) => terminalPane.screenText(id),
     tabs: () => terminalPane.tabs(),
     mock(on: boolean) {
-      debugTerminal?.dispose();
-      debugTerminal = on ? mockTerminalSource(config?.workingDirectory || undefined) : null;
-      terminalPane.reset();
+      pane.mockTerminal(on, config?.workingDirectory || undefined);
     },
     input: (text: string, id?: string) => terminalPane.input(text, id),
   },
@@ -3979,9 +3616,9 @@ const modsHost = createModsHost({
   paneTabsChanged,
   paneLayoutChanged,
   syncBrowserView,
-  browserDebug: () => ({ ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: (() => { const r = browserView.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })(), tab: paneTab, paneVisible, dialog: dialogOpen() }),
+  browserDebug: pane.browserDebug,
 });
-paneMods = modsHost.pane;
+pane.setModTabs(modsHost.pane);
 
 // [feature:pages]
 // Scheduled tasks and Dreaming: pages in the main column (pages.ts), each a list and a page per task or project.
@@ -4199,17 +3836,11 @@ void mcpPanel.refresh();
   applyConfigToUi();
   try {
     if (localStorage.getItem('sidebar') === 'collapsed') shell.classList.add('sidebar-collapsed');
-    // 'browser' is the key older builds used for the pane's visibility
-    const pane = localStorage.getItem('pane') ?? localStorage.getItem('browser');
-    paneVisible = pane !== 'hidden';
-    const savedTab = localStorage.getItem('paneTab');
-    paneTab = savedTab === 'diff' || savedTab === 'terminal' ? savedTab : 'browser';
-    const w = Number(localStorage.getItem('browserWidth'));
-    if (w > 0) setBrowserWidth(w);
+    pane.restore();
   } catch {
     /* ignore */
   }
-  applyPane(false);
+  pane.applyPane(false);
   // After a reload the main process still holds the session on screen, possibly mid-run: show it as it stands
   // (its transcript, what is in flight and its queue).
   try {
