@@ -338,6 +338,18 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       }
       value = block;
     }
+    if (key === 'browser' && scope === 'project' && isRecord(value)) {
+      // The sites the agent may use without asking, and the exempt hosts, decide where it acts unasked: the user's
+      // alone. The rest of the block (cookies, the downloads folder, chat links, sites that always ask) applies.
+      const block: Record<string, unknown> = { ...value };
+      for (const f of ['alwaysAllowed', 'exempt']) {
+        if (f in block) {
+          bad(`browser.${f}`, "a project's settings.json may not choose where the agent acts without asking; add sites in Settings → Browser or your own settings.json");
+          delete block[f];
+        }
+      }
+      value = block;
+    }
     if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);

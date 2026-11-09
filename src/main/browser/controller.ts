@@ -1,9 +1,11 @@
 // The Browser pane's controller: it owns the tabs (at most MAX_TABS; one is active and on screen, the others keep
 // their pages hidden), places the active tab's view where the window's pane is, hands popups to popups.ts, and does
 // what the browser_* tools ask, on the active tab and nothing else (browser_tabs switches). Every change is pushed
-// to the window as a BrowserState.
+// to the window as a BrowserState. For the browser's safety it also stamps the agent's actions (a download that
+// begins during one is the agent's and asks), hides a tab stopped at a certificate error behind the pane's
+// interstitial, and knows which tab a popup belongs to (its permission requests and downloads are that tab's).
 
-import { app, type BrowserWindow } from 'electron';
+import { app, webContents as allContents, type BrowserWindow, type WebContents, type WindowOpenHandlerResponse } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState, PopupState, TabState } from '../../shared/browser';
@@ -11,6 +13,11 @@ import { describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, readPage
 import { PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
+// Browser safety: the certificate interstitial, the agent's downloads, the permission bar's tabs
+import type { CertErrorState } from '../../shared/browser';
+import { certificateSentence, proceeded } from './certificates';
+import { startedByAgent, type ActingStamps } from './downloads';
+import { ownerTabId } from './permissions';
 
 export const MAX_TABS = 12;
 export const TOO_MANY_TABS = `Close a tab first: the browser keeps at most ${MAX_TABS}`;
@@ -58,6 +65,15 @@ export function resolveTarget(input: string, current: string): string {
   return /\s/.test(url) || !url.includes('.') ? `https://duckduckgo.com/?q=${encodeURIComponent(url)}` : `https://${url}`;
 }
 
+/**
+ * Listeners on every controller's tabs (feature.ts): a tab's main frame committed a new page (the permission bar's
+ * "this time" answers end when it leaves the site), and a tab closed.
+ */
+export const tabEvents = {
+  navigated: new Set<(tabId: string, url: string, contentsId: number) => void>(),
+  closed: new Set<(tabId: string) => void>(),
+};
+
 export interface BrowserControllerOptions {
   /** The state changed (pushed to the window as browser:state) */
   onState(state: BrowserState): void;
@@ -76,6 +92,11 @@ export class BrowserController {
   private visible = true;
   private readonly popups: PopupManager;
   private stateTimer: NodeJS.Immediate | null = null;
+  /** A popup's contents id → the tab that opened it */
+  private readonly popupOwners = new Map<number, string>();
+  /** The agent's actions running now, and when the last one ended (ms) */
+  private actingCount = 0;
+  private lastActEnd = 0;
 
   constructor(
     private readonly win: BrowserWindow,
@@ -98,8 +119,18 @@ export class BrowserController {
   /** A new tab, attached under the popups and hidden until it is activated; nothing loaded yet. */
   private makeTab(): BrowserTab {
     if (this.tabs.length >= MAX_TABS) throw new Error(TOO_MANY_TABS);
-    const tab = new BrowserTab({ onChange: () => this.scheduleState(), onShortcut: (t, key) => this.shortcut(t, key) });
-    tab.webContents.setWindowOpenHandler(this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background)));
+    const tab = new BrowserTab({
+      onChange: () => this.scheduleState(),
+      onShortcut: (t, key) => this.shortcut(t, key),
+      onCertError: () => {
+        this.layout();
+        this.scheduleState();
+      },
+      onNavigated: (t, url) => {
+        for (const fn of tabEvents.navigated) fn(t.id, url, t.webContents.id);
+      },
+    });
+    tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
     // Tabs sit below the popup cards: at the index of the last tab, never at the end of the window's views.
     this.win.contentView.addChildView(tab.view, this.tabs.length);
     this.tabs.push(tab);
@@ -122,13 +153,15 @@ export class BrowserController {
   }
 
   /** browser_tabs new: a tab at `url`, loaded like browser_navigate loads, with the same "Now at …" answer. */
-  async openTab(url: string, opts: { background?: boolean } = {}): Promise<string> {
-    const tab = this.makeTab();
-    if (opts.background) this.layout();
-    else this.activate(tab.id);
-    this.scheduleState();
-    const where = await this.navigateIn(tab, url);
-    return `Opened ${tab.id}${opts.background ? ' in the background' : ''}. ${where}`;
+  openTab(url: string, opts: { background?: boolean } = {}): Promise<string> {
+    return this.stamp(async () => {
+      const tab = this.makeTab();
+      if (opts.background) this.layout();
+      else this.activate(tab.id);
+      this.scheduleState();
+      const where = await this.navigateIn(tab, url);
+      return `Opened ${tab.id}${opts.background ? ' in the background' : ''}. ${where}`;
+    });
   }
 
   /** A link or window.open from a page: a tab (the active one when the cap is reached, as a plain navigation). */
@@ -162,6 +195,7 @@ export class BrowserController {
     const at = this.tabs.indexOf(tab);
     this.tabs.splice(at, 1);
     this.popups.closeFor(tab.id);
+    for (const fn of tabEvents.closed) fn(tab.id);
     if (this.activeTab === tab) this.activeTab = this.tabs[Math.min(at, this.tabs.length - 1)];
     try {
       this.win.contentView.removeChildView(tab.view);
@@ -268,7 +302,8 @@ export class BrowserController {
     const b = this.visible ? this.rounded() : { x: 0, y: 0, width: 0, height: 0 };
     for (const tab of this.tabs) {
       tab.view.setBounds(b);
-      tab.view.setVisible(tab === this.activeTab && this.visible);
+      // A tab stopped at a certificate error hides behind the pane's interstitial (drawn by the window).
+      tab.view.setVisible(tab === this.activeTab && this.visible && !tab.certError);
     }
     this.popups.layout();
   }
@@ -345,6 +380,12 @@ export class BrowserController {
 
   /** browser_navigate on the active tab: a URL, "back", "forward", a relative path or a search. */
   navigate(target: string): Promise<string> {
+    return this.stamp(() => this.navigateIn(this.activeTab, target));
+  }
+
+  /** The user's own navigation (the URL bar, Back, Forward, Reload; browser.go): the same, but not an agent action. */
+  userNavigate(target: string): Promise<string> {
+    if (target.trim() === 'reload') return this.reloadNow().then(() => 'Reloaded.');
     return this.navigateIn(this.activeTab, target);
   }
 
@@ -364,11 +405,16 @@ export class BrowserController {
       wc.loadURL(url).catch(() => undefined);
       await wait;
     }
+    if (tab.certError) return certificateSentence(tab.certError);
     const s = tab.state();
     return `Now at ${s.url}${s.title ? ` — "${s.title}"` : ''}`;
   }
 
-  async reload(): Promise<void> {
+  reload(): Promise<void> {
+    return this.stamp(() => this.reloadNow());
+  }
+
+  private async reloadNow(): Promise<void> {
     const wc = this.wc;
     const wait = this.waitForLoad(wc);
     wc.reload();
@@ -464,6 +510,7 @@ export class BrowserController {
   private async settle(before: BrowserState): Promise<string> {
     await sleep(300);
     if (this.wc.isLoading()) await this.waitForLoad(this.wc, 5000);
+    if (this.activeTab.certError) return ` ${certificateSentence(this.activeTab.certError)}`;
     const after = this.state();
     if (after.url !== before.url || after.title !== before.title) return ` Now at: ${after.title ? `${after.title} — ` : ''}${after.url}`;
     return '';
@@ -490,22 +537,30 @@ export class BrowserController {
     wc.sendInputEvent({ type: 'mouseMove', x: px, y: py });
     wc.sendInputEvent({ type: 'mouseDown', x: px, y: py, button, clickCount });
     wc.sendInputEvent({ type: 'mouseUp', x: px, y: py, button, clickCount });
+    // An action of its own (browser_click with x and y): what it starts in the next two seconds is the agent's.
+    this.lastActEnd = Date.now();
   }
 
-  async click(ref: string, button: 'left' | 'right' | 'middle' = 'left', double = false): Promise<string> {
-    const pt = await this.rectOf(ref);
-    const what = await this.describe(ref);
-    const before = this.state();
-    this.flash(ref);
-    await sleep(120);
-    this.wc.focus();
-    this.clickAt(pt.x, pt.y, button, double ? 2 : 1);
-    const suffix = await this.settle(before);
-    return `Clicked ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}).${suffix}`;
+  click(ref: string, button: 'left' | 'right' | 'middle' = 'left', double = false): Promise<string> {
+    return this.stamp(async () => {
+      const pt = await this.rectOf(ref);
+      const what = await this.describe(ref);
+      const before = this.state();
+      this.flash(ref);
+      await sleep(120);
+      this.wc.focus();
+      this.clickAt(pt.x, pt.y, button, double ? 2 : 1);
+      const suffix = await this.settle(before);
+      return `Clicked ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}).${suffix}`;
+    });
   }
 
   /** Types `text` into the field; `secret`: it was a credential field, so the result leaves the text out. */
-  async type(ref: string | undefined, text: string, submit = false, clear = true): Promise<{ content: string; secret: boolean }> {
+  type(ref: string | undefined, text: string, submit = false, clear = true): Promise<{ content: string; secret: boolean }> {
+    return this.stamp(() => this.typeNow(ref, text, submit, clear));
+  }
+
+  private async typeNow(ref: string | undefined, text: string, submit: boolean, clear: boolean): Promise<{ content: string; secret: boolean }> {
     const before = this.state();
     let what = { role: 'the focused element', name: '' };
     if (ref) {
@@ -529,7 +584,11 @@ export class BrowserController {
     return { content: `Typed ${JSON.stringify(text)} into ${what.role}${what.name ? ` '${what.name}'` : ''}${ref ? ` (${ref})` : ''}${submit ? ' and pressed Enter' : ''}.${suffix}`, secret: false };
   }
 
-  async pressKey(combo: string): Promise<string> {
+  pressKey(combo: string): Promise<string> {
+    return this.stamp(() => this.pressKeyNow(combo));
+  }
+
+  private async pressKeyNow(combo: string): Promise<string> {
     const parts = combo.split('+').map((p) => p.trim()).filter(Boolean);
     const keyName = parts.pop() ?? '';
     const modifiers = parts.map((m) => m.toLowerCase()).map((m) => (m === 'cmd' || m === 'command' || m === 'meta' ? 'cmd' : m === 'ctrl' || m === 'control' ? 'control' : m === 'option' ? 'alt' : m));
@@ -592,7 +651,11 @@ export class BrowserController {
     return { path: file, dataUrl: `data:image/png;base64,${png.toString('base64')}`, width, height };
   }
 
-  async evaluate(code: string): Promise<string> {
+  evaluate(code: string): Promise<string> {
+    return this.stamp(() => this.evaluateNow(code));
+  }
+
+  private async evaluateNow(code: string): Promise<string> {
     const result = await this.wc.executeJavaScript(code, true);
     if (result === undefined) return 'undefined';
     try {
@@ -601,5 +664,97 @@ export class BrowserController {
     } catch {
       return String(result);
     }
+  }
+
+  // ---------- Browser safety: the agent's actions, popups' tabs, certificate errors ----------
+
+  /**
+   * Runs one of the agent's actions (navigate, openTab, reload, click, type, pressKey, evaluate; clickAt stamps its
+   * end): while it runs, and for two seconds after, a download that begins is the agent's (downloads.ts).
+   */
+  private async stamp<T>(run: () => Promise<T>): Promise<T> {
+    this.actingCount++;
+    try {
+      return await run();
+    } finally {
+      this.actingCount--;
+      this.lastActEnd = Date.now();
+    }
+  }
+
+  stamps(): ActingStamps {
+    return { inFlight: this.actingCount, lastEnd: this.lastActEnd };
+  }
+
+  /** Whether a browser tool is acting now, or ended less than two seconds ago. */
+  acting(now = Date.now()): boolean {
+    return startedByAgent(this.stamps(), now);
+  }
+
+  /** Remembers which tab each popup a tab's page opens belongs to (a popup's own popups are found through their opener). */
+  private ownPopups(tab: BrowserTab, handler: (details: { url: string; disposition: string; features: string }) => WindowOpenHandlerResponse) {
+    return (details: Parameters<typeof handler>[0]): WindowOpenHandlerResponse => {
+      const r = handler(details);
+      if (r.action !== 'allow' || !r.createWindow) return r;
+      const make = r.createWindow;
+      return {
+        ...r,
+        createWindow: (options) => {
+          const wc = make(options);
+          const id = wc.id;
+          this.popupOwners.set(id, tab.id);
+          wc.once('destroyed', () => this.popupOwners.delete(id));
+          return wc;
+        },
+      };
+    };
+  }
+
+  private tabOfContents(wc: WebContents): BrowserTab | undefined {
+    return this.tabs.find((t) => !t.webContents.isDestroyed() && t.webContents.id === wc.id);
+  }
+
+  /** The tab a page belongs to: a tab's own contents, else the tab that opened it (a popup, a popup's popup). */
+  tabIdOf(wc: WebContents | null): string | null {
+    if (!wc || wc.isDestroyed()) return null;
+    return ownerTabId(wc.id, {
+      tabOf: (id) => this.tabs.find((t) => !t.webContents.isDestroyed() && t.webContents.id === id)?.id ?? this.popupOwners.get(id) ?? null,
+      openerOf: (id) => {
+        const opener = allContents.fromId(id)?.opener;
+        const from = opener ? allContents.fromFrame(opener) : undefined;
+        return from && !from.isDestroyed() ? from.id : null;
+      },
+    });
+  }
+
+  /** A tab's main frame stopped at a certificate error (certificates.ts). False: not a tab's contents (a popup). */
+  certificateError(wc: WebContents, error: CertErrorState): boolean {
+    const tab = this.tabOfContents(wc);
+    if (!tab) return false;
+    tab.setCertError(error);
+    return true;
+  }
+
+  /** Proceed anyway (the interstitial's link, the window only): this host and certificate pass until the app quits. */
+  certProceed(tabId: string): void {
+    const tab = this.tabById(tabId);
+    const e = tab.certError;
+    if (!e) return;
+    proceeded.add(e.host, e.fingerprint);
+    tab.setCertError(null);
+    tab.webContents.loadURL(e.url).catch(() => undefined);
+  }
+
+  /** Go back (the interstitial's button): the page before the failed one, or a blank tab when there is none. */
+  certBack(tabId: string): void {
+    const tab = this.tabById(tabId);
+    const e = tab.certError;
+    if (!e) return;
+    const wc = tab.webContents;
+    tab.setCertError(null);
+    // Electron commits an error page for the failed address; when it did not, the tab is still on the page before.
+    if (wc.getURL() !== e.url) return;
+    if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+    else wc.loadURL('about:blank').catch(() => undefined);
   }
 }
