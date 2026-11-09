@@ -1101,7 +1101,8 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .segmented label:active span { background: var(--hover); }
 
 /* ---------- Popovers and tooltips ---------- */
-.popover {
+/* .tray-pop: a popover that stays in the page while closed (the downloads tray), so `.popover` always means a menu that is open */
+.popover, .tray-pop {
   position: fixed; z-index: 100; min-width: 220px; max-width: 340px; padding: 4px;
   background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-pop); box-shadow: var(--shadow-pop);
   font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none; user-select: none;
@@ -1233,7 +1234,7 @@ dialog.dialog.confirm-dialog { width: 440px; }
 @keyframes progress { from { left: -40%; } to { left: 100%; } }
 @keyframes pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) {
-  .fade-in, .popover, .slash-menu, dialog.dialog[open] { animation: none; }
+  .fade-in, .popover, .tray-pop, .slash-menu, dialog.dialog[open] { animation: none; }
   .ellipsis i { animation: none; opacity: 1; }
   .browsing-pill .pulse { animation: none; }
   *, *::before, *::after { transition-duration: 0s !important; }
