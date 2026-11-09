@@ -3,6 +3,7 @@
 // which follow the pane because the view floats above the page.
 
 import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi } from '../shared/types';
+import { createBrowserPane } from './browser-pane.js';
 import { createChangesPane, mockChangesSource } from './changes.js';
 import { byId } from './dom.js';
 import type { ModPaneTabs } from './mods-host.js';
@@ -53,6 +54,16 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   const browserToggle = byId<HTMLButtonElement>('browser-toggle');
   const resizer = byId('pane-resizer');
   const placeholder = browserView.querySelector<HTMLElement>('.browser-placeholder');
+  /** The tab strip, the popups' state and the profile note (browser-pane.ts) */
+  const browserTabs = createBrowserPane({
+    strip: byId('browser-tabs'),
+    newButton: byId<HTMLButtonElement>('browser-tab-new'),
+    note: byId('browser-note'),
+    noteClose: byId<HTMLButtonElement>('browser-note-close'),
+    urlField: urlEl,
+    showError,
+    cleanError,
+  });
 
   let paneVisible = true;
   let paneTab: PaneTab = 'browser';
@@ -355,6 +366,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   });
 
   function applyBrowserState(s: BrowserState): void {
+    browserTabs.applyState(s);
     const blank = !s.url || s.url === 'about:blank';
     if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
     browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
@@ -416,10 +428,15 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     if (w > 0) setBrowserWidth(w);
   }
 
-  /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view and where its slot is */
+  /** The pane's own chrome has the focus (the URL bar, the tab strip, a bar button): the browser's shortcuts apply. */
+  function browserFocused(): boolean {
+    return browserShown() && browserPane.contains(document.activeElement);
+  }
+
+  /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view, where its slot is, the tabs and popups */
   function browserDebug() {
     const r = browserView.getBoundingClientRect();
-    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen() };
+    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug() };
   }
 
   return {
@@ -446,6 +463,13 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     applyBrowserState,
     restore,
     browserDebug,
+    browserFocused,
+    /** ⌘⇧N, ⌘W and ⌘L while the pane's chrome has the focus (keys inside the page itself reach the main process) */
+    newBrowserTab: () => void browserTabs.newTab(),
+    closeBrowserTab: () => void browserTabs.closeActive(),
+    focusUrl: () => browserTabs.focusUrl(),
+    /** The one-time note about the browser's profile, when it is due */
+    refreshBrowserNote: () => browserTabs.refreshNote(),
     /** The debug hook: the Diff pane from memory (null: the real tracker again) */
     mockChanges: (list: ChangeEntry[] | null, diffs: Record<string, Partial<ChangeDiff>> = {}) => {
       debugChanges = list ? mockChangesSource(list, diffs) : null;

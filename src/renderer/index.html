@@ -134,6 +134,10 @@
           </div>
 
           <section class="browser" id="browser-pane" role="tabpanel" aria-labelledby="pane-tab-browser">
+            <div class="browser-tabs">
+              <div id="browser-tabs" class="browser-tab-strip" role="tablist" aria-label="Browser tabs"></div>
+              <button type="button" id="browser-tab-new" class="icon-btn sm browser-tab-new" aria-label="New tab" data-tip="New tab" data-tip-kbd="⌘ ⇧ N" data-icon="plus"></button>
+            </div>
             <div class="browser-bar">
               <button id="back-btn" class="icon-btn" aria-label="Back" data-tip="Back" data-icon="arrow-left"></button>
               <button id="fwd-btn" class="icon-btn" aria-label="Forward" data-tip="Forward" data-icon="arrow-right"></button>
@@ -146,6 +150,10 @@
               <span id="browsing-pill" class="browsing-pill" role="status" hidden><span class="pulse" aria-hidden="true"></span><span>Agent is browsing</span></span>
               <button id="open-external-btn" class="icon-btn" aria-label="Open in browser" data-tip="Open in browser" data-icon="external-link"></button>
               <div class="browser-progress" id="browser-progress"></div>
+            </div>
+            <div id="browser-note" class="browser-note" role="status" hidden>
+              <span>The browser now keeps a profile of its own. Your sign-ins came along; a few sites may ask again.</span>
+              <button type="button" id="browser-note-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
             </div>
             <div id="browser-view" class="browser-view">
               <div class="browser-placeholder">

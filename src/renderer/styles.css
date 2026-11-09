@@ -867,6 +867,35 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .slash-foot span { display: inline-flex; align-items: center; gap: 4px; }
 
 /* ---------- Browser pane ---------- */
+/* The tab strip: a tab per page on the grey row, the active one on bg-000 with a hairline on three sides, open to the
+   bar below; the others grey; overflow scrolls sideways with the wheel, no arrows; a + at the end. */
+.browser-tabs { display: flex; align-items: flex-end; gap: 4px; height: 32px; flex: none; padding: 0 6px 0 8px; background: var(--bg-200); user-select: none; }
+.browser-tab-strip { display: flex; align-items: flex-end; gap: 2px; flex: 1; min-width: 0; height: 100%; overflow-x: auto; scrollbar-width: none; }
+.browser-tab-strip::-webkit-scrollbar { display: none; }
+.browser-tab {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 1 180px; min-width: 56px; height: 28px; padding: 0 4px 0 10px;
+  border: 1px solid transparent; border-bottom: none; border-radius: var(--r-control) var(--r-control) 0 0;
+  background: var(--bg-200); color: var(--text-400); font-size: var(--fs-ui); line-height: var(--lh-ui); cursor: default;
+  transition: background-color 0.12s, color 0.12s;
+}
+.browser-tab:hover { background: var(--bg-300); color: var(--text-100); }
+.browser-tab.active { background: var(--bg-000); color: var(--text-100); border-color: var(--border-subtle); }
+.browser-tab:focus-visible { outline-offset: -2px; }
+.browser-tab-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; color: var(--text-400); }
+.browser-tab.active .browser-tab-icon { color: var(--text-200); }
+.browser-tab-icon img { width: 16px; height: 16px; border-radius: 3px; }
+.browser-tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-tab-close {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 20px; height: 20px; border-radius: 4px; color: var(--text-400);
+  visibility: hidden; transition: background-color 0.12s, color 0.12s;
+}
+.browser-tab:hover .browser-tab-close, .browser-tab.active .browser-tab-close { visibility: visible; }
+.browser-tab-close:hover { background: var(--pressed); color: var(--text-100); }
+.browser-tab-new { align-self: center; }
+/* The one-time note under the URL bar: the browser has a profile of its own now */
+.browser-note { display: flex; align-items: center; gap: 8px; flex: none; min-height: 32px; padding: 4px 6px 4px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-400); font-size: var(--fs-small); line-height: var(--lh-small); }
+.browser-note > span { flex: 1; min-width: 0; }
 .browser-bar { position: relative; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--border-subtle); flex: none; user-select: none; }
 .url-pill {
   container-type: inline-size;

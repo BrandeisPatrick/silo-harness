@@ -1520,6 +1520,19 @@ document.addEventListener('keydown', (e) => {
     startTitleEdit();
   } else if (!meta) {
     return;
+  } else if (k === 'n' && e.shiftKey) {
+    // The browser's tabs, while its chrome has the focus (inside a page the main process handles the same keys)
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.newBrowserTab();
+  } else if (k === 'w' && !e.shiftKey) {
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.closeBrowserTab();
+  } else if (k === 'l' && !e.shiftKey) {
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.focusUrl();
   } else if (k === 'n' && !e.shiftKey) {
     e.preventDefault();
     void newSession();
@@ -2173,6 +2186,7 @@ void mcpPanel.refresh();
   reportBounds();
   autosize();
   applyBrowserState(await oc.browser.state());
+  void pane.refreshBrowserNote();
   inputEl.focus();
 })();
 
