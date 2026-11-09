@@ -9,7 +9,6 @@ import type {
   ContextInfo,
   FileHit,
   ImageAttachment,
-  LiveState,
   McpApi,
   McpServerInfo,
   MessageOrigin,
@@ -23,7 +22,6 @@ import type {
   RulesApi,
   SendResult,
   SessionMeta,
-  SessionStatus,
   TaskItem,
   TerminalTabInfo,
   TranscriptItem,
@@ -70,6 +68,7 @@ import { createConnection } from './connection.js';
 import { createToolGroups } from './tool-groups.js';
 import { createApprovals } from './approvals.js';
 import { createTranscript } from './transcript.js';
+import { createSessionsView } from './sessions-view.js';
 
 declare global {
   interface Window {
@@ -151,8 +150,6 @@ const modeBtn = $<HTMLButtonElement>('mode-btn');
 const modelBtn = $<HTMLButtonElement>('model-btn');
 const cwdBtn = $<HTMLButtonElement>('cwd-btn');
 const cwdLabel = $('cwd-label');
-const sessionTitle = $('session-title');
-const newSessionBtn = $<HTMLButtonElement>('new-session-btn');
 const slashMenu = $('slash-menu');
 const mentionMenu = $('mention-menu');
 const settingsDialog = $<HTMLDialogElement>('settings');
@@ -179,11 +176,6 @@ let config: AppConfig;
 let running = false;
 let runStartedAt = 0;
 let timer: number | undefined;
-/** The session on screen. Other sessions may be running too: their events only update `statuses`. */
-let currentSessionId = '';
-let sessions: SessionMeta[] = [];
-/** Per session: running, waiting for the user, unread (from the session list, kept current by every session's events) */
-const statuses = new Map<string, SessionStatus>();
 let runOutputTokens = 0;
 /** From a confirmed Rewind until the transcript is back: sending and other rewinds wait */
 let rewinding = false;
@@ -231,7 +223,7 @@ function showTasks(tasks: unknown): void {
 
 /** The current session's task list from its meta (on load and after switching), unless an event came in since `epoch`. */
 function showSessionTasks(meta: SessionMeta | null | undefined, epoch: number): void {
-  if (!meta || meta.id !== currentSessionId || epoch !== tasksEpoch) return;
+  if (!meta || meta.id !== currentSessionId() || epoch !== tasksEpoch) return;
   taskList.set(cleanTasks(meta.tasks));
 }
 
@@ -476,7 +468,7 @@ document.addEventListener(
     if (e.key !== 'Enter' && e.key !== 'Escape') return;
     if (!activePlan?.pending() || running || approvals.pending()) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return;
-    if (dialogOpen() || isMenuOpen() || !slashMenu.hidden || titleEditing) return;
+    if (dialogOpen() || isMenuOpen() || !slashMenu.hidden || titleEditing()) return;
     const t = e.target as HTMLElement;
     if (isTextField(t) && !(t === inputEl && composerEmpty())) return;
     if (composerHasContent()) return;
@@ -566,7 +558,7 @@ function writtenByModel(origin: MessageOrigin | undefined): boolean {
 function originLabel(origin: MessageOrigin, from?: string, note?: string): string | undefined {
   if (origin === 'user' || origin === 'queue') return undefined;
   if (origin === 'session') {
-    const title = from ? sessions.find((m) => m.id === from)?.title : undefined;
+    const title = from ? sessions().find((m) => m.id === from)?.title : undefined;
     return `from session ${title ?? from ?? 'another session'}${note ? ` · ${note}` : ''}`;
   }
   if (origin === 'mod') return from ? `from mod ${from}` : 'from a mod';
@@ -575,7 +567,7 @@ function originLabel(origin: MessageOrigin, from?: string, note?: string): strin
   if (origin === 'dream') return 'dreaming · what the dream read';
   // A slash command put this into the conversation; with a session behind it, it is that session's merged summary.
   if (origin === 'command') {
-    const title = from ? sessions.find((m) => m.id === from)?.title : undefined;
+    const title = from ? sessions().find((m) => m.id === from)?.title : undefined;
     return title ? `merged from ${title}` : from ? 'merged' : 'from a command';
   }
   return `from ${origin}`;
@@ -612,7 +604,7 @@ function applyTurns(items: TranscriptItem[]): void {
 /** After a run (or a fork): the bubbles learn their checkpoints from the transcript, read back from the main process. */
 async function syncTurns(): Promise<void> {
   const my = ++turnSync;
-  const id = currentSessionId;
+  const id = currentSessionId();
   if (!id || running) return;
   let items: TranscriptItem[];
   try {
@@ -621,7 +613,7 @@ async function syncTurns(): Promise<void> {
   } catch {
     return; // a new run started meanwhile; its end syncs again
   }
-  if (my !== turnSync || id !== currentSessionId || running || rewinding || !Array.isArray(items)) return;
+  if (my !== turnSync || id !== currentSessionId() || running || rewinding || !Array.isArray(items)) return;
   applyTurns(items);
 }
 
@@ -721,7 +713,7 @@ async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
   }
   setRewinding(false);
   renderTranscript(res.transcript);
-  if (res.session && typeof res.session === 'object' && res.session.id === currentSessionId) showTasks(res.session.tasks);
+  if (res.session && typeof res.session === 'object' && res.session.id === currentSessionId()) showTasks(res.session.tasks);
   const notice = rewindNotice(res);
   const note = addSystemMessage(notice.text, 'notice');
   if (notice.tip) note.querySelector('span')?.setAttribute('data-tip', notice.tip);
@@ -827,7 +819,7 @@ function setRunning(v: boolean, startedAt = Date.now()): void {
   syncPlaceholder();
   syncBusyUi();
   syncSpin();
-  if (currentSessionId) statuses.set(currentSessionId, { ...statusOf(currentSessionId), running: v });
+  sessionsView.setRunningStatus(v);
   // The last run of calls is live while a run goes on (a session brought on screen mid-run, too)
   toolGroups.updateLastGroup();
   if (v) {
@@ -991,7 +983,7 @@ function returnToComposer(messages: QueuedMessage[]): void {
   if (left) showInlineError(attachBtn, `${left} image${left === 1 ? '' : 's'} did not fit: a message can have up to 8.`);
   // Focus comes to the composer unless the user is typing somewhere else (a terminal, the search field, the URL bar).
   const active = document.activeElement;
-  if (!dialogOpen() && !titleEditing && (active === inputEl || !isTextField(active))) inputEl.focus();
+  if (!dialogOpen() && !titleEditing() && (active === inputEl || !isTextField(active))) inputEl.focus();
 }
 
 /** While a run is in progress the message waits in the queue until the agent's next step. */
@@ -1386,43 +1378,19 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
         const left = queueList.clear();
         if (left.length) returnToComposer(left);
       }
-      if (!dialogOpen() && !titleEditing && !isTextField(document.activeElement)) inputEl.focus();
+      if (!dialogOpen() && !titleEditing() && !isTextField(document.activeElement)) inputEl.focus();
       // The messages of this run now have checkpoints (a debug run_end renders only)
       if (!synthetic) void syncTurns();
       break;
   }
 }
-/** Set from a switch's transcript until its LiveState is applied: the session's events wait here meanwhile */
-let syncing: { id: string; buffer: AgentEvent[] } | null = null;
-
-function statusOf(id: string): SessionStatus {
-  return statuses.get(id) ?? sessions.find((m) => m.id === id)?.status ?? { running: false };
-}
-
-/** Keeps the sidebar's status of a session current from its events (the main process's next list push confirms it). */
-function trackStatus(id: string, ev: AgentEvent, onScreen: boolean): void {
-  const before = statusOf(id);
-  let next: SessionStatus | null = null;
-  if (ev.type === 'run_start') next = { running: true, unread: onScreen ? undefined : before.unread };
-  else if (ev.type === 'run_end') next = { running: false, attention: ev.reason === 'plan' ? 'plan' : undefined, unread: onScreen ? undefined : true };
-  else if (ev.type === 'approval_request') next = { ...before, attention: 'approval' };
-  else if (ev.type === 'approval_resolved' && before.attention === 'approval') next = { ...before, attention: undefined };
-  else if (ev.type === 'question_request') next = { ...before, attention: before.attention === 'approval' ? 'approval' : 'question' };
-  else if (ev.type === 'question_resolved' && before.attention === 'question') next = { ...before, attention: undefined };
-  if (!next) return;
-  statuses.set(id, next);
-  renderSessionList();
-}
 
 oc.onAgentEvent((ev, sessionId) => {
-  const id = typeof sessionId === 'string' && sessionId ? sessionId : currentSessionId;
-  const onScreen = id === currentSessionId;
+  const id = typeof sessionId === 'string' && sessionId ? sessionId : currentSessionId();
+  const onScreen = id === currentSessionId();
   bus.emit('agent-event', ev, id, onScreen);
-  trackStatus(id, ev, onScreen);
-  if (syncing && syncing.id === id) {
-    syncing.buffer.push(ev);
-    return;
-  }
+  sessionsView.trackStatus(id, ev, onScreen);
+  if (sessionsView.buffer(id, ev)) return;
   if (onScreen) handleEvent(ev);
   else if (ev.type === 'session_changed') onSessionChanged(ev.session);
 });
@@ -1691,7 +1659,7 @@ window.addEventListener(
 function escCounts(e: KeyboardEvent): boolean {
   return (
     !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing && !e.defaultPrevented &&
-    !running && compacting === null && !rewinding && !approvals.waiting() && !titleEditing && !dialogOpen() && !isMenuOpen() && !pageOpen()
+    !running && compacting === null && !rewinding && !approvals.waiting() && !titleEditing() && !dialogOpen() && !isMenuOpen() && !pageOpen()
   );
 }
 
@@ -1977,81 +1945,6 @@ function toggleSidebar(): void {
 $('sidebar-toggle').onclick = toggleSidebar;
 
 
-// Inline title editing (click or F2; Enter saves, Escape cancels)
-let titleEditing = false;
-
-function setTitle(text: string): void {
-  if (!titleEditing) sessionTitle.textContent = text;
-  document.title = text && text !== 'New session' ? `${text} — Silo Harness` : 'Silo Harness';
-}
-
-async function renameSession(id: string, title: string, anchor: HTMLElement): Promise<boolean> {
-  try {
-    if (typeof oc.sessions.rename !== 'function') throw new Error('No handler registered');
-    const meta = await oc.sessions.rename(id, title);
-    const i = sessions.findIndex((s) => s.id === id);
-    if (i >= 0) sessions[i] = meta;
-    if (id === currentSessionId) setTitle(meta.title);
-    renderSessionList();
-    return true;
-  } catch (err) {
-    showInlineError(anchor, `Couldn't rename: ${cleanError(err)}`);
-    return false;
-  }
-}
-
-function startTitleEdit(): void {
-  if (titleEditing || !currentSessionId) return;
-  titleEditing = true;
-  const original = sessionTitle.textContent ?? '';
-  sessionTitle.contentEditable = 'plaintext-only';
-  sessionTitle.classList.add('editing');
-  sessionTitle.focus();
-  const range = document.createRange();
-  range.selectNodeContents(sessionTitle);
-  const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  const finish = async (save: boolean) => {
-    if (!titleEditing) return;
-    titleEditing = false;
-    sessionTitle.removeEventListener('keydown', onKey);
-    sessionTitle.removeEventListener('blur', onBlur);
-    sessionTitle.contentEditable = 'false';
-    sessionTitle.classList.remove('editing');
-    sessionTitle.scrollLeft = 0;
-    const next = (sessionTitle.textContent ?? '').replace(/\s+/g, ' ').trim();
-    sessionTitle.textContent = original;
-    if (!save || !next || next === original) return;
-    sessionTitle.textContent = next;
-    const ok = await renameSession(currentSessionId, next, sessionTitle);
-    if (!ok) sessionTitle.textContent = original;
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      void finish(true);
-      inputEl.focus();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      void finish(false);
-      inputEl.focus();
-    }
-  };
-  const onBlur = () => void finish(true);
-  sessionTitle.addEventListener('keydown', onKey);
-  sessionTitle.addEventListener('blur', onBlur);
-}
-sessionTitle.addEventListener('click', () => startTitleEdit());
-sessionTitle.addEventListener('keydown', (e) => {
-  if (!titleEditing && e.key === 'Enter') {
-    e.preventDefault();
-    startTitleEdit();
-  }
-});
-
 // ---------- Sessions ----------
 
 /** The sidebar's list (sidebar.ts); set up under // [feature:sidebar]. */
@@ -2059,175 +1952,40 @@ let sidebarView: SidebarView | null = null;
 /** The pages in the main column (pages.ts); set up under // [feature:pages]. */
 let pagesView: PagesView | null = null;
 
-function renderSessionList(): void {
-  sidebarView?.render();
-}
-
-/** Re-reads the session list; returns the meta of the session on screen. */
-async function refreshSessions(): Promise<SessionMeta | null> {
-  const [list, current] = await Promise.all([oc.sessions.list(), oc.sessions.current()]);
-  applySessionList(list, current);
-  return sessions.find((m) => m.id === currentSessionId) ?? null;
-}
-
-/**
- * Takes a session list from the main process (a refresh or a 'sessions:changed' push). The session on screen stays
- * the one this window shows (a list that was read before a switch must not switch back); `current` only seeds it at
- * start-up and stands in for it while it has no messages yet (the store lists those only once they have some).
- */
-function applySessionList(list: SessionMeta[], current?: SessionMeta | null): void {
-  if (!Array.isArray(list)) return;
-  if (!currentSessionId && current) currentSessionId = current.id;
-  const mine = list.find((m) => m.id === currentSessionId) ?? (current?.id === currentSessionId ? current : sessions.find((m) => m.id === currentSessionId));
-  sessions = mine && !list.some((m) => m.id === mine.id) ? [mine, ...list] : list;
-  statuses.clear();
-  for (const m of sessions) if (m.status) statuses.set(m.id, { ...m.status });
-  // The window knows best whether the session on screen runs (its own events), and it is being read.
-  if (currentSessionId) statuses.set(currentSessionId, { ...statusOf(currentSessionId), running, unread: undefined });
-  if (mine) {
-    setTitle(mine.title);
-    applySessionPlan(mine);
-  }
-  renderSessionList();
-  bus.emit('sessions', sessions);
-}
-
-/** The session's newest plan may have been decided in the main process (e.g. by a build run): update its card. */
-function applySessionPlan(meta: SessionMeta): void {
-  if (meta.id !== currentSessionId || !meta.plan?.id) return;
-  planCards.get(meta.plan.id)?.update(meta.plan);
-  syncPlanStatus();
-}
-
-function onSessionChanged(meta: SessionMeta): void {
-  const i = sessions.findIndex((s) => s.id === meta.id);
-  if (i >= 0) sessions[i] = { ...sessions[i], ...meta };
-  if (meta.id === currentSessionId) setTitle(meta.title);
-  renderSessionList();
-  applySessionPlan(meta);
-  void refreshSessions();
-}
-
-/** Bumped by every showSession, so the slower of two quick switches gives way */
-let showSeq = 0;
-
-/**
- * Brings a session on screen, running or not: its transcript, then what is in flight (LiveState: the streaming reply,
- * running tools, waiting approval cards, the queue, the status line), then the events that arrived in between.
- * The main process takes the transcript and the live state at the same moment and sends every later event after its
- * reply, so the result is what a window that had watched from the start would show.
- */
-async function showSession(id: string): Promise<boolean> {
-  const my = ++showSeq;
-  const epoch = tasksEpoch;
-  let items: TranscriptItem[];
-  try {
-    items = await oc.sessions.switch(id);
-  } catch (err) {
-    if (my === showSeq) addSystemMessage(cleanError(err), 'error');
-    return false;
-  }
-  if (my !== showSeq) return false;
-  syncing = { id, buffer: [] };
-  currentSessionId = id;
-  statuses.set(id, { ...statusOf(id), unread: undefined });
-  // What belonged to the session shown before: its compaction status and queue rows go with it.
-  if (compacting) {
-    compacting = null;
-    statusLine.classList.remove('compacting');
-  }
-  queueList.clear();
-  renderTranscript(items);
-  let live: LiveState | null = null;
-  try {
-    live = await rpc('sessions.live', id);
-  } catch {
-    /* an older main process: the session shows as idle */
-  }
-  if (my !== showSeq) return false;
-  const buffered = syncing?.id === id ? syncing.buffer : [];
-  syncing = null;
-  applyLive(live);
-  for (const ev of buffered) handleEvent(ev);
-  showSessionTasks(await refreshSessions(), epoch);
-  if (my !== showSeq) return false;
-  changesPane.reset();
-  void refreshContext();
-  scrollToBottom(true);
-  bus.emit('session-shown', id);
-  return true;
-}
-
-/** Shows what is in flight in the session just rendered, through the same paths its events take. */
-function applyLive(live: LiveState | null): void {
-  const on = Boolean(live?.running);
-  if (on !== running || on) setRunning(on, live?.startedAt ?? Date.now());
-  if (!live || !on) {
-    syncPlanStatus();
-    return;
-  }
-  // Queued messages from elsewhere (a schedule, another session) get their bubble when delivered (user_message).
-  for (const m of live.queue ?? []) if (!m.origin || m.origin === 'user' || m.origin === 'queue') queueList.add(m);
-  for (const t of live.tools ?? []) handleEvent({ type: 'tool_start', id: t.id, name: t.name, args: t.args });
-  for (const a of live.approvals ?? []) handleEvent(a);
-  for (const q of live.questions ?? []) handleEvent(q);
-  if (live.thinking) handleEvent({ type: 'thinking_delta', text: live.thinking });
-  if (live.text) handleEvent({ type: 'text_delta', text: live.text });
-}
-
-async function switchSession(id: string): Promise<void> {
-  if (id === currentSessionId) return;
-  await showSession(id);
-}
-
-async function newSession(): Promise<void> {
-  let meta: SessionMeta;
-  try {
-    meta = await oc.sessions.create();
-  } catch (err) {
-    addSystemMessage(cleanError(err), 'error');
-    return;
-  }
-  await showSession(meta.id);
-  inputEl.focus();
-}
-newSessionBtn.onclick = () => void newSession();
-
-async function deleteSession(id: string): Promise<void> {
-  if (statusOf(id).running) return;
-  const meta = id === currentSessionId ? await oc.sessions.current() : sessions.find((s) => s.id === id);
-  if (meta?.messageCount && !window.confirm(`Delete "${meta.title}"? This cannot be undone.`)) return;
-  try {
-    const wasCurrent = id === currentSessionId;
-    const next = await oc.sessions.delete(id);
-    if (wasCurrent) await showSession(next.id);
-    else await refreshSessions();
-  } catch (err) {
-    addSystemMessage(cleanError(err), 'error');
-  }
-}
-
-async function forkSession(id: string): Promise<void> {
-  if (statusOf(id).running) return;
-  try {
-    const source = sessions.find((s) => s.id === id);
-    const fork = await oc.sessions.fork(id);
-    await showSession(fork.id);
-    addSystemMessage(`Forked "${source?.title ?? 'session'}". You are now in the fork; the original is unchanged.`, 'notice');
-  } catch (err) {
-    addSystemMessage(cleanError(err), 'error');
-  }
-}
-
-// The main process keeps the list current for every session (status changes, new and removed sessions).
-onPush('sessions:changed', (list) => applySessionList(list));
-// A notification was clicked: its session comes on screen.
-onPush('sessions:show', (id) => {
-  if (typeof id !== 'string' || !id) return;
-  if (id !== currentSessionId) void showSession(id);
-  // The session is the one behind a page (Scheduled tasks, Dreaming): the chat view comes back
-  else pagesView?.close();
+const sessionsView = createSessionsView({
+  api: oc.sessions,
+  input: inputEl,
+  running: () => running,
+  renderTranscript,
+  handleEvent,
+  setRunning,
+  syncPlanStatus,
+  updatePlanCard: (plan) => planCards.get(plan.id)?.update(plan),
+  dropCompaction: () => {
+    if (compacting) {
+      compacting = null;
+      statusLine.classList.remove('compacting');
+    }
+  },
+  queue: queueList,
+  tasksEpoch: () => tasksEpoch,
+  showSessionTasks,
+  resetChanges: () => changesPane.reset(),
+  refreshContext,
+  scrollToBottom,
+  renderList: () => sidebarView?.render(),
+  closePage: () => pagesView?.close(),
+  focusComposer: () => inputEl.focus(),
+  systemMessage: addSystemMessage,
+  showError: showInlineError,
+  cleanError,
 });
+const { statusOf, startTitleEdit, renameSession, refreshSessions, onSessionChanged, showSession, switchSession, newSession, deleteSession, forkSession } = sessionsView;
+/** The session on screen, the session list and whether the title is being edited: read through these */
+const currentSessionId = sessionsView.currentId;
+const sessions = sessionsView.list;
+const titleEditing = sessionsView.titleEditing;
+const renderSessionList = (): void => sidebarView?.render();
 
 // ---------- Slash menu (skills) ----------
 
@@ -2480,8 +2238,8 @@ window.__oc_debug = {
 // [feature:mods]
 // The mod host: the rail, mod tabs, the composer strip, backgrounds, injected styles and the bridge (mods-host.ts).
 const modsHost = createModsHost({
-  currentSessionId: () => currentSessionId,
-  sessions: () => sessions,
+  currentSessionId: () => currentSessionId(),
+  sessions: () => sessions(),
   config: () => config,
   running: () => running,
   toast: (text, kind) => flashStatus(text, kind === 'error' ? 'circle-alert' : 'info'),
@@ -2502,17 +2260,17 @@ pane.setModTabs(modsHost.pane);
 // [feature:pages]
 // Scheduled tasks and Dreaming: pages in the main column (pages.ts), each a list and a page per task or project.
 const scheduledPage = createScheduledPage({
-  sessions: () => sessions,
+  sessions: () => sessions(),
   status: statusOf,
   openSession: (id) => void openFromPage(id),
-  currentSessionId: () => currentSessionId,
+  currentSessionId: () => currentSessionId(),
   config: () => config,
   confirm: confirmAction,
   cleanError,
   showError: showInlineError,
 });
 const dreamingPage = createDreamingPage({
-  sessions: () => sessions,
+  sessions: () => sessions(),
   openSession: (id) => void openFromPage(id),
   cleanError,
   showError: showInlineError,
@@ -2551,7 +2309,7 @@ function openTaskForm(opts: { template?: string; edit?: string } = {}): void {
 
 /** A session chosen on a page or in the sidebar: the chat view comes back with it */
 async function openFromPage(id: string): Promise<void> {
-  if (pagesView?.isOpen() && id === currentSessionId) {
+  if (pagesView?.isOpen() && id === currentSessionId()) {
     pagesView.close();
     inputEl.focus();
     return;
@@ -2588,10 +2346,10 @@ const settingsPage = createSettingsPage({
   cleanError,
   chooseFolder,
   openShortcuts,
-  currentSessionId: () => currentSessionId,
+  currentSessionId: () => currentSessionId(),
   openSession: (id) => void openFromPage(id),
   openPage: (target) => (target === 'scheduled:new' ? openTaskForm() : openPage({ page: target })),
-  sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
+  sessionTitle: (id) => sessions().find((s) => s.id === id)?.title,
   fillComposer: (text) => fillComposer(text),
   modPreviews: () => modsHost.previews,
   beforeOpen: () => {
@@ -2644,9 +2402,9 @@ void rpc('settings.info')
 // [feature:sidebar]
 sidebarView = createSidebar({
   root: $('sidebar'),
-  sessions: () => sessions,
+  sessions: () => sessions(),
   // While a page is open no session is on screen: none shows selected
-  currentId: () => (pagesView?.isOpen() ? '' : currentSessionId),
+  currentId: () => (pagesView?.isOpen() ? '' : currentSessionId()),
   status: statusOf,
   open: async (id) => openFromPage(id),
   openPage: (page) => openPage({ page }),
@@ -2688,7 +2446,7 @@ const keepScheduleNames = (list: Schedule[]) => {
 onPush('schedules:changed', keepScheduleNames);
 void rpc('schedules.list').then(keepScheduleNames, () => undefined);
 setNameLookup({
-  session: (ref) => sessions.find((s) => s.id === ref)?.title,
+  session: (ref) => sessions().find((s) => s.id === ref)?.title,
   schedule: (id) => scheduleNames.get(id),
 });
 
@@ -2700,7 +2458,7 @@ setNameLookup({
 // Proposal cards in a dream's transcript and on the Dreaming page; the sidebar row is in sidebar.ts, the page in dreaming-page.ts
 setupDreamingView({
   openSession: (id) => void openFromPage(id),
-  sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
+  sessionTitle: (id) => sessions().find((s) => s.id === id)?.title,
   showError: showInlineError,
   cleanError,
 });
