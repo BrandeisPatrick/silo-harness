@@ -118,7 +118,8 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
 
     // ---------- Settings → Mods: the Conversation, Chat bar and Background tabs ----------
     const versions = (tab) => ev(`window.__oc_debug.looks.state(${js(tab)}).versions`);
-    check('Conversation offers Holo terminal, Chat bar Cockpit, Background Starfield, each after Default', (await versions('conversation')).join() === ',hyperspace/holo' && (await versions('chat-bar')).join() === ',hyperspace/cockpit' && (await versions('backgrounds')).includes('hyperspace/starfield'));
+    const conv = await versions('conversation');
+    check('Conversation offers Holo terminal (and the escape look of yours), Chat bar Cockpit, Background Starfield, each after Default', conv[0] === null && conv[1] === 'hyperspace/holo' && conv.includes('escape-look/x') && (await versions('chat-bar')).join() === ',hyperspace/cockpit' && (await versions('backgrounds')).includes('hyperspace/starfield'), conv);
     await ev(`window.__oc_debug.settings.open('mods', { tab: 'backgrounds', preview: 'hyperspace/starfield' })`);
     await sleep(500);
     check("Hyperspace's Starfield previewed offers the whole set", await setOffered());
