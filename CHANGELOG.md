@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
+
+Pull requests, documents and artifacts show as cards in the chat, as in Claude Code, and sessions can message each other, each message one quiet line in both conversations.
 
 ### Cards in the chat
 
