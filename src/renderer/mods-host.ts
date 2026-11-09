@@ -1672,6 +1672,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     decided: boolean;
   }
   const offers = new Map<string, Offer>();
+  /** Cards whose Turn on or Use is under way: the mod list that arrives before their answer is their doing, not Settings' */
+  const acting = new Set<string>();
 
   registerTranscriptItem('mod-offer', (item) => {
     const o = offers.get(String(item.key));
@@ -1760,6 +1762,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     });
     el.querySelector<HTMLButtonElement>('.mod-offer-use')?.addEventListener('click', async () => {
       for (const b of buttonsOf()) b.disabled = true;
+      acting.add(info.key);
       try {
         // The card is the approval: it says what the look may do. The whole mod is used (every kind it has).
         const now = currentMod(info.key) ?? info;
@@ -1768,16 +1771,21 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         applyMods(list);
       } catch (err) {
         failed('use it', err);
+      } finally {
+        acting.delete(info.key);
       }
     });
     el.querySelector<HTMLButtonElement>('.mod-offer-on')?.addEventListener('click', async () => {
       for (const b of buttonsOf()) b.disabled = true;
+      acting.add(info.key);
       try {
         const list = await rpc('mods.setEnabled', info.key, true);
         decide(info.key, 'on');
         applyMods(list);
       } catch (err) {
         failed('turn it on', err);
+      } finally {
+        acting.delete(info.key);
       }
     });
     return el;
@@ -1843,7 +1851,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       if (!m) {
         o.el.remove();
         offers.delete(key);
-      } else if (m.state === 'on') decide(key, 'elsewhere');
+      } else if (m.state === 'on' && !acting.has(key)) decide(key, 'elsewhere');
     }
   }
 

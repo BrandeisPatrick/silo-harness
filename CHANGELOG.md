@@ -20,6 +20,10 @@
 - **Clearer for the agent.** The sending agent learns whether its message started a run, waits behind a step, or waits for your decision on a plan, and that the reply does not come back by itself (a sub-session's report does). `session_list` says which sessions take messages without your approval.
 - **For hook authors:** UserPromptSubmit gets `silo_origin` (where the prompt came from: user, queue, session, schedule, remote, mod, command or dream) and, for a message from another session, `silo_from_session` with its id and title.
 
+### Fixes
+
+- **A new mod's card says it is on.** Turning on a mod the agent just wrote, from its own card, used to end with "was turned on in Settings"; the card now says "is on".
+
 ## 0.10.0
 
 The Browser pane grows into a browser you can sign in with and leave the agent in: a profile of its own, tabs, sign-in popups, and an agent that asks before it uses a site and never handles your passwords. Also find, zoom, a context menu, downloads, certificate warnings, a permission bar, Settings → Browser, and two rows to delete every session or every mod of yours.
