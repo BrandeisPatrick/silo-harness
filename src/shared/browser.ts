@@ -51,6 +51,16 @@ export interface PopupState {
 export interface BrowserConfig {
   /** Keep cookies and site data when the app quits (off: the browser's profile is cleared at quit) */
   keepCookies: boolean;
+  /** Where downloads are saved; '' is the Mac's Downloads folder */
+  downloadsDir: string;
+  /** Links in the chat open in the Browser pane instead of the default browser */
+  openChatLinksInPane: boolean;
+  /** Sites the agent may use without a card: the keys "Always allow …" saved (example.com, localhost:3000, file:/path) and host patterns */
+  alwaysAllowed: string[];
+  /** The user's own sensitive sites (host patterns), asked before every acting call, on top of the built-in list */
+  sensitive: string[];
+  /** The user's own exempt hosts (host patterns, or a folder whose files count), beside localhost and friends */
+  exempt: string[];
 }
 
 export interface BrowserRpc {

@@ -62,7 +62,7 @@ export function defaultConfig(): AppConfig {
     settingsTrusted: {},
     dreaming: { ...DEFAULT_DREAMING },
     providers: {},
-    browser: { keepCookies: true },
+    browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] },
   };
 }
 
@@ -195,7 +195,15 @@ export function normalizeDreaming(raw: unknown): DreamingConfig {
 /** The browser section over its defaults: a file from before the Browser pane had a profile of its own has none. */
 export function normalizeBrowser(raw: unknown): BrowserConfig {
   const r = isRecord(raw) ? raw : {};
-  return { keepCookies: typeof r.keepCookies === 'boolean' ? r.keepCookies : true };
+  const list = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim()))] : []);
+  return {
+    keepCookies: typeof r.keepCookies === 'boolean' ? r.keepCookies : true,
+    downloadsDir: typeof r.downloadsDir === 'string' ? r.downloadsDir.trim() : '',
+    openChatLinksInPane: r.openChatLinksInPane === true,
+    alwaysAllowed: list(r.alwaysAllowed),
+    sensitive: list(r.sensitive),
+    exempt: list(r.exempt),
+  };
 }
 
 /** Keeps the legacy autoApprove flag consistent with permissionMode, and autoTitles a boolean (default on). */
