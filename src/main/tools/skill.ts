@@ -3,7 +3,7 @@ import type { Tool } from './types';
 export const skillTool: Tool = {
   name: 'skill',
   description:
-    'Load a skill by name and follow its instructions. Skills are reusable procedures listed in the system prompt (for example "test" or "review"). Call this before starting a task that matches a skill.',
+    'Load a skill by name and follow its instructions. Skills are reusable procedures listed in the system prompt. Call this before starting a task that matches a skill.',
   parameters: {
     type: 'object',
     properties: { name: { type: 'string', description: 'Skill name exactly as listed' } },

@@ -94,7 +94,7 @@ export function answerText(questions: UserQuestion[], answers: QuestionAnswer[] 
 export const askUser: Tool = {
   name: 'ask_user',
   description:
-    'Ask the user 1–4 multiple-choice questions and wait for the answers. Use it when a choice is genuinely the user\'s: a preference, an unclear requirement, which of several reasonable approaches to take. Not for what you can find out with the other tools, and not to ask permission (actions that need it ask on their own). Each question has a header of at most 12 characters, 2–4 options (a label of 1–5 words and what choosing it means) and multiSelect when several can apply. The user can always answer in their own words, so add no "Other" option. Put a recommended option first and end its label with "(Recommended)". If the user skips, go on with your best judgement and say what you assumed.',
+    'Ask the user 1–4 multiple-choice questions and wait for the answers. Use it when a choice is genuinely the user\'s: a preference, an unclear requirement, which of several reasonable approaches to take. Not for what you can find out with the other tools, and not to ask permission (actions that need it ask on their own). Each question has a header of at most 12 characters. The user can always answer in their own words, so add no "Other" option. Put a recommended option first and end its label with "(Recommended)". If the user skips, go on with your best judgement and say what you assumed.',
   parameters: {
     type: 'object',
     properties: {
