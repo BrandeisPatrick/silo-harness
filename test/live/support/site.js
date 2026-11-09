@@ -65,6 +65,18 @@ function pages(other) {
 <script>function requestCamera() { return navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(() => 'granted', (e) => e.name); }</script>
 <p><button id="cam" type="button" onclick="requestCamera()">Use the camera</button></p>`,
     ),
+    // For the agent's approvals (browser-approvals.js), which reach the site as fixture.example (--host-resolver-rules
+    // maps it to 127.0.0.1) so that it is not an exempt host: the redirect to the second port by that name, and a
+    // shop whose "Pay now" marks the page paid.
+    '/redirect-named.html': { status: 302, location: `${other.replace('//127.0.0.1:', '//fixture.example:')}/other.html` },
+    '/shop.html': page(
+      'Shop',
+      `<h1>Shop</h1>
+<form id="checkout" onsubmit="document.body.dataset.paid = '1'; return false">
+  <p>One fixture, $49.00</p>
+  <p><button id="pay" type="submit">Pay now</button></p>
+</form>`,
+    ),
   };
 }
 
