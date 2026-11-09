@@ -12,25 +12,56 @@ import type { Skill } from '../skills';
 export const ESSENTIAL_NOTE =
   'To save context for this model\'s small window, the tools for scheduled tasks, sub-sessions and writing mods are turned off. If the user asks for one of those, say that all tools can be turned on in Settings → Context ("Tools offered to the model").';
 
-/** The system prompt in the pieces the context breakdown counts separately; joined in this order they are the prompt. */
+/** The app's registered prompt sections: those every session shares, and the session's own (its name, its parent). */
+export interface PromptExtra {
+  shared: string;
+  session: string;
+}
+
+/**
+ * The system prompt in the pieces the context breakdown counts separately. Joined, they are the prompt in this order:
+ * what is the same for every session first (base, sections, skills, MCP servers, the user's extra text), then what is
+ * the project's (instructions files), the mode, the environment (working directory, date) and last the session's own
+ * sections, so that providers that cache a request's prefix can reuse the start of it across turns and sessions.
+ */
 export interface PromptParts {
   base: string;
+  /** The app's sections every session shares */
+  sections: string;
   skills: string;
   mcp: string;
-  mode: string;
   userExtra: string;
   /** One chunk per instructions file */
   instructions: { label: string; text: string }[];
-  sections: string;
+  mode: string;
+  /** The working directory and today's date */
+  env: string;
+  /** The app's sections for this session alone */
+  sessionSections: string;
+}
+
+/** The parts joined in prompt order. */
+export function joinPrompt(p: PromptParts): string {
+  return p.base + p.sections + p.skills + p.mcp + p.userExtra + p.instructions.map((i) => i.text).join('') + p.mode + p.env + p.sessionSections;
 }
 
 /**
  * `cfg.workingDirectory` is the session's folder here (see Agent.sessionConfig). `extra` is the app's registered
  * sections. `own`: the session has a tool set of its own (Session.tools), named here instead of the usual ones.
  */
-export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra = '', own?: string[]): string {
-  const p = systemPromptParts(cfg, skills, mcp, extra, own);
-  return p.base + p.skills + p.mcp + p.mode + p.userExtra + p.instructions.map((i) => i.text).join('') + p.sections;
+export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra: string | PromptExtra = '', own?: string[]): string {
+  return joinPrompt(systemPromptParts(cfg, skills, mcp, extra, own));
+}
+
+const block = (text: string): string => (text.trim() ? `\n\n${text.trim()}` : '');
+
+/** Where the session works and when: near the end of the prompt, since it differs per project and per day. */
+function envText(cfg: AppConfig): string {
+  return `\n\nWorking directory: ${cfg.workingDirectory}\nToday: ${new Date().toISOString().slice(0, 10)}`;
+}
+
+function extraParts(extra: string | PromptExtra): PromptExtra {
+  return typeof extra === 'string' ? { shared: extra, session: '' } : extra;
 }
 
 /**
@@ -38,22 +69,18 @@ export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | 
  * permission mode, MCP servers or skills it cannot use; its sections (`extra`) say what it is for. The instructions
  * files are left out too: what such a session needs of them, its first message carries.
  */
-function ownToolsPromptParts(cfg: AppConfig, extra: string, own: string[]): PromptParts {
+function ownToolsPromptParts(cfg: AppConfig, extra: PromptExtra, own: string[]): PromptParts {
   const base = `You are Silo Harness, running on the user's Mac.
-Working directory: ${cfg.workingDirectory}
-Today: ${new Date().toISOString().slice(0, 10)}
 
 In this session you have only these tools: ${own.join(', ')}. You cannot run commands, change files, browse or start other sessions; do not say that you did.`;
   const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
-  const sections = extra.trim() ? `\n\n${extra.trim()}` : '';
-  return { base, skills: '', mcp: '', mode: '', userExtra, instructions: [], sections };
+  return { base, sections: block(extra.shared), skills: '', mcp: '', userExtra, instructions: [], mode: '', env: envText(cfg), sessionSections: block(extra.session) };
 }
 
-export function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra = '', own?: string[]): PromptParts {
+export function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extraIn: string | PromptExtra = '', own?: string[]): PromptParts {
+  const extra = extraParts(extraIn);
   if (own) return ownToolsPromptParts(cfg, extra, own);
   const base = `You are Silo Harness, an autonomous coding agent running on the user's Mac.
-Working directory: ${cfg.workingDirectory}
-Today: ${new Date().toISOString().slice(0, 10)}
 
 You have tools for the filesystem (read_file, write_file, edit_file, list_directory, glob, grep), a shell (bash), a built-in browser pane that the user can see next to the chat (browser_* tools), the Terminal pane next to the chat (terminal_* tools), and create_artifact for deliverables shown in the browser pane.
 
@@ -83,8 +110,7 @@ How to work:
     : '';
   const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
   const instructions = loadInstructions(cfg.workingDirectory).map((f) => ({ label: f.label, text: instructionsPrompt([f]) }));
-  const sections = extra.trim() ? `\n\n${extra.trim()}` : '';
-  return { base, skills: skillList, mcp: mcpText, mode: modeText, userExtra, instructions, sections };
+  return { base, sections: block(extra.shared), skills: skillList, mcp: mcpText, userExtra, instructions, mode: modeText, env: envText(cfg), sessionSections: block(extra.session) };
 }
 
 /** A user message: plain text, or text plus image parts when images are attached. */

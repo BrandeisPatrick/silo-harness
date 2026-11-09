@@ -54,13 +54,15 @@ export function setupSubagents(app: App, opts: SubagentsOptions = {}): Subagents
 
   for (const tool of subagentTools(svc)) app.tools.register({ ...tool, optional: true });
   // How to use the session tools: left out with them when the tool set is trimmed for a small window.
+  app.prompt.add('sessions', () => PROMPT_SECTION, { optional: true });
+  // This session's name changes when it gets a title: at the end of the prompt, after what every session shares
   app.prompt.add(
-    'sessions',
+    'session-name',
     ({ sessionId }) => {
       const me = app.store.get(sessionId);
-      return me ? `${PROMPT_SECTION}\nThis session is named "${me.title}" (id ${me.id}).` : PROMPT_SECTION;
+      return me ? `This session is named "${me.title}" (id ${me.id}).` : '';
     },
-    { optional: true },
+    { optional: true, perSession: true },
   );
   // What a sub-session must know about itself, whatever tools it has (the user can start one with /spawn).
   app.prompt.add('sub-session', ({ sessionId }) => {
@@ -72,14 +74,14 @@ export function setupSubagents(app: App, opts: SubagentsOptions = {}): Subagents
     ];
     if (svc.depth(me.id) >= MAX_DEPTH) lines.push('It is nested as deep as allowed, so it cannot start sub-sessions of its own.');
     return lines.join('\n');
-  });
+  }, { perSession: true });
   // The rules for messages from other sessions, once this session has one in its conversation (or reports to a parent)
   app.prompt.add('session-messages', ({ sessionId }) => {
     const me = app.store.get(sessionId);
     if (!me) return '';
     const sub = me.origin === 'spawn' && !!me.parentId;
     return sub || (me.turns ?? []).some((t) => t.origin === 'session') ? MESSAGES_SECTION : '';
-  });
+  }, { perSession: true });
   for (const cmd of subagentCommands(svc)) app.commands.register(cmd);
   return svc;
 }

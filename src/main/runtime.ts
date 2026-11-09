@@ -37,7 +37,7 @@ export interface RuntimeOptions {
    */
   updateConfig?: (change: (current: AppConfig) => AppConfig) => AppConfig;
   /** Registered prompt sections (app.prompt), joined */
-  prompt?: (info: { cwd: string; mode: AppConfig['permissionMode']; sessionId: string; essential?: boolean; restricted?: boolean }) => string;
+  prompt?: (info: { cwd: string; mode: AppConfig['permissionMode']; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session' }) => string;
 }
 
 /**

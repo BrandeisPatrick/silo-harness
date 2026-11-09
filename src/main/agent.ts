@@ -51,7 +51,7 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
-import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage } from './agent/prompt';
+import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
@@ -141,8 +141,8 @@ export interface AgentOptions {
   foreground?: () => boolean;
   /** Extra tools offered next to the built-in and MCP ones (app.tools) */
   tools?: () => Tool[];
-  /** Extra system-prompt text (app.prompt sections, already joined) */
-  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean }) => string;
+  /** Extra system-prompt text (app.prompt sections, already joined): those every session shares, or (part 'session') this session's own */
+  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session' }) => string;
   /** The hook engine (default: the app's 'hooks' service; none in bare tests) */
   hooks?: HookEngine | null;
 }
@@ -272,16 +272,25 @@ export class Agent {
     return Array.isArray(own) ? own.filter((n) => typeof n === 'string') : undefined;
   }
 
-  private promptExtra(cfg: AppConfig): string {
-    if (!this.opts.prompt) return '';
+  /**
+   * The app's prompt sections: those every session shares, and this session's own (its name, its parent), which go at
+   * the end of the prompt so that its start stays the same from session to session.
+   */
+  private promptExtra(cfg: AppConfig): PromptExtra {
+    if (!this.opts.prompt) return { shared: '', session: '' };
     try {
-      if (this.ownTools()) return this.opts.prompt({ cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id, restricted: true });
-      const essential = essentialToolsOnly(cfg);
-      const text = this.opts.prompt({ cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id, essential });
-      return essential ? `${text}${text ? '\n\n' : ''}${ESSENTIAL_NOTE}` : text;
+      const base = { cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id };
+      const restricted = Boolean(this.ownTools());
+      const essential = !restricted && essentialToolsOnly(cfg);
+      const info = restricted ? { ...base, restricted } : { ...base, essential };
+      const text = this.opts.prompt({ ...info, part: 'shared' });
+      const session = this.opts.prompt({ ...info, part: 'session' });
+      const shared = essential ? `${text}${text ? '\n\n' : ''}${ESSENTIAL_NOTE}` : text;
+      // A prompt function that does not know parts returns everything both times: keep it once
+      return { shared, session: session === text ? '' : session };
     } catch (err) {
       console.warn('[agent] a prompt section failed:', errorMessage(err));
-      return '';
+      return { shared: '', session: '' };
     }
   }
 
@@ -1030,7 +1039,7 @@ export class Agent {
     const mcpItems = [...byServer].map(([server, list]) => ({ label: server, tokens: estimateSpecTokens(list.map(toSpec)) }));
     const skillItems = parts.skills ? [{ label: 'Skills list', tokens: chars(parts.skills) }] : [];
     const used: ContextSlice[] = [
-      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.mcp + parts.mode + parts.userExtra + parts.sections) + 2 },
+      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra + parts.mode + parts.env + parts.sessionSections) + 2 },
       { key: 'instructions', label: 'Instructions files', tokens: instr.reduce((a, b) => a + b.tokens, 0), items: instr },
       { key: 'skills', label: 'Skills', tokens: chars(parts.skills), items: skillItems },
       { key: 'tools', label: 'Tool definitions', tokens: estimateSpecTokens(tools.filter((t) => !t.mcp).map(toSpec)) },
