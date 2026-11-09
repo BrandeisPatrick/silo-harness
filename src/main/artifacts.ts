@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ArtifactInfo, ArtifactKind } from '../shared/types';
+import { documentFile, documentTitle, documentKind } from './chat-cards/documents';
 import { localImageFile } from './images/local';
 import { servableImage } from './images/sniff';
 import type { Session } from './sessions';
@@ -161,6 +162,7 @@ export class ArtifactStore {
    *   artifact://view/<session>/files/<name>   a raw stored file (the viewer's <img> for SVG)
    *   artifact://view/<session>/images/<file>  an image the model showed (show_image): img-<n>.<ext> in that session's images folder
    *   artifact://view/_local/<token>/<name>    a local image a Markdown reply named (images.resolve made the token)
+   *   artifact://view/_doc/<token>/<name>      a Markdown or text file the agent wrote, in the viewer (its card made the token)
    * Images are only served when their content is an image.
    */
   resolve(url: string): Resolved | null {
@@ -186,6 +188,7 @@ export class ArtifactStore {
       const file = localImageFile(parts[1]);
       return file ? { kind: 'file', path: file } : null;
     }
+    if (parts[0] === '_doc' && parts.length === 3) return this.documentPage(parts[1]);
     const sessionId = parts[0] && safeId(parts[0]);
     if (!sessionId) return null;
     if (parts[1] === 'images') return parts.length === 3 ? this.storedImage(sessionId, parts[2]) : null;
@@ -202,8 +205,8 @@ export class ArtifactStore {
     return { kind: 'page', html: this.viewerHtml(info, fs.readFileSync(info.path, 'utf8')) };
   }
 
-  /** The viewer page for Markdown, code and SVG artifacts. */
-  viewerHtml(info: ArtifactInfo, source: string): string {
+  /** The viewer page for Markdown, code and SVG artifacts. `meta` replaces the line beside the title ("HTML · v2 · 4 KB"). */
+  viewerHtml(info: ArtifactInfo, source: string, meta?: string): string {
     const title = escapeHtml(info.title);
     const head =
       `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
@@ -228,11 +231,11 @@ body { margin: 0; background: var(--bg-100); color: var(--text-100); font: 16px/
 .artifact.svg .stage { flex: 1; display: flex; align-items: center; justify-content: center; }
 .artifact.svg img { max-width: 100%; max-height: calc(100vh - 140px); }
 </style></head>`;
-    const meta = `<span class="meta">${escapeHtml(kindLabel(info))} · v${info.version} · ${formatBytes(info.bytes)}</span>`;
+    const metaLine = `<span class="meta">${escapeHtml(meta ?? `${kindLabel(info)} · v${info.version} · ${formatBytes(info.bytes)}`)}</span>`;
     if (info.kind === 'svg') {
       return (
         head +
-        `<body><main class="artifact svg"><div class="artifact-head"><h1>${title}</h1>${meta}</div>` +
+        `<body><main class="artifact svg"><div class="artifact-head"><h1>${title}</h1>${metaLine}</div>` +
         `<div class="stage"><img src="/${encodeURIComponent(info.sessionId)}/files/${encodeURIComponent(path.basename(info.path))}" alt="${title}"></div></main></body></html>`
       );
     }
@@ -240,16 +243,32 @@ body { margin: 0; background: var(--bg-100); color: var(--text-100); font: 16px/
     if (info.kind === 'code') {
       return (
         head +
-        `<body><main class="artifact code"><div class="artifact-head"><h1>${title}</h1>${meta}</div><pre id="code"></pre></main>${data}<script type="module" src="/_app/artifact-viewer.js"></script></body></html>`
+        `<body><main class="artifact code"><div class="artifact-head"><h1>${title}</h1>${metaLine}</div><pre id="code"></pre></main>${data}<script type="module" src="/_app/artifact-viewer.js"></script></body></html>`
       );
     }
     return (
       head +
-      `<body><main class="artifact"><div class="artifact-head"><h1>${title}</h1>${meta}</div><div class="md" id="md"></div></main>${data}<script type="module" src="/_app/artifact-viewer.js"></script></body></html>`
+      `<body><main class="artifact"><div class="artifact-head"><h1>${title}</h1>${metaLine}</div><div class="md" id="md"></div></main>${data}<script type="module" src="/_app/artifact-viewer.js"></script></body></html>`
     );
   }
 
   // ---- internals ----
+
+  /** A Markdown or text file the agent wrote, in the viewer: Markdown rendered, plain text as numbered lines. */
+  private documentPage(token: string): Resolved | null {
+    const file = documentFile(token);
+    if (!file) return null;
+    let source: string;
+    try {
+      source = fs.readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+    const markdown = documentKind(file) === 'markdown';
+    const bytes = Buffer.byteLength(source);
+    const info: ArtifactInfo = { id: 'document', sessionId: '_doc', title: documentTitle(file, source), kind: markdown ? 'markdown' : 'code', language: markdown ? undefined : 'text', version: 1, createdAt: 0, updatedAt: 0, bytes, url: '', path: file };
+    return { kind: 'page', html: this.viewerHtml(info, source, `${path.basename(file)} · ${formatBytes(bytes)}`) };
+  }
 
   /** A show_image copy: only the img-<n>.<ext> names, only inside the session's images folder, only image content. */
   private storedImage(sessionId: string, name: string): Resolved | null {

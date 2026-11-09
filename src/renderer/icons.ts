@@ -93,6 +93,12 @@ const ICONS = {
   clock: '<circle cx="8" cy="8" r="6"/><path d="M8 4.75V8l2.25 1.5"/>',
   sliders: `<path d="M2.5 5h4.25M10.25 5h3.25M2.5 11h1.75M7.75 11h5.75"/><circle cx="8.5" cy="5" r="1.75"/><circle cx="6" cy="11" r="1.75"/>`,
   'sub-session': '<path d="M4 2.5v5.25c0 1.1.9 2 2 2h6.5M10 7.25l2.5 2.5-2.5 2.5"/>',
+  // Chat cards: a pull request (two commits and the branch that comes back), the repository's page (a browser window
+  // with code in it), a document (a note with its corner turned) and a failed check
+  'git-pull-request': '<circle cx="4.5" cy="3.75" r="1.5"/><circle cx="4.5" cy="12.25" r="1.5"/><circle cx="11.5" cy="12.25" r="1.5"/><path d="M4.5 5.25v5.5M11.5 10.75V6.25c0-1.1-.9-2-2-2H7.25M8.75 2.5L7 4.25 8.75 6"/>',
+  'repo-browser': '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.75"/><path d="M1.75 5.75h12.5M6.25 8l-1.5 1.5 1.5 1.5M9.75 8l1.5 1.5-1.5 1.5M8.6 7.75l-1.2 3.5"/>',
+  note: '<path d="M3.75 2.75h8.5c.55 0 1 .45 1 1v5.5l-4 4h-5.5c-.55 0-1-.45-1-1v-8.5c0-.55.45-1 1-1z"/><path d="M13.25 9.25h-3c-.55 0-1 .45-1 1v3"/>',
+  'circle-x': '<circle cx="8" cy="8" r="6"/><path d="M6.25 6.25l3.5 3.5M9.75 6.25l-3.5 3.5"/>',
   'git-merge': '<circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="9" r="1.5"/><path d="M4.5 5v6M4.5 5.5c0 2 1.5 3.5 3.5 3.5h2"/>',
   'file-export': `<path d="${PAGE}"/><path d="M9 1.75V6h4.25M8 13V8.5M6 10.25L8 8.25l2 2"/>`,
   'circle-dashed': '<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.4 2.2"/>',

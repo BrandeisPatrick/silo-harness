@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Cards in the chat
+
+- **Pull requests.** When a reply names a GitHub pull request, or the agent opens or reads one with `gh pr create` or `gh pr view`, a card for it goes under the reply, as in Claude Code: the state (Open, Draft, Merged or Closed, each in its own quiet colour), `owner/repo #3 · author · 20m ago`, the title, the number of files and the lines added and removed, and under a hairline what the checks and the review say ("All 3 checks passed", "2 of 5 checks failed · Changes requested"). The data comes from your own GitHub CLI (`gh pr view`, signed in as you); without gh, or when it cannot find the pull request, the card shows the repository, the number and the link, and why. A click opens the pull request in your browser, or in the Browser pane when Settings → Browser says so. A card asks again when it comes back into view, at most once a minute. A reply that lists more than three pull requests gets no cards.
+- **Documents.** A Markdown, HTML, PDF or plain-text file the agent writes gets a compact card under the reply ("Trend log", Document · MD); several stack 8px apart. The project's own files it keeps up to date (README.md, CHANGELOG.md, CLAUDE.md and the like) get none. A click opens Markdown and text in the Browser pane's viewer, rendered like the chat, an HTML file as itself, and a PDF in its default app; Reveal in Finder and Open with the default app are at the card's right on hover.
+- **Artifacts** use the same compact card ("Release board", Artifact · HTML). A click opens it in the Browser pane as before; Save as… and Reveal in Finder moved to the card's right, on hover.
+- **On the phone** the remote page shows the same cards in a simpler form: a pull request with a link to GitHub, a document or an artifact that says it is on your Mac.
+
 ## 0.10.0
 
 The Browser pane grows into a browser you can sign in with and leave the agent in: a profile of its own, tabs, sign-in popups, and an agent that asks before it uses a site and never handles your passwords. Also find, zoom, a context menu, downloads, certificate warnings, a permission bar, Settings → Browser, and two rows to delete every session or every mod of yours.
