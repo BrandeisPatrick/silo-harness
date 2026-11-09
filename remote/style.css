@@ -253,6 +253,21 @@ a.chat-card:active { background: var(--hover); }
 .chat-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .chat-card-title { font-size: 14.5px; line-height: 20px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-card-meta { font-size: 13px; line-height: 18px; color: var(--text-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Messages between sessions: one quiet line that opens to the message; the other session's name is a link */
+.session-msg { margin: 0 0 8px; }
+.session-msg > summary {
+  list-style: none; display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 36px;
+  padding: 0 8px; margin: 0 -8px; border-radius: var(--r-control);
+  font-size: 13.5px; line-height: 18px; color: var(--text-400); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.session-msg > summary::-webkit-details-marker { display: none; }
+.session-msg > summary:active { background: var(--hover); }
+.session-msg[open] > summary .chev { transform: rotate(90deg); }
+.sm-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-link { padding: 0; border: 0; background: none; font: inherit; color: var(--text-100); cursor: pointer; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.sm-name { color: var(--text-200); }
+.sm-body { margin: 2px 0 10px 4px; padding: 0 0 0 12px; border-left: 2px solid var(--border); font-size: 13.5px; line-height: 20px; color: var(--text-200); overflow-wrap: anywhere; }
+.sm-note { margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--text-400); }
 
 /* Cards: approval and plan */
 .card {

@@ -34,6 +34,7 @@ const SCRIPTS = [
   { name: 'carry-over', shots: 'none' },
   { name: 'compaction', needsApi: true },
   { name: 'subagents' },
+  { name: 'session-messages' },
   { name: 'names' },
   { name: 'tool-rows' },
   { name: 'quiet' },

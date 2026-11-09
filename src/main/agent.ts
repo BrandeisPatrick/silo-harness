@@ -85,8 +85,10 @@ interface PendingApproval {
   name: string;
   programs: string[];
   reason: string | null;
-  /** A tool's own question (ApproveOptions.custom): no "always" answers */
+  /** A tool's own question (ApproveOptions.custom): no "always" answers, except its own "for this session" one (sessionKey) */
   custom?: boolean;
+  /** ApproveOptions.sessionKey: what "for this session" allows on a custom card */
+  sessionKey?: string;
   /** A browser tool's card: what its answer allows (the site, or the sign-in page) */
   browser?: BrowserApproval;
 }
@@ -152,6 +154,8 @@ export class Agent {
   private allowedSites = new Map<string, Set<string>>();
   /** Per session: sign-in pages (signInPageKey) the user allowed an act on; their password field asks no more. */
   private signInPages = new Map<string, Set<string>>();
+  /** Per session: custom actions (ApproveOptions.sessionKey, e.g. messages to one session) the user allowed for the rest of the session. */
+  private allowedCustom = new Map<string, Set<string>>();
   /** Tokens the tool specs take on every request (measured at the start of each run). */
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
@@ -310,6 +314,9 @@ export class Agent {
     if (!p) return {};
     this.pendingApprovals.delete(id);
     const out: ApprovalOutcome = {};
+    // A tool's own question has no wider answer, except the "for this session" one its key offers (never a project rule)
+    const keep = p.custom && ok && always && !!p.sessionKey;
+    if (keep) this.sessionSet(this.allowedCustom).add(p.sessionKey!);
     if (p.custom) always = false;
     if (p.browser) {
       // A site card's "for this session" allows the site for the session; "Always" also saves it for this Mac (the
@@ -341,7 +348,7 @@ export class Agent {
       } else if (isEdit && this.getConfig().permissionMode === 'ask') out.setMode = 'acceptEdits';
     }
     p.resolve(ok ? { ok: true } : { ok: false, message: DENIED });
-    this.emit({ type: 'approval_resolved', id, ok, scope: ok && always ? scope : 'once' });
+    this.emit({ type: 'approval_resolved', id, ok, scope: keep ? 'session' : ok && always ? scope : 'once' });
     return out;
   }
 
@@ -407,23 +414,29 @@ export class Agent {
         mcp: (server) => this.sessionSet(this.mcpAllowed).has(server),
         reason: (reason) => this.sessionSet(this.allowedReasons).has(reason),
         program: (program) => this.sessionSet(this.allowedPrograms).has(program),
+        custom: (key) => this.sessionSet(this.allowedCustom).has(key),
       },
     });
     if (decision.kind === 'refuse') return Promise.resolve({ ok: false, message: decision.message });
     if (decision.kind === 'allow' || (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? ''))) return Promise.resolve({ ok: true });
-    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom, opts.browser);
+    const session = decision.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
+    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom, opts.browser, session);
   }
 
-  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval): Promise<ApprovalResult> {
+  /**
+   * Shows an approval card and waits for its answer. A custom card has Allow once and Deny, plus `session.label` when
+   * the tool offers a "for this session" answer for its key.
+   */
+  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval, session?: { key: string; label: string }): Promise<ApprovalResult> {
     const id = randomUUID();
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
     // A browser card names its kind and site for the renderer's wording, and carries the amber note
     const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
     if (custom) {
-      // Only Allow and Deny: the renderer hides the buttons whose label is empty.
+      // Allow and Deny (and the tool's own "for this session" answer): the renderer hides the buttons whose label is empty.
       return new Promise((resolve) => {
-        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true, browser });
-        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: '', projectLabel: '', ...extra });
+        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true, browser, ...(session ? { sessionKey: session.key } : {}) });
+        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: session?.label ?? '', projectLabel: '', ...extra });
       });
     }
     const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs, browser?.card === 'site' ? browser.site : undefined);
@@ -570,10 +583,13 @@ export class Agent {
 
   /**
    * UserPromptSubmit for a message about to enter the conversation. Returns false when a hook blocked it (the message is
-   * dropped and the reason shown); its context follows the message as a note.
+   * dropped and the reason shown); its context follows the message as a note. The hook sees where the message came from
+   * (silo_origin) and, for one from another session, which session sent it (silo_from_session).
    */
-  private async promptHooks(text: string): Promise<{ ok: boolean; context: string[] }> {
-    const out = await this.fireHook('UserPromptSubmit', { prompt: text });
+  private async promptHooks(text: string, origin: MessageOrigin, from?: string): Promise<{ ok: boolean; context: string[] }> {
+    const fields: Record<string, unknown> = { prompt: text, silo_origin: origin };
+    if (origin === 'session') fields.silo_from_session = { id: from ?? null, title: (from && this.store.get(from)?.title) || null };
+    const out = await this.fireHook('UserPromptSubmit', fields);
     if (!out) return { ok: true, context: [] };
     if (out.block) {
       this.emit({ type: 'error', kind: 'notice', message: `A UserPromptSubmit hook blocked this message, so it was not sent: ${plainReason(out.block)}` });
@@ -607,7 +623,7 @@ export class Agent {
     if (early) {
       this.emit({ type: 'run_start' });
       await this.startSessionHooks();
-      accepted = await this.promptHooks(userText);
+      accepted = await this.promptHooks(userText, origin, opts.from);
       if (!accepted.ok || signal.aborted) {
         this.running = false;
         this.abortController = null;
@@ -1232,7 +1248,7 @@ export class Agent {
     const cwd = this.cwd();
     let delivered = false;
     for (const m of batch) {
-      const accepted = await this.promptHooks(m.text);
+      const accepted = await this.promptHooks(m.text, m.origin ?? 'queue', m.from);
       if (!accepted.ok) {
         this.emit({ type: 'queue_dropped', id: m.id });
         continue;

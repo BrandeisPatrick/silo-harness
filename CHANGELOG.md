@@ -9,6 +9,17 @@
 - **Artifacts** use the same compact card ("Release board", Artifact · HTML). A click opens it in the Browser pane as before; Save as… and Reveal in Finder moved to the card's right, on hover.
 - **On the phone** the remote page shows the same cards in a simpler form: a pull request with a link to GitHub, a document or an artifact that says it is on your Mac.
 
+### Messages between sessions
+
+- **One quiet line each.** A message from another session no longer shows as a bubble of yours: it is one muted line, "Received message from release notes ›", and a message this session sent is "Messaged deploy fix ›", as in Claude Code. Click the line to read the message; the other session's name is a link that opens it. A sub-session's report and its first brief read the same way, and a report that did not end normally says so ("· it was stopped"). The phone shows the same lines.
+- **Not your word.** A message from another session is a request from another agent working for you, never you: the receiving session is told so in the message and in its instructions. It cannot answer an approval card, a question or a plan, and it cannot change the permission mode; the receiving agent asks you for those.
+- **Allow messages to a session for the rest of this one.** A message to a session that is not this session's parent or its own sub-session still asks first, and the card now also offers "Allow messages to "deploy fix" for this session", so a back-and-forth asks once per session. It is never saved for the project. Bypass sends without asking; Plan mode still refuses.
+- **Scheduled and dreaming sessions keep to their own.** A session a scheduled task or a dream started, and its sub-sessions, can message only their parent and their own sub-sessions. A message to any other session is refused at once instead of leaving a card nobody is there to answer.
+- **A waiting plan stays yours.** A message or a sub-session's report that reaches a session whose plan waits for your decision now waits too, and arrives once you decide, instead of starting a run that left the plan card behind. A message that was still queued when a run ended (a plan, a stop, the step limit) is no longer lost: it waits for your decision on the plan, or for that session's next run.
+- **Unread at once.** A session that is not on screen gets the blue dot as soon as a message from another session reaches it.
+- **Clearer for the agent.** The sending agent learns whether its message started a run, waits behind a step, or waits for your decision on a plan, and that the reply does not come back by itself (a sub-session's report does). `session_list` says which sessions take messages without your approval.
+- **For hook authors:** UserPromptSubmit gets `silo_origin` (where the prompt came from: user, queue, session, schedule, remote, mod, command or dream) and, for a message from another session, `silo_from_session` with its id and title.
+
 ## 0.10.0
 
 The Browser pane grows into a browser you can sign in with and leave the agent in: a profile of its own, tabs, sign-in popups, and an agent that asks before it uses a site and never handles your passwords. Also find, zoom, a context menu, downloads, certificate warnings, a permission bar, Settings → Browser, and two rows to delete every session or every mod of yours.

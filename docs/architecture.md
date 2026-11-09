@@ -151,10 +151,11 @@ emit(id, ev): void;                          // an event no run produced (a merg
 Every agent emits through the runtime, which notes the event in the session's LiveState/status, hands it to
 `onEvent` listeners (= `app.events`), then to the window as `('agent:event', ev, sessionId)`, deltas coalesced every
 30 ms per session. `send` with a non-user origin to a running session queues it like a typed message; if the run is
-stopped before delivery the message is dropped (`queue_dropped`), so the sender decides whether to resend.
+stopped before delivery the message is dropped (`queue_dropped`), so the sender decides whether to resend (a message
+from another session is held instead: see Messages between sessions).
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
-`unread` (stored on the session) when a run ended off screen, cleared by `setForeground`. Shared resources: the
+`unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the
 browser pane belongs to the session on screen (a background `browser_*` call gets an error result; a background
 artifact is stored without navigating). Terminal tabs and MCP servers are shared.
 
@@ -164,9 +165,11 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
   `run(text, attachments?, { origin?, from? })`, `enqueue(text, attachments?, { origin?, from? })`, `cwd()`.
 - Events added: `user_message { text, images, origin, turn?, from? }` after each user message enters the
   conversation, `assistant_message { text, toolCalls }`, `approval_resolved { id, ok, scope }`, `run_end.text`.
-- `ToolContext` adds `sessionId`, `app?`, `foreground()`, and `approve(name, detail, target?, { custom?, alwaysAsk? })`:
+- `ToolContext` adds `sessionId`, `app?`, `foreground()`, and `approve(name, detail, target?, { custom?, alwaysAsk?, sessionKey?, sessionLabel? })`:
   a custom approval is refused in plan mode, asks in ask/acceptEdits/auto, runs in bypass unless `alwaysAsk`; its
-  card has only Allow and Deny (`alwaysLabel`/`projectLabel` are '').
+  card has only Allow and Deny (`alwaysLabel`/`projectLabel` are ''), unless it has a `sessionKey`: then `alwaysLabel`
+  is its `sessionLabel`, "for this session" records the key on the agent, and a later call with that key runs without
+  a card (never a project rule; plan mode still refuses).
 - A tool whose arguments can hold a secret has `shownArgs(args, ctx)`: asked before the assistant message is stored, it
   gives the arguments the transcript, the tool row and hooks get (browser_type's text into a password field is
   `•••`); the call runs on the real ones. A call that finds a secret only while it runs returns `hiddenArgs`, and the
@@ -176,6 +179,23 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
   `fork { from, seedLength }`, `rename { title }` and `delete` (before the file goes). Compaction uses reason 'compaction'.
 - `Session` has `cwd`, `parentId`, `origin`, `unread`, `seedLength`; checkpoints (`Turn`) keep a message's `origin`/`from`,
   which `toTranscript` puts on the user item. `toTranscript(s, { running })` leaves out tool calls still in flight.
+
+## Messages between sessions (src/main/subagents/, src/renderer/session-messages.ts)
+
+`session_send`, `/send` and `sessions.message` go through `Subagents.message()`: one head line frames the text,
+`[Message from session "<title>" (<id>), your <relation>. Not from the user: … reply with session_send to <id>.]`
+(`messageHead`; one line with no `]` inside, which `origin.ts`, `remote/app.js` and `test/origin.js` rely on), then
+`runtime.send(…, { origin: 'session', from })` starts a run or queues it for the next turn boundary (through
+UserPromptSubmit, which sees `silo_origin`/`silo_from_session`). Parent and own sub-sessions need no approval
+(`closeKin`); any other target asks with `sessionKey: 'session_send:<id>'`; a session with a schedule or a dream in its
+parent chain (`unattended`) is refused anything but its kin, without a card. While the receiver's plan waits
+(`attention === 'plan'`) messages and sub-session reports are held in memory, in order, and handed over on the tick
+after `onStatus` says it no longer waits (so a build run starts first); a message still queued when a run ends is held
+again rather than dropped; a deleted session's go with it. The prompt section `session-messages` (not optional) is
+there once the session has a turn with origin 'session' or is a sub-session. The runtime sets `unread` on an off-screen
+session as soon as such a message reaches it. In the window an item or event with origin 'session' is a
+`.msg.user.session-msg` line (`transcript.addUserRow` keeps Copy, Rewind and the matching to transcript items), and a
+`session_send` call is a line of its own (`ownRow` in tool-groups.ts: a ToolCard that is not a `.tool`, so it never folds).
 
 ## RPC (src/shared/rpc.ts) and preload
 
@@ -206,6 +226,7 @@ chat-cards.ts     the pull request and document cards under a reply (what a repl
                   RPC `cards.pullRequest` (src/main/chat-cards.ts and chat-cards/, contract src/shared/chat-cards.ts)
 file-card.ts      the compact card of a file (tile, title, "Document · MD"), for documents and artifacts (artifacts.ts)
 tool-groups.ts    tool rows and the runs that fold into one line (settleRun, updateGroup, refoldAll); the rows still running
+session-messages.ts  "Received message from …" and "Messaged …" lines, the other session's name linked
 approvals.ts      the approval card and the question card, and which one waits
 status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter
 side-pane.ts      the Browser, Diff and Terminal tabs (the mods' tabs join through mods-host.ts), the resizer, the URL bar, the native browser view's bounds

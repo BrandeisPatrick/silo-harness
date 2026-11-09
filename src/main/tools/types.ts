@@ -16,6 +16,14 @@ export interface ApproveOptions {
   /** With custom: ask even in bypass mode */
   alwaysAsk?: boolean;
   /**
+   * With custom: what the card's "for this session" answer allows (e.g. `session_send:<target id>`). The card then
+   * offers `sessionLabel` next to Allow once, and a later call with the same key runs without asking for the rest of
+   * the session. Never saved as a project rule.
+   */
+  sessionKey?: string;
+  /** The card's wording for that answer: 'Allow messages to "Deploy fix" for this session' */
+  sessionLabel?: string;
+  /**
    * A browser tool's card, after the browser policy decided it asks (so it is asked in every mode it reaches the rules
    * in): the site card has the wider answers "Allow <site> for this session" and "Always allow <site>", the others
    * Allow and Deny only.

@@ -473,7 +473,9 @@ const script = (dir, name, body) => {
     const before = agent.session.messages.length;
     await agent.run('my password is hunter2');
     check('G: a UserPromptSubmit block drops the message, says why, and calls no model', agent.session.messages.length === before && state.requests.length === 0 && notices().some((t) => /blocked this message/.test(t) && /No passwords in prompts/.test(t)) && events.some((e) => e.type === 'run_end'), notices());
-    check('G: UserPromptSubmit input has the prompt', JSON.parse(fs.readFileSync(upsFile, 'utf8')).prompt === 'my password is hunter2');
+    const upsInput = JSON.parse(fs.readFileSync(upsFile, 'utf8'));
+    check('G: UserPromptSubmit input has the prompt', upsInput.prompt === 'my password is hunter2');
+    check('G: … and where it came from (silo_origin), with no sending session for a typed one', upsInput.silo_origin === 'user' && !('silo_from_session' in upsInput), upsInput);
 
     // Stop: exit 2 sends the run back once
     const stopIn = path.join(dir, 'stop-inputs.txt');

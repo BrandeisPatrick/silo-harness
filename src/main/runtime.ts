@@ -414,6 +414,16 @@ export class SessionRuntime {
         l.questions.clear();
         status = true;
         break;
+      case 'user_message': {
+        // A message from another session reached a session that is not on screen: the sidebar marks it at once
+        const s = ev.origin === 'session' && id !== this.fg ? this.opts.store.get(id) : undefined;
+        if (s && !s.unread) {
+          s.unread = true;
+          this.opts.store.save(s, false);
+          status = true;
+        }
+        break;
+      }
       case 'text_delta':
         l.text += ev.text;
         break;

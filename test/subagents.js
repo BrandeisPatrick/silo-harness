@@ -153,7 +153,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   r = await tool('session_send').run({ to: P, message: 'hello parent' }, sc.ctx);
   check('3: child → parent: no approval, delivered', sc.asked.length === 0 && /^Delivered/.test(r.content), r.content);
   const toParent = of(P, 'user_message').filter((e) => e.origin === 'session' && e.from === C).pop();
-  check('3: the parent sees who wrote', toParent && /^\[Message from session "Counter"/.test(toParent.text) && /hello parent/.test(toParent.text), toParent);
+  check('3: the parent sees who wrote, and that it is not the user', toParent && /^\[Message from session "Counter" \([^)]+\), your sub-session\. Not from the user: /.test(toParent.text) && /hello parent/.test(toParent.text), toParent);
   await allIdle();
   sc = ctxFor(P);
   r = await tool('session_send').run({ to: 'Counter', message: 'hello child' }, sc.ctx);
@@ -178,7 +178,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   events = [];
   rt.send(U, 'please send');
   const card = await waitFor(() => of(U, 'approval_request')[0], 5000, 'an approval card');
-  check('3: a real approval card for an unrelated target, Allow/Deny only', card.name === 'session_send' && card.alwaysLabel === '' && /from U via the model/.test(card.detail), card);
+  check('3: a real approval card for an unrelated target: Allow once, "for this session" for that target, Deny', card.name === 'session_send' && card.alwaysLabel === `Allow messages to "${rt.get(P).title}" for this session` && card.projectLabel === '' && /from U via the model/.test(card.detail), card);
   rt.respondApproval(card.id, true);
   await allIdle();
   check('3: delivered after approval', of(P, 'user_message').some((e) => /from U via the model/.test(e.text) && e.from === U));

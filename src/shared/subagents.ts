@@ -23,6 +23,9 @@ export interface SubagentsRpc {
    */
   'sessions.merge': (intoId: string, fromId: string) => { ok: boolean; error?: string };
   'sessions.related': (id: string) => RelatedSessions;
-  /** Delivers a message from one session to another (it starts a run there, or queues behind the current one) */
-  'sessions.message': (fromId: string, toId: string, text: string) => SendResult;
+  /**
+   * Delivers a message from one session to another: it starts a run there, queues behind the current one, or (`held`)
+   * waits while the receiver's plan waits for the user's decision
+   */
+  'sessions.message': (fromId: string, toId: string, text: string) => SendResult & { held?: boolean };
 }

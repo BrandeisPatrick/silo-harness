@@ -166,13 +166,13 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   // ---- 6: session_list and /sessions with a query ----
   res = await tool('session_list').run({ query: 'tcg' }, ctxFor(me.id).ctx);
   let lines = res.content.split('\n');
-  check('6: session_list query: header, then best first', lines[0] === `This session: ${me.id} "caller"` && /^Sessions matching "tcg" \(2\), best first:$/.test(lines[1]) && lines[2].includes(tcg.id) && lines[3].includes(tcgFork.id), res.content);
-  check('6: each line: id, name, relation, state, folder, activity', new RegExp(`^ {2}${tcg.id} {2}"tcg" {2}other {2}idle {2}\\S+ {2}active \\d+ min ago {2}last: done with tcg$`).test(lines[2]), lines[2]);
+  check('6: session_list query: header, who takes messages, then best first', lines[0] === `This session: ${me.id} "caller"` && /^Messages \(session_send\): /.test(lines[1]) && /^Sessions matching "tcg" \(2\), best first:$/.test(lines[2]) && lines[3].includes(tcg.id) && lines[4].includes(tcgFork.id), res.content);
+  check('6: each line: id, name, relation, state, folder, activity', new RegExp(`^ {2}${tcg.id} {2}"tcg" {2}other {2}idle {2}\\S+ {2}active \\d+ min ago {2}last: done with tcg$`).test(lines[3]), lines[3]);
   res = await tool('session_list').run({ query: 'archaeology' }, ctxFor(me.id).ctx);
   check('6: the query reaches sessions the plain list leaves out', res.content.includes(ancient.id), res.content);
   res = await tool('session_list').run({ query: 'worker' }, ctxFor(me.id).ctx);
   lines = res.content.split('\n');
-  check('6: related sessions rank first at the same tier', lines[2].includes(kid.id) && / sub-session /.test(lines[2]) && lines[3].includes(stranger.id), res.content);
+  check('6: related sessions rank first at the same tier', lines[3].includes(kid.id) && / sub-session /.test(lines[3]) && lines[4].includes(stranger.id), res.content);
   res = await tool('session_list').run({ query: 'quantum widgets' }, ctxFor(me.id).ctx);
   check('6: no match: the closest names', /No session matches "quantum widgets"\. Closest names:/.test(res.content), res.content);
   check('6: session_list takes an optional query', tool('session_list').parameters.properties.query?.type === 'string' && !(tool('session_list').parameters.required ?? []).includes('query'));

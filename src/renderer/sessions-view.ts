@@ -66,6 +66,8 @@ export function createSessionsView({ api, input: inputEl, running, renderTranscr
     else if (ev.type === 'approval_resolved' && before.attention === 'approval') next = { ...before, attention: undefined };
     else if (ev.type === 'question_request') next = { ...before, attention: before.attention === 'approval' ? 'approval' : 'question' };
     else if (ev.type === 'question_resolved' && before.attention === 'question') next = { ...before, attention: undefined };
+    // A message from another session marks a session that is not on screen at once (the main process stores it)
+    else if (ev.type === 'user_message' && ev.origin === 'session' && !onScreen && !before.unread) next = { ...before, unread: true };
     if (!next) return;
     statuses.set(id, next);
     renderSessionList();

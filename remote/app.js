@@ -318,8 +318,8 @@
   // what was said, as the desktop window does: these are the patterns of src/renderer/origin.ts there, and
   // test/live/remote-page.js runs the frames the app really writes through both.
   const FRAME = {
-    report: /^\[Sub-session "[\s\S]*?" \([\w-]+\) finished a turn: ([^\]\n]+)\]\n([\s\S]*?)\n\nNext: read more with session_read[^\n]*$/,
-    message: /^\[Message from (?:another session|session "[\s\S]*?" \([\w-]+\)[^\]\n]*)\]\n([\s\S]*)$/,
+    report: /^\[Sub-session "([\s\S]*?)" \([\w-]+\) finished a turn: ([^\]\n]+)\]\n([\s\S]*?)\n\nNext: read more with session_read[^\n]*$/,
+    message: /^\[Message from (?:another session|session "([\s\S]*?)" \([\w-]+\))[^\]\n]*\]\n([\s\S]*)$/,
     merged: /^\[Merged from "[\s\S]*?"\]\n\n([\s\S]*)$/,
     scheduled: /^\[Scheduled task "[\s\S]*?" \([^\n]*\)\. This message was sent automatically[^\n]*\]\n[^\n]*\n\n([\s\S]*)$/,
   };
@@ -328,8 +328,8 @@
     const raw = String(text == null ? '' : text);
     let m = null;
     if (origin === 'session') {
-      if ((m = FRAME.report.exec(raw))) return { text: m[2].trim(), note: m[1] === 'done' ? 'finished a turn' : m[1] };
-      if ((m = FRAME.message.exec(raw))) return { text: m[1].trim() };
+      if ((m = FRAME.report.exec(raw))) return { text: m[3].trim(), note: m[2] === 'done' ? 'finished a turn' : m[2], sender: m[1] };
+      if ((m = FRAME.message.exec(raw))) return { text: m[2].trim(), sender: m[1] };
     } else if (origin === 'command') {
       if ((m = FRAME.merged.exec(raw))) return { text: m[1].trim() };
     } else if (origin === 'schedule') {
@@ -338,7 +338,78 @@
     return { text: raw };
   }
 
+  // Messages between sessions, as on the desktop (src/renderer/session-messages.ts): one quiet line that opens to the
+  // message. The other session's name switches the page to it while the page knows that session.
+  function sessionLink(id, fallback) {
+    const known = id && (S.sessions.find((x) => x.id === id) || (S.localMeta && S.localMeta.id === id ? S.localMeta : null));
+    const n = h(known ? 'button' : 'span', known ? 'sm-link' : 'sm-name');
+    n.textContent = (known && known.title) || fallback || 'another session';
+    if (known) {
+      n.type = 'button';
+      n.dataset.session = id;
+    }
+    return n;
+  }
+
+  function lineEl(cls) {
+    const d = h('details', 'session-msg ' + cls);
+    const sum = h('summary');
+    const words = h('span', 'sm-words');
+    sum.append(words);
+    sum.insertAdjacentHTML('beforeend', `<span class="chev">${icon('chevron', 14)}</span>`);
+    const body = h('div', 'sm-body');
+    d.append(sum, body);
+    // The name switches the page to that session; the line does not open or shut for that tap
+    sum.addEventListener('click', (e) => {
+      const link = e.target.closest('.sm-link');
+      if (!link) return;
+      e.preventDefault();
+      switchTo(link.dataset.session);
+    });
+    return { d, words, body };
+  }
+
+  function receivedEl(text, from) {
+    const shown = unframe('session', text);
+    const { d, words, body } = lineEl('received');
+    words.append('Received message from ', sessionLink(from, shown.sender));
+    if (shown.note && shown.note !== 'finished a turn') words.append(` · ${shown.note}`);
+    body.append(h('div', 'md', markdown(shown.text)));
+    return d;
+  }
+
+  /** session_send: "Messaging B…", then "Messaged B" or "Message to B not sent"; opens to the message and the outcome */
+  function sendEl(args, result, ok) {
+    const { d, words, body } = lineEl('sent');
+    d._send = { args: parseArgs(args), words, body };
+    setSendState(d, result, ok);
+    return d;
+  }
+
+  function setSendState(d, result, ok) {
+    const t = d._send;
+    const to = typeof t.args.to === 'string' ? t.args.to : '';
+    const message = typeof t.args.message === 'string' ? t.args.message.trim() : '';
+    const m = ok ? /^Delivered to "(.*)" \(([^()\n]+)\)(?::\s*([^\n]*))?/.exec(result || '') : null;
+    const known = S.sessions.find((x) => x.id === to);
+    t.words.textContent = '';
+    t.body.textContent = '';
+    if (message) t.body.append(h('div', 'md', markdown(message)));
+    let detail = '';
+    if (ok === undefined) t.words.append('Messaging ', sessionLink(known ? to : '', (known && known.title) || to), '…');
+    else if (m) {
+      t.words.append('Messaged ', sessionLink(m[2], m[1]));
+      const how = (/^[^.]*\.?/.exec(m[3] || '') || [''])[0].trim();
+      detail = how ? `Delivered: ${how}` : 'Delivered.';
+    } else {
+      t.words.append('Message to ', sessionLink(known ? to : '', (known && known.title) || to), ' not sent');
+      detail = String(result || '').replace(/^(?:Not sent|Error):\s*/, '').replace(/^Not permitted:\s*/, '');
+    }
+    if (detail) t.body.append(h('div', 'sm-note', esc(detail)));
+  }
+
   function userEl(text, images, origin, from) {
+    if (origin === 'session') return receivedEl(text, from);
     const wrap = h('div', 'msg user');
     const bubble = h('div', 'bubble');
     const shown = unframe(origin, text);
@@ -557,6 +628,7 @@
 
   /** A one-line tool row; expands to the command and the result. ok: true/false, or undefined while it runs. */
   function toolEl(name, args, result, ok) {
+    if (name === 'session_send') return sendEl(args, result, ok);
     const a = parseArgs(args);
     const [verb, arg, mono, server] = toolLabel(name, a);
     const d = h('details', 'tool');
@@ -575,6 +647,7 @@
   }
 
   function setToolState(d, result, ok) {
+    if (d._send) return setSendState(d, result, ok);
     d._tool.result = result;
     d._tool.ok = ok;
     const st = d.querySelector('.tool-status');
@@ -631,8 +704,12 @@
     }
   }
 
-  function approvalTitle(name) {
+  function approvalTitle(name, detail) {
     if (name === 'bash' || name === 'terminal_run') return 'Run this command?';
+    if (name === 'session_send') {
+      const to = /^Send to session "(.*)" \([^()\n]+\):/.exec(detail || '');
+      return to ? `Send a message to “${to[1]}”?` : 'Send a message to another session?';
+    }
     if (name === 'write_file') return 'Write this file?';
     if (name === 'edit_file') return 'Make this edit?';
     const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
@@ -667,7 +744,7 @@
     const sessionLabel = typeof ev.alwaysLabel === 'string' ? ev.alwaysLabel.trim() : 'Allow for this session';
     card.innerHTML =
       `<div class="card-head"><span class="card-icon">${icon(browser ? 'globe' : 'shield', 16)}</span><div class="card-heading">` +
-      `<span class="card-kicker">Waiting for you</span><span class="card-title">${esc(browser ? browser.title : approvalTitle(ev.name))}</span></div></div>` +
+      `<span class="card-kicker">Waiting for you</span><span class="card-title">${esc(browser ? browser.title : approvalTitle(ev.name, ev.detail))}</span></div></div>` +
       (ev.reason ? `<div class="card-reason">${icon('alert', 14)}<span>${esc(ev.reason[0].toUpperCase() + ev.reason.slice(1))}</span></div>` : '') +
       `<div class="card-body">${browser ? browserBody(ev) : `<pre class="out">${esc(ev.detail || '')}</pre>`}</div>` +
       `<div class="card-actions">` +
