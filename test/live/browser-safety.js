@@ -3,8 +3,9 @@
 // themselves, never reach a tool result, the transcript on screen, the saved session, the history or a request to
 // the model; browser_read_page, browser_find and browser_eval show ••• in their place, also after "Show password";
 // browser_screenshot is refused while a filled credential field has the focus or shows its value. Then permissions:
-// a camera request from a page brings up the native question (stood in for through the main process's inspector),
-// the answer is remembered, notifications can be allowed, and the app's own page keeps its permissions unasked.
+// a camera request from a page brings up the permission bar under the URL bar, Don't allow is remembered,
+// notifications can be allowed every time, and the app's own page keeps its permissions unasked
+// (test/live/browser-permissions.js goes through the bar in full).
 // Run: npm run build && node test/live/browser-safety.js
 const fs = require('node:fs');
 const http = require('node:http');
@@ -85,11 +86,12 @@ function filesHolding(dir, needles) {
   const site = `127.0.0.1:${server.address().port}`;
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-browser-safety-'));
-  const inspectPort = 20000 + Math.floor(Math.random() * 20000);
   // Chromium's stand-in camera and microphone: a request reaches the permission check without touching real devices
-  const app = await launch({ profile, mode: 'bypass', mock: true, args: [`--inspect=${inspectPort}`, '--use-fake-device-for-media-stream'] });
-  const mainWs = async () => (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json())[0].webSocketDebuggerUrl;
-  const mainEval = async (expr) => evalAt(await mainWs(), expr);
+  const app = await launch({ profile, mode: 'bypass', mock: true, args: ['--use-fake-device-for-media-stream'] });
+  /** The permission bar's sentences, and a click on one of its answers */
+  const permissionBars = async () => (await app.evaluate('window.__oc_debug.mods.browser()')).safety.bars.filter((b) => b.kind === 'permission');
+  const waitPermissionBar = (re, what) => app.waitFor(`window.__oc_debug.mods.browser().safety.bars.some((b) => b.kind === 'permission' && ${re}.test(b.text))`, 10_000, what);
+  const answerBar = (label) => app.evaluate(`(() => { const b = [...document.querySelectorAll('#browser-bars .browser-ask.permission button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
   /** The Browser pane's page from the fixture server, as a CDP target. */
   const paneWs = () => app.pageTarget(base, 5000);
   const paneEval = async (expr) => evalAt(await paneWs(), expr);
@@ -117,20 +119,6 @@ function filesHolding(dir, needles) {
   const leaks = (s) => SECRETS.filter((x) => String(s ?? '').includes(x));
 
   try {
-    // The native question, stood in for: it records what it was asked and answers from a queue (default: Don't allow).
-    const stubbed = await mainEval(`(() => {
-      const { dialog } = process.mainModule.require('electron');
-      globalThis.__asked = [];
-      globalThis.__answers = [];
-      dialog.showMessageBox = async (win, opts) => {
-        const o = opts || win;
-        globalThis.__asked.push({ message: o.message, detail: o.detail, buttons: o.buttons, defaultId: o.defaultId, cancelId: o.cancelId, onWindow: Boolean(opts && win) });
-        return { response: globalThis.__answers.length ? globalThis.__answers.shift() : 1, checkboxChecked: false };
-      };
-      return true;
-    })()`);
-    check('setup: the dialog is stood in for through the main process', stubbed === true, stubbed);
-
     // ---------- Credentials ----------
     let r = await step('browser_navigate', { url: `${base}/login.html` });
     check('the fixture login page opens in the pane', /Sign in/.test(r ?? ''), r);
@@ -217,30 +205,28 @@ function filesHolding(dir, needles) {
     // ---------- Permissions ----------
     r = await step('browser_navigate', { url: `${base}/camera.html` });
     check('setup: the camera page opens', /Camera/.test(r ?? ''), r);
-    const cam = await paneEval(`navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(() => 'granted', (e) => e.name)`);
-    let asked = await mainEval('globalThis.__asked');
-    check('a camera request from a page brings up the question', asked.length === 1 && asked[0].message === `${site} wants to use your camera and microphone`, asked);
-    check('… on the main window, with Allow and Don\'t allow, Don\'t allow the default', asked[0] && asked[0].onWindow && JSON.stringify(asked[0].buttons) === JSON.stringify(['Allow', "Don't allow"]) && asked[0].defaultId === 1 && asked[0].cancelId === 1, asked[0]);
-    check('… and "Don\'t allow" denies it', cam === 'NotAllowedError', cam);
+    await paneEval(`(window.__cam = navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(() => 'granted', (e) => e.name), 1)`);
+    await waitPermissionBar(/camera/, 'the permission bar');
+    let bars = await permissionBars();
+    check('a camera request from a page brings up the permission bar', bars.length === 1 && bars[0].text === `${site} wants to use your camera and microphone`, bars);
+    check("… with Allow this time, Allow every time and Don't allow, Don't allow in the primary position", bars[0] && JSON.stringify(bars[0].buttons) === JSON.stringify(['Allow this time', 'Allow every time', "Don't allow"]) && (await app.evaluate(`document.querySelector('#browser-bars .browser-ask.permission button:last-child').classList.contains('primary')`)), bars[0]);
+    check("… and \"Don't allow\" denies it", (await answerBar("Don't allow")) && (await paneEval('window.__cam')) === 'NotAllowedError');
     const cam2 = await paneEval(`navigator.mediaDevices.getUserMedia({ video: true }).then(() => 'granted', (e) => e.name)`);
-    asked = await mainEval('globalThis.__asked');
-    check('the answer is remembered: no second question, still denied', asked.length === 1 && cam2 === 'NotAllowedError', { asked: asked.length, cam2 });
+    await sleep(200);
+    check('the answer is remembered: no second question, still denied', (await permissionBars()).length === 0 && cam2 === 'NotAllowedError', cam2);
 
-    await mainEval('globalThis.__answers.push(0)');
-    const notif = await paneEval(`Notification.requestPermission()`);
-    asked = await mainEval('globalThis.__asked');
-    check('notifications: asked, and Allow grants them', notif === 'granted' && asked.length === 2 && asked[1].message === `${site} wants to show notifications`, { notif, asked: asked[1] });
+    await paneEval(`(window.__n = Notification.requestPermission(), 1)`);
+    await waitPermissionBar(/notifications/, 'the notifications bar');
+    bars = await permissionBars();
+    check('notifications: asked, and Allow every time grants them', bars[0]?.text === `${site} wants to show notifications` && (await answerBar('Allow every time')) && (await paneEval('window.__n')) === 'granted', bars[0]);
     const notif2 = await paneEval(`Promise.all([Notification.requestPermission(), Notification.permission])`);
-    asked = await mainEval('globalThis.__asked');
-    check('… remembered, and the page sees them granted', JSON.stringify(notif2) === '["granted","granted"]' && asked.length === 2, notif2);
+    check('… remembered, and the page sees them granted', JSON.stringify(notif2) === '["granted","granted"]' && (await permissionBars()).length === 0, notif2);
     const geo = await paneEval(`navigator.permissions.query({ name: 'geolocation' }).then((s) => s.state)`);
     const clip = await paneEval(`navigator.permissions.query({ name: 'clipboard-write' }).then((s) => s.state, (e) => e.name)`);
-    asked = await mainEval('globalThis.__asked');
-    check('a check alone never asks: location reads denied until asked, clipboard writes granted', geo === 'denied' && clip === 'granted' && asked.length === 2, { geo, clip });
+    check('a check alone never asks: location reads denied until asked, clipboard writes granted', geo === 'denied' && clip === 'granted' && (await permissionBars()).length === 0, { geo, clip });
 
     const own = await app.evaluate(`(async () => ({ notif: await Notification.requestPermission(), current: Notification.permission, camera: (await navigator.permissions.query({ name: 'camera' })).state, geo: (await navigator.permissions.query({ name: 'geolocation' })).state }))()`);
-    asked = await mainEval('globalThis.__asked');
-    check("the app's own page keeps its permissions, without a question", own && own.notif === 'granted' && own.current === 'granted' && own.camera === 'granted' && own.geo === 'granted' && asked.length === 2, own);
+    check("the app's own page keeps its permissions, without a question", own && own.notif === 'granted' && own.current === 'granted' && own.camera === 'granted' && own.geo === 'granted' && (await permissionBars()).length === 0, own);
   } finally {
     await app.close();
     server.close();

@@ -1,6 +1,6 @@
 // A small fixture site the browser's live checks share: pages for a sign-in form, popups (window.open with a size,
 // postMessage back to the opener, a target="_blank" link), a redirect to a second port that stands in for another
-// site, a download with Content-Disposition, a camera request, and the same pages over HTTPS on a self-signed
+// site, downloads with Content-Disposition (a page of links for the user's and the agent's), a camera request, and the same pages over HTTPS on a self-signed
 // certificate for localhost and 127.0.0.1 (test/live/fixtures/site-cert.pem, valid 100 years).
 //
 //   const { startSite, httpsServer } = require('./support/site.js');
@@ -18,6 +18,17 @@ const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8">
 /** The pages, by path. `other` is the second server's base, for the redirect. */
 function pages(other) {
   return {
+    // Downloads (browser-downloads.js): one the user clicks (its name has a leading dot to strip), two the agent clicks.
+    '/downloads.html': page(
+      'Downloads',
+      `<h1>Downloads</h1>
+<p><a id="user-file" href="/files/report.txt">The quarterly report</a></p>
+<p><a id="agent-file" href="/files/agent-report.txt">Agent report</a></p>
+<p><a id="agent-file-2" href="/files/agent-notes.txt">Agent notes</a></p>`,
+    ),
+    '/files/report.txt': { body: 'The quarterly report.\n', headers: { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename=".report.txt"' } },
+    '/files/agent-report.txt': { body: 'A report the agent fetched.\n', headers: { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename="agent-report.txt"' } },
+    '/files/agent-notes.txt': { body: 'Notes the agent fetched.\n', headers: { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename="agent-notes.txt"' } },
     '/login.html': page(
       'Sign in',
       `<h1>Sign in</h1>

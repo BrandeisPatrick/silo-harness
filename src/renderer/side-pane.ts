@@ -1,14 +1,17 @@
 // The side pane next to the transcript: the Browser, Diff and Terminal tabs (the mods' tabs join them through
 // mods-host.ts), the rail that resizes it, the browser's URL bar, and the native browser view's bounds and visibility,
-// which follow the pane because the view floats above the page.
+// which follow the pane because the view floats above the page. The browser's bars, interstitial and downloads tray
+// are browser-bars.ts.
 
 import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi } from '../shared/types';
+import { createBrowserBars } from './browser-bars.js';
 import { createBrowserPane } from './browser-pane.js';
 import { createChangesPane, mockChangesSource } from './changes.js';
 import { byId } from './dom.js';
 import type { ModPaneTabs } from './mods-host.js';
 import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { forgetFile } from './tools.js';
+import { rpc } from './rpc.js';
 
 /** A built-in tab, or a mod's tab view as 'mod:<mod key>/<view id>' (mods-host.ts makes those). */
 export type PaneTab = 'browser' | 'diff' | 'terminal' | `mod:${string}`;
@@ -64,6 +67,20 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     showError,
     cleanError,
   });
+  /** The permission and download bars, the certificate interstitial, the pill's mark and the downloads tray */
+  const browserBars = createBrowserBars({
+    bars: byId('browser-bars'),
+    interstitial: byId('browser-interstitial'),
+    urlIcon: byId('url-icon'),
+    trayButton: byId<HTMLButtonElement>('downloads-btn'),
+    tray: byId('downloads-pop'),
+    // The tray's popover would sit under the native view: the view hides while it is open
+    onOverlay: () => syncBrowserView(),
+    showError,
+    cleanError,
+  });
+  /** The user's own navigation from the pane's chrome: not an agent action (a download it starts just starts). */
+  const go = (target: string, anchor: HTMLElement) => void rpc('browser.go', target).catch((err: unknown) => showError(anchor, `Couldn't open the page: ${cleanError(err)}`));
 
   let paneVisible = true;
   let paneTab: PaneTab = 'browser';
@@ -112,7 +129,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
 
   /** The native browser view floats above the page: it is shown only while its tab is on screen and no dialog is open. */
   function syncBrowserView(): void {
-    if (browserShown() && !dialogOpen()) {
+    if (browserShown() && !dialogOpen() && !browserBars.overlayOpen()) {
       reportBounds();
       setBrowserVisible(true);
       requestAnimationFrame(reportBounds);
@@ -133,7 +150,10 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     const showBrowser = browserShown();
     const showDiff = paneVisible && paneTab === 'diff';
     const showTerminal = paneVisible && paneTab === 'terminal';
-    if (!showBrowser) setBrowserVisible(false);
+    if (!showBrowser) {
+      browserBars.closeTray();
+      setBrowserVisible(false);
+    }
     // Focus would be lost with a hidden terminal: hand it back to the composer.
     if (!showTerminal && terminalPaneEl.contains(document.activeElement)) focusComposer();
     shell.classList.toggle('pane-hidden', !paneVisible);
@@ -279,7 +299,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   /** A link clicked in a terminal opens in the Browser pane. */
   function openTerminalLink(url: string): void {
     showPaneTab('browser');
-    void browser.navigate(url).catch((err: unknown) => showError(paneTabBrowser, `Couldn't open the link: ${cleanError(err)}`));
+    go(url, paneTabBrowser);
   }
 
   const terminalPane = createTerminalPane({
@@ -367,6 +387,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
 
   function applyBrowserState(s: BrowserState): void {
     browserTabs.applyState(s);
+    browserBars.applyState(s);
     const blank = !s.url || s.url === 'about:blank';
     if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
     browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
@@ -380,7 +401,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   urlEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      void browser.navigate(urlEl.value);
+      go(urlEl.value, urlEl);
       urlEl.blur();
     } else if (e.key === 'Escape') {
       e.stopPropagation();
@@ -395,9 +416,9 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
       urlEl.focus();
     }
   });
-  backBtn.onclick = () => void browser.back();
-  fwdBtn.onclick = () => void browser.forward();
-  reloadBtn.onclick = () => void browser.reload();
+  backBtn.onclick = () => go('back', backBtn);
+  fwdBtn.onclick = () => go('forward', fwdBtn);
+  reloadBtn.onclick = () => go('reload', reloadBtn);
   openExternalBtn.onclick = async () => {
     try {
       if (typeof browser.openExternal !== 'function') throw new Error('No handler registered');
@@ -436,7 +457,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view, where its slot is, the tabs and popups */
   function browserDebug() {
     const r = browserView.getBoundingClientRect();
-    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug() };
+    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), safety: browserBars.debug() };
   }
 
   return {
