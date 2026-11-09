@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AppConfig, PermissionMode } from '../shared/types';
+import type { AppConfig, AutoModeConfig, PermissionMode } from '../shared/types';
 import type { DreamingConfig } from '../shared/dreaming';
 import type { BrowserConfig } from '../shared/browser';
 import { DEFAULT_DREAMING } from './dreaming/names';
@@ -64,6 +64,7 @@ export function defaultConfig(): AppConfig {
     dreaming: { ...DEFAULT_DREAMING },
     providers: {},
     browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] },
+    autoMode: { environment: '', allow: [], model: '' },
   };
 }
 
@@ -229,10 +230,20 @@ export function normalizeBrowser(raw: unknown): BrowserConfig {
   };
 }
 
+/** autoMode as stored or hand-edited, over the defaults: free text, a list of rules, a model reference. */
+export function normalizeAutoMode(raw: unknown): AutoModeConfig {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    environment: typeof r.environment === 'string' ? r.environment.trim() : '',
+    allow: Array.isArray(r.allow) ? [...new Set(r.allow.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim()))] : [],
+    model: typeof r.model === 'string' ? r.model.trim() : '',
+  };
+}
+
 /** Keeps the legacy autoApprove flag consistent with permissionMode, and autoTitles a boolean (default on). */
 export function normalizeConfig(cfg: AppConfig): AppConfig {
   const mode: PermissionMode = (MODES as string[]).includes(cfg.permissionMode) ? cfg.permissionMode : 'ask';
-  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {}, browser: normalizeBrowser(cfg.browser) };
+  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {}, browser: normalizeBrowser(cfg.browser), autoMode: normalizeAutoMode(cfg.autoMode) };
 }
 
 export function saveConfig(cfg: AppConfig): void {

@@ -179,6 +179,12 @@ h1, h2 { margin: 0; }
   background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger);
   font-size: 13px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* A call Auto mode blocked: one quiet line, left-aligned like a tool row */
+.note.blocked { justify-content: flex-start; text-align: left; }
+.note.blocked .blocked-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note.blocked code { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
+.note.blocked .blocked-end { flex: none; white-space: nowrap; }
+.note.blocked button.link { padding: 0; border: 0; background: none; font: inherit; color: var(--text-100); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .divider { display: flex; align-items: center; gap: 12px; margin: 8px 0 16px; font-size: 12px; line-height: 16px; color: var(--text-400); }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border-subtle); }
 

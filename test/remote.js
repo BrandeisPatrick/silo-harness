@@ -221,6 +221,26 @@ function seedSession(store, title, extra = []) {
     check('api/approve deny never carries always', JSON.stringify(calls.at(-1)) === JSON.stringify(['respondApproval', 'ap3', false, false, 'session']), calls.at(-1));
     const gone = await post(base, 'api/approve', { id: 'gone', ok: true });
     check('api/approve on an answered card → 404', gone.status === 404);
+    const ra = await post(base, 'api/allow', { session: s1.id, id: 'blk1' });
+    check('api/allow → runtime.allowBlocked for that session', ra.status === 200 && JSON.stringify(calls.at(-1)) === JSON.stringify(['allowBlocked', s1.id, 'blk1']), calls.at(-1));
+    const rg = await post(base, 'api/allow', { session: s1.id, id: 'gone' });
+    check('api/allow on a block the app no longer knows → 404', rg.status === 404);
+    {
+      // A blocked call reaches the phone as its line; Allow is offered while this app session knows the block
+      const blockedMsgs = [
+        { role: 'user', content: 'push it' },
+        { role: 'assistant', content: '', tool_calls: [{ id: 'b1', type: 'function', function: { name: 'bash', arguments: '{"command":"git push --force"}' } }, { id: 'b2', type: 'function', function: { name: 'bash', arguments: '{"command":"git push -f origin x"}' } }] },
+        { role: 'tool', tool_call_id: 'b1', content: 'Blocked by Auto mode: [Destructive Git] force-pushes. Do not try to get around it; continue with other work, or ask the user.' },
+        { role: 'tool', tool_call_id: 'b2', content: 'Blocked by Auto mode: [Destructive Git] again. Do not try to get around it; continue with other work, or ask the user.' },
+      ];
+      const sb = seedSession(app.store, 'Blocked one', blockedMsgs);
+      f.services['auto-blocks'] = { list: (id) => (id === sb.id ? [{ id: 'b1', sessionId: sb.id, name: 'bash', what: 'git push --force', reason: '[Destructive Git] force-pushes', at: 1, allowed: true, sessionTitle: 'Blocked one' }] : []) };
+      const t = await (await fetch(base + 'api/transcript?session=' + sb.id)).json();
+      const lines = t.items.filter((i) => i.role === 'auto_blocked');
+      check('api/transcript: blocked calls are lines; one this app session knows (allowed), one it does not', lines.length === 2 && lines[0].block.what === 'git push --force' && lines[0].allowable === true && lines[0].block.allowed === true && lines[1].allowable === false && !t.items.some((i) => i.role === 'tool' && i.args.includes('push')), lines);
+      delete f.services['auto-blocks'];
+      app.store.delete(sb.id);
+    }
     const r4 = await post(base, 'api/plan', { session: s1.id, id: 'plan-1', decision: 'build-acceptEdits' });
     check('api/plan → runtime.respondPlan', r4.status === 200 && JSON.stringify(calls.at(-1)) === JSON.stringify(['respondPlan', s1.id, 'plan-1', 'build-acceptEdits']));
     const r5 = await post(base, 'api/new', {});

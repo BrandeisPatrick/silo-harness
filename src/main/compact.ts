@@ -5,6 +5,7 @@
 
 import type { AppConfig, PlanInfo, TaskItem } from '../shared/types';
 import type { Msg } from './sessions';
+import { AUTO_NOTE_PREFIX } from './agent/auto-rules';
 
 /** First line of the user message that stands in for the folded conversation; the transcript hides it. */
 export const COMPACT_MARK = '[Context compacted]';
@@ -86,14 +87,14 @@ export function isSyntheticUser(m: Msg): boolean {
   if (m.role !== 'user') return false;
   if (isCompactPreamble(m)) return true;
   const t = textOf(m.content).text;
-  return t.startsWith('[Screenshot returned by') || t.startsWith('You returned an empty response.') || t.startsWith(HOOK_NOTE_PREFIX);
+  return t.startsWith('[Screenshot returned by') || t.startsWith('You returned an empty response.') || t.startsWith(HOOK_NOTE_PREFIX) || t.startsWith(AUTO_NOTE_PREFIX);
 }
 
 /** A user-role message a hook added (context, a Stop hook's reason to keep going): sent to the model, not shown as a turn. */
 export const HOOK_NOTE_PREFIX = '[Hook ';
 
 /** A tool result that reports a failure: the call did not do what was asked (the window shows the row as failed). */
-export const FAILED_RESULT = /^(Error:|User denied|Not permitted|Tool call was interrupted|[A-Za-z]+(?::\S+)? hook (?:error|denied))/;
+export const FAILED_RESULT = /^(Error:|User denied|Not permitted|Blocked by Auto mode|Tool call was interrupted|[A-Za-z]+(?::\S+)? hook (?:error|denied))/;
 
 /** Index of the last message the user sent (-1 when there is none). Nothing from there on is pruned or summarised. */
 export function lastUserIndex(messages: Msg[]): number {

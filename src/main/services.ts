@@ -8,6 +8,7 @@ import type { RemoteStatus } from '../shared/remote';
 import type { Schedule, ScheduleInput, SchedulePatch } from '../shared/schedules';
 import type { RelatedSessions } from '../shared/subagents';
 import type { SessionMeta } from '../shared/types';
+import type { RecentBlock } from '../shared/auto-mode';
 
 /** app.service<HistoryService>('history') */
 export interface HistoryService {
@@ -58,4 +59,12 @@ export interface ContextService {
 /** app.service<SkillUsageService>('skill-usage') */
 export interface SkillUsageService {
   usage(scope: 'session' | 'all', sessionId?: string): { name: string; count: number; lastUsedAt: number }[];
+}
+
+/** app.service<AutoBlocksService>('auto-blocks') */
+export interface AutoBlocksService {
+  /** A session's blocks of this app session (all of them, newest first), or the 20 newest of every session */
+  list(sessionId?: string): RecentBlock[];
+  /** Allows a blocked action once (Agent.allowBlocked) */
+  allow(sessionId: string, id: string): { ok: boolean; error?: string };
 }

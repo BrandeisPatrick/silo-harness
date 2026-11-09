@@ -792,6 +792,46 @@
     card.append(line);
   }
 
+  /**
+   * A call Auto mode's safety check blocked: one quiet line, as on the desktop ("Auto mode blocked git push --force ·
+   * Allow"); `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed).
+   */
+  function blockedEl(block, state) {
+    const n = h('div', 'note blocked');
+    n.dataset.id = block.id;
+    n.title = block.reason || '';
+    n.innerHTML = `${icon('shield', 14)}<span class="blocked-words">Auto mode blocked <code>${esc(block.what || block.name)}</code></span><span class="blocked-end"></span>`;
+    setBlocked(n, state);
+    return n;
+  }
+
+  function setBlocked(n, state) {
+    const end = n.querySelector('.blocked-end');
+    end.textContent = '';
+    if (!state) return;
+    end.append(document.createTextNode(' · '));
+    if (state === 'allowed') {
+      end.append(document.createTextNode('Allowed'));
+      return;
+    }
+    const b = h('button', 'link', 'Allow');
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api('allow', { session: S.current, id: n.dataset.id });
+        setBlocked(n, 'allowed');
+      } catch (err) {
+        if (err.status === 404) setBlocked(n, null);
+        else {
+          b.disabled = false;
+          toast(err.message);
+        }
+      }
+    });
+    end.append(b);
+  }
+
   // A question card (ask_user). Questions with one answer each are buttons here; anything more (several answers, the
   // user's own words) is answered in the app.
   function questionEl(ev) {
@@ -907,6 +947,7 @@
       case 'artifact': return artifactCardEl(item.artifact);
       case 'image': return note(`Image: ${item.image.caption || item.image.name} (on your Mac)`);
       case 'compaction': return h('div', 'divider', 'Earlier messages summarised');
+      case 'auto_blocked': return blockedEl(item.block, item.block.allowed ? 'allowed' : item.allowable ? 'allow' : null);
       default: return null;
     }
   }
@@ -1107,6 +1148,19 @@
         noteTool(ev.name, row ? row._tool.args : null, ev.result, ev.ok);
         break;
       }
+      case 'auto_blocked': {
+        // The call's row gives way to the line
+        const row = V.tools.get(ev.block.id);
+        if (row) {
+          row.remove();
+          V.tools.delete(ev.block.id);
+        }
+        append(blockedEl(ev.block, 'allow'));
+        break;
+      }
+      case 'auto_allowed':
+        for (const n of el.transcript.querySelectorAll('.note.blocked')) if (n.dataset.id === ev.id) setBlocked(n, 'allowed');
+        break;
       case 'approval_request': {
         endStreaming();
         const card = approvalEl(ev);

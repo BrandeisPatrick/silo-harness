@@ -54,7 +54,10 @@ import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from
 import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage } from './agent/prompt';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
-import { approvalLabels, decideApproval, DENIED } from './agent/permissions';
+import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
+import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
+import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
+import type { AutoBlock } from '../shared/auto-mode';
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
 export { contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW } from './context-window';
@@ -95,6 +98,30 @@ interface PendingApproval {
 
 /** Browser cards a PreToolUse hook's "allow" does not skip: money and accounts are the user's, as in bypass mode. */
 const USER_ONLY_CARDS = new Set(['purchase', 'account']);
+
+/** What a call stopped while it waited gets back. */
+const INTERRUPTED = 'Tool call was interrupted before it produced a result.';
+
+/** Auto mode's state in one session (in memory: a new app session starts it afresh). */
+interface AutoState {
+  /** Blocks since the check last allowed an action, and in all */
+  inARow: number;
+  total: number;
+  /** Too many blocks: actions that need the check show the approval card for the rest of the session */
+  paused: boolean;
+  /** The check's model answered at least once (so a later failure to reach it blocks instead of falling back) */
+  reached: boolean;
+  /** The check's model could not be reached before it ever answered: the rule guard decides until the next run */
+  unavailable: boolean;
+  /** The one-line notices already shown in this session */
+  noticed: Set<string>;
+}
+
+/** The call an approval belongs to (its id and arguments), when it comes from a tool call. */
+interface CallRef {
+  id: string;
+  args: unknown;
+}
 
 /** How a run's user message was sent (Agent.run, Agent.enqueue). */
 export interface SendOptions {
@@ -156,6 +183,14 @@ export class Agent {
   private signInPages = new Map<string, Set<string>>();
   /** Per session: custom actions (ApproveOptions.sessionKey, e.g. messages to one session) the user allowed for the rest of the session. */
   private allowedCustom = new Map<string, Set<string>>();
+  /** Per session: Auto mode's counters and pause (see AutoState) */
+  private autoStates = new Map<string, AutoState>();
+  /** Per session: the actions Auto mode blocked in this app session, by call id, with the key Allow lets through once */
+  private autoBlocks = new Map<string, Map<string, { block: AutoBlock; key: string }>>();
+  /** Per session: blocked actions the user allowed (actionKey); each runs once without the check */
+  private autoAllowed = new Map<string, Set<string>>();
+  /** Per session: notes for the model (an allowed block) waiting for the run's next model call */
+  private autoNotes = new Map<string, string[]>();
   /** Tokens the tool specs take on every request (measured at the start of each run). */
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
@@ -398,29 +433,165 @@ export class Agent {
 
   /**
    * Decides, per permission mode, whether an action runs, asks, or is refused (the rules are in agent/permissions.ts).
-   * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown (what the mode refuses outright, plan
-   * mode's edits, stays refused, and a browser purchase or account card still asks, as it does in bypass mode).
+   * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown and no check runs (what the mode refuses
+   * outright, plan mode's edits, stays refused, and a browser purchase or account card still asks, as it does in
+   * bypass mode). In Auto mode what the rules do not settle goes to the safety check (autoCheck); `call` is the tool
+   * call it belongs to.
    */
-  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false): Promise<ApprovalResult> {
+  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false, call?: CallRef): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
     const mode = cfg.permissionMode;
     const cwd = cfg.workingDirectory;
-    const decision = decideApproval(name, detail, target, opts, {
-      mode,
-      cwd,
-      rules: cfg.allowRules?.[cwd],
-      mcp: () => this.mcp?.lookup(name),
-      allowed: {
-        mcp: (server) => this.sessionSet(this.mcpAllowed).has(server),
-        reason: (reason) => this.sessionSet(this.allowedReasons).has(reason),
-        program: (program) => this.sessionSet(this.allowedPrograms).has(program),
-        custom: (key) => this.sessionSet(this.allowedCustom).has(key),
-      },
-    });
-    if (decision.kind === 'refuse') return Promise.resolve({ ok: false, message: decision.message });
+    const st = this.autoState();
+    const decide = (auto: AutoLevel) =>
+      decideApproval(name, detail, target, opts, {
+        mode,
+        auto,
+        cwd,
+        rules: cfg.allowRules?.[cwd],
+        mcp: () => this.mcp?.lookup(name),
+        allowed: {
+          mcp: (server) => this.sessionSet(this.mcpAllowed).has(server),
+          reason: (reason) => this.sessionSet(this.allowedReasons).has(reason),
+          program: (program) => this.sessionSet(this.allowedPrograms).has(program),
+          custom: (key) => this.sessionSet(this.allowedCustom).has(key),
+        },
+      });
+    const settle = (d: ApprovalDecision): Promise<ApprovalResult> => {
+      if (d.kind === 'refuse') return Promise.resolve({ ok: false, message: d.message });
+      if (d.kind !== 'ask') return Promise.resolve({ ok: true });
+      const session = d.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
+      return this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session);
+    };
+    const decision = decide(mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
+    if (decision.kind === 'refuse') return settle(decision);
     if (decision.kind === 'allow' || (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? ''))) return Promise.resolve({ ok: true });
-    const session = decision.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
-    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom, opts.browser, session);
+    // An action Auto mode blocked and the user then allowed runs once, without the check or a card
+    if (!opts.browser && !opts.custom && this.sessionSet(this.autoAllowed).delete(actionKey(name, detail))) return Promise.resolve({ ok: true });
+    if (decision.kind !== 'classify') return settle(decision);
+    const checker = classifierTarget(cfg);
+    if (!checker) {
+      // No model can run the check: the rule guard and its cards, as before Auto mode had a check
+      this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
+      return settle(decide('guard'));
+    }
+    return this.autoCheck(checker, cfg, { name, detail, args: call?.args, callId: call?.id }, () => settle(decide('guard')));
+  }
+
+  // ---------- Auto mode ----------
+
+  private autoState(): AutoState {
+    let st = this.autoStates.get(this.session.id);
+    if (!st) {
+      st = { inARow: 0, total: 0, paused: false, reached: false, unavailable: false, noticed: new Set() };
+      this.autoStates.set(this.session.id, st);
+    }
+    return st;
+  }
+
+  /** A one-line notice, once per session for each kind. */
+  private autoNotice(kind: string, message: string): void {
+    const st = this.autoState();
+    if (st.noticed.has(kind)) return;
+    st.noticed.add(kind);
+    this.emit({ type: 'error', kind: 'notice', message });
+  }
+
+  /**
+   * Auto mode's safety check on one action: allowed, it runs; blocked, the agent reads why (and the window shows the
+   * quiet line). Fails closed: an error, a timeout or an answer that is not one blocks. Only when the model cannot be
+   * reached before it ever answered does the session fall back to the rule guard (`fallback`) until its next run.
+   */
+  private async autoCheck(checker: ClassifierTarget, cfg: AppConfig, action: ClassifiedAction, fallback: () => Promise<ApprovalResult>): Promise<ApprovalResult> {
+    const st = this.autoState();
+    const signal = this.abortController?.signal;
+    let verdict: Verdict | null = null;
+    try {
+      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action), signal);
+      st.reached = true;
+      verdict = parseVerdict(raw);
+      if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
+    } catch (err) {
+      if (signal?.aborted) return { ok: false, message: INTERRUPTED };
+      if (!isConnectionError(err)) st.reached = true;
+      else if (!st.reached) {
+        st.unavailable = true;
+        this.autoNotice('reach', `Auto mode's check could not reach ${checker.label}: risky actions ask instead.`);
+        return fallback();
+      }
+      console.warn('[auto] the safety check failed:', errorMessage(err));
+    }
+    if (signal?.aborted) return { ok: false, message: INTERRUPTED };
+    if (verdict?.decision === 'allow') {
+      st.inARow = 0;
+      return { ok: true };
+    }
+    return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON);
+  }
+
+  /** Records a block, tells the window, pauses Auto mode after too many, and returns what the agent reads. */
+  private autoBlock(action: ClassifiedAction, reason: string): ApprovalResult {
+    const st = this.autoState();
+    st.inARow++;
+    st.total++;
+    const id = action.callId || `block_${randomUUID()}`;
+    const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
+    this.sessionMap(this.autoBlocks).set(id, { block, key: actionKey(action.name, action.detail) });
+    this.emit({ type: 'auto_blocked', block: { ...block } });
+    if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {
+      st.paused = true;
+      this.autoNotice('paused', st.inARow >= PAUSE_IN_A_ROW ? `Auto mode paused after ${PAUSE_IN_A_ROW} blocks in a row: actions ask again.` : `Auto mode paused after ${PAUSE_TOTAL} blocks: actions ask again.`);
+    }
+    return { ok: false, message: blockedResult(reason) };
+  }
+
+  /**
+   * Allows an action Auto mode blocked in this session: it runs once, without the check, when the agent tries it again,
+   * and the agent is told it may (before its next model call, or at the start of the next run). False when the block
+   * is not one of this app session's.
+   */
+  allowBlocked(id: string): { ok: boolean; error?: string } {
+    const rec = this.autoBlocks.get(this.session.id)?.get(id);
+    if (!rec) return { ok: false, error: 'This block is from before the app started; ask the agent to try again.' };
+    if (rec.block.allowed) return { ok: true };
+    rec.block.allowed = true;
+    this.sessionSet(this.autoAllowed).add(rec.key);
+    // The user's Allow ends a run of blocks, as an action the check allows does
+    this.autoState().inARow = 0;
+    const note = allowedNote(rec.block.what);
+    if (this.running || this.compacting) this.sessionList(this.autoNotes).push(note);
+    else {
+      this.store.append(this.session, { role: 'user', content: note });
+      this.store.save(this.session, false);
+    }
+    this.emit({ type: 'auto_allowed', id });
+    return { ok: true };
+  }
+
+  /** The notes about allowed blocks, into the conversation before the next model call. */
+  private flushAutoNotes(): void {
+    const notes = this.autoNotes.get(this.session.id);
+    if (!notes?.length) return;
+    this.autoNotes.delete(this.session.id);
+    for (const content of notes) this.store.append(this.session, { role: 'user', content });
+  }
+
+  private sessionMap<V>(map: Map<string, Map<string, V>>): Map<string, V> {
+    let m = map.get(this.session.id);
+    if (!m) {
+      m = new Map();
+      map.set(this.session.id, m);
+    }
+    return m;
+  }
+
+  private sessionList<V>(map: Map<string, V[]>): V[] {
+    let l = map.get(this.session.id);
+    if (!l) {
+      l = [];
+      map.set(this.session.id, l);
+    }
+    return l;
   }
 
   /**
@@ -639,6 +810,8 @@ export class Agent {
     this.autoCompactFailed = false;
     this.compactedAt = -1;
     this.stuckAt = -1;
+    // Auto mode's check gets another chance to reach its model with each run
+    this.autoState().unavailable = false;
     if (!early) this.emit({ type: 'run_start' });
     this.emitUserMessage(userText, attachments.length, origin, opts.from);
     // Saved now, not only at the end: the session gets its title from this message at once, so a sidebar with
@@ -703,6 +876,7 @@ export class Agent {
           reason = 'aborted';
           break;
         }
+        this.flushAutoNotes();
         if (this.queued.length) await this.drainQueue(skills);
         await this.autoCompactIfNeeded(cfg, client, model, signal);
         if (signal.aborted) {
@@ -1455,7 +1629,7 @@ export class Agent {
       approve: async (toolName, detail, target, approveOpts) => {
         const askedAt = Date.now();
         try {
-          return hookApproval === 'allow' ? await this.requestApproval(toolName, detail, target, approveOpts, true) : await ctx.approve(toolName, detail, target, approveOpts);
+          return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow', { id: call.id, args: visible(args) });
         } finally {
           waited += Date.now() - askedAt;
         }

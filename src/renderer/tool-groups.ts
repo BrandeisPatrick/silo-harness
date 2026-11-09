@@ -203,7 +203,11 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     endAssistant();
     finishThinking();
     const card = ownRow?.(name, args) ?? createToolCard(name, args);
-    if (id) toolCards.set(id, card);
+    if (id) {
+      toolCards.set(id, card);
+      // A call Auto mode blocks gives way to its line (auto-blocked.ts), which finds the row by it
+      card.el.dataset.callId = id;
+    }
     cardByEl.set(card.el, card);
     lastToolCard = card;
     addNode(card.el);

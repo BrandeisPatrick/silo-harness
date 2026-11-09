@@ -75,7 +75,7 @@ How to work:
   if (cfg.permissionMode === 'plan') {
     modeText = `\n\nPLAN MODE: you are planning, not building. Explore with read_file, glob, grep, list_directory, read-only shell commands (ls, cat, git status/log/diff …) and the browser. Do not change files and do not run commands that change anything; write_file and edit_file are unavailable. When you understand the task, call submit_plan exactly once with a concise Markdown plan: the goal, numbered steps naming the files to touch, how to verify, and open questions. Then stop; the user decides whether to build it.`;
   } else if (cfg.permissionMode === 'auto') {
-    modeText = `\n\nYou run with automatic approval. A few risky actions (sudo, destructive git, writes outside the working directory, publishing, …) are paused for the user to review.`;
+    modeText = `\n\nAUTO MODE: actions run without asking the user. A safety check reviews the ones that could do harm (destructive git, deleting outside the working directory, deploys, publishing, sending data out, …). When it blocks one, the result starts with "Blocked by Auto mode" and gives the reason: do not try to get around it with another command, tool or script; continue with other work, or ask the user. sudo and deleting critical folders always ask the user.`;
   }
   const servers = mcp?.describe() ?? '';
   const mcpText = servers

@@ -11,6 +11,7 @@ import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, pa
 import { actions, button, group, iconButton, row, sectionTitle, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
+import { recentlyBlocked } from '../auto-blocked.js';
 
 export function generalSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('General'));
@@ -419,8 +420,16 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
   });
   const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Actions you always allow in this project.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
   rulesEl.classList.add('sp-embedded');
-  el.append(group(null, mode), group('This project', rules));
-  return { id: 'permissions', el };
+  const blocked = recentlyBlocked(ctx);
+  el.append(group(null, mode), group('This project', rules), group('Recently blocked', blocked.el));
+  return {
+    id: 'permissions',
+    el,
+    async load() {
+      await blocked.refresh();
+      return 'ok';
+    },
+  };
 }
 
 export function contextSection(ctx: Ctx): Section {

@@ -4,6 +4,7 @@ import type { Bounds, BrowserConfig, BrowserState } from './browser';
 import type { ModsConfig } from './mods';
 import type { ImageInfo } from './images';
 import type { DreamingConfig } from './dreaming';
+import type { AutoBlock } from './auto-mode';
 
 import type { RpcEvents, RpcMethods } from './rpc';
 
@@ -278,6 +279,19 @@ export interface AppConfig {
   dreaming: DreamingConfig;
   /** The Browser pane: whether its profile's cookies survive a quit (see src/shared/browser.ts) */
   browser: BrowserConfig;
+  /** Auto mode's safety check: what it is told about this Mac, the user's own allow rules, and its model */
+  autoMode?: AutoModeConfig;
+}
+
+/**
+ * AppConfig.autoMode ("autoMode" in your own settings.json; a project's file may not set it). `environment` is free
+ * text the check reads ("aisolutions-dev is a dev AWS account"); `allow` plain-language rules it allows; `model` the
+ * check's model, "<provider>:<model>" or a model id of the session's provider ('' : the session's own model).
+ */
+export interface AutoModeConfig {
+  environment: string;
+  allow: string[];
+  model: string;
 }
 
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */
@@ -432,6 +446,13 @@ export type AgentEvent =
   | { type: 'image'; image: ImageInfo }
   /** A hook with a statusMessage is running (text), or it finished (null): the status line says so meanwhile */
   | { type: 'hook_status'; text: string | null }
+  /**
+   * Auto mode's safety check blocked the call `block.id` (sent before its tool_end): the agent got the reason as the
+   * call's result and goes on; the window shows one quiet line with Allow instead of the call's row.
+   */
+  | { type: 'auto_blocked'; block: AutoBlock }
+  /** The user allowed the blocked call `id` (here, in Settings or on the phone): it runs once when the agent retries it */
+  | { type: 'auto_allowed'; id: string }
   /** `text` is the last assistant text of the run, when it had any */
   | { type: 'run_end'; reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan'; text?: string };
 
@@ -789,7 +810,9 @@ export type TranscriptItem =
   /** A show_image call is shown as the image itself instead of a tool row */
   | { role: 'image'; image: ImageInfo }
   /** A dream's propose_* call is shown as its proposal's card (the window has the proposal from dreaming.list) */
-  | { role: 'proposal'; proposalId: string; name: string; args: string; result: string };
+  | { role: 'proposal'; proposalId: string; name: string; args: string; result: string }
+  /** A call Auto mode's safety check blocked is shown as one quiet line instead of a tool row */
+  | { role: 'auto_blocked'; block: AutoBlock };
 
 export interface SessionsApi {
   list(): Promise<SessionMeta[]>;

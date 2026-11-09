@@ -322,6 +322,16 @@ export class SessionRuntime {
     return true;
   }
 
+  /**
+   * Allows an action Auto mode blocked in a session (Agent.allowBlocked): it runs once when the agent tries it again.
+   * Not ok when the session or the block is not known in this app session.
+   */
+  allowBlocked(sessionId: string, id: string): { ok: boolean; error?: string } {
+    const agent = this.agents.get(sessionId);
+    if (!agent) return { ok: false, error: 'This block is from before the app started; ask the agent to try again.' };
+    return agent.allowBlocked(id);
+  }
+
   /** A feature that decides plans of its own (see PlanClaim). */
   claimPlans(fn: PlanClaim): Disposer {
     this.planClaims.add(fn);

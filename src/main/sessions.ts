@@ -9,6 +9,7 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
+import { actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -284,7 +285,7 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
     if (m.role === 'user') {
       if (isCompactPreamble(m)) return;
       const text = displayText(m.content);
-      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX)) return;
+      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX)) return;
       const images = imageUrls(m.content);
       const mentions = mentionedPaths(rawText(m.content));
       const item: Extract<TranscriptItem, { role: 'user' }> = { role: 'user', text };
@@ -327,6 +328,12 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         const proposal = ok && PROPOSAL_TOOLS.includes(call.function.name) ? PROPOSAL_ID_RE.exec(result)?.[1] : undefined;
         if (proposal) {
           items.push({ role: 'proposal', proposalId: proposal, name: call.function.name, args: call.function.arguments, result });
+          continue;
+        }
+        // A call Auto mode's check blocked is one quiet line (auto-blocked.ts in the window)
+        const blocked = blockedReason(result);
+        if (blocked !== null) {
+          items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
           continue;
         }
         // A show_image call is the image itself (a failed one stays a tool row with its error)

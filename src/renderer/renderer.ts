@@ -2175,6 +2175,10 @@ Object.assign(window.__oc_debug!, { sidebar: sidebarView.debug });
 import { setupImageView } from './images.js';
 setupImageView({ messages: messagesEl, openLightbox, showError: showInlineError });
 
+// [feature:auto-blocked]
+import { setupAutoBlocked } from './auto-blocked.js';
+setupAutoBlocked({ messages: messagesEl });
+
 // [feature:history]
 
 // [feature:schedules]
