@@ -1350,11 +1350,6 @@ inputEl.addEventListener('keydown', (e) => {
       return;
     }
   }
-  if (e.key === '?' && composerEmpty() && !e.metaKey && !e.ctrlKey) {
-    e.preventDefault();
-    openShortcuts();
-    return;
-  }
   if (e.key === 'Backspace' && !inputEl.value && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     const items = tray.items();
     if (items.length) {
