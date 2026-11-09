@@ -14,7 +14,6 @@ import type {
   MessageOrigin,
   ModelCapabilities,
   SiloHarnessApi,
-  PermissionMode,
   PlanInfo,
   ProjectRules,
   QueuedMessage,
@@ -29,10 +28,9 @@ import type {
 import { brandMark, hydrateIcons, icon, type IconName } from './icons.js';
 import { byId, escapeHtml, isTextField, writeClipboard } from './dom.js';
 import { renderMarkdown } from './markdown.js';
-import { setDiffBaseDir } from './diff.js';
-import { asArgs, resetFileCache, setToolCwd, statusVerb } from './tools.js';
-import { closeMenu, initTooltips, isMenuOpen, menuAnchoredTo, openMenu, type MenuItem, type MenuSection } from './popover.js';
-import { MODE_CHIP_CLASSES, MODE_CYCLE, MODES, modeOf, nextMode } from './modes.js';
+import { asArgs, resetFileCache, statusVerb } from './tools.js';
+import { closeMenu, initTooltips, isMenuOpen } from './popover.js';
+import { MODES } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
 import { attachmentLabel, createAttachmentTray, dataUrlToBlob, imageType, type AddResult, type ImageInput } from './attachments.js';
 import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './artifacts.js';
@@ -58,8 +56,7 @@ import { createScheduledPage } from './scheduled-page.js';
 import { createDreamingPage } from './dreaming-page.js';
 import { setNameLookup } from './tool-labels.js';
 import { unframe } from './origin.js';
-import { shortPath } from './home.js';
-import { activeProvider, allProviders } from './provider-view.js';
+import { activeProvider } from './provider-view.js';
 import { createShortcutsSheet } from './shortcuts.js';
 import { createSlashMenu } from './slash-menu.js';
 import { createConfirmDialog } from './confirm.js';
@@ -70,6 +67,7 @@ import { createApprovals } from './approvals.js';
 import { createTranscript } from './transcript.js';
 import { createSessionsView } from './sessions-view.js';
 import { createStatusLine } from './status-line.js';
+import { createHeader } from './header.js';
 
 declare global {
   interface Window {
@@ -146,7 +144,6 @@ const stopBtn = $<HTMLButtonElement>('stop-btn');
 const modeBtn = $<HTMLButtonElement>('mode-btn');
 const modelBtn = $<HTMLButtonElement>('model-btn');
 const cwdBtn = $<HTMLButtonElement>('cwd-btn');
-const cwdLabel = $('cwd-label');
 const slashMenu = $('slash-menu');
 const mentionMenu = $('mention-menu');
 const settingsDialog = $<HTMLDialogElement>('settings');
@@ -309,7 +306,7 @@ const approvals = createApprovals({
     config = next;
   },
   running: () => running(),
-  currentMode,
+  currentMode: () => currentMode(),
   lastCard: toolGroups.lastCard,
   addNode,
   endAssistant,
@@ -319,8 +316,8 @@ const approvals = createApprovals({
   // The status line is set up further down; a card reaches it only once it is answered
   setStatusText: (text) => setStatusText(text),
   baseVerb: () => baseVerb(),
-  applyConfigToUi,
-  announceMode,
+  applyConfigToUi: () => applyConfigToUi(),
+  announceMode: (before) => announceMode(before),
   // Set up under the Permissions heading below, long before a card is answered
   refreshRules: () => rulesPanel.refresh(),
   dialogOpen,
@@ -724,7 +721,7 @@ const statusLine = createStatusLine({
   boundary: transcriptWrap,
   api: oc,
   config: () => config,
-  currentMode,
+  currentMode: () => currentMode(),
   composerHasContent,
   planPending: () => Boolean(activePlan?.pending()),
   planIsLast: () => Boolean(activePlan && isLastCard(activePlan.el)),
@@ -1564,165 +1561,37 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-function currentMode(): PermissionMode {
-  return modeOf(config);
-}
 
-/** Posts the "Permission mode: …" notice when the mode differs from `before`. */
-function announceMode(before: PermissionMode): void {
-  const now = currentMode();
-  if (now === before) return;
-  if (now !== 'plan' && basePlaceholder === KEEP_PLACEHOLDER) setBasePlaceholder(DEFAULT_PLACEHOLDER);
-  addSystemMessage(`Permission mode: ${MODES[now].label}. ${MODES[now].hint}.`, 'notice');
-}
+// ---------- Header / config: the mode, model and folder chips (header.ts) ----------
 
-async function setMode(mode: PermissionMode): Promise<void> {
-  const before = currentMode();
-  try {
-    config = await oc.setConfig({ ...config, permissionMode: mode, autoApprove: mode === 'bypass' });
-  } catch (err) {
-    showInlineError(modeBtn, `Couldn't change the mode: ${cleanError(err)}`);
-    return;
-  }
-  applyConfigToUi();
-  if (currentMode() !== mode) showInlineError(modeBtn, `${MODES[mode].label} needs the updated app. Restart Silo Harness and try again.`);
-  if (currentMode() === 'bypass') approvals.allowPending();
-  announceMode(before);
-}
-
-async function toggleMode(): Promise<void> {
-  await setMode(nextMode(currentMode()));
-}
-
-modeBtn.onclick = () => {
-  if (menuAnchoredTo(modeBtn)) return closeMenu();
-  const mode = currentMode();
-  const item = (m: PermissionMode): MenuItem => {
-    const info = MODES[m];
-    return {
-      label: info.label,
-      description: info.desc,
-      icon: info.icon,
-      // Neutral icons, as Claude Code's menus; Bypass keeps its red words
-      danger: m === 'bypass',
-      checked: m === mode,
-      onSelect: () => {
-        inputEl.focus();
-        if (m !== currentMode()) void setMode(m);
-      },
-    };
-  };
-  openMenu([{ label: 'Permission mode', items: MODE_CYCLE.map(item) }, { items: [item('bypass')] }], {
-    anchor: modeBtn,
-    placement: 'top-start',
-    boundary: transcriptWrap,
-    minWidth: 300,
-    className: 'mode-menu',
-    footer: '<kbd>⇧</kbd><kbd>Tab</kbd><span>cycles every mode except Bypass</span>',
-  });
-};
-
-async function setModel(model: string, name = activeProvider(config).name): Promise<void> {
-  try {
-    await rpc('providers.setModel', name, model);
-    config = await oc.getConfig();
-  } catch (err) {
-    // An older main process (no such method): only the Ollama block's model could be chosen here
-    if (!/No handler registered|Unknown (?:RPC )?method/i.test(String((err as Error)?.message ?? err))) {
-      showInlineError(modelBtn, `Couldn't choose ${model}: ${cleanError(err)}`);
-      return;
-    }
-    config = await oc.setConfig({ ...config, ollama: { ...config.ollama, model } });
-  }
-  applyConfigToUi();
-  inputEl.focus();
-  void refreshContext();
-}
-
-/** Makes another provider the one in use (from the model menu). */
-async function useProvider(name: string): Promise<void> {
-  config = await oc.setConfig({ ...config, provider: name });
-  applyConfigToUi();
-  inputEl.focus();
-  void refreshContext();
-}
-
-modelBtn.onclick = async () => {
-  if (menuAnchoredTo(modelBtn)) return closeMenu();
-  const settingsItem: MenuItem = { label: 'Settings…', icon: 'settings', hint: '⌘,', onSelect: () => openSettings('provider') };
-  const opts = { anchor: modelBtn, placement: 'top-start' as const, boundary: transcriptWrap, minWidth: 260 };
-  const active = activeProvider(config);
-  const current = active.model;
-  // The other providers that could be used as they are
-  const others = allProviders(config).filter((p) => p.name !== active.name && !p.error);
-  const switchSection = (): MenuSection[] => (others.length ? [{ label: 'Provider', items: others.map((p) => ({ label: p.label, hint: p.model, onSelect: () => void useProvider(p.name) })) }] : []);
-  const section = (models: string[], note?: string): MenuSection => ({
-    label: active.label,
-    items: models.map((m) => ({ label: m, checked: m === current, onSelect: () => void (m === current ? inputEl.focus() : setModel(m, active.name)) })),
-    note,
-  });
-  const sections = (models: string[], note?: string) => [section(models, note), ...switchSection(), { items: [settingsItem] }];
-  const own = [...new Set([...(current ? [current] : []), ...active.models])];
-  const menu = openMenu(sections(own, active.type === 'ollama' ? 'Loading models…' : active.models.length ? undefined : 'Loading models…'), opts);
-  try {
-    const models = active.type === 'ollama' ? await oc.listOllamaModels() : await rpc('providers.models', active.name);
-    if (!menuAnchoredTo(modelBtn)) return;
-    const list = [...new Set([...(current ? [current] : []), ...models])];
-    const none = active.type === 'ollama' ? 'No local models. Try: ollama pull qwen3:8b' : 'The service listed no models.';
-    menu.update(sections(list, models.length ? undefined : none));
-  } catch {
-    if (!menuAnchoredTo(modelBtn)) return;
-    const note = active.type === 'ollama' ? 'Could not reach Ollama. Is it running()? Start it with: ollama serve' : active.error ?? (own.length ? undefined : 'This service does not list its models; set one in Settings.');
-    menu.update(sections(own, note));
-  }
-};
-
-// ---------- Header / config ----------
-
-let lastToolActivity: boolean | undefined;
-
-function applyConfigToUi(): void {
-  const active = activeProvider(config);
-  const model = active.model;
-  // Under the chat bar: the model in the text colour, then a muted word when there is one worth saying
-  const sub = config.provider === 'ollama' && config.ollama.think === 'on' ? 'Thinking' : '';
-  modelBtn.innerHTML = `<span class="foot-label">${escapeHtml(model || 'Choose a model')}</span>${sub ? `<span class="foot-sub">${sub}</span>` : ''}`;
-  modelBtn.dataset.tip = `${active.label} · ${active.baseURL}`;
-  modelBtn.dataset.provider = active.name;
-  const mode = currentMode();
-  const info = MODES[mode];
-  modeBtn.innerHTML = `<span class="foot-label">${escapeHtml(info.short)}</span>`;
-  modeBtn.dataset.tip = `${info.label}: ${info.desc}`;
-  modeBtn.dataset.mode = mode;
-  modeBtn.setAttribute('aria-label', `Permission mode: ${info.label}`);
-  for (const c of MODE_CHIP_CLASSES) modeBtn.classList.toggle(c, c === info.chipClass);
-  cwdLabel.textContent = shortPath(config.workingDirectory);
-  cwdBtn.dataset.tip = `${config.workingDirectory} · click to change`;
-  setToolCwd(config.workingDirectory);
-  setDiffBaseDir(config.workingDirectory);
-  connection.renderRecent();
-  document.documentElement.dataset.theme = config.theme === 'system' ? '' : config.theme;
-  // Tool activity: Summary or Every call; the conversation on screen folds again when it changes
-  if (lastToolActivity !== undefined && lastToolActivity !== summaryMode()) refoldAll();
-  lastToolActivity = summaryMode();
-  // A provider change asks Ollama again; the strip and the banner follow the config either way
-  connection.configApplied();
-  void refreshVisionNote();
-  bus.emit('config', config);
-}
-
-/**
- * The main process changed the config (another feature, a folder that followed a session, an approval that switched
- * the mode): the window follows the way a Settings save does.
- */
-onPush('config:changed', (next) => {
-  if (!next || typeof next !== 'object') return;
-  const prev = config;
-  config = next;
-  applyConfigToUi();
-  if (prev && prev.workingDirectory !== next.workingDirectory) void changesPane.refresh();
-  void refreshContext();
+const header = createHeader({
+  modeBtn,
+  modelBtn,
+  cwdBtn,
+  boundary: transcriptWrap,
+  api: oc,
+  config: () => config,
+  setConfig: (next) => {
+    config = next;
+  },
+  leavePlanPlaceholder: () => {
+    if (basePlaceholder === KEEP_PLACEHOLDER) setBasePlaceholder(DEFAULT_PLACEHOLDER);
+  },
+  allowPendingApproval: () => approvals.allowPending(),
+  renderRecent: () => connection.renderRecent(),
+  connectionChanged: () => connection.configApplied(),
+  summaryMode,
+  refoldAll,
+  refreshVisionNote,
+  refreshChanges: () => changesPane.refresh(),
+  refreshContext,
+  openSettings: (section) => openSettings(section),
+  focusComposer: () => inputEl.focus(),
+  notice: addSystemMessage,
+  showError: showInlineError,
+  cleanError,
 });
+const { currentMode, announceMode, setMode, toggleMode, applyConfigToUi } = header;
 
 // ---------- Provider connection: the banner above the composer and the welcome screen's setup strip ----------
 
