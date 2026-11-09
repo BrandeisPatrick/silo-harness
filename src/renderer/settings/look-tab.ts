@@ -241,7 +241,7 @@ export function lookTab(d: LookTabDeps): LookTab {
     acts.innerHTML = '';
     const set = m ? lookSets([m])[0] : undefined;
     if (!inUse) acts.append(button('Back to current', () => preview(undefined), { aria: 'Back to what is in use' }));
-    if (set && !setInUse(set, layout())) acts.append(button('Use the whole set', (b) => void use(ref, b, true), { aria: `Use the whole set of ${set.name}` }));
+    if (set && !setInUse(set, layout())) acts.append(button('Use the set', (b) => void use(ref, b, true), { aria: `Use the set of ${set.name}` }));
     if (!inUse || m?.state === 'paused') {
       const u = button(m?.state === 'paused' ? 'Allow and use' : 'Use', (b) => void use(ref, b), { primary: true, aria: `Use ${v?.title ?? 'Default'}` });
       u.classList.add('sp-look-use');
@@ -332,7 +332,7 @@ export function lookTab(d: LookTabDeps): LookTab {
       void stateFor(v, entry.frame).then((st) => p.set(st));
     }
     const badge = h('span', { class: 'sp-look-badge', hidden: true }, 'In use');
-    const asks = m && needsApproval(m) ? h('span', { class: 'sp-look-asks', title: 'Its first Use asks for your approval', 'aria-label': 'asks before its first use', html: icon('shield-check', 12) }) : null;
+    const asks = m && needsApproval(m) ? h('span', { class: 'sp-look-asks', title: 'Asks before first use', 'aria-label': 'asks before first use', html: icon('shield-check', 12) }) : null;
     b.append(thumb, h('span', { class: 'sp-look-name' }, v.title, ...(asks ? [asks] : [])), h('span', { class: 'sp-look-source' }, v.source), badge);
     b.addEventListener('click', () => preview(v.ref === current() ? undefined : v.ref));
     b.addEventListener('dblclick', () => void use(v.ref, null));
@@ -366,8 +366,8 @@ export function lookTab(d: LookTabDeps): LookTab {
       const ok = await ctx.confirm({
         title: sheet.title,
         icon: 'palette',
-        quote: { label: sheet.lines.length ? 'Its pages will be able to' : 'Its pages ask for nothing', text: sheet.lines.length ? sheet.lines.map((l) => `•  ${l}`).join('\n') : 'It only draws its own look and keeps its own storage.' },
-        description: [...sheet.warnings, 'It is asked once: after this its looks are used without asking.'].join(' '),
+        quote: { label: sheet.lines.length ? 'Its pages will be able to' : 'Its pages ask for nothing', text: sheet.lines.length ? sheet.lines.map((l) => `•  ${l}`).join('\n') : 'It only draws its own look.' },
+        description: sheet.warnings.join(' '),
         confirmLabel: 'Use',
       });
       if (!ok) return;

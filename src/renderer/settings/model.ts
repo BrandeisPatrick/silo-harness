@@ -113,7 +113,7 @@ export function parseUrl(text: string): Parsed<string> {
   try {
     u = new URL(t);
   } catch {
-    return { ok: false, error: 'This is not a URL. It should start with http:// or https://.' };
+    return { ok: false, error: 'Not a URL. Start it with http:// or https://.' };
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'Use an http:// or https:// address.' };
   return { ok: true, value: t.replace(/\/+$/, '') };
@@ -217,18 +217,18 @@ export const TRASH_DAYS: { value: number; label: string }[] = [
 
 /** docs/mods.md, "Permissions": what each permission lets a mod do, in plain words. */
 export const PERMISSION_WORDS: Record<ModPermission, string> = {
-  'session:read': 'Read the session on screen: its messages, tool calls, tasks, plan, outputs and context use',
-  'session:send': 'Send messages as you and fill the composer',
-  'session:control': 'Stop a run, compact, open or start sessions, start and merge sub-sessions',
-  'sessions:read': 'List and search all your conversations',
-  model: 'Call the model (uses tokens)',
-  'skills:read': 'List skills and how often they are used',
+  'session:read': 'Read the session on screen, tool calls included',
+  'session:send': 'Send messages as you',
+  'session:control': 'Stop, start, open and merge sessions',
+  'sessions:read': 'Search all your sessions',
+  model: 'Call the model, which uses tokens',
+  'skills:read': 'List your skills',
   'config:read': 'Read non-secret settings',
-  'config:write': 'Change the theme, auto-compact, keep-awake, notifications and background',
-  schedules: 'List, create, change and delete scheduled tasks',
-  remote: 'See and switch remote control',
+  'config:write': 'Change some settings, like the theme',
+  schedules: 'Manage scheduled tasks',
+  remote: 'Turn remote control on or off',
   network: 'Reach the internet',
-  hooks: "React to the agent's actions before and after they happen, and block them: tool calls, prompts, the end of a turn",
+  hooks: "Watch and block the agent's actions",
 };
 
 export function permissionWords(p: string): string {
@@ -483,20 +483,20 @@ export function grantSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'wa
   const asked = resuming ? m.wants : (m.manifest?.permissions ?? []);
   const lines = asked.map(permissionWords);
   const warnings: string[] = [];
-  if (asked.includes('network')) warnings.push('It can reach the internet, so what it reads can leave this Mac.');
+  if (asked.includes('network')) warnings.push('What it reads can leave this Mac.');
   const name = m.manifest?.name ?? 'This mod';
-  return { title: resuming ? `${name} wants more access` : `Turn on ${name}?`, lines, warnings };
+  return { title: resuming ? `Give ${name} more access?` : `Turn on ${name}?`, lines, warnings };
 }
 
 /** The confirmation of the first Use of a look of yours or a project's: what its pages may do, and that it restyles the app. */
 export function useSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'approved'>, kind: LookKind): { title: string; lines: string[]; warnings: string[] } {
   const asked = m.wants.length ? m.wants : (m.manifest?.permissions ?? []);
   const lines = asked.map(permissionWords);
-  const what = kind === 'background' ? 'It draws behind the whole window, and its stylesheets can restyle the app, approval cards included.' : kind === 'theme' ? 'It restyles the whole app, approval cards included.' : `It restyles the ${kind === 'composer' ? 'chat bar' : 'conversation, approval cards included'}.`;
+  const what = kind === 'background' ? 'It draws behind the whole window and can restyle approval cards.' : kind === 'theme' ? 'It restyles the whole app, approval cards included.' : `It restyles the ${kind === 'composer' ? 'chat bar' : 'conversation, approval cards included'}.`;
   const warnings = [what, 'Use it only if you trust where it came from.'];
-  if (asked.includes('network')) warnings.push('It can reach the internet, so what it reads can leave this Mac.');
+  if (asked.includes('network')) warnings.push('What it reads can leave this Mac.');
   const name = m.manifest?.name ?? 'This look';
-  return { title: m.state === 'paused' ? `${name} asks for more` : `Use ${name}?`, lines, warnings };
+  return { title: m.state === 'paused' ? `Give ${name} more access?` : `Use ${name}?`, lines, warnings };
 }
 
 /** A mod id from its name: "Word count!" → "word-count" (lower-case letters, digits and -, 2 to 40, starts with a letter). */

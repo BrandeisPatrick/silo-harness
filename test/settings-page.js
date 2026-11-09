@@ -62,7 +62,7 @@ const { check, done } = require('./support/check.js');
   check('turning on lists what the manifest asks, in words', sheet.lines.length === 2 && /Reach the internet/.test(sheet.lines[1]) && /Turn on Panel/.test(sheet.title));
   check('… with the network warning, and nothing of its theme (a look asks at its first Use)', sheet.warnings.length === 1 && /leave this Mac/.test(sheet.warnings[0]));
   sheet = m.grantSheet({ state: 'paused', manifest, wants: ['network'], wantsStyles: false, granted: ['config:read'] });
-  check('a paused mod lists only what is new', sheet.lines.length === 1 && /wants more access/.test(sheet.title) && sheet.warnings.length === 1);
+  check('a paused mod lists only what is new', sheet.lines.length === 1 && /Give Panel more access\?/.test(sheet.title) && sheet.warnings.length === 1);
   const use = m.useSheet({ state: 'off', manifest: { name: 'Teal', permissions: ['session:read'] }, wants: ['session:read'], approved: false }, 'conversation');
   check('the first Use of a look: what its pages may do, that it restyles, and to trust where it came from', /Use Teal\?/.test(use.title) && use.lines.length === 1 && /restyles the conversation/.test(use.warnings[0]) && /trust where it came from/.test(use.warnings[1]));
   check('… a theme and a background say so', /restyles the whole app/.test(m.useSheet({ state: 'off', manifest: { name: 'T' }, wants: [] }, 'theme').warnings[0]) && /draws behind the whole window/.test(m.useSheet({ state: 'off', manifest: { name: 'B' }, wants: [] }, 'background').warnings[0]));

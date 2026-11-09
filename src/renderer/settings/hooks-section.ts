@@ -10,16 +10,10 @@ import type { Ctx, Section } from './ctx.js';
 
 export function hooksSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('Hooks'));
-  el.append(
-    note(
-      'Hooks run a command, call a URL or ask a mod before and after the agent acts: they can block a tool call, add context, or keep a turn going. They are defined under "hooks" in settings.json, in the same format as Claude Code, so hooks you already have work as they are. A project’s hooks run only once you trust its settings.json (Configuration files).',
-      'sp-intro',
-    ),
-  );
   const inEffect = h('div', { class: 'sp-hooks' });
   const runsEl = h('div', { class: 'sp-hook-runs' });
   const openRow = row(
-    { id: 'hooks-open', title: 'Add or change hooks', desc: 'Edit "hooks" in your settings.json; changes apply to the next event.', keywords: 'settings.json edit add hook command PreToolUse PostToolUse Stop' },
+    { id: 'hooks-open', title: 'Add or change hooks', desc: 'Edit "hooks" in your settings.json.', keywords: 'settings.json edit add hook command PreToolUse PostToolUse Stop' },
     button('Open settings.json', () => void ctx.call('settings.open', 'user').catch((err) => openRow.problem(ctx.cleanError(err))), { icon: 'file' }),
   );
   el.append(inEffect, group(null, openRow), runsEl);
@@ -44,10 +38,10 @@ export function hooksSection(ctx: Ctx): Section {
 
   function render(info: HooksInfo): void {
     inEffect.innerHTML = '';
-    if (info.disabled) inEffect.append(note('disableAllHooks is set in a settings file: the hooks of the files do not run (a mod’s still do).', 'sp-inline-status error'));
+    if (info.disabled) inEffect.append(note('disableAllHooks is set, so only mod hooks run.', 'sp-inline-status error'));
     const byEvent = new Map<string, HookEntryInfo[]>();
     for (const e of info.hooks) byEvent.set(e.event, [...(byEvent.get(e.event) ?? []), e]);
-    if (!info.hooks.length) inEffect.append(group('In effect', row({ id: 'hooks-none', title: 'No hooks', desc: 'Neither your settings.json, a trusted project file nor a mod that is on defines any.', keywords: 'hooks none empty' })));
+    if (!info.hooks.length) inEffect.append(group('In effect', row({ id: 'hooks-none', title: 'No hooks', keywords: 'hooks none empty' })));
     for (const event of HOOK_EVENT_ORDER) {
       const list = byEvent.get(event);
       if (list?.length) inEffect.append(group(event, ...list.map((e, i) => hookRow(e, i))));
@@ -69,7 +63,7 @@ export function hooksSection(ctx: Ctx): Section {
       }
     }, { icon: 'trash' });
     clear.disabled = !info.runs.length;
-    const clearRow = row({ id: 'hooks-runs', title: 'Recent runs', desc: info.runs.length ? `${info.runs.length} since Silo Harness started, newest first.` : 'None yet in this app session.', keywords: 'hooks runs log history clear exit code' }, clear);
+    const clearRow = row({ id: 'hooks-runs', title: 'Recent runs', desc: info.runs.length ? `${info.runs.length} since launch, newest first.` : 'None since launch.', keywords: 'hooks runs log history clear exit code' }, clear);
     const runs = [...info.runs].reverse().slice(0, 50);
     runsEl.append(group('Recent runs', clearRow, ...runs.map(runRow)));
     ctx.refreshSearch();

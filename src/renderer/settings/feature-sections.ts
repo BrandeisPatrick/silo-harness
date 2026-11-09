@@ -24,7 +24,7 @@ export function skillsSection(ctx: Ctx): Section {
 
   function render(skills: SkillInfo[], configDir: string): void {
     const project = ctx.config().workingDirectory;
-    where.textContent = `A skill is a folder with a SKILL.md. Put new ones in ${tildePath(configDir)}/skills/<name>/ for every project, or in ${tildePath(project)}/.silo-harness/skills/<name>/ for this one. The agent loads a skill when its description fits the task, and / in the composer lists them.`;
+    where.textContent = `Skills live in ${tildePath(configDir)}/skills and ${tildePath(project)}/.silo-harness/skills.`;
     listEl.innerHTML = '';
     for (const g of GROUPS) {
       const items = skills.filter((s) => s.source === g.source);
@@ -46,7 +46,7 @@ export function skillsSection(ctx: Ctx): Section {
       }
       listEl.append(grp);
     }
-    if (!skills.length) listEl.append(note('No skills found yet.'));
+    if (!skills.length) listEl.append(note('No skills yet.'));
     ctx.refreshSearch();
   }
 
@@ -87,10 +87,10 @@ export function pagesSection(openPage: (target: 'scheduled' | 'scheduled:new' | 
   el.append(
     group(
       null,
-      link('page-scheduled', 'Scheduled tasks', 'Prompts that run later or on a rhythm have a page of their own: Scheduled, in the sidebar.', 'scheduled schedule schedules task tasks cron timer recurring repeat hourly daily weekly monthly later automation run', 'scheduled'),
-      link('page-scheduled-new', 'New scheduled task', 'Opens the New task form on the Scheduled tasks page, empty or from a template.', 'create add new scheduled task schedule template', 'scheduled:new'),
-      link('page-dreaming', 'Dreaming', 'Dreams read your recent sessions and suggest skills, mods and memory. Their page: Dreaming, in the sidebar.', 'dream dreaming dreams suggestions proposals review reflect learn', 'dreaming'),
-      link('page-dreaming-daily', 'Dream every day', 'The daily dream, its time, its mode (Auto, Approve, Plan) and what it looks for are on the Dreaming page.', 'dream daily time night automatic mode auto approve plan skills mods memory look for privacy tokens', 'dreaming'),
+      link('page-scheduled', 'Scheduled tasks', 'A page of its own, in the sidebar.', 'scheduled schedule schedules task tasks cron timer recurring repeat hourly daily weekly monthly later automation run prompts rhythm', 'scheduled'),
+      link('page-scheduled-new', 'New scheduled task', 'Opens the New task form.', 'create add new scheduled task schedule template form', 'scheduled:new'),
+      link('page-dreaming', 'Dreaming', 'A page of its own, in the sidebar.', 'dream dreaming dreams suggestions proposals review reflect learn sessions skills mods memory', 'dreaming'),
+      link('page-dreaming-daily', 'Dream every day', 'Set on the Dreaming page.', 'dream daily time night automatic mode auto approve plan skills mods memory look for privacy tokens', 'dreaming'),
     ),
   );
   return { id: 'pages', el };
@@ -113,7 +113,7 @@ export function remoteSection(ctx: Ctx): Section {
       onRow.problem(`Couldn't turn it ${on ? 'on' : 'off'}: ${ctx.cleanError(err)}`);
     }
   });
-  const onRow = row({ id: 'remote-enabled', title: 'Remote control', desc: 'Follow and steer your sessions from a phone or another computer, through a small page Silo Harness serves.', keywords: 'phone mobile web server access' }, onInput);
+  const onRow = row({ id: 'remote-enabled', title: 'Remote control', desc: 'Use your sessions from a phone or another computer.', keywords: 'phone mobile web server access' }, onInput);
   onRow.el.classList.add('clickable');
 
   const bindSeg = segmented<'localhost' | 'lan'>(
@@ -134,14 +134,14 @@ export function remoteSection(ctx: Ctx): Section {
       }
     },
   );
-  const bindRow = row({ id: 'remote-bind', title: 'Who can reach it', desc: 'Devices on this network means anyone on the same Wi-Fi who has the link.', keywords: 'lan localhost network wifi bind' }, bindSeg);
+  const bindRow = row({ id: 'remote-bind', title: 'Who can reach it', desc: 'On this network, anyone on your Wi-Fi with the link.', keywords: 'lan localhost network wifi bind' }, bindSeg);
 
   const linksGroup = group('Links');
   const devicesRow = row({ id: 'remote-clients', title: 'Connected devices', desc: '', keywords: 'clients phones connected' });
   const newLinkRow = row(
-    { id: 'remote-newlink', title: 'New link', desc: 'Replaces the access token: every link handed out so far stops working.', keywords: 'token reset revoke' },
+    { id: 'remote-newlink', title: 'New link', desc: 'Old links stop working.', keywords: 'token reset revoke access' },
     button('New link', async (b) => {
-      const ok = await ctx.confirm({ title: 'Make a new link?', description: 'Every link handed out so far stops working, and connected devices are disconnected.', confirmLabel: 'New link', danger: true });
+      const ok = await ctx.confirm({ title: 'Make a new link?', description: 'Old links stop working and connected devices disconnect.', confirmLabel: 'New link', danger: true });
       if (!ok) return;
       b.disabled = true;
       try {
@@ -157,7 +157,7 @@ export function remoteSection(ctx: Ctx): Section {
     }, { icon: 'refresh' }),
   );
   const explain = note(
-    'While it is on, anyone with a link can read your sessions, send messages, stop runs, answer approval cards and decide plans, and start new sessions. It cannot change settings, the permission mode, mods, schedules or files. Each link carries its access token, so share it like a password.',
+    'Anyone with a link can read and run your sessions, so share it like a password.',
     'sp-explain',
   );
   el.append(group(null, onRow, bindRow), linksGroup, group('Devices', devicesRow, newLinkRow), explain);
@@ -181,11 +181,11 @@ export function remoteSection(ctx: Ctx): Section {
         copy.addEventListener('click', () => void copyWithFeedback(copy, u));
         const r = row({ id: `remote-url-${i}`, title: label, desc: u.replace(/\/r\/[^/]+/, '/r/••••••'), keywords: 'link url address copy' }, copy);
         r.descEl.classList.add('sp-path');
-        r.descEl.title = 'The full link, token included, is copied';
+        r.descEl.title = 'Copies the full link';
         linksGroup.append(r.el);
       });
-    } else linksGroup.append(note(status.enabled ? (status.error ? `It could not start: ${status.error}` : 'Starting…') : 'Turn remote control on to get a link.', status.error ? 'error' : ''));
-    devicesRow.setDesc(status.running ? (status.clients ? `${status.clients} connected now.` : 'None connected right now.') : 'None: remote control is off.');
+    } else linksGroup.append(note(status.enabled ? (status.error ? `Couldn't start: ${status.error}` : 'Starting…') : 'Turn it on to get a link.', status.error ? 'error' : ''));
+    devicesRow.setDesc(status.running ? (status.clients ? `${status.clients} connected now.` : 'None connected.') : 'Remote control is off.');
     ctx.refreshSearch();
   }
 
