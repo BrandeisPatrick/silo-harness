@@ -1,13 +1,35 @@
 <p align="center"><img src="build/icon.png" width="84" alt=""></p>
 <h1 align="center">Silo Harness</h1>
-<p align="center">The self-improving agent harness: an open-source Mac app in the style of Claude Code. Dreaming reads your past sessions and proposes skills, memory and mods for you to keep, and the agent builds a mod when you ask. Local models via Ollama, or any provider through an OpenAI-compatible endpoint.</p>
+<p align="center"><b>An open-source, Claude Code–style Mac app that runs any model, local or hosted.</b></p>
+<p align="center">And it gets better the more you use it: Dreaming turns your past sessions into skills, memory and mods for you to keep, and the agent builds new panels and looks for the app when you ask.</p>
 <p align="center">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20silicon-lightgrey.svg">
-  <img alt="Electron" src="https://img.shields.io/badge/Electron-45-47848F.svg">
+  <a href="https://github.com/BrandeisPatrick/silo-harness/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/BrandeisPatrick/silo-harness?label=download"></a>
 </p>
-<p align="center"><a href="https://brandeispatrick.github.io/silo-harness/">Website</a> · <a href="https://github.com/BrandeisPatrick/silo-harness/releases/latest">Download</a></p>
-<p align="center"><img src="docs/screenshots/hero.png" width="820" alt="Silo Harness"></p>
+<p align="center"><a href="https://github.com/BrandeisPatrick/silo-harness/releases/latest">Download</a> · <a href="https://brandeispatrick.github.io/silo-harness/">Website</a> · <a href="docs/reference.md">Reference</a></p>
+<p align="center"><img src="docs/screenshots/demo.gif" width="820" alt="Silo Harness: the agent adds rate limiting to an API and runs the tests, then builds a panel for the app's rail on request"></p>
+<p align="center">If it is useful to you, a ⭐ helps other people find it.</p>
+
+## Try it in a minute
+
+1. [Download the app](https://github.com/BrandeisPatrick/silo-harness/releases/latest) (Apple silicon), drag it into Applications and open it. It isn't notarized yet: the first time, macOS stops it; allow it in System Settings → Privacy & Security → Open Anyway.
+2. Give it a model, either way:
+
+   **A hosted model.** Copy an [OpenRouter](https://openrouter.ai/keys) key, then run (the key is read from the clipboard, so it never lands in your shell history):
+
+   ```bash
+   pbpaste | "/Applications/Silo Harness.app/Contents/Resources/bin/silo" provider add openrouter --type openrouter --model anthropic/claude-sonnet-4.5 --key-stdin --use
+   ```
+
+   **Or fully local**, with no account and nothing leaving your Mac:
+
+   ```bash
+   brew install ollama && ollama serve &
+   ollama pull qwen3:8b
+   ```
+
+The app picks the change up while it runs. Other providers (OpenAI, Anthropic, Portkey, Groq, DeepSeek, Together, LM Studio, any OpenAI-compatible service) are in [configure.md](docs/configure.md); a coding agent can do the setup for you from that page.
 
 ## Why
 
@@ -17,25 +39,18 @@
 - **Sessions side by side.** Several run at once. The agent starts sub-sessions and merges them back; forks and sub-sessions nest in the sidebar; any session finds another by its name; scheduled tasks run on a rhythm; your phone can follow along.
 - **Mods.** The rail, the tabs, the look of the conversation and of the chat bar, and the background are mods: sandboxed folders of web files with a documented protocol, reloaded when a file is saved. Ask the agent for one and turn it on.
 - **Dreaming.** Once a day, or when you ask, a dream reads your recent sessions and suggests skills, mods and memory lines from what you keep asking for, each with the evidence; you apply or dismiss them.
+- **A browser you can sign in with.** Tabs, a profile of its own and sign-in popups. The agent asks before it uses each site, a purchase or a new account always waits for you, and what you type into a password, code or card field never reaches the agent.
 - **Nothing is lost.** An append-only history log survives crashes, rewinds and compactions; deleted sessions go to a trash.
 - **See everything.** Tool rows with diffs, images inline in replies, a Diff pane with revert, a real Terminal pane, a built-in browser the agent drives, artifacts beside the chat.
 - **Standard extensions.** MCP servers (`.mcp.json`), skills (`SKILL.md`), project instructions (`AGENTS.md` / `CLAUDE.md`), `settings.json`.
 - **Small codebase.** Electron + TypeScript, no bundler, no framework.
 
-## Quick start
+## From source
 
 ```bash
-brew install ollama && ollama serve &
-ollama pull qwen3:8b
 git clone https://github.com/BrandeisPatrick/silo-harness.git && cd silo-harness
 npm install && npm start
 ```
-
-Or download the app from [Releases](https://github.com/BrandeisPatrick/silo-harness/releases). It isn't notarized yet: on first launch, open it once, then allow it in System Settings → Privacy & Security → Open Anyway.
-
-Hosted models: OpenRouter, Portkey, OpenAI, Anthropic, Groq, DeepSeek, Together, LM Studio or any OpenAI-compatible service, chosen in Settings → Model or named in `~/.silo-harness/settings.json`.
-
-Any coding agent can do the setup for you with the command inside the app, `Silo Harness.app/Contents/Resources/bin/silo` (`silo provider add openrouter --type openrouter --model … --use`, then `silo provider test`): see [docs/configure.md](docs/configure.md).
 
 ## Features
 
