@@ -8,315 +8,389 @@ Fixes tool results being shown with the wrong tool call when using Ollama models
 
 - **Tool results with Ollama.** Each result now stays with the call that produced it, including in sessions saved before this release.
 
-## 0.11.0
-
-Pull requests, documents and artifacts show as cards in the chat, as in Claude Code, and sessions can message each other, each message one quiet line in both conversations.
+## 0.11.0 — 2026-11-09
 
-### Cards in the chat
+Pull requests, documents and artifacts now appear as cards in the conversation, and sessions can message each other.
 
-- **Pull requests.** When a reply names a GitHub pull request, or the agent opens or reads one with `gh pr create` or `gh pr view`, a card for it goes under the reply, as in Claude Code: the state (Open, Draft, Merged or Closed, each in its own quiet colour), `owner/repo #3 · author · 20m ago`, the title, the number of files and the lines added and removed, and under a hairline what the checks and the review say ("All 3 checks passed", "2 of 5 checks failed · Changes requested"). The data comes from your own GitHub CLI (`gh pr view`, signed in as you); without gh, or when it cannot find the pull request, the card shows the repository, the number and the link, and why. A click opens the pull request in your browser, or in the Browser pane when Settings → Browser says so. A card asks again when it comes back into view, at most once a minute. A reply that lists more than three pull requests gets no cards.
-- **Documents.** A Markdown, HTML, PDF or plain-text file the agent writes gets a compact card under the reply ("Trend log", Document · MD); several stack 8px apart. The project's own files it keeps up to date (README.md, CHANGELOG.md, CLAUDE.md and the like) get none. A click opens Markdown and text in the Browser pane's viewer, rendered like the chat, an HTML file as itself, and a PDF in its default app; Reveal in Finder and Open with the default app are at the card's right on hover.
-- **Artifacts** use the same compact card ("Release board", Artifact · HTML). A click opens it in the Browser pane as before; Save as… and Reveal in Finder moved to the card's right, on hover.
-- **On the phone** the remote page shows the same cards in a simpler form: a pull request with a link to GitHub, a document or an artifact that says it is on your Mac.
+### Highlights
 
-### Messages between sessions
+- **Chat cards.** Pull requests a reply names or the agent creates or views, and documents and artifacts it writes, appear as cards like Claude Code's.
+- **Messages between sessions.** Each message between sessions, and a sub-session's brief and report, is one muted line in both conversations, such as "Messaged deploy fix ›".
 
-- **One quiet line each.** A message from another session no longer shows as a bubble of yours: it is one muted line, "Received message from release notes ›", and a message this session sent is "Messaged deploy fix ›", as in Claude Code. Click the line to read the message; the other session's name is a link that opens it. A sub-session's report and its first brief read the same way, and a report that did not end normally says so ("· it was stopped"). The phone shows the same lines.
-- **Not your word.** A message from another session is a request from another agent working for you, never you: the receiving session is told so in the message and in its instructions. It cannot answer an approval card, a question or a plan, and it cannot change the permission mode; the receiving agent asks you for those.
-- **Allow messages to a session for the rest of this one.** A message to a session that is not this session's parent or its own sub-session still asks first, and the card now also offers "Allow messages to "deploy fix" for this session", so a back-and-forth asks once per session. It is never saved for the project. Bypass sends without asking; Plan mode still refuses.
-- **Scheduled and dreaming sessions keep to their own.** A session a scheduled task or a dream started, and its sub-sessions, can message only their parent and their own sub-sessions. A message to any other session is refused at once instead of leaving a card nobody is there to answer.
-- **A waiting plan stays yours.** A message or a sub-session's report that reaches a session whose plan waits for your decision now waits too, and arrives once you decide, instead of starting a run that left the plan card behind. A message that was still queued when a run ended (a plan, a stop, the step limit) is no longer lost: it waits for your decision on the plan, or for that session's next run.
-- **Unread at once.** A session that is not on screen gets the blue dot as soon as a message from another session reaches it.
-- **Clearer for the agent.** The sending agent learns whether its message started a run, waits behind a step, or waits for your decision on a plan, and that the reply does not come back by itself (a sub-session's report does). `session_list` says which sessions take messages without your approval.
-- **For hook authors:** UserPromptSubmit gets `silo_origin` (where the prompt came from: user, queue, session, schedule, remote, mod, command or dream) and, for a message from another session, `silo_from_session` with its id and title.
+### New
 
-### Fixes
+- **Pull request cards.** Each card shows the state, title, files and lines changed, checks and review through your own `gh`, and a click opens the pull request.
+- **Document and artifact cards.** Markdown, HTML, PDF and text files the agent writes, and artifacts, share one compact card with "Reveal in Finder" on hover.
+- **Allow for this session.** Messaging an unrelated session can be allowed for the rest of this session from its card, and the choice is never saved for the project.
 
-- **A new mod's card says it is on.** Turning on a mod the agent just wrote, from its own card, used to end with "was turned on in Settings"; the card now says "is on".
-
-## 0.10.0
+### Improved
 
-The Browser pane grows into a browser you can sign in with and leave the agent in: a profile of its own, tabs, sign-in popups, and an agent that asks before it uses a site and never handles your passwords. Also find, zoom, a context menu, downloads, certificate warnings, a permission bar, Settings → Browser, and two rows to delete every session or every mod of yours.
+- **Waiting plans.** A message or sub-session report reaching a session whose plan awaits your decision waits too, and messages queued when a run ends are never lost.
+- **Unread marks.** A session that is not on screen gets the blue dot as soon as a message from another session reaches it.
+- **On the phone.** The remote page shows the same message lines and simpler cards: pull requests link to GitHub, documents and artifacts say they are on your Mac.
 
-### The browser
+### Fixed
 
-- **A profile of its own.** The Browser pane no longer shares its cookies with the app's own pages, artifacts and mods: it keeps a profile of its own. Nobody is signed out by the move: the first launch copies your sign-ins over and says so once, in a quiet line under the URL bar (a site that keeps its sign-in in local storage may ask again).
-- **Keep cookies and Clear browsing data.** Settings → Browser → Keep cookies after quitting (on by default) keeps you signed in from one launch to the next; turned off, the pane's cookies and site data are cleared when the app quits. Clear browsing data signs you out of every site at once, after a confirmation, and reloads the open tabs.
-- **Tabs.** A strip of tabs under Browser · Diff · Terminal, with each page's icon and title, a × and a +. ⌘⇧N opens a tab, ⌘W closes it and ⌘L puts you in the URL bar, whenever the pane has the focus, the page included. A link that opens a new window opens a tab; a ⌘-click or a middle click, one in the background. Up to 12 tabs.
-- **Sign-in popups.** A sign-in window a page opens (the "Sign in with …" kind) now opens as a card floating over the pane, with its title, its site and a ×, that you can drag by its bar. It stays connected to the page that opened it, so the sign-in can complete there, and it goes away when it closes itself. Until now such a window replaced the page instead, and the sign-in could not report back.
-- **The agent asks before it uses a site.** The first time it reads or acts on a site, a card asks "Let the agent use example.com?", with what it wants to do and, in grey under it, its reason. Allow once, allow the site for this session, or always (Settings → Browser lists the sites you always allow, with Remove). Each subdomain is a site of its own, and a redirect to another site asks again. Your own servers (localhost, 127.0.0.1, `*.localhost`, `*.test`, and hosts you add) never ask.
-- **Local files ask too.** The agent opening a file outside the session's folder in the browser is a read the file tools would have asked for: it asks "Let the agent read a local file?" with the path in full. Files inside the folder, and artifacts, do not ask. Pages the agent cannot open at all (`javascript:`, `data:`, the browser's own) are refused with a pointer to artifacts.
-- **Sensitive sites.** On sign-in pages, email, banks, brokers and wallets, payment pages and password vaults, every action the agent takes asks first, with an amber note on the card ("This looks like a financial site"), in every mode but Bypass. A page with a password field counts as a sign-in page. The list is in Settings → Browser, where you can add your own.
-- **What the agent is refused, in every mode.** It cannot type a password, a one-time code or card details on a site other than your own development hosts (also when a click on another field puts the focus in one), cannot solve a CAPTCHA, cannot answer a page's permission request and cannot proceed past a certificate error. It reads why and asks you to do it in the pane.
-- **What always asks, Bypass included.** A click that looks like a purchase ("Make a purchase?") or like making an account ("Create an account?") waits for your Allow or Deny, and so does every download the agent starts.
-- **JavaScript by mode.** `browser_eval` shows its code on a card: in Ask mode every call asks, in Auto only code that reaches for the site's cookies or storage, the network, a password or a field's value asks, Bypass runs it and Plan refuses it.
-- **A permission bar instead of a dialog.** A page that wants your camera, microphone, location or notifications now asks on a bar under the URL bar, Chrome's way: Allow this time, Allow every time or Don't allow. The last two are kept per site; Settings → Browser → Permissions lists them, with Reset. A request waits with its tab when the tab is in the background. USB, HID and serial devices are always refused.
-- **Certificate errors.** A page whose certificate is not valid no longer loads behind your back: the pane shows "This connection is not private" with the reason in words, Go back, and Proceed anyway (unsafe), which lets that site through until the app quits and leaves an amber triangle in the URL pill. A grey lock marks a secure page and "Not secure" a plain HTTP one.
-- **Downloads.** Files save straight to your Downloads folder (or the one you choose in Settings → Browser) under a clean name that never overwrites another, and a tray at the right of the browser bar lists them, with a progress ring while one downloads, Open, Show in Finder, Cancel and Clear. A download the agent starts waits, paused, on a bar ("The agent started a download: report.pdf (1.2 MB) from example.com") until you allow it.
-- **Find in page.** ⌘F in the pane opens a find bar under the URL bar: "3 of 12", Enter and ⇧Enter to move, Esc to close. ⌘F in the chat still searches your sessions.
-- **Zoom per site.** ⌘+, ⌘− and ⌘0 zoom the page, and the site keeps its level, also after a relaunch. A chip in the URL pill shows it ("125%") and resets it on click. The View menu's zoom acts on the page when the page has the focus and on the app otherwise, never both.
-- **A right click.** The page has a context menu: spelling suggestions, open a link or an image in a new tab, copy a link, an image or a selection, search DuckDuckGo for the selection, cut, copy and paste in fields, back, forward and reload, Print…, Save as PDF… and Inspect Element. ⌥⌘I opens the page's DevTools.
-- **Blocked popups.** When a page tries to open one popup too many, a line under the URL bar says "A popup was blocked · Show"; Show opens it in a new tab.
-- **Chat links in the pane.** Turn on Settings → Browser → Open links from the chat in the Browser pane, and a web link in a reply opens in a new tab of the pane, which comes forward, instead of in your default browser.
-- **Settings → Browser** has it all in one place: the profile, the downloads folder, chat links, the sites the agent may always use, the sites that always ask, your exempt hosts, and the saved permission answers. A project's settings.json may not choose the sites the agent uses without asking.
-- **On the phone.** The remote page words the browser's cards as the Mac does, with the reason and the amber note, and allows a site once or for the session. The permission and download bars stay on the Mac.
-- **For mod and hook authors:** a new tool, `browser_tabs` (list, new, select, close), and an optional `reason` argument on `browser_navigate`, `browser_click`, `browser_type`, `browser_press_key`, `browser_eval` and `browser_tabs`, which hooks see in `tool_input`. Every other browser tool acts on the active tab.
+- **Mod cards.** Turning on a mod the agent just wrote, from its own card, leaves the card saying "is on".
 
-### Settings
+### Security
 
-- **Delete all sessions.** Settings → History has the row: after a confirmation that says how many sessions there are, every one of them goes the way a deleted session goes, into the trash for as long as Keep deleted sessions for says (and away at once when it is Off). Running sessions are stopped first, and the window opens on a fresh session.
-- **Delete all custom mods.** Settings → Mods has the row, under the list: after a confirmation that names them, every mod of yours (the folders in `~/.silo-harness/mods`) moves to the macOS Trash, where it can be recovered. What was granted or set for them is forgotten, a look of theirs in use goes back to Default, and the rail, the tabs and the list follow at once. Built-in mods and a project’s mods stay.
+- **Messages carry no authority.** A message from another session is a request from another agent, never you, and cannot answer approvals, questions or plans or change the permission mode.
+- **Scheduled and dreaming sessions.** Sessions a scheduled task or a dream started, and their sub-sessions, can message only their parent and own sub-sessions; anything else is refused at once.
 
-## 0.9.1
+### For developers
 
-Fixes in the Browser pane: what you or the agent type into a password, one-time code or card field never reaches the agent, and sites ask before using your camera, microphone, location or notifications. Under the hood, the window's and the agent's code is split into smaller modules, with no change in behaviour.
+- **Prompt origin in hooks.** `UserPromptSubmit` gets `silo_origin`, saying where the prompt came from, and `silo_from_session` with the sending session's id and title.
+- **Session messaging tools.** `session_list` says which sessions take messages without your approval, and the sending agent learns whether its message started a run or waits.
 
-### Fixes
+## 0.10.0 — 2026-11-09
 
-- **Passwords no longer reach the agent.** Until now, a password typed into a page in the Browser pane, by you or by the agent, could come back in what the agent read: in the page outline (`browser_read_page`), in `browser_find`, in `browser_eval` results and in `browser_type`'s own "Typed …" line. From there it went into the transcript, the history, hooks, exports and the remote page. Now the value of a password field, a one-time code field or a card field (number, security code, expiry) reads `•••` in everything the browser tools report about a page, also after you click "Show password". Usernames, emails and other fields read as before.
-- **The agent still fills these fields, without repeating them.** When `browser_type` types into one, its result says how many characters went in, and the transcript, the tool row and hooks show `•••` for the text.
-- **No screenshots of a filled password.** `browser_screenshot` is refused while a filled password, code or card field has the focus or shows its value on screen, and tells the agent to move the focus or scroll the field away.
-- **Sites ask before using your camera, microphone, location or notifications.** Until now, any page in the Browser pane got these, and every other permission a page can ask for, without a word. Now Silo Harness asks you first, for example "example.com wants to use your camera and microphone", with Allow and Don't allow, and remembers your answer for that site until it quits. Only you can answer: the agent cannot. Pages that open a link in another app (an email link, a meeting link) ask too, and so do artifacts. Full screen and copying to the clipboard still work without asking, and the app's own window is unchanged.
+The Browser pane becomes a browser you can sign in with: its own profile, tabs, sign-in popups, downloads, and an agent that asks before using a site.
 
-## 0.9.0
+### Highlights
 
-Scheduled tasks and Dreaming have pages of their own, laid out like Claude Code's; looks (background, chat bar, conversation, theme) are previewed and used without switches; and the rail and the mods' tabs open and close like the browser.
+- **Its own profile.** The Browser pane's cookies are kept apart from the app's pages, artifacts and mods, and you stay signed in from one launch to the next.
+- **Browser tabs.** The pane holds up to 12 tabs with icons and titles; ⌘⇧N opens one, ⌘W closes it and ⌘L goes to the URL bar.
+- **The agent asks first.** The first time the agent uses a site, a card asks to allow it once, for the session or always; your own servers never ask.
 
-### Scheduled tasks and Dreaming, as pages
+### New
 
-- **Pages of their own.** Scheduled and Dreaming in the sidebar no longer open Settings: each opens a page in the main column, in place of the session, as Claude Code's Scheduled row does. The row shows selected while it is open; choosing a session in the sidebar brings the chat back, and ⌘[ goes back a page. Settings no longer has the two sections, and a search there still finds them, with rows that open the pages.
-- **Scheduled tasks.** Your tasks as cards: the name, where each run goes (a new session or the same one), the prompt, and whether it is active, paused or done with its rhythm ("Active · Weekdays at 08:30"). Search by name or prompt, filter by Active or Paused, sort by next run, name or last run. A banner says what is true of them: they run only while Silo Harness is open and the Mac awake, and a run missed while it was closed or asleep happens once when it is back, if it was due less than a day before.
-- **Templates.** A nightly dependency audit, a weekly changelog draft, a morning summary, a daily test run and a weekly TODO sweep, each a click away from a filled-in New task form.
-- **The New task form.** Name, instructions, the folder, the schedule (once at a date and time, every hour, every few minutes, hours or days, every day, weekdays, every week on a day, every month, or a custom cron rhythm) with its first run shown as you type, and whether each run starts a new session or continues one you pick. The same form edits a task. The side pane's Scheduled tab opens it for New, and has an Open page button.
-- **A task's page.** Run now and an Active switch to pause and resume it; Edit and Delete in the menu of the breadcrumb at the top; and its History: every run, newest first, with the session it made or continued, when, and whether it is running, waiting for you, done, failed or stopped. A run opens its session in the chat view, where you can keep talking in it. Beside it, what the task does, where, how often and under which permission mode.
-- **The lightning bolt.** A session made by a scheduled run sits in the sidebar with the others, by date, with a lightning bolt in front of its title (in place of the clock at the end of the row). A dream's session, while it is listed, has the moon in front of its title in the same way. The running, waiting and unread marks stay at the end.
-- **Dreaming.** The same layout: a card per project that has dreams or that the next dream reads, with the mode, its last dream's report and what waits ("Daily at 03:00 · 2 suggestions waiting"), and a Suggestions tab with every proposal that waits, to apply or dismiss, as in the dream's session. Run a dream ⌄ dreams about every project with new activity or the one you pick. A project's page has Run a dream now, its dreams newest first, each opening its session, and the settings beside them: the daily dream and its time, the mode, and what to look for. The banner says whether the daily dream is on and that a dream sends parts of your past sessions to the model you configured.
-- **For mods:** `harness.ui.openPage('scheduled' | 'dreaming', { form: 'new' })` opens a page (and the New task form), and `harness.ui.openSettings('scheduled')` or `('dreaming')` opens the page instead of the old section.
+- **Sign-in popups.** A "Sign in with …" window opens as a card over the pane that you can drag, and the sign-in completes on the page.
+- **Cookies and site data.** Turn off "Keep cookies after quitting" to clear site data on quit, or use "Clear browsing data" to sign out of every site.
+- **A downloads tray.** Files save to Downloads or a folder you choose, never overwriting another, and a tray lists them with "Open", "Cancel" and "Show in Finder".
+- **Find in page.** ⌘F in the pane opens a find bar with a match count; Enter and ⇧Enter move between matches, and Esc closes it.
+- **Zoom per site.** ⌘+, ⌘− and ⌘0 zoom the page, each site keeps its level after a relaunch, and a chip in the URL pill resets it.
+- **A context menu.** Right-click a page for spelling suggestions, links in new tabs, copying, a DuckDuckGo search, "Save as PDF…" and "Inspect Element"; ⌥⌘I opens DevTools.
+- **Blocked popups.** When a page opens too many popups, "A popup was blocked · Show" appears under the URL bar, and "Show" opens it in a tab.
+- **Links from the chat.** With "Open links from the chat in the Browser pane" on, a web link in a reply opens in a new tab of the pane.
+- **Browser settings.** Settings → Browser gathers the profile, downloads folder, chat links, allowed and always-asking sites, exempt hosts and saved permission answers.
+- **Delete all sessions.** Settings → History can delete every session after a confirmation, keeping them in the trash for as long as "Keep deleted sessions for" says.
+- **Delete all custom mods.** Settings → Mods can move every mod of yours to the macOS Trash after a confirmation, while built-in and project mods stay.
 
-### Looks without switches
+### Improved
 
-- **Backgrounds, chat bar looks, conversation looks and themes have no switch any more.** They are looks: each is available as soon as it is installed, and its tab in Settings → Mods (Background, Chat bar, Conversation, Theme) decides which one is in use, one of each kind, with Default first. Using a look puts away the one of its kind that was in use; there is nothing to turn on first.
-- **See it before you use it.** At the top of each look tab is a preview of what is in use: the background, live, behind a miniature window with the Dim slider under it; a sample chat bar; a short sample exchange; or a miniature window in the theme. Click any version in the grid under it and the preview shows that one while the window stays as it is. **Use** applies it; **Back to current** returns to what you have. The look's own settings are right under its name.
-- **New ⌄** on each look tab: *Ask the agent…* closes Settings and starts the request in the composer ("Make a chat bar look that …"), and *From a template…* writes a starter that shows up in the grid, previewed, not applied.
-- **One question, once.** The first Use of a look of yours or of a project's asks what its pages may do and says that it restyles the app; after that it is used without asking. Built-in looks never ask.
-- **Sets.** A mod with several kinds of look, like Hyperspace, has *Use the whole set* next to Use.
-- **The chat card** for a new look the agent wrote offers **Preview** (its tab, with it in the preview) and **Use**, instead of Turn on.
-- **One theme at a time.** Themes no longer stack. If you had several themes on, the last one in the order they applied stays in use.
-- **Nothing changes on screen when you update.** The background and looks you had chosen stay in use, the theme as above, and a look of yours that was turned on but not chosen is simply available.
-- **For mod authors:** a look and a background view may name a `preview` picture for their card. `mod_check` says whether a look is in use and approved. A mod with panels or commands as well as looks keeps its switch for those only.
-- **Settings → Appearance** keeps Light, Dark and System (now called Colour scheme) and its rows that open each look tab.
+- **A permission bar.** Camera, microphone, location and notification requests ask on a bar under the URL bar, Chrome's way; USB, HID and serial devices are always refused.
+- **Connection marks.** A grey lock marks a secure page, and "Not secure" marks a plain HTTP one.
+- **On the phone.** The remote page shows the browser's cards worded as on the Mac and can allow a site once or for the session.
 
-### Panels from the top bar
+### Security
 
-- **The rail's toggle** is always the first icon of the top bar, before Terminal, Diff and Browser, drawn as a list in a box like the others. It and ⌘⇧E open and close the rail, and the app remembers the choice.
-- **Mod tabs in the side pane close** with the × on the tab (or Delete when the tab has the focus), and leave the strip. The ⋯ menu shows them again ("Show Side chat"), opening the pane if it was closed. A closed tab stays closed after a restart.
+- **Local files ask first.** When the agent opens a file outside the session's folder, it asks first with the full path; `javascript:` and `data:` pages are refused.
+- **Sensitive sites.** The agent asks before every action on sign-in, email, bank, broker, wallet, payment and password vault pages, except in Bypass, and you can add sites.
+- **Refused in every mode.** The agent cannot type passwords, one-time codes or card details outside your development hosts, solve CAPTCHAs, answer permission requests or proceed past certificate errors.
+- **Asks even in Bypass.** A click that looks like a purchase or creating an account, and every download the agent starts, waits for your "Allow" or "Deny".
+- **JavaScript by mode.** `browser_eval` shows its code on a card: Ask always asks, Auto asks for code touching cookies, storage, network, passwords or field values, and Plan refuses.
+- **Certificate warnings.** An invalid certificate stops the page at "This connection is not private"; "Proceed anyway (unsafe)" lets that site through until the app quits.
+- **Project settings.** A project's `settings.json` cannot choose which sites the agent uses without asking.
 
-## 0.8.0
+### For developers
 
-Closer to Claude Code: hooks in Claude Code's own format, from settings.json and from mods; the permission prompt and a new question card drawn as Claude Code draws them; one quiet line per tool call; and the rail, the footer and the status line laid out like Claude Code's.
+- **A tabs tool.** The new `browser_tabs` tool lists, opens, selects and closes tabs, and every other browser tool acts on the active tab.
+- **A reason argument.** `browser_navigate`, `browser_click`, `browser_type`, `browser_press_key`, `browser_eval` and `browser_tabs` take an optional `reason`, which hooks see in `tool_input`.
 
-### Hooks
+### Upgrade notes
 
-- **Hooks, as in Claude Code.** Put `"hooks"` in `~/.silo-harness/settings.json` and a command, a script or an HTTP endpoint runs at fixed points of the agent's work: before a tool call (it can refuse it, ask you first, let it through without asking, or change what it does), after one, when you send a message, when a run ends (it can send the agent back to work), around a compaction, when a session starts and ends, and when an approval waits. The format is Claude Code's, so the hooks you already have work as they are: the same events, matchers, `if` rules, input on stdin and exit codes, and tool names like `Bash`, `Read`, `Write` and `Edit`. docs/hooks.md has the details and what is not supported.
-- **A project's hooks wait for your trust.** A project's `settings.json` with hooks runs nothing until you trust the file in Settings → Configuration files, which says before you do that it defines hooks that run commands, and lists them.
-- **Settings → Hooks** lists the hooks in effect, by event, with where each comes from, and the hooks that ran since the app started: what they decided, their exit code, how long they took and what they printed on stderr.
-- **In the conversation**, a hook that blocks something or fails leaves a quiet note saying so, and the status line says what a hook is doing while it runs, when it has a status message.
-- **Mods can handle hooks** with the new `hooks` permission: `harness.hooks.on('PreToolUse', handler)` gets the same input and returns the same answer as a command hook. A new `worker` seat loads a hidden page whenever the mod is on, for a mod that has nothing to show. The card that turns a mod on says plainly what the permission allows. Older mods are unaffected.
+- **Sign-ins carried over.** The first launch copies your sign-ins to the new profile and says so once; a site keeping its sign-in in local storage may ask again.
 
-### Closer to Claude Code
+## 0.9.1 — 2026-11-09
 
-- **The rail.** Environment shows the folder with its path, the repository and the branch when the folder is a git repository, the provider and model, and Remote control with a small switch; the mode row and Keep awake are gone from it (the mode stays in the footer, Keep awake in Settings → General). Context shows a plain title, a 4 px bar in the legend's order, coloured squares, the percentage column in strong text, a chevron row for each slice that opens, "Last updated … Refreshes when this turn ends", and "Nk until auto-compact" with a Compact session button, as Claude Code lays it out.
-- **The footer** under the chat bar names the model and the mode in muted text at 12 px; only the ring carries colour.
-- **The status line** stays on one line when the side pane is open: the text is cut with an ellipsis, the time, the token count and the esc hint stay whole.
-- **For mods**: `harness.ui.openSettings(section)` opens Settings at a section, and `harness.project.git()` (with `config:read`) returns the repository and branch of the session's folder.
-- **The approval card** looks like Claude Code's permission prompt: the question in a header band, what the command does (in the model's words, when it says) and why the card came up in muted text, the command, then Deny and **Allow once ⌘↵** at the bottom right, with ⌄ opening "Allow … for this session" (A) and "Always allow … in this project" (P). No icon tile, no stack of buttons, no key on every button. ⌘↵ allows once even while you type, and Esc denies instead of stopping the run.
-- **Auto mode** says why it stopped in a quiet line on the card ("Auto mode stopped to ask: it pushes to a remote.") rather than with an amber warning, and the mode menu's icons are neutral, as in Claude Code's menus; only Bypass keeps its red words.
-- **Questions.** The agent can ask you one to four multiple-choice questions when a choice is genuinely yours, and waits for the answers, in every mode, Plan included. The card has the approval card's frame: the question with a short header as a chip, the options as rows you click or pick with 1–4, "Other" for your own words, Skip and Submit ⌘↵; several questions come one at a time. Answered, it folds to "Asked a question" with your answers inside. The phone page shows a one-answer question as buttons. Hooks see the tool as `AskUserQuestion`.
-- **One quiet line per tool call.** With Tool activity on Summary, a single call now folds like a run of several: "Ran a command", "Read a file", "Edited a file +3 −1", and opened it shows the row with its details. An answered approval no longer leaves a separate "Allowed · …" line in either setting: the call's row keeps the answer, and a call you or a hook denied reads "Denied a command".
+Fixes in the Browser pane: passwords, one-time codes and card details stay out of what the agent reads, and sites ask before using your camera, microphone, location or notifications.
 
-## 0.7.0
+### Security
 
-The window and the website can be made of glass: translucent, layered materials in the style of macOS 26, on the app's own white and grey. The Glass theme is off until you turn it on.
+- **Hidden field values.** Password, one-time code and card fields read "•••" in everything the browser tools report, so their values never reach the transcript, hooks or exports.
+- **Typing without echoing.** `browser_type` still fills such fields but reports only how many characters went in, and the transcript and hooks show "•••".
+- **No password screenshots.** `browser_screenshot` is refused while a filled password, code or card field has the focus or shows its value on screen.
+- **Sites ask first.** Pages and artifacts ask before using your camera, microphone, location or notifications, or opening links in other apps, and remember answers until the app quits.
+- **Yours to answer.** Only you can answer a site's permission request, never the agent; full screen and clipboard copying work without asking.
 
-### Liquid glass
+## 0.9.0 — 2026-11-09
 
-- **Glass theme.** A bundled theme mod, off by default, with its switch under Settings → Mods → Themes. Turned on, the sidebar, the side pane and the rail, the top bar, the chat bar, the cards in the conversation, menus and dialogs become frosted layers: each shows what is behind it, blurred and tinted with the surface's own colour, with a hairline and a thin highlight along its top edge, and depth comes from the blur rather than from shadows. The conversation stays as it was, plain text on the page colour, with the chat bar floating over its last lines. In light and dark, on the app's neutral palette: Paper or Midnight turned on after it recolour the glass through their tokens.
-- **Behind a background.** With a background mod in use (Hyperspace's Starfield, the bundled backgrounds, your own picture) the panes are frosted over it, while the conversation keeps letting it through at the Dim you chose, as without the theme.
-- **Reduce transparency.** With it on in System Settings → Accessibility → Display, every layer is opaque, in the same colours.
-- **The website.** The project's page has the same treatment: its top bar sticks to the top as frosted glass over the page as it scrolls, and the feature cards, the install blocks and the chips are glass over a soft canvas, in both themes. Nothing moves and nothing needs scripts; without backdrop filters the same layers are opaque.
+Scheduled tasks and Dreaming get pages of their own, looks are previewed and used without switches, and the rail and mod tabs open and close like the browser.
 
-## 0.6.0
+### Highlights
 
-Silo Harness (the new name of Open Harness) now works with whichever model service you use, and can be set up from a file or the command line, by you or by a coding agent such as Claude Code.
+- **Scheduled and Dreaming pages.** Scheduled and Dreaming open pages of their own in the main column, laid out like Claude Code's, instead of Settings sections; ⌘[ goes back.
+- **Looks without switches.** Backgrounds, chat bar looks, conversation looks and themes need no switch: preview any in its Settings → Mods tab, then "Use" applies it.
 
-### Silo Harness
+### New
 
-The app is now called **Silo Harness** (it was Open Harness). Nothing you have is lost, and nothing needs to be done by hand:
+- **Scheduled tasks.** The Scheduled page lists tasks as cards to search, filter and sort; each task's page has "Run now", an "Active" switch and its run history.
+- **Task form and templates.** The "New task" form sets instructions, folder and schedule, from once to a custom cron rhythm, and five templates fill it in for you.
+- **Dreaming page.** A card per project shows its mode, last report and waiting suggestions; a "Suggestions" tab applies or dismisses them, and project pages run dreams.
+- **New looks and sets.** "New ⌄" on each look tab asks the agent or uses a template, and a set like Hyperspace offers "Use the whole set".
 
-- **On the first launch** the config folder `~/.open-harness` is renamed `~/.silo-harness`, and a link is left at `~/.open-harness` pointing to it, so your scripts and an older copy of the app still find it. The data folder (sessions, history, settings, artifacts) moves from `~/Library/Application Support/Open Harness` to `~/Library/Application Support/Silo Harness`. Both are renamed in place, not copied. If either cannot be moved, the app says so in its log and goes on: the config folder keeps being used under its old name, and the data folder starts empty with the old one left untouched.
-- **New names, old ones still read.** A project's folder is `.silo-harness/` (skills, mods, settings.json); `.open-harness/` is still read when a project has only that one. The instructions file is `SILOHARNESS.md`, in a project and in `~/.silo-harness`; `OPENHARNESS.md` (and `OPENAGENT.md`, `OPENCODER.md`) are still read when it is absent, and the `#` shortcut and dreams add to the file you already have.
-- **Variables.** `SILO_HARNESS_CONFIG_DIR`, `SILO_HARNESS_USER_DATA` and `SILO_HARNESS_CLI_LINK_DIR`; the `OPEN_HARNESS_…` names still work when the new ones are not set. The terminal sets `SILO_HARNESS_TERMINAL` and, for this release, `OPEN_HARNESS_TERMINAL` too, and `TERM_PROGRAM` is `Silo Harness`.
-- **The command is `silo`** (it was `open-harness`), at `Contents/Resources/bin/silo`. Settings → General → Command line tool → Install links it into `~/.local/bin` and takes away the old `open-harness` link the app made there.
-- **Mods** keep working unchanged: the mod protocol, `mod.json`, the CSS tokens and the bridge are the same. `harness.info.app.name` now says "Silo Harness".
-- **The old app can go.** Once Silo Harness has started once, drag Open Harness to the Trash.
+### Improved
 
-### Any provider
+- **Rail and mod tabs.** The top bar's first icon or ⌘⇧E toggles the rail, and side pane mod tabs close with × until the ⋯ menu shows them.
+- **Lightning bolt and moon.** Sessions from scheduled runs sit with the others by date, with a lightning bolt before the title; a dream's session shows a moon.
+- **Agent-written looks.** The chat card for a look the agent wrote offers "Preview" and "Use" instead of "Turn on".
+- **Appearance settings.** Settings → Appearance keeps Light, Dark and System, now called "Colour scheme", with rows that open each look tab.
 
-- **Named providers.** `"providers"` in `~/.silo-harness/settings.json` (or config.json) holds any number of entries, each of a type that knows its base URL, its key variable and its headers, so an entry can be two lines: `openrouter`, `portkey`, `openai`, `anthropic` (its OpenAI-compatible endpoint), `groq`, `deepseek`, `together`, `ollama`, `lmstudio`, and `openai-compatible` for anything else. An entry can override the base URL, name the key's variable (`apiKeyEnv`) or hold the key (`apiKey`), choose the model, list models for the picker, add headers, and state the context window and the most tokens a reply may have. `"provider"` picks one by name. See [docs/configure.md](docs/configure.md).
-- **Your 0.4.0 settings keep working as they are.** The Ollama and gateway blocks are the providers `ollama` and `portkey`; nothing is migrated.
-- **Settings → Model** chooses among every provider, then its model: a picker from the entry's list and what the service lists, or a text field. A Test button sends one tiny request and says how long the answer took. A provider a file defines is marked "Set in settings.json", and a button opens the file.
-- **The model button under the chat bar** lists the provider's models and the other providers that are ready to use, and names the provider by its label: the gateway fields are no longer called "Portkey" when they point somewhere else. The setup strip says when the provider in use needs a key or a model.
-- **Plain errors.** A missing key names the variable to set; a refused key, an unknown model or an unreachable address says so, with the provider's name and what to check.
+### Security
 
-### The command line
+- **One question, once.** The first "Use" of your own or a project's look asks what its pages may do; built-in looks never ask.
 
-- **`silo`**, inside the app at `Contents/Resources/bin/silo`, runs with the app's own Electron and does not need the app to be running: `provider list`, `provider add`, `provider remove`, `provider use`, `provider test`, `config path`, `config get`, `config set`, `config unset` and `doctor`, each with `--json` and `--help` and an exit code that says whether it worked. It writes your settings.json and keeps everything it does not know about; the running app picks the change up within a second.
-- A key is never taken from a command-line argument: `--key-env` names its variable, `--key-stdin` reads it from standard input.
-- **Settings → General → Command line tool** shows where the command is and links it into `~/.local/bin` (no administrator password), and says so when that folder is not on your PATH.
-- **For coding agents**: [docs/configure.md](docs/configure.md) has the exact steps and what never to do, and [settings.schema.json](https://brandeispatrick.github.io/silo-harness/settings.schema.json) describes every field; settings.json accepts a `"$schema"` key.
+### For developers
 
-### Keys
+- **Opening pages.** `harness.ui.openPage()` opens the Scheduled or Dreaming page, or the "New task" form, and `harness.ui.openSettings()` with those names does too.
+- **Look previews.** Looks may name a `preview` picture, `mod_check` says whether one is in use and approved, and a mod's switch covers only its panels and commands.
 
-- Keys never reach the window, the logs, the transcript, what mods can read or the command's output: Settings shows "Set (OPENROUTER_API_KEY)" or "Not set".
-- A project's settings.json may no longer carry a key: `apiKey`, `portkey.apiKey`, `portkey.providerApiKey` and `env` variables named like a key are ignored there, with a problem line.
-- Nor may it choose which key is sent, or where: `apiKeyEnv` is ignored in a project's file (the type's usual variable is used), a provider entry for a service that takes a key cannot set its own address there (define it in your own settings.json and select it from the project with `"provider"`), a header cannot hold a `${VAR}`, and the gateway block's `portkey.baseURL` is ignored (its model, virtual key, provider slug and config id still apply).
+### Upgrade notes
 
-## 0.5.0
+- **One theme only.** Themes stop stacking: of several themes that were on, the last one applied stays in use, and your chosen looks stay too.
 
-The window is white and grey now, like Claude Code: neutral surfaces in light and dark, grey buttons, and colour only where it means something. The warm look of 0.4.0 is a bundled theme you can turn back on. Settings → Mods has a tab for each kind of mod, and the app has a new icon.
+### Known issues
 
-### White and grey
+- **Runs need the app.** Tasks run only while the app is open and the Mac awake; a run missed by under a day happens once afterwards.
 
-- **A new icon.** An S on a grey LED dot-matrix board, on a light tile. The mark in the sidebar and on the empty page draws the same S in the scheme's colours, and a theme can colour it through `--mark` and `--mark-ink`.
-- **Neutral surfaces.** The transcript, the top bar, the rail, cards and the chat bar are white, the sidebar a light grey, the user's bubble and code a lighter one; in dark, a neutral near-black with the sidebar and controls a step lighter. No warm tint anywhere.
-- **Grey buttons.** A button is white with a hairline; the one that confirms (Allow, Apply, Apply all, Save, Turn on, Compact now …) is a grey fill with the text colour. A dangerous action has red text and a red hairline rather than a red fill. The same goes for the mod kit's `h-btn`, the bundled mods' pages and the phone page.
-- **Colour where it means something.** Blue for links, the focus ring, a switch that is on, the context ring and progress; green and red for diffs, success and failure; amber for the Auto mode, a context window filling up and a session waiting for you; the unread dot stays blue. The spinner, selected rows and tabs, the icon on a card and the mark beside the model name are neutral.
-- **The phone page** has the same palette.
+## 0.8.0 — 2026-11-07
 
-### Themes
+The app moves closer to Claude Code: hooks in its format, its permission prompt, a question card, one quiet line per tool call, and its rail layout.
 
-- **Paper theme.** A bundled theme mod, off by default, that brings back 0.4.0's paper surfaces and terracotta accent on buttons, switches, spinners and marks. Turn it on in Settings → Mods.
-- New tokens for themes and mod pages, so a theme can colour each role again: `--button-fill`, `--button-fill-hover` and `--button-text` (the button that confirms), `--switch-on`, `--spinner`, `--badge-bg` and `--badge-ink`, `--mark` and `--mark-ink`, `--segment-on`, `--attention`, and the sidebar's `--side-hover`, `--side-active` and `--tree-line`, now on `:root`. `--accent` is the blue. `docs/mods.md` lists them; Midnight sets them and keeps its blue buttons.
+### Highlights
 
-### Settings → Mods, by kind
+- **Claude Code hooks.** Hooks in `~/.silo-harness/settings.json` run around tool calls, prompts, compaction and session events in Claude Code's format, so your existing hooks work; see [docs/hooks.md](docs/hooks.md).
+- **Claude Code's permission prompt.** The approval card looks like Claude Code's: "Deny" and "Allow once ⌘↵" at the bottom, ⌄ for session or project rules, and Esc denies.
+- **Questions from the agent.** The agent can ask you one to four multiple-choice questions, in every mode; answer with a click, 1–4 or your own words under "Other".
 
-- **A tab for each kind of mod.** Settings → Mods opens on a strip of tabs: Mods (panels, side-pane tabs, composer strips and slash commands), Backgrounds, Chat bar, Conversation and Themes. A mod is in each tab its manifest calls for, so Hyperspace is under Backgrounds, Chat bar and Conversation, and not among the general mods. The arrow keys move between the tabs, and Settings remembers the last one while the app runs.
-- **Pick it where it lives.** Each special tab starts with its picker: the background (with your own picture and the Dim slider), the chat bar look or the conversation look in use, each with that mod's own settings right under it; on Themes, the theme mods with their switches in the order they apply, the later one winning where two overlap. Below the picker are the mods of that kind, with the same cards as before.
-- **Use the whole set.** A mod that brings a conversation look, a chat bar look and a background has "Use the whole set" on its card, in each of its tabs, in place of the Set row.
-- **New and Install on every tab.** The New form starts at the tab's kind, and can now write a starter theme too.
-- **Appearance is shorter.** It keeps Light, Dark and System, and shows the current background, chat bar look, conversation look and themes, each with a row that opens its tab. Search still finds the rows inside the tabs, and choosing a hit (click it, or press Enter for the first one) opens its tab. The card in the chat for a new background or look links to its tab.
+### New
 
-## 0.4.0
+- **Hooks in Settings.** Settings → Hooks lists the hooks in effect and where each comes from, plus recent runs with their decision, exit code, time and stderr.
+- **Hooks in the conversation.** A hook that blocks something or fails leaves a quiet note, and the status line shows a running hook's status message.
 
-The app can now look back over your sessions, once a day or when you ask, and suggest what would make the agent work better for you: skills, mods and memory, each for you to apply or dismiss.
+### Improved
 
-### Dreaming
+- **One line per call.** With "Tool activity" on "Summary", a single call folds too ("Edited a file +3 −1"), and an answered approval stays in its call's row.
+- **Rail layout.** Environment shows the folder, repository, branch, provider, model and "Remote control" but no mode row or "Keep awake"; Context follows Claude Code's layout.
+- **Footer and status line.** The footer names the model and mode in muted 12 px text, and the status line stays on one line with the side pane open.
+- **Quieter Auto mode.** Auto mode says why it stopped in a quiet line on the card, and the mode menu's icons are neutral; only Bypass stays red.
 
-A dream is a quiet session that reads what happened in your recent sessions and suggests how the agent could work better for you: a **skill** for a chore you asked for more than once, a **memory** line for a preference you stated or a correction you had to make, a **mod** for a view you keep asking for.
+### Security
 
-- **It proposes; you decide.** A dream can read and search your sessions and look at the project, nothing more: no shell, no edits, no browser. Each suggestion says why, quotes your own words and links the sessions it came from. The app applies a suggestion, never the model, and only into the skill folders, the mod folders and the instructions files, never through a link that leads out of the project; a suggestion that changes something that exists says so and shows the difference, and anything applied can be reverted. A new mod stays off until you turn it on.
-- **Three modes.** Approve (the default): the dream finishes its review, then each suggestion waits for Apply or Dismiss. Auto: suggestions are applied as they are made and the dream lists what it did. Plan: the suggestions become one plan in the dream's session; approving it applies them all, and answering in the session changes the plan.
-- **Once a day, or when you ask.** Off until you turn it on in Settings → Dreaming; then once a day at the time you pick (03:00 by default). A dream missed while the app was closed runs once at the next launch, unless one ran in the last 20 hours. To run one by hand, press the run icon in Settings → Dreaming, or type `/dream` in a session for that session's project.
-- **What it reads.** One dream per project with new activity since its last dream, at most five per run, each given a digest of its sessions that the app puts together from the history log (what you asked, the final replies, the tool activity with failures and denied approvals, your `#` memory lines), sized to 40% of the model's context window; what does not fit waits for the next dream. A dream that finds nothing worth suggesting says so, and that is a good result.
-- **Where it shows.** A Dreaming row in the sidebar under Customize, with a dot while suggestions wait. Settings → Dreaming lists every dream with its state and its suggestions (Apply, Dismiss, Apply all, Revert) and opens its session, where each suggestion is a card. The sidebar shows a dream's session only while it waits for you or is on screen. A notification when a nightly dream leaves suggestions for you.
-- A dream sends parts of your past conversations to the model you configured and uses tokens: about as many as a long message per project.
-- `settings.json` can set `dreaming.daily`, `dreaming.time`, `dreaming.mode`, `dreaming.skills`, `dreaming.mods` and `dreaming.memory`. A `#` memory line is now also recorded in the session's history log.
+- **Hooks need your trust.** Hooks from a project's `settings.json` run only after you trust the file, and turning on a mod with hooks says plainly what it allows.
 
-### Fixes
+### For developers
 
-- The "Saved" tick in Settings no longer lands on a row's description: it shows above the control.
+- **What hooks can do.** Hooks can refuse, ask about, allow or change a tool call, and send the agent back to work when a run ends.
+- **Hooks in mods.** With the `hooks` permission, `harness.hooks.on('PreToolUse', handler)` works like a command hook, and a new `worker` seat runs a hidden page.
+- **Mod APIs.** `harness.ui.openSettings(section)` opens Settings at a section, and `harness.project.git()` with `config:read` returns the session folder's repository and branch.
+- **Question tool name.** Hooks see the question tool as `AskUserQuestion`.
 
-## 0.3.0
+## 0.7.0 — 2026-11-07
 
-The window is rebuilt around reading: a measured type scale, one calm column, a chat bar that is a single bar, and tool activity that folds into a line. Mods can now restyle the conversation and the chat bar as looks, with a space-opera set to try, and any session can find another by its name.
+A bundled Glass theme turns the window into frosted, translucent layers in the style of macOS 26, and the website gets the same look.
 
-### A calmer window to read in
+### Highlights
 
-Chatting with an agent means reading a lot of text, so the window now gives the words room and keeps everything else quiet.
+- **Glass theme.** The bundled Glass theme, off by default, turns panes, bars, cards, menus and dialogs into frosted glass, while the conversation stays plain text.
 
-- **One type scale, the system font everywhere.** Replies, your messages, tool and status lines and what you type are 15 px on 21 px lines; rows, menus, buttons and inputs 14 px; headings in the rail, notes and counts 13 px; date groups, captions and badges 12 px. Nothing is smaller than 12 px but keyboard keys and the terminal. Headings in a reply are the body size in semibold, not big headlines.
-- **A reading column.** The transcript is one centred column, 736 px at most, with 16 px between blocks. Tool activity is a quiet muted line with its chevron after the words; cards (the task list, plans, artifacts) are a light hairline with no shadow; your message is a soft grey bubble on the right; inline code is a small chip without a border.
-- **The chat bar is one bar.** A plus on the left, the text, and one action on the right: a return glyph that sends, or while a run is going a stop square (with text typed, Enter queues it for the agent's next step). Attached pictures sit inside the bar above the text, 120 px each. Under the bar a quiet row shows the model, the permission mode (in colour only for Plan and Bypass) and a context ring whose tooltip has the percentage. This was the bundled "Compact chat bar" mod; it is the app's own look now and the mod is gone (a profile that had it on just ignores the entry).
-- **Tool activity folds into one line.** A turn that reads six files, edits two and runs the tests is no longer nine lines between two paragraphs: each run of calls is one quiet line that says what happened, "Read 6 files, edited 2 files, ran a command", with the lines added and removed (+49 −2) and anything that failed or was denied on its right. Click it to see every row as before. While the agent works the line shows the call in flight. An approval card waiting for you stays in the open; once you answer, its line folds in with the call, so a turn in Ask mode folds too. A single call stays a single row, and a session opened later folds the same way. Settings → General → Tool activity → Every call brings back one row per call.
-- **More air, fewer boxes.** A 44 px top bar with the folder beside the title, sidebar rows on a 34 px pitch with clear space above each date group, rail sections separated by one hairline with regular-weight headings, rows on a 32 px pitch in the rail mods, and Settings rows with their title and description 24 px apart.
-- **For mod authors**: the type scale is in the kit (`--fs-ui`, `--fs-small`, `--fs-micro`, `--fs-body`, `--fs-code` and their line heights; see [docs/mods.md](docs/mods.md)), `harness.css` pages use it (rows 14 px, `h-item` 32 px tall, `h-title` no longer uppercase), and `.h-md` reads like a reply.
+### New
 
-### Sessions
+- **Glass over backgrounds.** With a background in use, the panes are frosted over it while the conversation lets it through at your Dim setting.
+- **Light, dark and themes.** Glass works in light and dark, and Paper or Midnight turned on after it recolour the glass through their tokens.
+- **Reduce transparency.** With "Reduce transparency" on in System Settings → Accessibility → Display, every layer is opaque in the same colours.
 
-- **Find a session by its name.** From any session, name another one in plain words ("read the session called deploy fix", "tell tcg fork to stop"): the agent and the commands find it among all your sessions, not only the related and recent ones. The name may be written loosely (case, quotes, punctuation, the start of it, a small typo). When several sessions fit, a related one wins; otherwise you get the list to pick from.
-- **Rename from the conversation.** `/rename <new name>`, or `/rename` alone to edit the title in the top bar; or ask the agent to "call this session …" (`session_rename`, no approval needed). A name another session already has is allowed, and you are told that it makes lookup by that name ambiguous.
-- `/sessions <name>` and `session_list` with a query list every session that matches, best first, with its folder and last activity.
+### Improved
 
-### Looks
+- **A glass website.** The project's page has a frosted top bar and glass cards, install blocks and chips in both themes, with no scripts needed.
 
-- **Looks for the conversation and the chat bar.** A mod can now restyle just the transcript or just the chat bar (`contributes.looks`, see [docs/mods.md](docs/mods.md#looks)). The app scopes a look to its region, so it cannot reach the rest of the window, and keeps a few attributes on the region (a run in progress, light or dark, the permission mode, the mod's own settings) so a look can come alive without any script.
-- **Settings → Appearance → Looks**: pick a conversation look, a chat bar look and a background, or a whole set from one mod in a single choice.
-- **Hyperspace**, a bundled space-opera set to turn on in Settings → Mods: a starfield behind the app that jumps to lightspeed while the agent works and brakes with a flash when it is done, a holographic conversation, and a cockpit chat bar. Five glow colours, and a calm setting for less motion.
-- **Backgrounds can follow the pointer** (the `pointer` event), for parallax.
-- A mod's stylesheet can no longer `@import` another one, and its relative `url()`s point at the mod's own files.
-- Choosing a background from a mod in Settings → Appearance works again.
+## 0.6.0 — 2026-11-06
 
-### Fixes
+Silo Harness, the new name of Open Harness, works with whichever model service you use and can be set up from a file or the command line.
 
-- A confirmation that followed another one at once (merge twice, delete twice) could close itself without asking: the first one's late "closed" signal cancelled it. Each confirmation now only answers to its own.
+### Highlights
 
-## 0.2.0
+- **Now Silo Harness.** Open Harness is now Silo Harness, and nothing you have is lost or needs to be moved by hand.
+- **Named providers.** Add any number of providers to `settings.json`, each typed as `openrouter`, `portkey`, `openai`, `anthropic`, `groq`, `deepseek`, `together`, `ollama`, `lmstudio` or `openai-compatible`; see [docs/configure.md](docs/configure.md).
+- **A command line tool.** The `silo` command lists, adds, removes, tests and switches providers, reads and sets config and runs `doctor`, with or without the app running.
 
-The app is now called **Open Harness** (it was OpenAgent). On the first launch your sessions, settings and artifacts are moved from the old data folder to the new one (`~/Library/Application Support/Open Harness`). `OPENAGENT.md` files and `.openagent/skills` folders are still read. The repository is now `BrandeisPatrick/open-harness`; old links redirect.
+### New
 
-### Mods
+- **Model settings.** Settings → Model and the model button pick a provider and its model, and "Test" says how long one tiny request took.
 
-Everything beside the chat is now a mod: a folder of web files that the app shows in a seat and reloads when a file is saved.
+### Improved
 
-- **A protocol, documented**: [docs/mods.md](docs/mods.md). A `mod.json`, pages that run in sandboxed frames, one small `harness` object to talk to the app, and permissions you grant when you turn a mod on.
-- **Seats**: sections in a right-hand rail, tabs beside the Browser, a strip above the composer, a background behind the window. A mod can also contribute styles (themes, a restyled chat bar), slash commands and its own settings.
-- **Built in**: Environment, Context, Tasks, Plan, Outputs, Sub-sessions, Skills in the rail; Side chat and Scheduled as tabs; dynamic backgrounds, a compact chat bar and a theme to turn on.
-- **The agent writes them**: ask for a panel and the agent writes the folder, checks it with `mod_check`, and a card in the chat offers to turn it on. After that its edits show up live.
-- **Safe by construction**: a mod cannot reach the network without the `network` permission, cannot read another mod's files, and can never answer an approval card or change the permission mode. Mods from a project, or written by the agent, stay off until you turn them on.
-- **For authors**: a playground that hosts mods outside the app (`node modkit/playground/serve.js`), and Settings → Mods to install from a folder or a Git URL, start a new one, or customise a built-in one.
+- **Plain errors.** A missing key names its variable; a refused key, unknown model or unreachable address names the provider; the setup strip flags what is missing.
 
-### Sessions
+### Security
 
-- **Several sessions run at once.** Switch freely; a session keeps running off screen. The sidebar shows which are running, which wait for you, and which finished unseen.
-- **Sub-sessions.** The agent can start sub-sessions for parts of a job, read what they did, message them, and merge their results back; so can you, with `/spawn`, `/merge`, `/sessions` and `/send`. Forks can be merged back the same way.
-- **A sidebar that shows the family.** Forks and sub-sessions are nested under the session they came from. Sessions are grouped by day, groups collapse, and search looks inside conversations, not just titles.
-- **Each session has its own folder**, and the app's folder follows the session on screen.
-- **Scheduled tasks.** A prompt that runs once, every N minutes or on a cron rhythm, in a new session or an existing one. The agent can create them; each one it creates is shown to you for approval first.
-- **Remote control.** Follow and steer sessions from your phone: a token-protected page served by the app, off until you turn it on.
+- **Keys stay hidden.** Keys never reach the window, logs, transcript, mods or command output; Settings shows only "Set (OPENROUTER_API_KEY)" or "Not set".
+- **No keys in projects.** A project's `settings.json` cannot hold a key or choose which key is sent where: `apiKey`, `apiKeyEnv`, `portkey.baseURL` and similar fields are ignored.
+- **Command line keys.** `silo` takes a key only through `--key-env` or `--key-stdin`, never as an argument.
 
-### Nothing is lost
+### For developers
 
-- **History log.** Every message, tool call and approval is written to an append-only log as it happens. A crash or force-quit mid-run no longer loses the run; a rewind or a compaction no longer destroys what it removes.
-- **Trash.** A deleted session can be restored for 30 days.
-- **Export** a session as Markdown.
+- **Provider entries.** An entry can set its base URL, key variable (`apiKeyEnv`) or key (`apiKey`), model, model list, headers and token limits, and `"provider"` picks one.
+- **Command details.** Every `silo` subcommand takes `--json` and `--help` and reports success in its exit code, and the running app applies changes within a second.
+- **Renamed variables.** `SILO_HARNESS_CONFIG_DIR`, `SILO_HARNESS_USER_DATA`, `SILO_HARNESS_CLI_LINK_DIR` and `SILO_HARNESS_TERMINAL` replace the `OPEN_HARNESS_…` variables, which still work, and `TERM_PROGRAM` is "Silo Harness".
+- **Mods unchanged.** The mod protocol, `mod.json`, CSS tokens and bridge are unchanged, and `harness.info.app.name` says "Silo Harness".
+- **Setup for coding agents.** [settings.schema.json](https://brandeispatrick.github.io/silo-harness/settings.schema.json) describes every field, `settings.json` accepts a `"$schema"` key, and coding agents find exact steps in [docs/configure.md](docs/configure.md).
 
-### The conversation
+### Upgrade notes
 
-- **Images in replies.** The model can show an image inline (`show_image`): a screenshot it took, a chart it made, a picture in the project. Tool rows that produced an image carry a thumbnail. Remote images in a reply are never loaded.
-- **The task list is a card in the chat**, under the latest message.
-- **Better compaction.** Old tool output is cleared first; if that is not enough the older part is summarised and the recent part kept word for word, with your latest request carried verbatim. A summary that saves nothing is not used, and a session is never left over the limit. A "context too long" error from the provider now compacts and retries instead of ending the run.
-- **Stop means stop.** Stopping a run now ends the shell command it was running, and whatever that command started.
+- **Folders move on launch.** The first launch renames `~/.open-harness` to `~/.silo-harness`, leaving a link behind, and moves the data folder to `~/Library/Application Support/Silo Harness`.
+- **Failed moves.** If a move fails, it is logged: the config folder keeps its old name, and the data folder starts empty, leaving the old one untouched.
+- **Old names still read.** Projects use `.silo-harness/` and `SILOHARNESS.md`, but `.open-harness/`, `OPENHARNESS.md`, `OPENAGENT.md` and `OPENCODER.md` are still read when the new ones are absent.
+- **A new command name.** The command is now `silo`; Settings → General → "Command line tool" links it into `~/.local/bin` and removes the old `open-harness` link.
+- **Remove the old app.** Once Silo Harness has started once, drag Open Harness to the Trash.
 
-### Settings
+## 0.5.0 — 2026-11-06
 
-- **A settings page**: sections on the left, one control per row, changes apply as you make them, search across everything.
-- **settings.json, made safe.** A project's `.open-harness/settings.json` used to apply as soon as you opened the folder, which let a cloned repository switch the agent to Bypass or point your key at another server. It now waits for your approval, and an edit withdraws it. Values are validated, files are re-read while the app runs, and fields a file sets are shown read-only.
-- **Keep awake** while a session runs.
-- **Tools sized to the model.** With a context window under 32k tokens the scheduling, session and mod tools are left out, so small local models keep their room to work. Settings → Context decides.
+The window turns white and grey like Claude Code, 0.4.0's warm look becomes a bundled theme, and Settings → Mods gets a tab for each kind of mod.
 
-### For contributors
+### Highlights
 
-- `docs/architecture.md`: the app container, the session runtime, and the seams features plug into.
-- `npm test`: the headless suites (a mock model, no network). `npm run test:live`: the real app, hidden, on a throwaway profile, driven against the API (`ANTHROPIC_API_KEY`) or a mock model; with `OPEN_HARNESS_LIVE_APP` set to a packaged binary the same scripts drive that.
-- `node scripts/readme-shots.js` remakes the README screenshots from scripted scenes in the real app.
+- **White and grey.** Surfaces are neutral white and light grey, or near-black in dark, with no warm tint anywhere, as in Claude Code.
+- **A tab per kind.** Settings → Mods has a tab for each kind (Mods, Backgrounds, Chat bar, Conversation and Themes), and the look tabs open with their picker.
 
-### Known limits
+### New
 
-- Project MCP servers and a project's settings file follow the folder of the session on screen, not each background session's.
-- Remote control is plain HTTP: use it on a network you trust. It has not been tried on phone browsers beyond a phone-sized window.
-- A rewind deletes the stored copy of images shown after that point.
-- Not notarized: on first launch, open it once, then allow it in System Settings → Privacy & Security → Open Anyway.
+- **A new icon.** The icon is an S on a grey LED dot-matrix board on a light tile, and the sidebar and empty page draw the same S.
+- **Paper theme.** A bundled theme, off by default, brings back 0.4.0's paper surfaces and terracotta accent; turn it on in Settings → Mods.
+- **Use the whole set.** A mod with a conversation look, chat bar look and background offers "Use the whole set" on its card in each tab.
+- **New and Install everywhere.** "New" and "Install" are on every tab, and the "New" form starts at the tab's kind and can write a starter theme.
 
-## 0.1.0
+### Improved
 
-First public release.
+- **Grey buttons.** Buttons are white with a hairline, the confirming one a grey fill, and dangerous actions use red text and a red hairline.
+- **Meaningful colour.** Blue marks links, focus and switches; green and red mark diffs, success and failure; amber marks Auto mode, a filling context and waiting sessions.
+- **Same palette everywhere.** The phone page, the bundled mods' pages and the mod kit's `h-btn` use the same palette and buttons.
+- **A shorter Appearance.** Settings → Appearance keeps Light, Dark and System with rows to each look tab, which search hits and new-look chat cards also open.
+
+### For developers
+
+- **Theme tokens.** New tokens such as `--button-fill`, `--switch-on`, `--spinner`, `--mark` and `--attention` let a theme colour each role, and `--accent` is the blue; see [docs/mods.md](docs/mods.md).
+
+## 0.4.0 — 2026-11-06
+
+The app can look back over your sessions, once a day or when you ask, and suggest skills, mods and memory for you to apply or dismiss.
+
+### Highlights
+
+- **Dreams suggest improvements.** A dream reads your recent sessions and suggests skills for repeated chores, memory lines for your preferences, or mods for views you keep asking for.
+
+### New
+
+- **It proposes, you decide.** Each suggestion says why, quotes your own words and links its sessions, and anything applied can be reverted.
+- **Three modes.** Approve, the default, waits for "Apply" or "Dismiss" on each suggestion; Auto applies them as they come; Plan gathers them into one plan.
+- **Daily or on demand.** A daily dream, off until you turn it on, runs at 03:00 or a time you pick, and `/dream` runs one for the session's project.
+- **What a dream reads.** Each project with new activity gets a digest of its sessions sized to 40% of the model's context window, at most five projects per run.
+- **Where dreams show.** A Dreaming row under Customize shows a dot while suggestions wait, and Settings → Dreaming lists every dream with "Apply", "Dismiss" and "Revert".
+- **Dream notifications.** A notification tells you when a nightly dream leaves suggestions.
+
+### Improved
+
+- **Memory lines logged.** A `#` memory line is also recorded in the session's history log.
+
+### Fixed
+
+- **Saved tick placement.** The "Saved" tick in Settings shows above the control, not on a row's description.
+
+### Security
+
+- **Read-only dreams.** A dream can only read and search your sessions and look at the project, with no shell, edits or browser.
+- **Where changes go.** The app, never the model, applies suggestions, only into skill, mod and instructions files, and a new mod stays off until you turn it on.
+- **Data and tokens.** A dream sends parts of your past conversations to your configured model and uses about as many tokens as a long message per project.
+
+### For developers
+
+- **Dreaming settings.** `settings.json` can set `dreaming.daily`, `dreaming.time`, `dreaming.mode`, `dreaming.skills`, `dreaming.mods` and `dreaming.memory`.
+
+## 0.3.0 — 2026-11-06
+
+The window is rebuilt around reading, mods can restyle the conversation and chat bar as looks, and any session can find another by its name.
+
+### Highlights
+
+- **Folded tool activity.** Each run of tool calls folds into one line, "Read 6 files, edited 2 files, ran a command", unless "Tool activity" is "Every call".
+- **Looks for mods.** A mod can restyle just the conversation or just the chat bar, scoped to that region; see [docs/mods.md](docs/mods.md#looks).
+- **Sessions by name.** Name another session in plain words, even loosely, and the agent finds it among all your sessions, preferring a related one when several fit.
+
+### New
+
+- **Rename and list sessions.** `/rename` or `session_rename` renames a session without approval, and `/sessions <name>` or `session_list` lists every match, best first.
+- **Looks in Settings.** Settings → Appearance → Looks picks a conversation look, a chat bar look and a background, or a whole set from one mod.
+- **The Hyperspace set.** A bundled space-opera set brings a starfield that jumps to lightspeed while the agent works, a holographic conversation and a cockpit chat bar.
+
+### Improved
+
+- **A type scale.** Text uses the system font on one scale, 15 px for the conversation down to 12 px for captions, and reply headings stay body-sized.
+- **A reading column.** The transcript is one centred column up to 736 px wide, with quiet tool lines, hairline cards and your messages in grey bubbles.
+- **A single chat bar.** The chat bar is one bar: a plus, the text and a send or stop button, with model, mode and context in a row below.
+- **More air, fewer boxes.** The window gets a 44 px top bar with the folder beside the title, roomier rows and single hairlines between rail sections.
+
+### Fixed
+
+- **Background choice.** Choosing a background from a mod in Settings → Appearance works again.
+- **Back-to-back confirmations.** A confirmation right after another, such as deleting twice, stays open until you answer it.
+
+### For developers
+
+- **Kit type scale.** The kit has the type scale (`--fs-ui`, `--fs-small`, `--fs-micro`, `--fs-body`, `--fs-code`), `harness.css` pages use it, and `.h-md` reads like a reply.
+- **Attributes for looks.** A look's region carries attributes for a run in progress, light or dark, the permission mode and the mod's settings, so no script is needed.
+- **Mod styles and events.** Backgrounds can follow the `pointer` event for parallax, a stylesheet cannot `@import` another, and relative `url()`s point at the mod's files.
+
+### Upgrade notes
+
+- **Compact chat bar.** The bundled "Compact chat bar" mod is now the app's own look and is gone; a profile that had it on ignores the entry.
+
+## 0.2.0 — 2026-11-06
+
+OpenAgent becomes Open Harness: everything beside the chat is now a mod, several sessions run at once, and nothing in a session is lost.
+
+### Highlights
+
+- **Everything is a mod.** Everything beside the chat is a mod, a folder of web files the app shows in a seat and reloads on save.
+- **Several sessions at once.** Sessions keep running off screen, each in its own folder, and the sidebar shows which are running, waiting for you or finished unseen.
+- **Sub-sessions and forks.** The agent, or you with `/spawn`, `/merge`, `/sessions` and `/send`, can start sub-sessions, read and message them, and merge results back; forks merge too.
+
+### New
+
+- **Mod seats.** Mods fill rail sections, tabs beside the Browser, a strip above the composer or the background, and add styles, slash commands and settings.
+- **Built-in mods.** The rail holds Environment, Context, Tasks, Plan, Outputs, Sub-sessions and Skills, and Side chat and Scheduled are tabs beside the Browser.
+- **Optional looks.** Dynamic backgrounds, a compact chat bar and a theme come built in, ready to turn on.
+- **Mods from the agent.** Ask for a panel and the agent writes it, checks it with `mod_check`, and offers a card to turn it on; edits show live.
+- **Scheduled tasks.** A prompt can run once, every N minutes or on a cron rhythm, in a new or existing session; tasks the agent creates need approval.
+- **Remote control.** Follow and steer sessions from your phone on a token-protected page the app serves, off until you turn it on.
+- **History log.** Every message, tool call and approval goes to an append-only log, so a crash, rewind or compaction loses nothing.
+- **Trash and export.** A deleted session can be restored for 30 days, and any session can be exported as Markdown.
+- **Images in replies.** The model can show an image inline with `show_image`, tool rows with an image carry a thumbnail, and remote images never load.
+- **A settings page.** Settings has sections on the left, one control per row, changes that apply at once, and search across everything.
+- **Keep awake.** "Keep awake" keeps the computer awake while a session runs.
+
+### Improved
+
+- **A family sidebar.** Forks and sub-sessions nest under their parent, sessions group by day in collapsible groups, and search looks inside conversations.
+- **Task list card.** The task list is a card in the chat, under the latest message.
+- **Better compaction.** Old tool output clears first, then older turns are summarised while recent ones and your latest request stay word for word.
+- **Context overflow.** A "context too long" error from the provider compacts the session and retries, so the run goes on.
+- **Stop means stop.** Stopping a run ends its shell command and everything that command started.
+- **Live settings files.** Settings files are validated and re-read while the app runs, and fields a file sets show read-only.
+- **Tools sized to models.** Below a 32k-token context window, the scheduling, session and mod tools are left out so small local models keep room; Settings → Context decides.
+
+### Security
+
+- **Safe by construction.** Mods need `network` permission to go online, cannot read other mods' files, answer approvals or change the mode, and project or agent mods start off.
+- **Project settings approval.** A project's `.open-harness/settings.json` applies only after your approval, which an edit withdraws, so a cloned repository cannot switch to Bypass or send your key elsewhere.
+
+### For developers
+
+- **The mod protocol.** A `mod.json`, pages in sandboxed frames, one small `harness` object and permissions granted at turn-on make up the protocol; see [docs/mods.md](docs/mods.md).
+- **Mod playground.** `node modkit/playground/serve.js` hosts mods outside the app, and Settings → Mods installs from a folder or Git URL, starts one or customises a built-in.
+
+### Upgrade notes
+
+- **Data moves on launch.** Sessions, settings and artifacts move from the old data folder to `~/Library/Application Support/Open Harness` on the first launch.
+- **Old files still read.** `OPENAGENT.md` files and `.openagent/skills` folders are still read.
+- **New repository.** The repository is now `BrandeisPatrick/open-harness`, and old links redirect.
+
+### Known issues
+
+- **Project config scope.** Project MCP servers and a project's settings file follow the folder of the session on screen, not each background session's.
+- **Remote control over HTTP.** Remote control is plain HTTP, so use it on a network you trust; phone browsers are untested beyond a phone-sized window.
+- **Rewind and images.** A rewind deletes the stored copy of images shown after that point.
+
+## 0.1.0 — 2026-10-30
+
+First public release, as OpenAgent: an open-source coding agent for the Mac in the style of Claude Code, running local models through Ollama or any provider through Portkey.
