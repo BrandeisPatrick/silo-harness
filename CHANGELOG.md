@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.9.1
+## 0.10.0
 
-Fixes in the Browser pane: what you or the agent type into a password, one-time code or card field never reaches the agent, and sites ask before using your camera, microphone, location or notifications. Under the hood, the window's and the agent's code is split into smaller modules, with no change in behaviour.
+The Browser pane grows into a browser you can sign in with and leave the agent in: a profile of its own, tabs, sign-in popups, and an agent that asks before it uses a site and never handles your passwords. Also find, zoom, a context menu, downloads, certificate warnings, a permission bar, Settings → Browser, and two rows to delete every session or every mod of yours.
 
 ### The browser
 
@@ -32,6 +32,10 @@ Fixes in the Browser pane: what you or the agent type into a password, one-time 
 
 - **Delete all sessions.** Settings → History has the row: after a confirmation that says how many sessions there are, every one of them goes the way a deleted session goes, into the trash for as long as Keep deleted sessions for says (and away at once when it is Off). Running sessions are stopped first, and the window opens on a fresh session.
 - **Delete all custom mods.** Settings → Mods has the row, under the list: after a confirmation that names them, every mod of yours (the folders in `~/.silo-harness/mods`) moves to the macOS Trash, where it can be recovered. What was granted or set for them is forgotten, a look of theirs in use goes back to Default, and the rail, the tabs and the list follow at once. Built-in mods and a project’s mods stay.
+
+## 0.9.1
+
+Fixes in the Browser pane: what you or the agent type into a password, one-time code or card field never reaches the agent, and sites ask before using your camera, microphone, location or notifications. Under the hood, the window's and the agent's code is split into smaller modules, with no change in behaviour.
 
 ### Fixes
 

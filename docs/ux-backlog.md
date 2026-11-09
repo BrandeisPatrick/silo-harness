@@ -15,6 +15,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.8.0 | Closer to Claude Code: hooks in Claude Code's format (settings.json and mods), the permission prompt and an ask_user question card in Claude Code's style, one quiet line per tool call, the rail, footer and status line laid out like Claude Code's | released 2026-11-07 |
 | 0.9.0 | Scheduled tasks and Dreaming as pages (cards, a task page with its runs, runs as regular ⚡ sessions); looks previewed and used without switches; the rail and mod tabs open and close like the browser | released 2026-11-09 |
 | 0.9.1 | Fixes: credentials typed into the Browser pane hidden from the agent, permission prompts for pages; the renderer and the agent split into modules | released 2026-11-09 |
+| 0.10.0 | The Browser pane as a browser: its own profile with sign-ins carried over, tabs, sign-in popups as cards, per-site approval for the agent, sensitive sites, credentials and CAPTCHAs refused, purchases and accounts asking, a permission bar, certificate warnings, downloads, find, zoom, a context menu, Settings → Browser; Delete all sessions and Delete all custom mods | released 2026-11-09 |
 
 ## Done in earlier rounds
 
