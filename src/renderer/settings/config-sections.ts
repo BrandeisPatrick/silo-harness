@@ -11,6 +11,7 @@ import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, pa
 import { actions, button, group, iconButton, row, sectionTitle, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
+import { recentlyBlocked } from '../auto-blocked.js';
 
 export function generalSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('General'));
@@ -419,13 +420,18 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
   });
   const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Answers you gave with "Always allow … in this project". Matching actions run without an approval card.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
   rulesEl.classList.add('sp-embedded');
-  el.append(group(null, mode), group('This project', rules));
+  const blocked = recentlyBlocked(ctx);
+  el.append(group(null, mode), group('This project', rules), group('Recently blocked', blocked.el));
   return {
     id: 'permissions',
     el,
     sync(cfg) {
       const m = order.includes(cfg.permissionMode) ? cfg.permissionMode : 'ask';
       mode.setDesc(`${MODES[m].hint}. The mode chip in the composer changes it for now; this is where it starts.`);
+    },
+    async load() {
+      await blocked.refresh();
+      return 'ok';
     },
   };
 }

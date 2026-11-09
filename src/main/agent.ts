@@ -556,6 +556,8 @@ export class Agent {
     if (rec.block.allowed) return { ok: true };
     rec.block.allowed = true;
     this.sessionSet(this.autoAllowed).add(rec.key);
+    // The user's Allow ends a run of blocks, as an action the check allows does
+    this.autoState().inARow = 0;
     const note = allowedNote(rec.block.what);
     if (this.running || this.compacting) this.sessionList(this.autoNotes).push(note);
     else {

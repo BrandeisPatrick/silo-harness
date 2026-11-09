@@ -1,6 +1,7 @@
 // The routes under /r/<token>/api/. This is the whole of what the remote can do: read sessions, send a message,
-// stop a run, answer an approval card (never with a project rule) or a question card, decide a plan, start a session. Nothing here
-// touches settings, the permission mode, trust, mods, schedules or files.
+// stop a run, answer an approval card (never with a project rule) or a question card, allow once an action Auto mode
+// blocked, decide a plan, start a session. Nothing here touches settings, the permission mode, trust, mods, schedules
+// or files.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { toTranscript } from '../sessions';
 import { activeModel } from '../providers';
 import { bool, HttpError, json, readJson, str } from './guard';
 import { remoteItem, remoteLive } from './sanitize';
+import type { AutoBlocksService } from '../services';
 
 export interface RemoteState {
   app: { name: string; version: string };
@@ -50,7 +52,7 @@ export class Api {
   async handle(route: string, url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const method = req.method ?? 'GET';
     const get = ['state', 'transcript'];
-    const post = ['send', 'stop', 'approve', 'answer', 'plan', 'new'];
+    const post = ['send', 'stop', 'approve', 'answer', 'allow', 'plan', 'new'];
     if (!get.includes(route) && !post.includes(route)) return false;
     const wanted = get.includes(route) ? 'GET' : 'POST';
     if (method !== wanted) {
@@ -88,6 +90,13 @@ export class Api {
         const answers = Array.isArray(body.answers) ? body.answers.slice(0, 4) : null;
         const found = rt.respondQuestion(id, answers);
         json(res, found ? 200 : 404, found ? { ok: true } : { ok: false, error: 'That question was already answered.' });
+        break;
+      }
+      case 'allow': {
+        // An action Auto mode blocked: it runs once when the agent tries it again (as the desktop's Allow)
+        const session = this.known(str(body, 'session'));
+        const r = rt.allowBlocked(session, str(body, 'id'));
+        json(res, r.ok ? 200 : 404, r.ok ? { ok: true } : { ok: false, error: r.error ?? 'That block is no longer known.' });
         break;
       }
       case 'plan': {
@@ -132,7 +141,14 @@ export class Api {
     // A run in progress has its tool calls stored before their results: those are in flight, and `live.tools` (or a
     // later tool_start) shows them. Left in, they would show twice, once as a finished "(no result)" row.
     const running = this.app.runtime.isRunning(id);
-    return { items: toTranscript(s, { running }).map(remoteItem), live: remoteLive(this.app.runtime.live(id)), seq };
+    // A blocked call's line offers Allow while this app session still knows the block
+    const blocks = this.app.service<AutoBlocksService>('auto-blocks')?.list(id) ?? [];
+    const items = toTranscript(s, { running }).map((item) => {
+      if (item.role !== 'auto_blocked') return remoteItem(item);
+      const known = blocks.find((b) => b.id === item.block.id);
+      return { role: 'auto_blocked' as const, block: { ...item.block, allowed: known?.allowed === true }, allowable: !!known };
+    });
+    return { items, live: remoteLive(this.app.runtime.live(id)), seq };
   }
 
   private known(id: string): string {

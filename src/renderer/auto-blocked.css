@@ -1,0 +1,28 @@
+/* A call Auto mode's safety check blocked (auto-blocked.ts): one quiet line, measured like a folded tool line
+   (.tool-group > summary in styles.css: 24px, the body size, muted), the command in the mono face. Allow is a link
+   in the reading colour; the check's reason is the line's tooltip. */
+.transcript > .auto-blocked { margin-bottom: 16px; }
+.transcript > :is(.thinking, .tool, .tool-group, .auto-blocked) + .auto-blocked,
+.transcript > .auto-blocked + :is(.thinking, .tool, .tool-group) { margin-top: -8px; }
+.auto-blocked {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  height: 24px; padding: 0 4px;
+  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400);
+}
+.auto-blocked-icon { display: inline-flex; flex: none; width: 16px; height: 16px; }
+.auto-blocked-words { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-blocked-what { font-family: var(--mono); font-size: 0.9em; }
+.auto-blocked-end { display: inline-flex; flex: none; align-items: center; gap: 8px; }
+.auto-blocked-end:empty { display: none; }
+.auto-blocked-allow {
+  padding: 0 1px; border: 0; border-radius: 3px; background: none; font: inherit; color: var(--text-100); cursor: pointer;
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  transition: text-decoration-color 0.1s;
+}
+.auto-blocked-allow:hover { text-decoration-color: currentColor; }
+.auto-blocked-allow:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.auto-blocked-allow:disabled { cursor: default; opacity: 0.6; }
+
+/* Settings → Permissions → Recently blocked: the command as each row's title */
+.auto-blocked-list .sp-row-name.auto-blocked-what { overflow-wrap: anywhere; }
