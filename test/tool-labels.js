@@ -80,15 +80,17 @@ const { check, done } = require('./support/check.js');
   check('schedule_update: a rename keeps the old name in the row', agentArgFromResult('schedule_update', { id: 'sch_1', name: 'New' }, 'Updated: sch_1  "New"  every 4 hours  next: x  last: y') === null);
   check('schedule_delete: the result names it', agentArgFromResult('schedule_delete', { id: 'sch_1' }, 'Deleted schedule "Nightly audit" (sch_1).') === 'Nightly audit');
   check('session_send: the card names the session', agentArgFromApproval('session_send', `Send to session "Fix the tests" (${SUB}):\n\nhello`) === 'to Fix the tests');
-  check('session_send: the result names it', agentArgFromResult('session_send', { to: SUB }, `Delivered to "Fix the tests" (${SUB}) and it started working on it.`) === 'to Fix the tests');
+  check('session_send: the result names it', agentArgFromResult('session_send', { to: SUB }, `Delivered to "Fix the tests" (${SUB}): it started a run on it. Its reply does not come back by itself: read it later with session_read ${SUB} or session_list, or it may answer with session_send.`) === 'to Fix the tests');
   check('session_read: the result names it', agentArgFromResult('session_read', { id: 'x' }, 'Session x "Fix the tests" (idle): the last 6 messages of 12.\n\nUSER: hi') === 'Fix the tests');
   check('session_merge: the result names it', agentArgFromResult('session_merge', { id: 'x' }, '[Merged from "Fix the tests"]\n\nSUMMARY') === 'Fix the tests');
 
   // ---------- Summaries on the right ----------
   const meta = (name, r, a = {}) => agentToolMeta(name, a, r)?.text;
   check('session_spawn: started', meta('session_spawn', `Started sub-session "L" (id ${SUB}). It runs in the background…`) === 'started');
-  check('session_send: sent', meta('session_send', `Delivered to "L" (${SUB}) and it started working on it.`) === 'sent');
-  check('session_send: queued', meta('session_send', `Delivered to "L" (${SUB}); it is busy, so the message waits for its current step to end.`) === 'queued');
+  check('session_send: sent', meta('session_send', `Delivered to "L" (${SUB}): it started a run on it. It is your sub-session, so its report comes back here by itself when it finishes the turn.`) === 'sent');
+  check('session_send: queued', meta('session_send', `Delivered to "L" (${SUB}): it is busy, so the message waits behind its current step. Its reply does not come back by itself.`) === 'queued');
+  check('session_send: held', meta('session_send', `Delivered to "L" (${SUB}): its plan waits for the user, so the message is held until the user decides the plan. Its reply does not come back by itself.`) === 'held');
+  check('session_send: refused in a scheduled tree reads as denied', meta('session_send', 'Not sent: Not permitted: this session runs unattended (a scheduled task or a dream started it), so …') === 'denied');
   const list = `This session: a "Parent"\nRelated (2):\n  b  "L"  sub-session  idle  last: ok\n  c  "M"  fork  idle\nOther recent sessions (1):\n  d  "N"  other  idle`;
   check('session_list: 3 sessions', meta('session_list', list) === '3 sessions', meta('session_list', list));
   check('session_list: none', meta('session_list', 'This session: a "P"\nRelated: none.') === 'no other sessions');

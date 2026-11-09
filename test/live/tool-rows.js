@@ -34,9 +34,17 @@ async function runMode(mode, shots) {
   const current = () => app.evaluate(`oc.sessions.current().then((m) => m.id)`);
   const light = () => app.evaluate(`document.documentElement.dataset.theme = 'light'`);
 
-  /** The newest row of a tool: verb, argument (and its tooltip), summary, whether it finished, and its folded line */
+  /**
+   * The newest row of a tool: verb, argument (and its tooltip), summary, whether it finished, and its folded line.
+   * session_send is a line of its own ("Messaged …", session-messages.ts): its words, link, delivery note and answer.
+   */
   const readRow = (name) =>
     app.evaluate(`(() => {
+      if (${JSON.stringify(name)} === 'session_send') {
+        const el = [...document.querySelectorAll('#messages .session-msg.sent')].pop();
+        if (!el) return null;
+        return { summary: el.querySelector(':scope > summary').innerText.trim(), done: el.dataset.state !== 'running', state: el.dataset.state, top: el.parentElement.id === 'messages' && !el.closest('.tool-group'), to: el.querySelector(':scope > summary .session-msg-link')?.dataset.session ?? null, note: (el.querySelector('.session-msg-note')?.textContent ?? '').trim(), decision: (el.querySelector('.tool-decision')?.textContent ?? '').replace(/\\s+/g, ' ').trim(), verb: el.querySelector(':scope > summary').innerText.trim(), arg: '', meta: el.dataset.state };
+      }
       const el = [...document.querySelectorAll('.tool[data-tool=${JSON.stringify(name)}]')].pop();
       if (!el) return null;
       const t = (s) => (el.querySelector(s)?.textContent ?? '').replace(/\\s+/g, ' ').trim();
@@ -68,7 +76,11 @@ async function runMode(mode, shots) {
       await app.waitFor(`!document.querySelector('.approval')`, 10_000, 'the card to go');
       card.decided = norm((await readRow(name))?.decision);
     }
-    await app.waitFor(`(() => { const el = [...document.querySelectorAll('.tool[data-tool=${JSON.stringify(name)}]')].pop(); return el && !el.querySelector('.tool-status.spin'); })()`, 60_000, `${name}'s row to finish`);
+    const finished =
+      name === 'session_send'
+        ? `(() => { const el = [...document.querySelectorAll('#messages .session-msg.sent')].pop(); return el && el.dataset.state !== 'running'; })()`
+        : `(() => { const el = [...document.querySelectorAll('.tool[data-tool=${JSON.stringify(name)}]')].pop(); return el && !el.querySelector('.tool-status.spin'); })()`;
+    await app.waitFor(finished, 60_000, `${name}'s row to finish`);
     await app.waitFor(nothingRuns, 120_000, 'every session to finish');
     await sleep(300);
     return { row: await readRow(name), card };
@@ -118,7 +130,9 @@ async function runMode(mode, shots) {
     record('session_read', s.row);
 
     s = await step('session_send', { to: child, message: 'Also check that /health stays unlimited.' });
-    expectRow('session_send', s.row, 'Message', `to ${TITLE}`, s.row.meta.startsWith('queued') ? 'queued' : 'sent');
+    // A message is not a tool row: its own line, "Messaged <title>", the title linked to the session
+    check(tag('session_send: its own line "Messaged …", linked, never folded'), s.row && s.row.summary === `Messaged ${TITLE}` && s.row.to === child && s.row.top && s.row.state === 'sent', s.row);
+    check(tag('session_send: opened, it says how it was delivered'), s.row && /^Delivered: (it started a run on it|it is busy, so the message waits behind its current step)\.$/.test(s.row.note), s.row && s.row.note);
     check(tag('session_send: no card for its own sub-session'), !s.card);
     record('session_send', s.row);
 
@@ -197,16 +211,17 @@ async function runMode(mode, shots) {
     await app.click('#new-session-btn');
     await app.waitFor(`document.querySelector('#empty-state') && !document.querySelector('#empty-state').hidden`, 10_000, 'a new session');
     s = await step('session_send', { to: A, message: 'FYI: the limiter is merged.' }, { answer: asks ? 'allow' : undefined, shot: asks ? 'ask-7-send-card' : undefined });
-    expectRow('session_send (unrelated)', s.row, 'Message', `to ${aTitle}`, s.row.meta.startsWith('queued') ? 'queued' : 'sent');
+    check(tag('session_send (unrelated): its own line "Messaged …", linked'), s.row && s.row.summary === `Messaged ${aTitle}` && s.row.to === A && s.row.top && s.row.state === 'sent', s.row);
     record('session_send (unrelated)', s.row, s.card);
     if (asks) {
       check(tag('session_send card: title'), s.card.title === `Allow Silo Harness to send a message to “${aTitle}”?`, s.card.title);
-      check(tag('session_send card: the answer is in the row'), s.card.decided === 'Allowed once', s.card.decided);
+      check(tag('session_send card: while it waits the line reads "Messaging …"'), s.card.row && s.card.row.state === 'running' && s.card.row.summary === `Messaging ${aTitle}…`, s.card.row);
+      check(tag('session_send card: the answer is in the line'), s.card.decided === 'Allowed once', s.card.decided);
     } else check(tag('session_send to an unrelated session: no card in bypass'), !s.card && (await app.count('.approval')) === 0);
 
-    const decided = await app.evaluate(`({ lines: document.querySelectorAll('.approval').length, answers: [...document.querySelectorAll('.tool-decision')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim()), words: [...document.querySelectorAll('#messages > .tool-group > summary .group-verb')].map((e) => e.textContent) })`);
+    const decided = await app.evaluate(`({ lines: document.querySelectorAll('.approval').length, answers: [...document.querySelectorAll('.tool-decision')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim()), words: [...document.querySelectorAll('#messages > .tool-group > summary .group-verb, #messages > .session-msg > summary')].map((e) => e.textContent) })`);
     check(tag('no answered card is left as a line; the answers in the rows name no tool'), decided.lines === 0 && decided.answers.length === (asks ? 1 : 0) && decided.answers.every((l) => !/_/.test(l)), decided.answers);
-    check(tag('no folded line names a tool'), decided.words.length > 0 && decided.words.every((w) => !/_/.test(w)), decided.words);
+    check(tag('no folded line or message line names a tool'), decided.words.length > 0 && decided.words.every((w) => !/_/.test(w)), decided.words);
     await light();
     await sleep(300);
     await app.screenshot(path.join(shots, `${mode}-8-unrelated-send.png`));

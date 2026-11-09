@@ -39,10 +39,13 @@ const { check, done } = require('./support/check.js');
   // ---------- a message from another session ----------
   u = unframe('session', `${messageHead(child, 'sub-session')}\nThe replay is done: 429s only for one client.`);
   check('a message shows its text only', u.text === 'The replay is done: 429s only for one client.' && u.note === undefined, u);
+  check('… and names its sender for the row ("Received message from …")', u.sender === child.title, u.sender);
+  check('the head line says it is not from the user, in one line, and none of that reaches the row', /^\[[^\n]*Not from the user: [^\]\n]*\]$/.test(messageHead(child, 'peer session')) && !/Not from the user|session_send|no user authority/.test(u.text), messageHead(child, 'peer session'));
   u = unframe('session', `${messageHead(odd, 'peer session')}\nTwo\nlines.`);
   check('… with an odd title and a body of several lines', u.text === 'Two\nlines.', u);
   u = unframe('session', `${messageHead(undefined, '')}\nHello.`);
-  check('… and from a session that is gone', u.text === 'Hello.', u);
+  check('… and from a session that is gone', u.text === 'Hello.' && u.sender === undefined, u);
+  check('a report names its sub-session for the row too', unframe('session', note('aborted', 'Stopped early.')).sender === child.title);
 
   // ---------- a merged summary ----------
   u = unframe('command', mergedText(child.title, '## What it did\n\n- Replayed an hour of traffic.'));
