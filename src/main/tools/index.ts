@@ -4,6 +4,7 @@ import type { Tool } from './types';
 import { readFile, writeFile, editFile, listDirectory, glob, grep } from './fs';
 import { bash } from './shell';
 import { browserTools } from './browser';
+import { READ_ONLY_BROWSER_TOOLS } from '../browser/policy';
 import { skillTool } from './skill';
 import { submitPlan } from './plan';
 import { terminalTools } from './terminal';
@@ -11,11 +12,17 @@ import { createArtifact } from './artifact';
 import { updateTasks } from './tasks';
 import { askUser } from './ask-user';
 
-export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions } from './types';
+export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions, BrowserApproval } from './types';
 
-/** The tools offered to the model. Plan mode swaps the file-changing tools for submit_plan; ask_user is in every mode. */
+/** Plan mode's browser: the tools that read the page or the pane (browser_tabs new is a navigation, with its site card). */
+const planBrowserTools = browserTools.filter((t) => READ_ONLY_BROWSER_TOOLS.has(t.name));
+
+/**
+ * The tools offered to the model. Plan mode swaps the file-changing tools for submit_plan and keeps only the browser
+ * tools that read; ask_user is in every mode.
+ */
 export function allTools(mode: PermissionMode = 'ask'): Tool[] {
-  if (mode === 'plan') return [readFile, listDirectory, glob, grep, bash, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan];
+  if (mode === 'plan') return [readFile, listDirectory, glob, grep, bash, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan];
   return [readFile, writeFile, editFile, listDirectory, glob, grep, bash, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser];
 }
 

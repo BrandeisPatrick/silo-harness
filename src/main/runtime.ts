@@ -290,7 +290,7 @@ export class SessionRuntime {
 
   /**
    * Answers an approval card, whichever session holds it, with everything the answer implies (a mode switch, a saved
-   * project rule). False when no session has that card any more.
+   * project rule, a browser site always allowed). False when no session has that card any more.
    */
   respondApproval(id: string, ok: boolean, always = false, scope: ApprovalScope = 'session'): boolean {
     const agent = this.findApproval(id);
@@ -305,7 +305,10 @@ export class SessionRuntime {
       update((c) => ({ ...c, permissionMode: mode }));
     }
     const rule = outcome.rule;
-    if (rule) {
+    if (rule?.kind === 'site') {
+      // "Always allow example.com": saved on this Mac for every project (Settings → Browser lists it), not in allowRules
+      update((c) => ({ ...c, browser: { ...c.browser, alwaysAllowed: [...new Set([...(c.browser?.alwaysAllowed ?? []), ...rule.values])] } }));
+    } else if (rule) {
       update((c) => {
         const r: StoredRules = { ...(c.allowRules?.[cwd] ?? {}) };
         const add = (list: string[] | undefined) => [...new Set([...(list ?? []), ...rule.values])];

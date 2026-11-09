@@ -7,7 +7,8 @@ import { app, type BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState, PopupState, TabState } from '../../shared/browser';
-import { describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
+import { clickTargetScript, describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, passwordFieldScript, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
+import type { ClickTarget } from './policy';
 import { PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
@@ -316,6 +317,21 @@ export class BrowserController {
     if (ref && REF_RE.test(ref)) return this.targetKind(ref, false);
     if (field) return ((await this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: fieldKindScript(field) }]).catch(() => null)) as string | null) ?? null;
     return this.targetKind(undefined, true);
+  }
+
+  /**
+   * What a click on `ref`, or at a viewport point, would land on, for the click rules (policy.ts clickRule): its text,
+   * role, tag and type, whether it sits in a CAPTCHA, whether its form holds card fields and where that form posts.
+   * The page is not changed. null when nothing is there or the page cannot be asked.
+   */
+  async describeTarget(target: { ref: string } | { x: number; y: number }): Promise<ClickTarget | null> {
+    if ('ref' in target && !REF_RE.test(target.ref)) return null;
+    return ((await this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: clickTargetScript(target) }]).catch(() => null)) as ClickTarget | null) ?? null;
+  }
+
+  /** Whether the active page shows a password field: the sign-in page signal (policy.ts looksLikeSignInPage). False when it cannot say. */
+  async pageHasPasswordField(): Promise<boolean> {
+    return (await this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: passwordFieldScript() }]).catch(() => false)) === true;
   }
 
   private async waitForLoad(wc = this.wc, timeoutMs = 20_000): Promise<void> {
