@@ -3,7 +3,7 @@
   "id": "sub-sessions",
   "name": "Sub-sessions",
   "version": "1.0.0",
-  "description": "The parent, sub-sessions and forks of the session on screen, with a way to merge finished ones back.",
+  "description": "Sub-sessions and forks of this session, and merging them back.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "git-branch",

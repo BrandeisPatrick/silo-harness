@@ -122,8 +122,8 @@ declare global {
        */
       setup(checks: Partial<SetupChecks> | null): void;
       /**
-       * Renders the welcome screen's Recent projects row from these folders instead of config.recentDirs (the current
-       * working directory is still left out; clicking a chip really switches to it); null goes back to config.recentDirs
+       * The welcome screen's folder menu lists these folders instead of config.recentDirs (after the Silo folder;
+       * picking one really switches to it); null goes back to config.recentDirs
        */
       recent(dirs: string[] | null): void;
     };

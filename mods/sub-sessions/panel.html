@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="root" hidden></div>
-<p class="h-empty" id="empty" hidden>No sub-sessions or forks. Sessions the agent starts from this one, and forks of it, show up here.</p>
+<p class="h-empty" id="empty" hidden>No sub-sessions or forks</p>
 <script src="/@harness/harness.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -35,7 +35,7 @@
 
   function status(s) {
     if (s.running) return { glyph: '<span class="h-spin sm"></span>', label: 'Running' };
-    if (s.attention) return { glyph: '<span class="wait"></span>', label: s.attention === 'approval' ? 'Waiting for an approval' : 'Waiting for its plan to be approved' };
+    if (s.attention) return { glyph: '<span class="wait"></span>', label: s.attention === 'approval' ? 'Waiting for an approval' : 'Plan waiting for approval' };
     return { glyph: ICON.done, label: 'Done' };
   }
 
@@ -69,7 +69,7 @@
       m.className = 'h-btn ghost sm merge';
       m.textContent = merging.has(s.id) ? 'Merging…' : 'Merge';
       m.disabled = merging.has(s.id);
-      m.title = `Bring what "${s.title}" did back into this session`;
+      m.title = 'Merge into this session';
       m.onclick = () => merge(s);
       r.appendChild(m);
     }

@@ -3,7 +3,7 @@
   "id": "tasks",
   "name": "Tasks",
   "version": "1.0.0",
-  "description": "The agent's task list for the session on screen, as it works through it.",
+  "description": "The agent's task list for this session.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "list-checks",

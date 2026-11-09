@@ -1,26 +1,24 @@
-// The welcome screen's setup strip (#setup-strip, above the suggestion chips): what still stands between a fresh
-// install and a first run, one line each with its fix. Ollama not answering ("Start Ollama"), the configured model
-// not downloaded ("Pull a model" shows the command with a Copy button), the working directory still the home folder
-// ("Choose folder"). Lines are keyed by id and updated in place, so an open command, a focused button or a running
+// The welcome screen's setup strip (#setup-strip, above the folder row): what still stands between a fresh install
+// and a first run, one line each with its fix. Ollama not answering ("Start Ollama"), the configured model not
+// downloaded ("Pull a model" shows the command with a Copy button), another provider without its key or model
+// ("Open settings"). Lines are keyed by id and updated in place, so an open command, a focused button or a running
 // "Starting…" survive the re-checks. The app decides which lines show (see SetupLine); this module draws them.
 
 import { copyWithFeedback } from './dom.js';
 import { icon, type IconName } from './icons.js';
-import { homeDir } from './home.js';
 
-export type SetupId = 'ollama' | 'model' | 'folder' | 'provider';
+export type SetupId = 'ollama' | 'model' | 'provider';
 
-/** Which checks pass (true = fine): Ollama answers, the configured model is downloaded, a project folder is chosen. */
+/** Which checks pass (true = fine): Ollama answers, the configured model is downloaded. */
 export interface SetupChecks {
   ollama: boolean;
   model: boolean;
-  folder: boolean;
 }
 
 /** A partial or malformed object from the debug hook: anything not false counts as fine. */
 export function cleanChecks(v: unknown): SetupChecks {
   const o = (v && typeof v === 'object' ? v : {}) as Partial<Record<keyof SetupChecks, unknown>>;
-  return { ollama: o.ollama !== false, model: o.model !== false, folder: o.folder !== false };
+  return { ollama: o.ollama !== false, model: o.model !== false };
 }
 
 export interface SetupLine {
@@ -56,14 +54,6 @@ export interface SetupStrip {
 }
 
 // ---------- What the checks compare ----------
-
-/** /Users/me (and /home/me, /root, /var/root): where the working directory starts on a fresh install (os.homedir()). */
-export function isHomeFolder(dir: string): boolean {
-  const d = String(dir ?? '').trim().replace(/\/+$/, '');
-  const home = homeDir();
-  if (home) return d === home;
-  return /^\/Users\/[^/]+$/.test(d) || /^\/home\/[^/]+$/.test(d) || d === '/root' || d === '/var/root';
-}
 
 /** Ollama lists "llama3.1:latest" for a model configured as "llama3.1" (and the other way round). */
 export function hasModel(models: string[], model: string): boolean {

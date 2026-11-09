@@ -13,6 +13,29 @@ const { launch, checker } = require('./rig.js');
   try {
     check('the window loads with an empty session', await app.exists('#empty-state'));
     check('the composer shows the configured model', /haiku|mock/i.test((await app.text('#model-btn')) || ''), await app.text('#model-btn'));
+
+    // The welcome screen: the title, the folder row (the working folder's path and Choose folder), the composer
+    const project = await app.evaluate(`oc.getConfig().then((c) => c.workingDirectory)`);
+    const tildeOf = (p) => (p === os.homedir() ? '~' : p.startsWith(os.homedir() + '/') ? '~' + p.slice(os.homedir().length) : p);
+    const welcome = await app.evaluate(`(() => { const p = document.querySelector('#folder-row-path'); return { title: document.querySelector('.empty-title')?.textContent, paragraph: document.querySelectorAll('#empty-state p').length, chips: document.querySelectorAll('#empty-state button').length, row: !document.querySelector('#folder-row').hidden, path: p?.textContent, tip: p?.dataset.tip, button: document.querySelector('#folder-row-btn')?.innerText.trim(), sentence: /Working in|home folder/.test(document.querySelector('#empty-state').innerText) }; })()`);
+    check('welcome: the title and nothing under it but the folder row', welcome.title === 'What should we build?' && welcome.paragraph === 0 && welcome.chips === 1 && welcome.row && !welcome.sentence, welcome);
+    check('welcome: the row shows the working folder as a path, the whole path as its tooltip, and Choose folder', welcome.tip === tildeOf(project) && welcome.path.endsWith(path.basename(project)) && welcome.button === 'Choose folder', { welcome, project });
+    const menuItems = () => app.evaluate(`[...document.querySelectorAll('.folder-menu .pop-item')].map((b) => ({ label: b.querySelector('.pop-title').textContent, checked: b.getAttribute('aria-checked') }))`);
+    await app.click('#folder-row-btn');
+    await app.waitFor(`!!document.querySelector('.folder-menu')`, 5000, 'the folder menu');
+    let items = await menuItems();
+    const silo = path.join(app.profile, 'home-config', 'Silo');
+    check('Choose folder: the Silo folder first, the working folder checked, then Choose another folder…', items.length === 3 && items[0].label.endsWith('/Silo') && items[0].checked === 'false' && items[1].label.endsWith(path.basename(project)) && items[1].checked === 'true' && items[2].label === 'Choose another folder…', items);
+    await app.evaluate(`document.querySelectorAll('.folder-menu .pop-item')[0].click()`);
+    const switched = await app.waitFor(`oc.getConfig().then((c) => c.workingDirectory === ${JSON.stringify(silo)} && document.querySelector('#folder-row-path').textContent.endsWith('Silo'))`, 5000, 'the switch to the Silo folder').catch(() => false);
+    check('picking the Silo folder makes it the working folder, and the row follows', Boolean(switched) && fs.existsSync(silo), silo);
+    await app.click('#folder-row-btn');
+    await app.waitFor(`!!document.querySelector('.folder-menu')`, 5000, 'the folder menu again');
+    items = await menuItems();
+    check('… the folder left is now a recent folder in the menu', items.length === 3 && items[0].checked === 'true' && items[1].label.endsWith(path.basename(project)) && items[1].checked === 'false', items);
+    await app.evaluate(`document.querySelectorAll('.folder-menu .pop-item')[1].click()`);
+    const back = await app.waitFor(`oc.getConfig().then((c) => c.workingDirectory === ${JSON.stringify(project)})`, 5000, 'the switch back').catch(() => false);
+    check('… and picking it switches back', Boolean(back));
     await app.screenshot(path.join(shots, 'smoke-1-empty.png'));
 
     if (app.live) {

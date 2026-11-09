@@ -137,12 +137,12 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
     const run = await app.evaluate(`(() => { const b = document.querySelector('#dream-run'); return b && { text: b.innerText.trim(), menu: b.getAttribute('aria-haspopup') }; })()`);
     check('page: a "Run a dream" button with a menu', run && run.text === 'Run a dream' && run.menu === 'menu', run);
     const bannerText = await app.text('#dreaming-banner');
-    check('page: the banner says the daily dream is off, and what a dream sends and costs', /daily dream is off/.test(bannerText) && /sends parts of your past sessions to the model you configured/.test(bannerText) && /uses tokens/.test(bannerText), bannerText);
+    check('page: the banner says the daily dream is off, and what a dream sends and costs', /daily dream is off/.test(bannerText) && /send parts of past sessions to your model/.test(bannerText) && /use tokens/.test(bannerText), bannerText);
     await app.click('#dream-settings-btn');
     await app.waitFor(`!!document.querySelector('#dream-settings[open]')`, 5000, 'the settings dialog');
     const page = await app.evaluate(`document.querySelector('#dream-settings').innerText`);
-    check('settings: daily, mode, what to look for, privacy and cost', /Daily dream/.test(page) && /Auto/.test(page) && /Approve/.test(page) && /Plan/.test(page) && /Skills/.test(page) && /Mods/.test(page) && /Memory/.test(page) && /sends parts of your past sessions/.test(page) && /uses tokens/.test(page), page.slice(0, 600));
-    check('settings: the mode line says what Approve does', /each suggestion waits for you to apply or dismiss it/.test(page));
+    check('settings: daily, mode, what to look for, privacy and cost', /Daily dream/.test(page) && /Auto/.test(page) && /Approve/.test(page) && /Plan/.test(page) && /Skills/.test(page) && /Mods/.test(page) && /Memory/.test(page) && /send parts of past sessions/.test(page) && /use tokens/.test(page), page.slice(0, 600));
+    check('settings: the mode line says what Approve does', /Each suggestion waits for you to apply or dismiss\./.test(page));
     check('settings: off by default', !(await app.evaluate(`document.querySelector('#dream-dlg-daily').checked`)));
     await shotOf(app, '2-settings-off');
     await app.evaluate(`document.querySelector('#dream-dlg-daily').click()`);
@@ -200,7 +200,7 @@ const isDreamReq = (p) => (p.messages || []).some((m) => m.role === 'user' && ty
     const modState = await app.evaluate(`oc.rpc('mods.list').then((l) => (l.find((m) => m.id === 'release-status') || {}).state)`).catch(() => null);
     check('apply: the new mod stays off', modState !== 'on', modState);
     await app.waitFor(`document.querySelector('#dreaming-dot').hidden`, 5000, 'the dot to go');
-    check('sidebar: the dot goes once nothing waits', /Nothing waits for you/.test(await app.text('#dream-suggestions')));
+    check('sidebar: the dot goes once nothing waits', /No suggestions waiting/.test(await app.text('#dream-suggestions')));
 
     // ---- the dream's session ----
     await openProject();

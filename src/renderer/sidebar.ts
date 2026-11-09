@@ -126,7 +126,7 @@ function indicatorHtml(ind: Indicator): string {
       return '<span class="trail-meta" data-tip="Finished while you were away"><span class="status-dot unread" aria-label="Unread"></span></span>';
     case 'family':
       return ind.count
-        ? `<span class="trail-meta family${ind.hot ? ' hot' : ''}" data-tip="${ind.count} session${ind.count === 1 ? '' : 's'} inside${ind.hot ? ', one needs a look' : ''}">${icon('git-branch', 14)}<span class="family-count">${ind.count}</span></span>`
+        ? `<span class="trail-meta family${ind.hot ? ' hot' : ''}" data-tip="${ind.count} session${ind.count === 1 ? '' : 's'} inside${ind.hot ? ', one waiting' : ''}">${icon('git-branch', 14)}<span class="family-count">${ind.count}</span></span>`
         : `<span class="trail-meta family" data-tip="Has forks or sub-sessions">${icon('git-branch', 14)}</span>`;
     case 'fork':
       return `<span class="trail-meta kind" data-tip="Forked session">${icon('git-branch', 14)}</span>`;
@@ -238,7 +238,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'session-empty';
-      empty.textContent = 'Sessions you start appear here.';
+      empty.textContent = 'No sessions yet';
       frag.appendChild(empty);
     }
     list.appendChild(frag);
@@ -420,7 +420,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
   async function mergeSession(m: SessionMeta, into: SessionMeta): Promise<void> {
     const ok = await d.confirm({
       title: `Merge into "${into.title}"?`,
-      description: `A summary of what "${m.title}" did since it split off is added to "${into.title}", and this session is marked merged. Both stay in the sidebar.`,
+      description: 'A summary of its work is added there; both sessions stay.',
       confirmLabel: 'Merge',
       icon: 'git-merge',
     });
@@ -734,7 +734,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
     const n = Number(s?.waiting) || 0;
     dreamingDot.hidden = n === 0;
     dreamingRow.setAttribute('aria-label', n ? `Dreaming, ${n} suggestion${n === 1 ? '' : 's'} waiting` : 'Dreaming');
-    dreamingRow.dataset.tip = n ? `${n} suggestion${n === 1 ? '' : 's'} waiting for you` : '';
+    dreamingRow.dataset.tip = n ? `${n} suggestion${n === 1 ? '' : 's'} waiting` : '';
     if (!n) delete dreamingRow.dataset.tip;
   };
   onPush('dreaming:changed', syncDreaming);

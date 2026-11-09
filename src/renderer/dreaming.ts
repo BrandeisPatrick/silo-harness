@@ -195,7 +195,7 @@ export function proposalCard(id: string, opts: { links?: boolean } = {}): HTMLEl
       el.append(from);
     }
     el.append(previewOf(p));
-    if (p.kind === 'mod') el.append(h('p', { class: 'proposal-note' }, 'A new mod stays off until you turn it on in Settings → Mods.'));
+    if (p.kind === 'mod') el.append(h('p', { class: 'proposal-note' }, 'It stays off until you turn it on in Settings → Mods.'));
     el.append(h('div', { class: 'proposal-target', title: p.target }, tilde(p.target)), footOf(p));
   };
   let set = cards.get(id);

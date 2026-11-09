@@ -301,7 +301,7 @@ export function createSessionsView({ api, input: inputEl, running, renderTranscr
       const source = sessions.find((s) => s.id === id);
       const fork = await api.fork(id);
       await showSession(fork.id);
-      addSystemMessage(`Forked "${source?.title ?? 'session'}". You are now in the fork; the original is unchanged.`, 'notice');
+      addSystemMessage(`Forked "${source?.title ?? 'session'}". The original is unchanged.`, 'notice');
     } catch (err) {
       addSystemMessage(cleanError(err), 'error');
     }

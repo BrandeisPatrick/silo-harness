@@ -3,7 +3,7 @@
   "id": "plan",
   "name": "Plan",
   "version": "1.0.0",
-  "description": "The plan the agent proposed in Plan mode, and whether it was approved.",
+  "description": "The plan from Plan mode and whether it was approved.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "clipboard",

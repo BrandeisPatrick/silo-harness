@@ -1,13 +1,14 @@
 // The provider connection and the welcome screen's setup strip: whether Ollama answers and has the configured
-// model, the banner above the composer when it does not, the strip's lines with their fixes ("Start Ollama", "Choose
-// folder", …), the working-directory picker and the recent-projects row.
+// model, the banner above the composer when it does not, the strip's lines with their fixes ("Start Ollama", "Pull a
+// model", …), the working-directory picker and the welcome screen's folder row with its menu of folders.
 
 import type { AppConfig, SiloHarnessApi } from '../shared/types';
 import { byId } from './dom.js';
 import { shortPath } from './home.js';
 import { activeProvider, usesOllama } from './provider-view.js';
-import { createRecentRow, dirName, recentChoices } from './recent.js';
-import { cleanChecks, createSetupStrip, hasModel, isHomeFolder, isLocalOllama, ollamaAddress, ollamaServeCommand, pullCommand, type SetupChecks, type SetupId, type SetupLine } from './setup.js';
+import { createFolderRow, dirName, folderChoices } from './folder-row.js';
+import { rpc } from './rpc.js';
+import { cleanChecks, createSetupStrip, hasModel, isLocalOllama, ollamaAddress, ollamaServeCommand, pullCommand, type SetupChecks, type SetupId, type SetupLine } from './setup.js';
 import type { createTerminalPane } from './terminal.js';
 
 export interface ConnectionDeps {
@@ -32,7 +33,7 @@ export interface ConnectionDeps {
   cleanError(err: unknown): string;
   /** A quiet notice in the transcript */
   notice(text: string): void;
-  /** The config changed here: the top bar, the strip and the recent row follow */
+  /** The config changed here: the top bar, the strip and the folder row follow */
   applyConfigToUi(): void;
   refreshContext(): Promise<void>;
   /** The spinners follow "Starting Ollama…" */
@@ -100,9 +101,8 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
   /** Which checks pass: the debug hook's, or the real ones (unknown counts as fine, so nothing flashes before the first answer). */
   function setupChecks(): SetupChecks {
     if (debugSetup) return debugSetup;
-    const folder = !isHomeFolder(config().workingDirectory);
     const h = usesOllama(config()) ? ollamaHealth : null;
-    return { ollama: !h || h.reachable, model: !h || !h.reachable || hasModel(h.models, activeProvider(config()).model), folder };
+    return { ollama: !h || h.reachable, model: !h || !h.reachable || hasModel(h.models, activeProvider(config()).model) };
   }
 
   function ollamaLine(): SetupLine {
@@ -135,7 +135,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     };
   }
 
-  /** The strip's lines: Ollama and the model only with the Ollama provider, the folder line with either. */
+  /** The strip's lines: Ollama and the model with the Ollama provider, what a key or model lacks with any other. */
   function setupLines(): SetupLine[] {
     const checks = setupChecks();
     const lines: SetupLine[] = [];
@@ -147,7 +147,6 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
       // Any other provider: what stands in the way (no key, no model), with Settings at hand
       lines.push({ id: 'provider', icon: active.key === 'missing' ? 'plug' : 'settings', title: active.key === 'missing' ? `${active.label} needs a key` : `No model set for ${active.label}`, detail: active.key === 'missing' ? active.keySource : undefined, action: 'Open settings', actionTip: active.error });
     }
-    if (!checks.folder) lines.push({ id: 'folder', icon: 'folder', title: 'Working in your home folder', action: 'Choose folder', actionTip: 'Choose the project folder Silo Harness works in' });
     return lines;
   }
 
@@ -165,7 +164,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     if (ollamaHealth?.reachable) ollamaStartFailed = false;
     setupStrip.render(setupLines());
     // On the welcome screen the strip says it with a fix at hand; the banner returns once the conversation starts.
-    const covered = !emptyState.hidden && setupStrip.lines().some((id) => id !== 'folder');
+    const covered = !emptyState.hidden && setupStrip.lines().length > 0;
     connText.textContent = connProblem ?? '';
     connBanner.hidden = !connProblem || covered;
     scheduleSetupCheck();
@@ -175,7 +174,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
   function scheduleSetupCheck(): void {
     window.clearTimeout(setupTimer);
     setupTimer = undefined;
-    const watching = !debugSetup && usesOllama(config()) && !emptyState.hidden && setupStrip.lines().some((id) => id !== 'folder');
+    const watching = !debugSetup && usesOllama(config()) && !emptyState.hidden && setupStrip.lines().length > 0;
     if (!watching && !ollamaStartedAt) return;
     setupTimer = window.setTimeout(
       () => {
@@ -196,13 +195,11 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
   // Back from a terminal where Ollama was started or a model pulled: check right away.
   window.addEventListener('focus', () => {
     if (!config() || debugSetup || !usesOllama(config()) || emptyState.hidden) return;
-    if (setupStrip.lines().some((id) => id !== 'folder')) void checkConnection();
+    if (setupStrip.lines().length) void checkConnection();
   });
 
   async function setupAction(id: SetupId, button: HTMLButtonElement): Promise<void> {
-    if (id === 'folder') {
-      if ((await chooseFolder()) && !dialogOpen()) focusComposer();
-    } else if (id === 'model') {
+    if (id === 'model') {
       // "Choose model" (a pull shows its command instead): the model chip's menu
       modelBtn.click();
     } else if (id === 'provider') openSettings('provider');
@@ -234,15 +231,15 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
   }
 
   /**
-   * After the working directory changed (the picker, a recent project): the top bar, the setup strip and the recent
-   * row follow. In an empty session they show the change; a notice would replace the welcome screen.
+   * After the working directory changed (the picker, the folder row's menu): the top bar and the folder row follow.
+   * In an empty session they show the change; a notice would replace the welcome screen.
    */
   function folderChanged(dir: string): void {
     applyConfigToUi();
     if (emptyState.hidden) notice(`Working directory set to ${dir}`);
   }
 
-  /** The working-directory picker (the top bar's folder and the setup strip's "Choose folder"). */
+  /** The working-directory picker (the top bar's folder and the folder row's "Choose another folder…"). */
   async function chooseFolder(): Promise<boolean> {
     let dir: string | null;
     try {
@@ -258,36 +255,52 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
   }
   cwdBtn.onclick = () => void chooseFolder();
 
-  // ---------- Recent projects: the welcome screen's row of folders used before (AppConfig.recentDirs) ----------
+  // ---------- The folder row: the welcome screen's working folder, and a menu of the Silo folder and the recent ones ----------
 
-  /** The debug hook's folders, shown instead of config().recentDirs */
+  /** The debug hook's folders, listed instead of config().recentDirs */
   let debugRecent: string[] | null = null;
+  /** The Silo folder (~/Documents/Silo): first in the menu */
+  let siloDir = '';
+  void rpc('config.defaultWorkDir')
+    .then((dir) => {
+      if (typeof dir === 'string') siloDir = dir;
+    })
+    .catch(() => {
+      /* the menu lists the recent folders only */
+    });
 
-  const recentRow = createRecentRow({ root: byId('recent-dirs'), onPick: (dir, chip) => switchFolder(dir, chip) });
+  const folderRow = createFolderRow({
+    root: byId('folder-row'),
+    choices: () => folderChoices(siloDir, debugRecent ?? config().recentDirs, config().workingDirectory),
+    onPick: (dir, button) => switchFolder(dir, button),
+    onChoose: async () => {
+      if ((await chooseFolder()) && !dialogOpen()) focusComposer();
+    },
+  });
 
-  /** The row: config().recentDirs (or the debug hook's folders) without the current working directory; hidden when empty. */
+  /** The folder row follows the working directory (its menu reads the recent folders when it opens). */
   function renderRecent(): void {
     if (!config()) return;
-    recentRow.render(recentChoices(debugRecent ?? config().recentDirs, config().workingDirectory));
+    folderRow.render(config().workingDirectory);
   }
 
   /**
-   * A recent project's chip: the working directory switches to it the way the picker does (setConfig, then the same
-   * refresh; no notice in an empty session). The main process puts the folder it switched to first in recentDirs and
-   * drops folders that no longer exist, so when it is not first the folder is gone: the previous one comes back.
+   * A folder from the row's menu: the working directory switches to it the way the picker does (setConfig, then the
+   * same refresh; no notice in an empty session). The main process puts the folder it switched to first in recentDirs
+   * and drops folders that no longer exist, so when it is not first the folder is gone: the previous one comes back.
    */
-  async function switchFolder(dir: string, chip: HTMLButtonElement): Promise<void> {
+  async function switchFolder(dir: string, button: HTMLButtonElement): Promise<void> {
     const prev = config().workingDirectory;
     if (dir === prev) return;
     let next: AppConfig;
     try {
       next = await api.setConfig({ ...config(), workingDirectory: dir });
     } catch (err) {
-      showError(chip, `Couldn't switch to ${dirName(dir)}: ${cleanError(err)}`);
+      showError(button, `Couldn't switch to ${dirName(dir)}: ${cleanError(err)}`);
       return;
     }
     if (Array.isArray(next?.recentDirs) && next.recentDirs[0] !== dir) {
-      showError(chip, `Can't find ${shortPath(dir)}. It may have been moved or deleted.`);
+      showError(button, `Can't find ${shortPath(dir)}. It may have been moved or deleted.`);
       try {
         next = await api.setConfig({ ...next, workingDirectory: prev });
       } catch {
@@ -301,7 +314,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     folderChanged(dir);
     // The picker's change reaches the context meter through a context event; this one asks
     void refreshContext();
-    // The chip is gone (it is the working directory now): on to the first message, as after "Choose folder"
+    // On to the first message, as after "Choose another folder…"
     if (!dialogOpen()) focusComposer();
   }
 
@@ -332,7 +345,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
       // Back to the real checks: ask Ollama again now
       if (!debugSetup && config()) void checkConnection();
     },
-    /** The debug hook: the recent row from these folders instead of config.recentDirs (null: the config's again) */
+    /** The debug hook: the folder menu lists these folders instead of config.recentDirs (null: the config's again) */
     mockRecent: (dirs: string[] | null) => {
       debugRecent = Array.isArray(dirs) ? dirs.slice() : null;
       renderRecent();

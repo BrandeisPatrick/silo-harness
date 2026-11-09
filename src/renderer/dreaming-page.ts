@@ -44,8 +44,7 @@ export interface DreamingPage {
   debug: { state(): unknown };
 }
 
-const PRIVACY = 'A dream sends parts of your past sessions to the model you configured, and uses tokens: about as many as a long message, once per project with new activity.';
-const lowerDay = (s: string) => s.replace(/^(Today|Tomorrow|Yesterday)/, (m) => m.toLowerCase());
+const PRIVACY = 'Dreams send parts of past sessions to your model and use tokens.';
 
 export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
   let absent: boolean | null = null;
@@ -107,7 +106,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
       if (/^\d{2}:\d{2}$/.test(time.value)) void setConfig({ time: time.value }, time);
     });
     const next = state()?.nextRunAt;
-    const dailyNote = c.daily && next ? `Next: ${formatWhenAt(next)}. A dream missed while the app was closed runs once at the next launch.` : 'Off: dreams run only when you start one. When it is on, a dream runs once a day at this time, local time.';
+    const dailyNote = c.daily && next ? `Next: ${formatWhenAt(next)}` : 'Dreams run only when you start one.';
     const dailyBlock = sideSection(
       'Daily dream',
       h('label', { class: 'pg-switch wide', for: `${prefix}-daily` }, h('span', { class: 'pg-switch-label' }, 'Every day'), daily),
@@ -135,9 +134,9 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
     };
     const kinds = sideSection(
       'Looks for',
-      kind('skills', 'Skills', 'A procedure you asked for more than once, written down so /name runs it.'),
-      kind('mods', 'Mods', 'A view or a status you keep asking for, as a small panel. It stays off until you turn it on.'),
-      kind('memory', 'Memory', 'Preferences, corrections and facts about a project, as lines in its instructions file.'),
+      kind('skills', 'Skills', 'Steps you ask for often, run with /name.'),
+      kind('mods', 'Mods', 'Panels for what you check often, off until turned on.'),
+      kind('memory', 'Memory', 'Preferences and facts, added to the instructions file.'),
     );
     return [dailyBlock, modeBlock, kinds];
   }
@@ -178,7 +177,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
     try {
       const s = await rpc('dreaming.run', cwd);
       adoptDreaming(s);
-      if (!s.running && s.lastCheck?.found === 0) runNote = cwd ? `Nothing new to dream about in ${folderName(cwd)} since its last dream.` : 'Nothing new to dream about since the last dream.';
+      if (!s.running && s.lastCheck?.found === 0) runNote = cwd ? `Nothing new in ${folderName(cwd)} since its last dream.` : 'Nothing new since the last dream.';
     } catch (err) {
       runNote = d.cleanError(err);
     }
@@ -234,15 +233,15 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
     if (s?.running) parts.push(`Dreaming about ${folderName(s.running.cwd)} now${s.running.queued ? `, then ${s.running.queued} more project${s.running.queued === 1 ? '' : 's'}` : ''}.`);
     let action: HTMLElement | null = null;
     if (c?.daily) {
-      parts.push(`The daily dream runs at ${c.time}${s?.nextRunAt ? ` (next: ${lowerDay(formatWhenAt(s.nextRunAt))})` : ''}, over the projects with new activity.`);
+      parts.push(`The daily dream runs at ${c.time}.`);
       action = h('button', { type: 'button', class: 'link-btn pg-banner-action', id: 'dream-banner-change' }, 'Change');
       action.addEventListener('click', () => openSettings());
     } else {
-      parts.push('The daily dream is off: a dream runs only when you start one.');
+      parts.push('The daily dream is off.');
       action = h('button', { type: 'button', class: 'btn sm pg-banner-action', id: 'dream-banner-on' }, 'Turn on');
       action.addEventListener('click', () => void setConfig({ daily: true }, action!));
     }
-    parts.push(PRIVACY.replace(/: about as many.*$/, '.'));
+    parts.push(PRIVACY);
     return banner(parts.join(' '), { id: 'dreaming-banner', icon: 'moon', action });
   }
 
@@ -343,7 +342,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
         { class: 'pg-empty', id: 'dreaming-empty' },
         h('span', { class: 'pg-empty-icon', html: icon('moon', 20) }),
         h('h2', { class: 'pg-empty-title' }, 'No dreams yet'),
-        h('p', { class: 'pg-empty-text' }, 'A dream reads what happened in your recent sessions of a project and suggests skills, mods and memory that would help the agent work better for you. It reads; it changes nothing by itself unless the mode is Auto. Projects show here once they have sessions to dream about.'),
+        h('p', { class: 'pg-empty-text' }, 'Dreams read recent sessions and suggest skills, mods and memory.'),
         h('div', { class: 'pg-empty-actions' }, runB),
       );
     }
@@ -352,7 +351,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
       const box = h('div', { class: 'pg-suggestions', id: 'dream-suggestions' });
       const dreams = (state()?.dreams ?? []).filter((x) => dreamWaiting(x) > 0);
       if (!dreams.length) {
-        box.append(h('div', { class: 'pg-nothing' }, 'Nothing waits for you. Suggestions from dreams in Approve or Plan mode wait here until you apply or dismiss them.'));
+        box.append(h('div', { class: 'pg-nothing' }, 'No suggestions waiting'));
         return box;
       }
       for (const dr of dreams) {
@@ -446,12 +445,12 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
           action = h('button', { type: 'button', class: 'btn sm', id: 'project-run', 'data-focus': 'project-run' }, h('span', { html: icon('play', 14) }), h('span', {}, 'Run a dream now'));
           action.addEventListener('click', () => void run(route.cwd));
         }
-        const sub = runningHere ? 'Dreaming now…' : c?.daily && s?.nextRunAt ? `Next dream: ${formatWhenAt(s.nextRunAt)}${info && !info.fresh ? ', if there is something new by then' : ''}` : 'The daily dream is off';
+        const sub = runningHere ? 'Dreaming now…' : c?.daily && s?.nextRunAt ? `Next dream: ${formatWhenAt(s.nextRunAt)}` : 'The daily dream is off';
         col.append(pageHead(name, { chip: MODE_WORDS[c?.mode ?? 'approve'], sub, actions: h('div', { class: 'pg-head-actions' }, action) }));
         if (runNote) col.append(h('p', { class: 'pg-run-note', id: 'dream-run-note', role: 'status' }, runNote));
         col.append(h('hr', { class: 'pg-rule' }));
         const main = h('section', { class: 'pg-main', 'aria-labelledby': 'project-history-title' }, h('h2', { class: 'pg-h2', id: 'project-history-title' }, 'History'));
-        if (!dreams.length) main.append(h('div', { class: 'pg-nothing', id: 'project-no-dreams' }, info?.fresh ? `No dreams yet. The next one reads ${info.fresh} session${info.fresh === 1 ? '' : 's'}.` : 'No dreams yet'));
+        if (!dreams.length) main.append(h('div', { class: 'pg-nothing', id: 'project-no-dreams' }, 'No dreams yet'));
         else {
           const list = h('ul', { class: 'pg-rows', id: 'project-dreams', 'aria-label': 'Dreams, newest first' });
           for (const dr of dreams) list.append(h('li', {}, dreamRow(dr)));
@@ -460,7 +459,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
         const side = h('aside', { class: 'pg-side', 'aria-label': 'Dreaming settings' });
         side.append(h('p', { class: 'pg-side-kicker' }, 'Settings · for every project'));
         side.append(...settingsBlocks('project'));
-        side.append(sideSection('Project', h('div', { class: 'pg-folder', title: route.cwd }, h('span', { class: 'pg-folder-icon', html: icon('folder', 14) }), h('span', { class: 'pg-folder-name' }, name)), h('p', { class: 'pg-side-note' }, tilde(route.cwd)), info ? h('p', { class: 'pg-side-note' }, info.fresh ? `${info.fresh} session${info.fresh === 1 ? '' : 's'} with activity since its last dream.` : 'Nothing new since its last dream.') : null));
+        side.append(sideSection('Project', h('div', { class: 'pg-folder', title: route.cwd }, h('span', { class: 'pg-folder-icon', html: icon('folder', 14) }), h('span', { class: 'pg-folder-name' }, name)), h('p', { class: 'pg-side-note' }, tilde(route.cwd)), info ? h('p', { class: 'pg-side-note' }, info.fresh ? `${info.fresh} new session${info.fresh === 1 ? '' : 's'} since its last dream` : 'Nothing new since its last dream') : null));
         side.append(sideSection('Privacy', h('p', { class: 'pg-side-note' }, PRIVACY)));
         col.append(h('div', { class: 'pg-detail' }, main, side));
       });

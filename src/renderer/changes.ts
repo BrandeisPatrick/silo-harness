@@ -79,7 +79,7 @@ export function createChangesPane(o: ChangesPaneOptions): ChangesPane {
 
   function renderEmpty(): void {
     const note = unavailable ? `<p class="changes-note">${escapeHtml(unavailable)}</p>` : '';
-    o.empty.innerHTML = `<span class="changes-empty-icon">${icon('file-diff', 20)}</span><p>No changes yet. Files the agent writes or edits show up here.</p>${note}`;
+    o.empty.innerHTML = `<span class="changes-empty-icon">${icon('file-diff', 20)}</span><p>No changes yet</p>${note}`;
   }
 
   function renderList(): void {
@@ -119,7 +119,7 @@ export function createChangesPane(o: ChangesPaneOptions): ChangesPane {
     const actions = document.createElement('div');
     actions.className = 'change-actions';
     actions.innerHTML =
-      `<button type="button" id="change-revert" class="btn sm" data-tip="Restore the original content">${icon('undo', 14)}<span>Revert</span></button>` +
+      `<button type="button" id="change-revert" class="btn sm" data-tip="Restore the original">${icon('undo', 14)}<span>Revert</span></button>` +
       `<button type="button" id="change-open" class="btn sm" data-tip="Open with the default app"${e.status === 'deleted' ? ' disabled' : ''}>${icon('external-link', 14)}<span>Open in editor</span></button>`;
     actions.querySelector<HTMLButtonElement>('#change-revert')!.onclick = (ev) => void revert(e, ev.currentTarget as HTMLElement);
     actions.querySelector<HTMLButtonElement>('#change-open')!.onclick = (ev) => void openInEditor(e, ev.currentTarget as HTMLElement);
@@ -167,12 +167,12 @@ export function createChangesPane(o: ChangesPaneOptions): ChangesPane {
     const body = o.detail.querySelector('.diff-body');
     const scroll = o.detail.dataset.path === e.path && body ? body.scrollTop : 0;
     let el: HTMLElement;
-    if (d.binary) el = shell(e, `${icon('info', 14)}<span>Binary file. There is no text diff to show.</span>`);
+    if (d.binary) el = shell(e, `${icon('info', 14)}<span>Binary file, no text diff</span>`);
     else {
       const rows = diffRows(d);
       const changed = rows.some((r) => r.kind !== 'ctx');
       if (!rows.length || (!changed && d.status === 'modified')) {
-        el = shell(e, `${icon('info', 14)}<span>${!rows.length ? 'Empty file.' : 'No line changes (whitespace at the end of the file or line endings only).'}</span>`);
+        el = shell(e, `${icon('info', 14)}<span>${!rows.length ? 'Empty file.' : 'Only whitespace or line endings changed.'}</span>`);
       } else {
         el = renderDiff(e.relPath, rows, { className: 'fill', context: d.status === 'modified' ? 3 : undefined, limit: MAX_ROWS });
         el.querySelector('.diff-stat')!.insertAdjacentHTML('beforebegin', kindTag(e));
@@ -189,7 +189,7 @@ export function createChangesPane(o: ChangesPaneOptions): ChangesPane {
     const api = o.source();
     const token = ++listToken;
     if (!api) {
-      unavailable = 'Change tracking needs the updated app. Restart Silo Harness to turn it on.';
+      unavailable = 'Restart Silo Harness to turn on change tracking.';
       entries = [];
       setCount(0);
       renderList();
@@ -240,8 +240,8 @@ export function createChangesPane(o: ChangesPaneOptions): ChangesPane {
   async function revert(e: ChangeEntry, anchor: HTMLElement): Promise<void> {
     if (busy) return;
     const ok = await o.confirm({
-      title: `Revert ${e.relPath} to its original content? This cannot be undone.`,
-      description: e.status === 'added' ? 'The file did not exist before this session, so reverting deletes it.' : undefined,
+      title: `Revert ${e.relPath}?`,
+      description: e.status === 'added' ? 'This deletes the new file and cannot be undone.' : 'This restores the original and cannot be undone.',
       confirmLabel: 'Revert',
       danger: true,
     });

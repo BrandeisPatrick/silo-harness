@@ -175,8 +175,6 @@
 .pg-prompt.open { display: block; -webkit-line-clamp: unset; }
 .pg-more { margin-top: 4px; }
 .pg-inline-link { font-size: inherit; line-height: inherit; text-align: left; }
-.pg-inline-icon { display: inline-flex; vertical-align: -1px; color: var(--text-400); }
-.pg-inline-icon .icon { display: inline-block; }
 .pg-folder, .pg-mode { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-100); }
 .pg-folder-icon, .pg-mode-icon { display: inline-flex; flex: none; color: var(--text-400); }
 .pg-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
