@@ -1,9 +1,11 @@
 // One tab of the Browser pane: its WebContentsView in the browser's own profile, the listeners that keep its
-// TabState current (title, url, loading, history, favicon), the safety prelude started on every page, and the
-// pane's shortcuts pressed inside the page (⌘⇧N, ⌘W, ⌘L), which the window never sees.
+// TabState current (title, url, loading, history, favicon, the page's security), the safety prelude started on every
+// page, the pane's shortcuts pressed inside the page (⌘⇧N, ⌘W, ⌘L), which the window never sees, and the certificate
+// error its page stopped at (certificates.ts), which the pane covers with the interstitial.
 
 import { WebContentsView, type WebContents } from 'electron';
-import type { TabState } from '../../shared/browser';
+import type { CertErrorState, TabState } from '../../shared/browser';
+import { pageSecurity } from './certificates';
 import { inSafetyWorld, SAFETY_WORLD } from './safety';
 import { browserSession, BROWSER_PARTITION, cleanUserAgent } from './session';
 
@@ -14,6 +16,10 @@ export interface TabHooks {
   onChange(tab: BrowserTab): void;
   /** One of the pane's shortcuts was pressed inside the page */
   onShortcut(tab: BrowserTab, key: TabShortcut): void;
+  /** The tab stopped at a certificate error, or left it (the view hides behind the interstitial while it has one) */
+  onCertError?(tab: BrowserTab): void;
+  /** A new page committed in the main frame (the permission bar's "this time" answers end when the site changes) */
+  onNavigated?(tab: BrowserTab, url: string): void;
 }
 
 /** The events after which the state is read again. */
@@ -58,6 +64,8 @@ export class BrowserTab {
   favicon: string | null = null;
   /** Popups refused since the last navigation (a fourth while three are open) */
   blockedPopups = 0;
+  /** The certificate error the main frame stopped at (the interstitial shows), until the tab navigates on */
+  certError: CertErrorState | null = null;
   private disposed = false;
 
   constructor(private readonly hooks: TabHooks) {
@@ -73,6 +81,7 @@ export class BrowserTab {
     });
     for (const ev of STATE_EVENTS) wc.on(ev as 'did-navigate', () => this.changed());
     wc.on('page-favicon-updated', (_e, favicons) => void this.loadFavicon(favicons));
+    this.watchCertificates(wc);
     // Start watching each page's credential fields as soon as it is there (see pagePrelude in safety.ts)
     wc.on('dom-ready', () => void wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: inSafetyWorld('return true;') }]).catch(() => undefined));
     wc.on('before-input-event', (event, input) => {
@@ -104,6 +113,31 @@ export class BrowserTab {
     this.changed();
   }
 
+  // ---------- Certificate errors (browser safety) ----------
+
+  /**
+   * The certificate error goes when the tab moves on: a navigation to another address starts, or a page commits (an
+   * error page does not: Electron reports it as did-fail-load). A new page is also reported for the permission bar.
+   */
+  private watchCertificates(wc: WebContents): void {
+    wc.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame || details.isSameDocument || !this.certError) return;
+      if (details.url !== this.certError.url) this.setCertError(null);
+    });
+    wc.on('did-navigate', (_e, url) => {
+      if (this.certError) this.setCertError(null);
+      if (!this.disposed) this.hooks.onNavigated?.(this, url);
+    });
+  }
+
+  /** The main frame stopped at a certificate error (certificates.ts), or left it (null). */
+  setCertError(error: CertErrorState | null): void {
+    if (this.disposed) return;
+    this.certError = error;
+    this.hooks.onCertError?.(this);
+    this.changed();
+  }
+
   /** A popup of this tab was refused: counted until the next navigation. */
   blockedPopup(): void {
     this.blockedPopups++;
@@ -113,17 +147,20 @@ export class BrowserTab {
   state(): TabState {
     const wc = this.view.webContents;
     if (this.disposed || wc.isDestroyed()) {
-      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups };
+      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups, certError: null, security: 'none' };
     }
+    const url = wc.getURL();
     return {
       id: this.id,
-      url: wc.getURL(),
+      url,
       title: wc.getTitle(),
       favicon: this.favicon,
       loading: wc.isLoading(),
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       blockedPopups: this.blockedPopups,
+      certError: this.certError ? { ...this.certError } : null,
+      security: this.certError ? 'none' : pageSecurity(url),
     };
   }
 
