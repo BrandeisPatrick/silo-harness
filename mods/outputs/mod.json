@@ -3,7 +3,7 @@
   "id": "outputs",
   "name": "Outputs",
   "version": "1.0.0",
-  "description": "What the session produced: artifacts, images and changed files, newest first.",
+  "description": "Artifacts, images and changed files from the session.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "files",

@@ -53,8 +53,8 @@ export function nextRunWords(s: Schedule, now = Date.now()): string {
   const st = taskState(s, now);
   if (st === 'running') return s.nextRunAt ? `Running now · next run ${lower(formatWhenAt(s.nextRunAt, now))}` : 'Running now';
   if (s.enabled && s.nextRunAt) return `Next run: ${formatWhenAt(s.nextRunAt, now)}`;
-  if (st === 'done') return s.lastStatus === 'missed' ? 'Missed: Silo Harness was closed at the time' : s.lastRunAt ? `Ran ${lower(formatWhenAt(s.lastRunAt, now))}` : 'Will not run again';
-  return 'Paused: it will not run until you turn it on';
+  if (st === 'done') return s.lastStatus === 'missed' ? 'Missed: the app was closed' : s.lastRunAt ? `Ran ${lower(formatWhenAt(s.lastRunAt, now))}` : 'Will not run again';
+  return 'Paused';
 }
 
 const lower = (s: string) => s.replace(/^(Today|Tomorrow|Yesterday)/, (m) => m.toLowerCase());
@@ -195,7 +195,7 @@ export function rhythmToWhen(r: Rhythm, now = Date.now()): Parsed<ScheduleWhen> 
     }
     case 'hourly': {
       const m = Number(r.minute);
-      if (!Number.isInteger(m) || m < 0 || m > 59) return { ok: false, error: 'The minute is from 0 to 59.' };
+      if (!Number.isInteger(m) || m < 0 || m > 59) return { ok: false, error: 'Pick a minute from 0 to 59.' };
       return { ok: true, value: { kind: 'cron', expr: `${m} * * * *` } };
     }
     case 'interval': {
@@ -203,7 +203,7 @@ export function rhythmToWhen(r: Rhythm, now = Date.now()): Parsed<ScheduleWhen> 
       if (!Number.isInteger(n) || n < 1) return { ok: false, error: 'Enter a whole number.' };
       const minutes = n * (r.unit === 'days' ? 1440 : r.unit === 'hours' ? 60 : 1);
       if (minutes < 5) return { ok: false, error: 'A task runs at most every 5 minutes.' };
-      if (minutes > 366 * 1440) return { ok: false, error: 'At most a year apart; pick a rhythm with a date instead.' };
+      if (minutes > 366 * 1440) return { ok: false, error: 'Pick an interval of at most a year.' };
       return { ok: true, value: { kind: 'every', minutes } };
     }
     case 'daily':
@@ -221,13 +221,13 @@ export function rhythmToWhen(r: Rhythm, now = Date.now()): Parsed<ScheduleWhen> 
         return { ok: true, value: { kind: 'cron', expr: `${m} ${h} * * ${d}` } };
       }
       const date = Number(r.date);
-      if (!Number.isInteger(date) || date < 1 || date > 28) return { ok: false, error: 'The day of the month is from 1 to 28, so it runs every month.' };
+      if (!Number.isInteger(date) || date < 1 || date > 28) return { ok: false, error: 'Pick a day from 1 to 28.' };
       return { ok: true, value: { kind: 'cron', expr: `${m} ${h} ${date} * *` } };
     }
     case 'cron': {
       const expr = String(r.cron ?? '').trim().replace(/\s+/g, ' ');
       const fields = expr.split(' ');
-      if (fields.length !== 5 || fields.some((f) => !/^[\d*/,\-A-Za-z]+$/.test(f))) return { ok: false, error: 'A cron rhythm has five fields: minute hour day month weekday, like 0 9 * * 1-5.' };
+      if (fields.length !== 5 || fields.some((f) => !/^[\d*/,\-A-Za-z]+$/.test(f))) return { ok: false, error: 'A cron rhythm needs five fields, like 0 9 * * 1-5.' };
       return { ok: true, value: { kind: 'cron', expr } };
     }
   }
@@ -316,9 +316,9 @@ export function runState(run: ScheduleRun, latestOfSession: boolean, session?: {
 export const MODE_WORDS: Record<DreamMode, string> = { auto: 'Auto', approve: 'Approve', plan: 'Plan' };
 
 export const MODE_LINES: Record<DreamMode, string> = {
-  auto: 'Each suggestion is applied as soon as the dream makes it; you can revert it afterwards. New mods still stay off until you turn them on.',
-  approve: 'The dream finishes its review, then each suggestion waits for you to apply or dismiss it.',
-  plan: 'Nothing is applied: the suggestions become one plan in the dream’s session. Approve it to apply them all, or answer to change it.',
+  auto: 'Suggestions apply right away; you can revert them.',
+  approve: 'Each suggestion waits for you to apply or dismiss.',
+  plan: 'Suggestions become one plan for you to approve.',
 };
 
 const OPEN_STATES = ['waiting', 'planned'];
@@ -415,12 +415,12 @@ export function projectFooter(c: DreamProjectCard, cfg: DreamingConfig | undefin
 
 /** Two muted lines about the last dream: its own report, else what it left behind. */
 export function dreamSummary(d: Dream | undefined): string {
-  if (!d) return 'No dream yet. The next one reads its recent sessions and suggests skills, mods and memory.';
-  if (d.status === 'running') return 'Dreaming now: reading the recent sessions.';
+  if (!d) return 'No dream yet';
+  if (d.status === 'running') return 'Dreaming now…';
   if (d.status === 'failed') return `The last dream failed: ${d.error ?? 'unknown error'}`;
   if (d.summary) return d.summary;
   const shown = d.proposals.filter((p) => p.state !== 'withdrawn');
-  if (!shown.length) return d.status === 'stopped' ? 'The last dream was stopped before it suggested anything.' : 'The last dream found nothing worth suggesting.';
+  if (!shown.length) return d.status === 'stopped' ? 'The last dream was stopped.' : 'The last dream found nothing to suggest.';
   return `Suggested ${shown.map((p) => `${p.kind === 'memory' ? 'memory' : `a ${p.kind}`}: “${p.title}”`).join('; ')}.`;
 }
 

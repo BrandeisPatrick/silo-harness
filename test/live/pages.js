@@ -86,14 +86,15 @@ async function frameEval(app, part, expression) {
       chatGone: getComputedStyle(document.querySelector('.content')).display === 'none' && getComputedStyle(document.querySelector('.title-block')).display === 'none',
       banner: document.querySelector('#scheduled-banner')?.innerText,
       empty: !!document.querySelector('#scheduled-empty'),
+      emptyText: document.querySelector('#scheduled-empty .pg-empty-text')?.textContent,
       tabs: [...document.querySelectorAll('.pg-tab')].map((t) => t.textContent + ':' + t.getAttribute('aria-selected')),
       focus: document.activeElement?.id,
       landmark: document.querySelector('#page-view').getAttribute('role') + '|' + document.querySelector('#page-view').getAttribute('aria-labelledby'),
     }))()`);
     check('Scheduled opens in the main column: its title, the row selected, no session selected, the chat view gone', look.title === 'Scheduled tasks' && look.rowActive && look.noSessionActive && look.chatGone, look);
     check('a region labelled by the page heading, which has the focus', look.landmark === 'region|page-title' && look.focus === 'page-title', look);
-    check('Yours and Templates; the banner says when tasks run', look.tabs.join() === 'Yours:true,Templates:false' && /only while Silo Harness is open and your Mac is awake/.test(look.banner) && /less than a day/.test(look.banner), look);
-    check('no tasks: the empty state with New task', look.empty && (await app.exists('#task-empty-new')));
+    check('Yours and Templates; the banner says when tasks run', look.tabs.join() === 'Yours:true,Templates:false' && look.banner?.trim() === 'Tasks run only while Silo Harness is open and your Mac is awake.', look);
+    check('no tasks: the empty state with one short line and New task', look.empty && look.emptyText === 'Run a prompt on a schedule.' && (await app.exists('#task-empty-new')), look.emptyText);
     await app.screenshot(path.join(SHOTS, 'scheduled-empty-light.png'));
 
     // ---------- New task, from the form ----------
@@ -329,7 +330,7 @@ async function frameEval(app, part, expression) {
     await app.waitFor(`document.querySelector('#page-view')?.dataset.page === 'dreaming' && !!document.querySelector('.project-card')`, 10_000, 'the Dreaming page with a project card');
     const dl = await app.evaluate(`(() => ({ title: document.querySelector('#page-title').textContent, row: document.querySelector('#dreaming-row').classList.contains('active'), banner: document.querySelector('#dreaming-banner').innerText, tabs: [...document.querySelectorAll('.pg-tab')].map((t) => t.dataset.tab), cards: [...document.querySelectorAll('.project-card')].map((c) => ({ cwd: c.dataset.project, chip: c.querySelector('.pg-chip').textContent, foot: c.querySelector('.pg-card-foot').innerText.trim(), text: c.querySelector('.pg-card-text').textContent })) }))()`);
     check('Dreaming: the page, its row selected, Projects and Suggestions', dl.title === 'Dreaming' && dl.row && dl.tabs.join() === 'projects,suggestions', dl);
-    check('the banner: off until turned on, and what a dream sends', /daily dream is off/.test(dl.banner) && /sends parts of your past sessions to the model you configured/.test(dl.banner), dl.banner);
+    check('the banner: off until turned on, and what a dream sends', /daily dream is off/.test(dl.banner) && /send parts of past sessions to your model/.test(dl.banner), dl.banner);
     check('a card for the project the next dream reads: its mode, sessions to read', dl.cards.length === 1 && dl.cards[0].cwd === project && dl.cards[0].chip === 'Approve' && /^Off · \d+ sessions? to read$/.test(dl.cards[0].foot) && /^No dream yet/.test(dl.cards[0].text), dl.cards);
     await app.click('#dream-banner-on');
     await app.waitFor(`oc.getConfig().then((c) => c.dreaming.daily === true)`, 5000, 'daily on');
@@ -387,7 +388,7 @@ async function frameEval(app, part, expression) {
     check('Apply writes the skill', fs.existsSync(path.join(project, '.silo-harness/skills/release-chore/SKILL.md')));
     await app.waitFor(`document.querySelectorAll('#dream-suggestions .proposal-card').length === 1`, 5000, 'one left');
     await app.click('#dream-suggestions .proposal-card[data-kind="memory"] [data-action="dismiss"]');
-    await app.waitFor(`/Nothing waits for you/.test(document.querySelector('#dream-suggestions')?.innerText || '')`, 5000, 'nothing left');
+    await app.waitFor(`/No suggestions waiting/.test(document.querySelector('#dream-suggestions')?.innerText || '')`, 5000, 'nothing left');
     check('Dismiss: nothing written, nothing waits, the dot goes', !fs.existsSync(path.join(project, 'SILOHARNESS.md')) && (await app.evaluate(`document.querySelector('#dreaming-dot').hidden`)));
 
     const errs = app.console.filter((l) => /^\[(error|exception)\]/.test(l));

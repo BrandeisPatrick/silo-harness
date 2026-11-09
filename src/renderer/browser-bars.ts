@@ -223,11 +223,11 @@ export function createBrowserBars(o: BrowserBarsDeps) {
       o.urlIcon.setAttribute('aria-label', 'Secure connection');
     } else if (sec === 'insecure') {
       o.urlIcon.textContent = 'Not secure';
-      o.urlIcon.dataset.tip = 'This page is not sent over a secure connection';
+      o.urlIcon.dataset.tip = 'Connection is not secure';
       o.urlIcon.setAttribute('aria-label', 'Not secure');
     } else if (sec === 'proceeded') {
       o.urlIcon.innerHTML = icon('triangle-alert', 14);
-      o.urlIcon.dataset.tip = "This site's certificate is not valid; you chose to proceed";
+      o.urlIcon.dataset.tip = 'Invalid certificate, you proceeded';
       o.urlIcon.setAttribute('aria-label', 'Certificate not valid');
     } else {
       o.urlIcon.innerHTML = icon('globe', 14);

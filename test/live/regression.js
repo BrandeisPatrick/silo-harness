@@ -92,7 +92,7 @@ const { launch, checker, sleep } = require('./rig.js');
     // ---- fork ----
     const sessionsBefore = await app.count('.session-item');
     await menuItem('.session-item.active', 'Fork');
-    await app.waitFor(`[...document.querySelectorAll('.msg.system')].some((e) => /You are now in the fork/.test(e.innerText))`, 10_000, 'the fork notice');
+    await app.waitFor(`[...document.querySelectorAll('.msg.system')].some((e) => /Forked .*The original is unchanged/.test(e.innerText))`, 10_000, 'the fork notice');
     check('fork: a new session on screen with the history', (await app.count('.session-item')) === sessionsBefore + 1 && (await app.count('.msg.user')) >= 1 && /\(fork\)/.test(await app.text('.session-item.active .label')));
 
     // ---- delete (the fork) ----

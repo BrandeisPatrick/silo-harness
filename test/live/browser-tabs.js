@@ -40,7 +40,7 @@ const { check, done } = checker();
     const look = await app.evaluate(`(() => { const row = document.querySelector('.browser-tabs'); const tab = document.querySelector('.browser-tab.active'); const s = getComputedStyle(tab); return { h: row.getBoundingClientRect().height, bg: s.backgroundColor, bt: s.borderTopWidth, bb: s.borderBottomWidth, tabH: tab.getBoundingClientRect().height }; })()`);
     check('the strip is 32 px tall, the active tab 28 px, white, with a hairline above and none below', look.h === 32 && look.bt === '1px' && look.bb === '0px' && look.tabH === 28 && look.bg === 'rgb(255, 255, 255)', look);
     check('the placeholder shows for the blank tab', await app.evaluate(`!document.querySelector('.browser-placeholder').hidden`));
-    check('the one-time note about the profile is shown', d.noteShown && /profile of its own/.test(await app.text('#browser-note')), await app.text('#browser-note'));
+    check('the one-time note about the profile is shown', d.noteShown && /its own profile now/.test(await app.text('#browser-note')), await app.text('#browser-note'));
     await app.screenshotOf(path.join(shots, 'tabs-1-note.png'), '#side-pane', 0);
     await app.click('#browser-note-close');
     await sleep(200);

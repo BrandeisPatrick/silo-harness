@@ -57,11 +57,6 @@
   .empty .mark .h-icon { width: 20px; height: 20px; }
   .empty h2 { margin: 0 0 6px; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 500; color: var(--text-100); }
   .empty p { max-width: 380px; color: var(--text-400); }
-  .examples { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 420px; margin-top: 16px; }
-  .example { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-000); color: var(--text-200); text-align: left; box-shadow: var(--shadow-sm); transition: background-color 0.12s, color 0.12s, border-color 0.12s; }
-  .example:hover { background: var(--surface-hover); color: var(--text-100); border-color: var(--border); }
-  .example .h-icon { color: var(--text-400); }
-  .example span { flex: 1 1 auto; min-width: 0; }
 
   .jump { position: sticky; bottom: 8px; display: flex; justify-content: center; height: 0; overflow: visible; pointer-events: none; }
   .jump .h-btn { transform: translateY(-36px); pointer-events: auto; border-radius: 999px; }
@@ -77,15 +72,13 @@
   .send .h-icon { width: 16px; height: 16px; }
   .send.stop { background: var(--text-100); color: var(--bg-100); }
   .send.stop:hover { background: var(--text-200); }
-  .keys-hint { margin-top: 6px; text-align: center; }
-  @media (max-width: 480px) { .keys-hint .keys { display: none; } }
 </style>
 </head>
 <body>
 <header class="bar">
   <div class="wrap">
     <div class="bar-row">
-      <label class="ctx" title="Put the main conversation in front of your question (read-only)"><input type="checkbox" class="h-switch" id="ctx" checked><span>Include this session's conversation</span></label>
+      <label class="ctx"><input type="checkbox" class="h-switch" id="ctx" checked><span>Include this session's conversation</span></label>
       <button class="h-btn ghost sm" id="new" title="Clear this side conversation">New chat</button>
     </div>
     <p class="h-muted note" id="note"></p>
@@ -97,8 +90,7 @@
   <div class="wrap empty" id="empty" hidden>
     <div class="mark" id="mark"></div>
     <h2>Ask on the side</h2>
-    <p>A quick question that should not go into the session, like what a flag does or what an error means. The agent keeps working while you ask.</p>
-    <div class="examples" id="examples"></div>
+    <p>A quick question that stays out of the session.</p>
   </div>
   <div class="jump" id="jump" hidden><button class="h-btn sm" id="jump-btn">Jump to the latest</button></div>
 </main>
@@ -109,7 +101,6 @@
       <textarea id="input" rows="1" placeholder="Ask a quick question" aria-label="Your question"></textarea>
       <button class="h-btn primary send" id="send" aria-label="Send" title="Send (Enter)"></button>
     </div>
-    <p class="h-muted keys-hint">Enter sends<span class="keys">, Shift+Enter starts a new line</span>. Esc stops an answer.</p>
   </div>
 </footer>
 
@@ -126,13 +117,7 @@
     alert: svg('<circle cx="8" cy="8" r="6.25"/><path d="M8 4.75v3.75M8 11.1v.15"/>'),
     plus: svg('<path d="M8 3.25v9.5M3.25 8h9.5"/>'),
     message: svg('<path d="M3.25 3h9.5c.69 0 1.25.56 1.25 1.25v6c0 .69-.56 1.25-1.25 1.25H8.5l-3 2.5v-2.5H3.25C2.56 11.5 2 10.94 2 10.25v-6C2 3.56 2.56 3 3.25 3z"/>'),
-    ask: svg('<path d="M3.25 3h9.5c.69 0 1.25.56 1.25 1.25v6c0 .69-.56 1.25-1.25 1.25H8.5l-3 2.5v-2.5H3.25C2.56 11.5 2 10.94 2 10.25v-6C2 3.56 2.56 3 3.25 3z"/>', 'h-icon sm'),
   };
-  const EXAMPLES = [
-    'What does the last error in the main chat mean?',
-    'In two sentences, what is the agent doing right now?',
-    'What does `git commit --no-verify` skip?',
-  ];
   const SYSTEM = 'You answer a side question in a small panel next to a coding session. Answer briefly and directly, in Markdown. ' +
     'Nothing said here is added to the main conversation, and you cannot act on the project from here.';
   const MAX_STORED = 200 * 1024; // a stored value may be up to 256 KB
@@ -202,8 +187,8 @@
   function renderNote() {
     const t = sessionTitle ? `“${sessionTitle.length > 60 ? sessionTitle.slice(0, 60) + '…' : sessionTitle}”` : 'the main conversation';
     $('note').textContent = include
-      ? `The model can see ${t}. Nothing said here is added to it.`
-      : 'The model sees only this side chat. Nothing said here is added to the main conversation.';
+      ? `The model sees ${t}. Nothing here is added to it.`
+      : 'The model sees only this chat. Nothing here is added to the session.';
     $('ctx').checked = include;
   }
 
@@ -275,7 +260,7 @@
       const chip = document.createElement('span');
       chip.className = 'h-chip';
       chip.textContent = msg.interrupted ? 'Interrupted' : 'Stopped';
-      chip.title = msg.interrupted ? 'Another session came on screen before the answer finished' : 'You stopped this answer';
+      chip.title = msg.interrupted ? 'Stopped by a session switch' : 'You stopped this answer';
       info.appendChild(chip);
     }
     if (isLast && msg.usage) {
@@ -294,7 +279,7 @@
       const copy = button('Copy', ICON.copy, 'Copy this answer', async () => {
         try { await harness.ui.copy(msg.content); flash(copy, 'Copied'); } catch (e) { harness.ui.toast(e.message, { kind: 'error' }); }
       });
-      const send = button('Send to main chat', ICON.toMain, 'Put this answer in the main composer; you decide whether to send it', async () => {
+      const send = button('Send to main chat', ICON.toMain, 'Add to the main composer', async () => {
         try { await harness.composer.insert(msg.content); flash(send, 'In the composer'); } catch (e) { harness.ui.toast(e.message, { kind: 'error' }); }
       });
       actions.append(copy, send);
@@ -457,7 +442,7 @@
       if (result && typeof result.text === 'string' && result.text.length >= msg.content.length) msg.content = result.text;
       if (result && result.stopped) msg.stopped = true;
       if (result && result.usage) msg.usage = result.usage;
-      if (!msg.content) { messages.pop(); if (!(result && result.stopped)) messages.push({ role: 'error', code: 'empty', content: 'The model sent an empty answer.', hint: 'Try asking again, or rephrase the question.' }); }
+      if (!msg.content) { messages.pop(); if (!(result && result.stopped)) messages.push({ role: 'error', code: 'empty', content: 'The model sent an empty answer.', hint: 'Try again or rephrase it.' }); }
     }
     save();
     render();
@@ -521,17 +506,6 @@
   };
 
   $('mark').innerHTML = ICON.message;
-  EXAMPLES.forEach((q) => {
-    const b = document.createElement('button');
-    b.className = 'example';
-    b.innerHTML = ICON.ask;
-    const s = document.createElement('span');
-    s.textContent = q;
-    b.appendChild(s);
-    b.title = 'Put this question in the field';
-    b.onclick = () => { const t = $('input'); t.value = q; grow(); t.focus(); t.setSelectionRange(q.length, q.length); };
-    $('examples').appendChild(b);
-  });
 
   // Links in replies open in the browser and code blocks copy: harness.js does both for anything inside .h-md.
 
