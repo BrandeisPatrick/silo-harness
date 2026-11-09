@@ -33,12 +33,18 @@ function startMock() {
         }
         // As on the OpenAI-compatible path: a reply with `when(payload)` only answers requests it matches, and
         // `delayMs` holds it back (a run that stays in progress). Replies without either answer in order, at once.
+        // `chunks` streams the content as lines of its own, `chunkDelayMs` apart, before the last line.
         const at = state.replies.findIndex((r) => typeof r.when !== 'function' || r.when(payload));
         const reply = at >= 0 ? state.replies.splice(at, 1)[0] : { content: 'Done.' };
-        const message = { role: 'assistant', content: reply.content ?? '' };
-        if (reply.toolCalls) message.tool_calls = reply.toolCalls.map((c) => ({ function: { name: c.name, arguments: c.args } }));
-        const answer = () => {
+        const message = { role: 'assistant', content: reply.chunks ? '' : (reply.content ?? '') };
+        // Ollama's calls carry no id unless `ollamaToolIds` is set (as newer versions send them)
+        if (reply.toolCalls) message.tool_calls = reply.toolCalls.map((c) => ({ ...(state.ollamaToolIds && c.id ? { id: c.id } : {}), function: { name: c.name, arguments: c.args } }));
+        const answer = async () => {
           res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+          for (const piece of reply.chunks ?? []) {
+            res.write(JSON.stringify({ model: payload.model, message: { role: 'assistant', content: piece }, done: false }) + '\n');
+            await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+          }
           res.end(JSON.stringify({ model: payload.model, message, done: true, done_reason: reply.toolCalls ? 'tool_calls' : 'stop', prompt_eval_count: reply.promptTokens ?? state.ollamaPromptTokens, eval_count: 20 }) + '\n');
         };
         if (reply.delayMs) setTimeout(answer, reply.delayMs);
