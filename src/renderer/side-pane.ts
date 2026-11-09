@@ -1,17 +1,18 @@
 // The side pane next to the transcript: the Browser, Diff and Terminal tabs (the mods' tabs join them through
 // mods-host.ts), the rail that resizes it, the browser's URL bar, and the native browser view's bounds and visibility,
 // which follow the pane because the view floats above the page. The browser's bars, interstitial and downloads tray
-// are browser-bars.ts.
+// are browser-bars.ts; the find bar is browser-find.ts.
 
 import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi } from '../shared/types';
 import { createBrowserBars } from './browser-bars.js';
+import { createBrowserFind } from './browser-find.js';
 import { createBrowserPane } from './browser-pane.js';
 import { createChangesPane, mockChangesSource } from './changes.js';
 import { byId } from './dom.js';
 import type { ModPaneTabs } from './mods-host.js';
 import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { forgetFile } from './tools.js';
-import { rpc } from './rpc.js';
+import { onPush, rpc } from './rpc.js';
 
 /** A built-in tab, or a mod's tab view as 'mod:<mod key>/<view id>' (mods-host.ts makes those). */
 export type PaneTab = 'browser' | 'diff' | 'terminal' | `mod:${string}`;
@@ -64,6 +65,22 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     note: byId('browser-note'),
     noteClose: byId<HTMLButtonElement>('browser-note-close'),
     urlField: urlEl,
+    zoomChip: byId<HTMLButtonElement>('zoom-chip'),
+    popupNote: byId('browser-popup-note'),
+    popupText: byId('browser-popup-note').querySelector<HTMLElement>('.browser-popup-text')!,
+    popupShow: byId<HTMLButtonElement>('browser-popup-show'),
+    popupClose: byId<HTMLButtonElement>('browser-popup-close'),
+    showError,
+    cleanError,
+  });
+  /** Find in page: the bar under the URL bar */
+  const browserFind = createBrowserFind({
+    bar: byId('browser-find'),
+    input: byId<HTMLInputElement>('browser-find-input'),
+    count: byId('browser-find-count'),
+    prev: byId<HTMLButtonElement>('browser-find-prev'),
+    next: byId<HTMLButtonElement>('browser-find-next'),
+    close: byId<HTMLButtonElement>('browser-find-close'),
     showError,
     cleanError,
   });
@@ -388,6 +405,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   function applyBrowserState(s: BrowserState): void {
     browserTabs.applyState(s);
     browserBars.applyState(s);
+    browserFind.applyState(s);
     const blank = !s.url || s.url === 'about:blank';
     if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
     browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
@@ -398,6 +416,8 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     if (placeholder) placeholder.hidden = !blank;
   }
   browser.onState(applyBrowserState);
+  // A link from the chat opened in a new tab (Settings → Browser): the Browser tab of the pane comes forward
+  onPush('browser:show', () => showPaneTab('browser'));
   urlEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -411,7 +431,8 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   });
   urlEl.addEventListener('focus', () => urlEl.select());
   document.querySelector('.url-pill')!.addEventListener('mousedown', (e) => {
-    if (e.target !== urlEl) {
+    // The zoom chip is a button of its own; the rest of the pill puts the cursor in the field
+    if (e.target !== urlEl && !(e.target as HTMLElement).closest('#zoom-chip')) {
       e.preventDefault();
       urlEl.focus();
     }
@@ -457,7 +478,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view, where its slot is, the tabs and popups */
   function browserDebug() {
     const r = browserView.getBoundingClientRect();
-    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), safety: browserBars.debug() };
+    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), safety: browserBars.debug(), find: browserFind.debug() };
   }
 
   return {
@@ -485,10 +506,13 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     restore,
     browserDebug,
     browserFocused,
-    /** ⌘⇧N, ⌘W and ⌘L while the pane's chrome has the focus (keys inside the page itself reach the main process) */
+    /** ⌘⇧N, ⌘W, ⌘L, ⌘F, ⌘+ ⌘− ⌘0 and ⌥⌘I while the pane's chrome has the focus (keys inside the page itself reach the main process) */
     newBrowserTab: () => void browserTabs.newTab(),
     closeBrowserTab: () => void browserTabs.closeActive(),
     focusUrl: () => browserTabs.focusUrl(),
+    openFind: () => browserFind.openBar(),
+    zoomBrowser: (change: 'in' | 'out' | 'reset') => void browserTabs.zoom(change),
+    browserDevTools: () => void browserTabs.devTools(),
     /** The one-time note about the browser's profile, when it is due */
     refreshBrowserNote: () => browserTabs.refreshNote(),
     /** The debug hook: the Diff pane from memory (null: the real tracker again) */

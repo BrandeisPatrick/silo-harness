@@ -977,6 +977,38 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .ix-proceed { margin-top: 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); text-decoration: underline; text-underline-offset: 2px; }
 .ix-proceed:hover { color: var(--text-100); }
 
+/* Find in page (browser-find.ts): a row under the URL bar, its height out of the view's slot like the bars below it */
+.browser-find {
+  display: flex; align-items: center; gap: 4px; flex: none; height: 40px; padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.browser-find-icon { display: inline-flex; flex: none; padding: 0 4px; color: var(--text-400); }
+.browser-find-input {
+  flex: 1 1 auto; min-width: 60px; max-width: 320px; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-control);
+  background: var(--bg-200); color: var(--text-100); font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none;
+  transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.browser-find-input::placeholder { color: var(--text-400); }
+.browser-find-input:focus { background: var(--bg-000); border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--field-ring); }
+.browser-find-count { flex: none; min-width: 0; margin: 0 6px; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.browser-find-count:empty { display: none; }
+.browser-find .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+/* The blocked-popup strip: one line like the profile note, "A popup was blocked · Show" */
+.browser-popup-note > span { flex: none; }
+.browser-popup-note > .spacer { flex: 1; }
+.browser-popup-dot { color: var(--text-400); }
+.browser-popup-show { padding: 0 2px; border-radius: 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-100); text-decoration: underline; text-decoration-color: var(--border-subtle); text-underline-offset: 2px; }
+.browser-popup-show:hover { text-decoration-color: currentColor; }
+
+/* The zoom chip at the right of the URL pill: the page's level when it is not 100 %; a click resets it */
+.zoom-chip {
+  flex: none; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--bg-300); color: var(--text-400);
+  font-size: var(--fs-micro); line-height: var(--lh-micro); font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s;
+}
+.zoom-chip:hover { background: var(--pressed); color: var(--text-100); }
+
 /* The URL pill's mark: a grey lock (https), "Not secure" (http), the amber triangle (a certificate proceeded past) */
 .url-icon { align-items: center; color: var(--text-400); }
 .url-icon.text { padding-right: 8px; border-right: 1px solid var(--border-subtle); font-size: var(--fs-micro); line-height: var(--lh-micro); white-space: nowrap; }

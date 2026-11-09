@@ -72,12 +72,11 @@ export function browserSection(ctx: Ctx): Section {
   const dirRow = row({ id: 'browser-downloadsDir', title: 'Downloads folder', desc: '', keywords: 'downloads download save folder location files directory', field: 'browser.downloadsDir' }, actions(changeDir, resetDir));
   dirRow.descEl.classList.add('sp-path');
 
-  // The behaviour behind this switch (links in replies opening in the pane) comes with the next stage of the
-  // browser; until then the chat's links open in the default browser whatever it says.
+  // The main window's window-open handler reads it (browser/feature.ts openChatLink)
   const chatLinks = ctx.switchField({
     id: 'browser-openChatLinksInPane',
     title: 'Open links from the chat in the Browser pane',
-    desc: 'Links in replies open in the pane beside the conversation instead of your default browser.',
+    desc: 'Web links in replies open in a new tab of the pane beside the conversation instead of your default browser.',
     keywords: 'links chat replies open default browser pane safari chrome',
     field: 'browser.openChatLinksInPane',
   });

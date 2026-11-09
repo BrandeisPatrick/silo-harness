@@ -146,6 +146,7 @@
                 <span id="url-icon" class="url-icon" data-icon="globe" data-icon-size="14"></span>
                 <input id="url" class="url" spellcheck="false" autocomplete="off" placeholder="Enter a URL or search" aria-label="Address">
                 <span id="browser-title" class="browser-title"></span>
+                <button type="button" id="zoom-chip" class="zoom-chip" data-tip="Reset zoom" data-tip-kbd="⌘ 0" hidden></button>
               </div>
               <span id="browsing-pill" class="browsing-pill" role="status" hidden><span class="pulse" aria-hidden="true"></span><span>Agent is browsing</span></span>
               <button id="open-external-btn" class="icon-btn" aria-label="Open in browser" data-tip="Open in browser" data-icon="external-link"></button>
@@ -155,6 +156,22 @@
             <div id="browser-note" class="browser-note" role="status" hidden>
               <span>The browser now keeps a profile of its own. Your sign-ins came along; a few sites may ask again.</span>
               <button type="button" id="browser-note-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
+            </div>
+            <!-- Find in page (browser-find.ts) and the blocked-popup strip (browser-pane.ts): pane chrome, above the page's slot -->
+            <div id="browser-find" class="browser-find" role="search" aria-label="Find in page" hidden>
+              <span class="browser-find-icon" data-icon="search" data-icon-size="14"></span>
+              <input id="browser-find-input" class="browser-find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page" aria-label="Find in page" aria-describedby="browser-find-count">
+              <span id="browser-find-count" class="browser-find-count" aria-live="polite"></span>
+              <button type="button" id="browser-find-prev" class="icon-btn sm" aria-label="Previous match" data-tip="Previous match" data-tip-kbd="⇧ ↵" data-icon="chevron-up" data-icon-size="14"></button>
+              <button type="button" id="browser-find-next" class="icon-btn sm" aria-label="Next match" data-tip="Next match" data-tip-kbd="↵" data-icon="chevron-down" data-icon-size="14"></button>
+              <button type="button" id="browser-find-close" class="icon-btn sm" aria-label="Close find bar" data-tip="Close" data-tip-kbd="Esc" data-icon="x" data-icon-size="14"></button>
+            </div>
+            <div id="browser-popup-note" class="browser-note browser-popup-note" role="status" hidden>
+              <span class="browser-popup-text"></span>
+              <span class="browser-popup-dot" aria-hidden="true">·</span>
+              <button type="button" id="browser-popup-show" class="browser-popup-show">Show</button>
+              <span class="spacer"></span>
+              <button type="button" id="browser-popup-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
             </div>
             <!-- The permission bar and the agent's download bar (browser-bars.ts): pane chrome, never part of the page -->
             <div id="browser-bars" class="browser-bars" aria-live="polite" hidden></div>

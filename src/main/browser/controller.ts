@@ -5,19 +5,22 @@
 // begins during one is the agent's and asks), hides a tab stopped at a certificate error behind the pane's
 // interstitial, and knows which tab a popup belongs to (its permission requests and downloads are that tab's).
 
-import { app, webContents as allContents, type BrowserWindow, type WebContents, type WindowOpenHandlerResponse } from 'electron';
+import { app, clipboard, dialog, webContents as allContents, type BrowserWindow, type ContextMenuParams, type WebContents, type WindowOpenHandlerResponse } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Bounds, BrowserState, PopupState, TabState } from '../../shared/browser';
+import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from '../../shared/browser';
 import { clickTargetScript, describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, passwordFieldScript, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
 import { CREDENTIAL_REFUSAL, type ClickTarget } from './policy';
 import { PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
+// Polish: the right click, find in page and zoom per site
+import { searchUrl, showContextMenu, type ContextAction } from './context-menu';
+import { applySavedZoom, stepZoom, type ZoomChange } from './zoom';
 // Browser safety: the certificate interstitial, the agent's downloads, the permission bar's tabs
 import type { CertErrorState } from '../../shared/browser';
 import { certificateSentence, proceeded } from './certificates';
-import { startedByAgent, type ActingStamps } from './downloads';
+import { sanitizeFilename, startedByAgent, type ActingStamps } from './downloads';
 import { ownerTabId } from './permissions';
 
 export const MAX_TABS = 12;
@@ -82,9 +85,16 @@ export interface BrowserControllerOptions {
   onPopups(popups: PopupState[]): void;
   /** ⌘L inside a page: the window has the focus again and should put it in the URL bar */
   onFocusUrl?(): void;
+  /** ⌘F inside a page: the window has the focus again and should open the find bar */
+  onFindOpen?(): void;
+  /** What the find bar's search found on a tab (browser:found) */
+  onFound?(result: FindResultState): void;
   /** The window's chrome is dark (the popup cards' bars follow) */
   dark?(): boolean;
 }
+
+/** How long a Save Image As… counts as the user's download, whatever the agent did just before. */
+const USER_DOWNLOAD_MS = 10_000;
 
 export class BrowserController {
   private readonly tabs: BrowserTab[] = [];
@@ -98,6 +108,8 @@ export class BrowserController {
   /** The agent's actions running now, and when the last one ended (ms) */
   private actingCount = 0;
   private lastActEnd = 0;
+  /** Addresses the user asked to save from the context menu, and until when that counts (ms) */
+  private readonly userDownloads = new Map<string, number>();
 
   constructor(
     private readonly win: BrowserWindow,
@@ -128,7 +140,13 @@ export class BrowserController {
         this.scheduleState();
       },
       onNavigated: (t, url) => {
+        // A site whose zoom was saved gets it back (also after a relaunch)
+        applySavedZoom(t.webContents, url);
         for (const fn of tabEvents.navigated) fn(t.id, url, t.webContents.id);
+      },
+      onContextMenu: (t, params) => this.contextMenu(t, params),
+      onFound: (t, r) => {
+        if (!this.win.isDestroyed()) this.opts.onFound?.({ tabId: t.id, ...r });
       },
     });
     tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
@@ -183,6 +201,8 @@ export class BrowserController {
   activate(id: string): void {
     const tab = this.tabById(id);
     if (tab !== this.activeTab) {
+      // The find bar belongs to the tab it searched: its highlight goes with it (the window closes the bar)
+      this.activeTab.stopFind();
       this.activeTab = tab;
       this.layout();
     }
@@ -228,7 +248,155 @@ export class BrowserController {
     else if (key === 'focus-url') {
       if (!this.win.isDestroyed()) this.win.webContents.focus();
       this.opts.onFocusUrl?.();
+    } else if (key === 'find') {
+      if (!this.win.isDestroyed()) this.win.webContents.focus();
+      this.opts.onFindOpen?.();
+    } else if (key === 'zoom-in' || key === 'zoom-out' || key === 'zoom-reset') this.zoom(key === 'zoom-in' ? 'in' : key === 'zoom-out' ? 'out' : 'reset', tab);
+    else if (key === 'devtools') this.toggleDevTools(tab);
+  }
+
+  /**
+   * A link from the chat (Settings → Browser: Open links from the chat in the pane): a new tab at `url`, in front,
+   * as the user's own navigation (no agent stamp, no site card). False when the pane already holds MAX_TABS.
+   */
+  openLink(url: string): boolean {
+    try {
+      this.newTab(url);
+      return true;
+    } catch {
+      return false;
     }
+  }
+
+  // ---------- Find, zoom, the strip, DevTools, the right click (the user's, never the agent's) ----------
+
+  /** The find bar's search on the active tab: a new text, or the next (previous) match; '' stops. */
+  findInPage(text: string, forward = true): void {
+    this.activeTab.find(text, forward);
+  }
+
+  /** The find bar closed: the search stops, and with `focusPage` the page has the focus again. */
+  stopFindInPage(focusPage = false): void {
+    this.activeTab.stopFind();
+    if (focusPage && !this.wc.isDestroyed()) this.wc.focus();
+  }
+
+  /** One zoom step on a tab (the active one by default), saved for its site. Returns the level in percent. */
+  zoom(change: ZoomChange, tab: BrowserTab = this.activeTab): number {
+    const level = stepZoom(tab.webContents, change);
+    this.scheduleState();
+    return level;
+  }
+
+  /** The View menu's zoom while `wc` has the focus: true when it is a page of the browser (a tab or a popup), which then zooms. */
+  zoomContents(wc: WebContents, change: ZoomChange): boolean {
+    if (!this.tabIdOf(wc)) return false;
+    stepZoom(wc, change);
+    this.scheduleState();
+    return true;
+  }
+
+  /** The blocked-popup strip: Show opens the last refused popup's address in a new tab; both answers clear the strip. */
+  blockedPopup(tabId: string, action: 'show' | 'dismiss'): void {
+    const url = this.tabById(tabId).clearBlockedPopups();
+    if (action === 'show' && url) this.openFromPage(url, false);
+  }
+
+  /** ⌥⌘I: a tab's DevTools, in a window of their own (a view in the pane has nowhere to dock them), opened or closed. */
+  toggleDevTools(tab: BrowserTab = this.activeTab): void {
+    const wc = tab.webContents;
+    if (wc.isDestroyed()) return;
+    if (wc.isDevToolsOpened()) wc.closeDevTools();
+    else wc.openDevTools({ mode: 'detach' });
+  }
+
+  /** Whether a download of `url` beginning now is one the user asked for in the context menu (the mark is used up). */
+  userDownload(url: string, now = Date.now()): boolean {
+    for (const [u, until] of this.userDownloads) if (until < now) this.userDownloads.delete(u);
+    const mine = this.userDownloads.has(url);
+    this.userDownloads.delete(url);
+    return mine;
+  }
+
+  /** A right click on a tab's page: the native menu (context-menu.ts), whose items act on that tab. */
+  private contextMenu(tab: BrowserTab, params: ContextMenuParams): void {
+    const wc = tab.webContents;
+    if (wc.isDestroyed() || this.win.isDestroyed()) return;
+    showContextMenu(
+      params,
+      { canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() },
+      (action) => void this.contextAction(tab, action, params).catch((err: unknown) => console.warn('[browser] the context menu item failed:', err instanceof Error ? err.message : String(err))),
+      (menu) => menu.popup({ window: this.win }),
+    );
+  }
+
+  private async contextAction(tab: BrowserTab, action: ContextAction, params: { x: number; y: number }): Promise<void> {
+    const wc = tab.webContents;
+    if (wc.isDestroyed()) return;
+    switch (action.do) {
+      case 'replace':
+        return wc.replaceMisspelling(action.word);
+      case 'learn':
+        wc.session.addWordToSpellCheckerDictionary(action.word);
+        return;
+      case 'back':
+        if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+        return;
+      case 'forward':
+        if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+        return;
+      case 'reload':
+        return wc.reload();
+      case 'cut':
+        return wc.cut();
+      case 'copy':
+        return wc.copy();
+      case 'paste':
+        return wc.paste();
+      case 'pasteAndMatchStyle':
+        return wc.pasteAndMatchStyle();
+      case 'selectAll':
+        return wc.selectAll();
+      case 'openTab':
+        // In the background, as Chrome does (a ⌘-click too)
+        return this.openFromPage(action.url, true);
+      case 'copyText':
+        return clipboard.writeText(action.text);
+      case 'copyImage':
+        return wc.copyImageAt(Math.round(params.x), Math.round(params.y));
+      case 'saveImage':
+        // Saved like any download (the folder in Settings → Browser), as the user's even right after an agent's action
+        this.userDownloads.set(action.url, Date.now() + USER_DOWNLOAD_MS);
+        return wc.downloadURL(action.url);
+      case 'search':
+        return this.openFromPage(searchUrl(action.query), false);
+      case 'print':
+        wc.print({}, (ok, why) => {
+          if (!ok && why && why !== 'cancelled') console.warn('[browser] printing failed:', why);
+        });
+        return;
+      case 'savePdf':
+        return this.saveAsPdf(wc);
+      case 'inspect':
+        if (!wc.isDevToolsOpened()) wc.openDevTools({ mode: 'detach' });
+        wc.inspectElement(Math.round(params.x), Math.round(params.y));
+        return;
+    }
+  }
+
+  /** Save as PDF…: a save dialog on the window (the page's title as the name, in the Downloads folder), then the page as a PDF. */
+  private async saveAsPdf(wc: WebContents): Promise<void> {
+    let host = '';
+    try {
+      host = new URL(wc.getURL()).hostname;
+    } catch {
+      /* no host */
+    }
+    const name = sanitizeFilename(`${(wc.getTitle() || host || 'Page').slice(0, 120)}.pdf`);
+    const r = await dialog.showSaveDialog(this.win, { title: 'Save as PDF', defaultPath: path.join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (r.canceled || !r.filePath || wc.isDestroyed()) return;
+    const data = await wc.printToPDF({ printBackground: true });
+    await fs.promises.writeFile(r.filePath, data);
   }
 
   // ---------- Popups ----------

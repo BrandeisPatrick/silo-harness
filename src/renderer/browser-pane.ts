@@ -1,6 +1,8 @@
 // The Browser pane's own chrome beyond the URL bar: the tab strip (a tab per page with its favicon, title and ×, a +
-// at the end), the popups the main process reports (the cards themselves are native views laid over the pane), and
-// the one-time note that the browser now keeps a profile of its own. side-pane.ts owns the pane and calls in here.
+// at the end), the popups the main process reports (the cards themselves are native views laid over the pane), the
+// one-time note that the browser now keeps a profile of its own, the zoom chip in the URL pill ("125%", which resets
+// on click) and the strip under the URL bar when the tab's page tried to open a popup that was refused ("A popup was
+// blocked · Show"). side-pane.ts owns the pane and calls in here.
 
 import type { BrowserState, PopupState, TabState } from '../shared/browser';
 import { icon } from './icons.js';
@@ -14,8 +16,20 @@ export interface BrowserPaneDeps {
   note: HTMLElement;
   noteClose: HTMLButtonElement;
   urlField: HTMLInputElement;
+  /** The chip at the right of the URL pill */
+  zoomChip: HTMLButtonElement;
+  /** The blocked-popup strip, its words, Show and × */
+  popupNote: HTMLElement;
+  popupText: HTMLElement;
+  popupShow: HTMLButtonElement;
+  popupClose: HTMLButtonElement;
   showError(anchor: HTMLElement, message: string): void;
   cleanError(err: unknown): string;
+}
+
+/** The blocked-popup strip's words: "A popup was blocked", "3 popups were blocked". */
+export function blockedPopupWords(n: number): string {
+  return n === 1 ? 'A popup was blocked' : `${n} popups were blocked`;
 }
 
 /** The host of a page, for a tab without a title ("example.com"); the URL itself for pages without one. */
@@ -88,7 +102,43 @@ export function createBrowserPane(o: BrowserPaneDeps) {
     });
     const active = tabEls.get(s.activeId);
     if (active && o.strip.scrollWidth > o.strip.clientWidth) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    renderTabChrome(s.tabs.find((t) => t.id === s.activeId) ?? null);
   }
+
+  /** The active tab's zoom chip and blocked-popup strip. */
+  function renderTabChrome(t: TabState | null): void {
+    const zoom = t && Number.isFinite(t.zoom) ? Math.round(t.zoom) : 100;
+    o.zoomChip.hidden = zoom === 100;
+    const label = `${zoom}%`;
+    if (o.zoomChip.textContent !== label) o.zoomChip.textContent = label;
+    o.zoomChip.setAttribute('aria-label', `Zoom ${label}, reset to 100%`);
+    const blocked = t && !t.certError ? t.blockedPopups : 0;
+    o.popupNote.hidden = blocked <= 0;
+    if (blocked > 0) {
+      o.popupText.textContent = blockedPopupWords(blocked);
+      o.popupShow.hidden = !t?.blockedPopupUrl;
+      o.popupShow.dataset.tip = t?.blockedPopupUrl ?? '';
+      o.popupNote.dataset.tab = t!.id;
+    }
+  }
+
+  /** ⌘+ / ⌘− / ⌘0 with the pane focused, and the chip: one step on the active tab, kept for its site. */
+  function zoom(change: 'in' | 'out' | 'reset'): Promise<void> {
+    return act(o.zoomChip, "Couldn't zoom", () => rpc('browser.zoom', change));
+  }
+
+  /** ⌥⌘I with the pane focused: the active tab's DevTools, in a window of their own. */
+  function devTools(): Promise<void> {
+    return act(o.urlField, "Couldn't open the developer tools", () => rpc('browser.devTools'));
+  }
+
+  function popupAction(action: 'show' | 'dismiss', anchor: HTMLElement): void {
+    const id = o.popupNote.dataset.tab;
+    if (id) void act(anchor, action === 'show' ? "Couldn't open the popup" : "Couldn't dismiss it", () => rpc('browser.blockedPopup', id, action));
+  }
+  o.zoomChip.addEventListener('click', () => void zoom('reset'));
+  o.popupShow.addEventListener('click', () => popupAction('show', o.popupShow));
+  o.popupClose.addEventListener('click', () => popupAction('dismiss', o.popupClose));
 
   function applyState(s: BrowserState): void {
     state = s;
@@ -212,14 +262,18 @@ export function createBrowserPane(o: BrowserPaneDeps) {
     activate,
     focusUrl,
     refreshNote,
+    zoom,
+    devTools,
     popups: () => popups.map((p) => ({ ...p, bounds: { ...p.bounds } })),
     /** For the live checks: the tabs as drawn and the popups as last reported */
     debug: () => ({
-      tabs: (state?.tabs ?? []).map((t) => ({ id: t.id, url: t.url, title: t.title, loading: t.loading, favicon: Boolean(t.favicon), blockedPopups: t.blockedPopups })),
+      tabs: (state?.tabs ?? []).map((t) => ({ id: t.id, url: t.url, title: t.title, loading: t.loading, favicon: Boolean(t.favicon), blockedPopups: t.blockedPopups, blockedPopupUrl: t.blockedPopupUrl, zoom: t.zoom })),
       activeId: state?.activeId ?? '',
       drawn: [...o.strip.querySelectorAll<HTMLElement>('.browser-tab')].map((el) => ({ id: el.dataset.id, title: el.querySelector('.browser-tab-title')?.textContent ?? '', active: el.classList.contains('active') })),
       popups: popups.map((p) => ({ id: p.id, tabId: p.tabId, title: p.title, url: p.url, bounds: { ...p.bounds } })),
       noteShown: !o.note.hidden,
+      zoomChip: o.zoomChip.hidden ? null : o.zoomChip.textContent ?? '',
+      popupNote: o.popupNote.hidden ? null : { text: o.popupNote.innerText.replace(/\s+/g, ' ').trim(), show: !o.popupShow.hidden, height: o.popupNote.getBoundingClientRect().height },
     }),
   };
 }

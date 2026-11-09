@@ -224,7 +224,7 @@ export class PopupManager {
         return { action: 'deny' };
       }
       if (decision === 'deny') {
-        if (!/^\s*javascript:/i.test(details.url)) tab.blockedPopup();
+        if (!/^\s*javascript:/i.test(details.url)) tab.blockedPopup(details.url);
         return { action: 'deny' };
       }
       const size = requestedSize(details.features);

@@ -1,15 +1,50 @@
 // One tab of the Browser pane: its WebContentsView in the browser's own profile, the listeners that keep its
-// TabState current (title, url, loading, history, favicon, the page's security), the safety prelude started on every
-// page, the pane's shortcuts pressed inside the page (⌘⇧N, ⌘W, ⌘L), which the window never sees, and the certificate
-// error its page stopped at (certificates.ts), which the pane covers with the interstitial.
+// TabState current (title, url, loading, history, favicon, the page's security and zoom), the safety prelude started
+// on every page, the pane's shortcuts pressed inside the page (⌘⇧N, ⌘W, ⌘L, ⌘F, ⌘+ ⌘− ⌘0, ⌥⌘I), which the window
+// never sees, the find bar's search (find.ts), the right click (context-menu.ts), and the certificate error its page
+// stopped at (certificates.ts), which the pane covers with the interstitial.
 
-import { WebContentsView, type WebContents } from 'electron';
-import type { CertErrorState, TabState } from '../../shared/browser';
+import { WebContentsView, type ContextMenuParams, type WebContents } from 'electron';
+import type { CertErrorState, FindResultState, TabState } from '../../shared/browser';
 import { pageSecurity } from './certificates';
+import { PageFinder } from './find';
 import { inSafetyWorld, SAFETY_WORLD } from './safety';
 import { browserSession, BROWSER_PARTITION, cleanUserAgent } from './session';
+import { zoomOf } from './zoom';
 
-export type TabShortcut = 'new-tab' | 'close-tab' | 'focus-url';
+export type TabShortcut = 'new-tab' | 'close-tab' | 'focus-url' | 'find' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'devtools';
+
+/** The parts of a key press (Electron's Input) the shortcuts read. */
+export interface ShortcutInput {
+  type: string;
+  key: string;
+  code?: string;
+  meta: boolean;
+  control: boolean;
+  shift: boolean;
+  alt: boolean;
+  isAutoRepeat: boolean;
+}
+
+/**
+ * The pane's shortcut a key pressed inside a page stands for, or null (the page gets it): ⌘⇧N new tab, ⌘W close it,
+ * ⌘L the URL bar, ⌘F find, ⌘+ (⌘= too) and ⌘− zoom, ⌘0 back to 100 %, ⌥⌘I DevTools. ⌘ is Control away from the Mac,
+ * so Control+N and friends keep their text-editing meaning there. A held key repeats only the zoom.
+ */
+export function shortcutOf(input: ShortcutInput, platform: string = process.platform): TabShortcut | null {
+  if (input.type !== 'keyDown') return null;
+  const mod = platform === 'darwin' ? input.meta : input.control;
+  if (!mod) return null;
+  const key = String(input.key ?? '').toLowerCase();
+  if (input.alt) return !input.shift && !input.isAutoRepeat && (input.code === 'KeyI' || key === 'i') ? 'devtools' : null;
+  if (key === '=' || key === '+') return 'zoom-in';
+  if (key === '-' || key === '_') return 'zoom-out';
+  if (input.isAutoRepeat) return null;
+  if (key === '0' && !input.shift) return 'zoom-reset';
+  if (key === 'n' && input.shift) return 'new-tab';
+  if (input.shift) return null;
+  return key === 'w' ? 'close-tab' : key === 'l' ? 'focus-url' : key === 'f' ? 'find' : null;
+}
 
 export interface TabHooks {
   /** Something the state carries changed */
@@ -20,6 +55,10 @@ export interface TabHooks {
   onCertError?(tab: BrowserTab): void;
   /** A new page committed in the main frame (the permission bar's "this time" answers end when the site changes) */
   onNavigated?(tab: BrowserTab, url: string): void;
+  /** The page was right-clicked */
+  onContextMenu?(tab: BrowserTab, params: ContextMenuParams): void;
+  /** The find bar's search found something, or stopped */
+  onFound?(tab: BrowserTab, result: Omit<FindResultState, 'tabId'>): void;
 }
 
 /** The events after which the state is read again. */
@@ -64,9 +103,12 @@ export class BrowserTab {
   favicon: string | null = null;
   /** Popups refused since the last navigation (a fourth while three are open) */
   blockedPopups = 0;
+  /** The address the last refused popup wanted, until the next navigation */
+  blockedPopupUrl: string | null = null;
   /** The certificate error the main frame stopped at (the interstitial shows), until the tab navigates on */
   certError: CertErrorState | null = null;
   private disposed = false;
+  private readonly finder: PageFinder;
 
   constructor(private readonly hooks: TabHooks) {
     this.view = new WebContentsView({
@@ -74,10 +116,15 @@ export class BrowserTab {
     });
     const wc = this.view.webContents;
     wc.setUserAgent(cleanUserAgent(wc.getUserAgent()));
-    // A new page starts with no icon and a clean popup count; the generic listeners below then report the state.
+    this.finder = new PageFinder(wc, (r) => {
+      if (!this.disposed) this.hooks.onFound?.(this, r);
+    });
+    // A new page starts with no icon, a clean popup count and no search; the generic listeners below then report the state.
     wc.on('did-navigate', () => {
       this.favicon = null;
       this.blockedPopups = 0;
+      this.blockedPopupUrl = null;
+      if (this.finder.stop() && !this.disposed) this.hooks.onFound?.(this, { text: '', matches: 0, active: 0, final: true });
     });
     for (const ev of STATE_EVENTS) wc.on(ev as 'did-navigate', () => this.changed());
     wc.on('page-favicon-updated', (_e, favicons) => void this.loadFavicon(favicons));
@@ -85,13 +132,27 @@ export class BrowserTab {
     // Start watching each page's credential fields as soon as it is there (see pagePrelude in safety.ts)
     wc.on('dom-ready', () => void wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: inSafetyWorld('return true;') }]).catch(() => undefined));
     wc.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown' || input.isAutoRepeat || input.alt || !(input.meta || input.control)) return;
-      const key = input.key.toLowerCase();
-      const action: TabShortcut | null = key === 'n' && input.shift ? 'new-tab' : key === 'w' && !input.shift ? 'close-tab' : key === 'l' && !input.shift ? 'focus-url' : null;
+      const action = shortcutOf(input);
       if (!action) return;
+      // Taken here, the key reaches neither the page nor the app's menu (whose zoom would act a second time)
       event.preventDefault();
       this.hooks.onShortcut(this, action);
     });
+    // ⌘ and the scroll wheel (or a pinch with ⌘) asks for a zoom, which Electron leaves to the app: a step, like ⌘+ / ⌘−
+    wc.on('zoom-changed', (_e, direction) => this.hooks.onShortcut(this, direction === 'in' ? 'zoom-in' : 'zoom-out'));
+    wc.on('context-menu', (_e, params) => {
+      if (!this.disposed) this.hooks.onContextMenu?.(this, params);
+    });
+  }
+
+  /** The find bar's search on this page: a new text, or the next (previous) match of the same one; '' stops it. */
+  find(text: string, forward = true): void {
+    if (!this.disposed) this.finder.find(text, forward);
+  }
+
+  /** The search ends and its highlight goes (the bar closed, the tab went to the background). */
+  stopFind(): void {
+    this.finder.stop();
   }
 
   get webContents(): WebContents {
@@ -138,16 +199,26 @@ export class BrowserTab {
     this.changed();
   }
 
-  /** A popup of this tab was refused: counted until the next navigation. */
-  blockedPopup(): void {
+  /** A popup of this tab was refused: counted (and its address kept for the strip's Show) until the next navigation. */
+  blockedPopup(url?: string): void {
     this.blockedPopups++;
+    if (url && !/^\s*javascript:/i.test(url)) this.blockedPopupUrl = url;
     this.changed();
+  }
+
+  /** The strip's Show or ×: the count and the address go. Returns the address there was. */
+  clearBlockedPopups(): string | null {
+    const url = this.blockedPopupUrl;
+    this.blockedPopups = 0;
+    this.blockedPopupUrl = null;
+    this.changed();
+    return url;
   }
 
   state(): TabState {
     const wc = this.view.webContents;
     if (this.disposed || wc.isDestroyed()) {
-      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups, certError: null, security: 'none' };
+      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups, blockedPopupUrl: null, certError: null, security: 'none', zoom: 100 };
     }
     const url = wc.getURL();
     return {
@@ -159,8 +230,10 @@ export class BrowserTab {
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       blockedPopups: this.blockedPopups,
+      blockedPopupUrl: this.blockedPopupUrl,
       certError: this.certError ? { ...this.certError } : null,
       security: this.certError ? 'none' : pageSecurity(url),
+      zoom: zoomOf(wc),
     };
   }
 

@@ -2,14 +2,14 @@
 // Features never edit this file; they get `app` in their setup function (see docs/architecture.md).
 // First: carry over the folders of the app's older names, before any other module reads them.
 import './carry-over';
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, webContents } from 'electron';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
 import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
 import { loadConfig, saveConfig } from './config';
-import { BrowserController, browserSession, setupBrowser } from './browser';
+import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
 import { TerminalManager } from './terminal';
 import { createApp, type AppHost } from './app';
 import { registerCoreIpc } from './ipc';
@@ -89,8 +89,9 @@ function createWindow(): void {
       backgroundThrottling: !LIVE_TEST,
     },
   });
+  // A link in the chat: the default browser, or a tab of the pane when Settings → Browser says so (browser/feature.ts)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openChatLink(host!, browser, url);
     return { action: 'deny' };
   });
   win.webContents.on('console-message', (event) => {
@@ -109,6 +110,8 @@ function createWindow(): void {
     },
     onPopups: (popups) => a.push('browser:popups', popups),
     onFocusUrl: () => a.push('browser:focus-url', null),
+    onFindOpen: () => a.push('browser:find-open', null),
+    onFound: (result) => a.push('browser:found', result),
     dark: darkChrome,
   });
   const servers = a.mcp;
@@ -225,7 +228,21 @@ function buildMenu(): void {
       { role: 'appMenu' },
       { role: 'fileMenu' },
       { role: 'editMenu' },
-      { role: 'viewMenu' },
+      // The View menu's own items, but zoom of our own: a role zooms whichever page has the focus, the Browser pane's
+      // included, with steps of its own and nothing kept. A page of the browser zooms as ⌘+ in it does (per site);
+      // the app's window zooms as before.
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          ...zoomMenuItems((wc, change) => browser?.zoomContents(wc, change) ?? false, () => webContents.getFocusedWebContents() ?? win?.webContents ?? null),
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+        ],
+      },
       { role: 'windowMenu' },
     ]),
   );

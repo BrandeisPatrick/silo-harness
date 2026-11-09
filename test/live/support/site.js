@@ -80,6 +80,27 @@ function pages(other) {
     // maps it to 127.0.0.1) so that it is not an exempt host: the redirect to the second port by that name, and a
     // shop whose "Pay now" marks the page paid.
     '/redirect-named.html': { status: 302, location: `${other.replace('//127.0.0.1:', '//fixture.example:')}/other.html` },
+    // For the polish (browser-polish.js): a word three times for find in page, and a text field that hands the focus
+    // on to the password field whenever it has it (browser_type's click on it ends in the password field, where it must
+    // type nothing). Checked every 20 ms rather than on focus: a hidden window takes no clicks and fires no focus
+    // events, so the test gives the field the focus from the page.
+    '/find.html': page(
+      'Find',
+      `<h1>Find in page</h1>
+<p>A kumquat is a small citrus fruit.</p>
+<p>The rind of the kumquat is sweet, the flesh sour.</p>
+<p>Eat a kumquat whole.</p>
+<p><a id="away" href="/landing.html">Somewhere else</a></p>`,
+    ),
+    '/focus-move.html': page(
+      'Profile',
+      `<h1>Your profile</h1>
+<form onsubmit="return false">
+  <p><label>Nickname <input id="nick" type="text"></label></p>
+  <p><label>Password <input id="pw" type="password" autocomplete="current-password"></label></p>
+</form>
+<script>setInterval(() => { if (document.activeElement === document.getElementById('nick')) document.getElementById('pw').focus(); }, 20);</script>`,
+    ),
     '/shop.html': page(
       'Shop',
       `<h1>Shop</h1>

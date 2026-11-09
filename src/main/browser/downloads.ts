@@ -139,6 +139,8 @@ export interface DownloadHost {
   defaultDir(): string;
   /** The controller's stamps (null without a window: nothing is the agent's) */
   stamps(): ActingStamps | null;
+  /** The user asked for this address from the context menu (Save Image As…): theirs, whatever the stamps say */
+  userStarted?(url: string): boolean;
   /** The tab a download's contents belong to (a popup's: the tab that opened it) */
   tabOf(wc: WebContents | null): string | null;
   onChange(list: DownloadState[]): void;
@@ -195,7 +197,8 @@ export class DownloadManager {
     const url = item.getURL();
     const filename = sanitizeFilename(item.getFilename());
     const stamps = this.host.stamps();
-    const byAgent = stamps ? startedByAgent(stamps, Date.now()) : false;
+    const asked = [url, ...(typeof item.getURLChain === 'function' ? item.getURLChain().slice(0, 1) : [])].some((u) => this.host.userStarted?.(u));
+    const byAgent = stamps && !asked ? startedByAgent(stamps, Date.now()) : false;
     let tabId: string | null = null;
     try {
       tabId = this.host.tabOf(wc);

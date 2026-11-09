@@ -1,14 +1,16 @@
 // Feature: the Browser pane's main-process side beyond the controller. Sets the browser's own session up at launch
 // (session.ts), answers the window's browser.* RPC methods (tabs, popups, the one-time profile note, Clear browsing
-// data, the user's own navigation) and clears the profile at quit when Keep cookies is off. The browser's safety is
-// wired here too: the permission bar's requests and answers (permissions.ts), the certificate interstitial
-// (certificates.ts), the downloads with their tray and the agent's download bar (downloads.ts), and what Settings →
-// Browser reads. Every answer comes from the window's RPC; no tool reaches any of it.
+// data, the user's own navigation, find in page, zoom, the blocked-popup strip, DevTools) and clears the profile at
+// quit when Keep cookies is off. The browser's safety is wired here too: the permission bar's requests and answers
+// (permissions.ts), the certificate interstitial (certificates.ts), the downloads with their tray and the agent's
+// download bar (downloads.ts), and what Settings → Browser reads. Every answer comes from the window's RPC; no tool
+// reaches any of it. openChatLink is the main window's: a link clicked in the chat opens in the pane when Settings →
+// Browser says so.
 
 import { app as electronApp, dialog, shell } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
-import type { BrowserListField, DownloadAction, PermissionAnswer } from '../../shared/browser';
+import type { BrowserConfig, BrowserListField, DownloadAction, PermissionAnswer } from '../../shared/browser';
 import type { App } from '../app';
 import { settingsLayer } from '../settings';
 import { installCertificateHandler } from './certificates';
@@ -21,6 +23,34 @@ import { browserSession, clearBrowsingData, clearPrivateData, dismissProfileNote
 const ANSWERS: PermissionAnswer[] = ['once', 'always', 'deny'];
 const DOWNLOAD_ACTIONS: DownloadAction[] = ['open', 'show', 'cancel', 'clear', 'allow', 'deny'];
 const LISTS: BrowserListField[] = ['alwaysAllowed', 'sensitive', 'exempt'];
+const ZOOMS = ['in', 'out', 'reset'] as const;
+
+/**
+ * Where a link clicked in the chat goes: the Browser pane when Settings → Browser says so and it is a web page (http
+ * or https), else the default browser (and any other scheme, mailto: included, to the app the Mac has for it).
+ */
+export function chatLinkTarget(url: string, browser: Pick<BrowserConfig, 'openChatLinksInPane'> | undefined): 'pane' | 'external' {
+  if (browser?.openChatLinksInPane !== true) return 'external';
+  try {
+    const u = new URL(String(url ?? ''));
+    return u.protocol === 'http:' || u.protocol === 'https:' ? 'pane' : 'external';
+  } catch {
+    return 'external';
+  }
+}
+
+/**
+ * A link clicked in the chat (the main window's window-open handler): in a new tab of the pane, brought forward, as
+ * the user's own navigation (no agent stamp, no site card: the cards are for the agent's calls), when chatLinkTarget
+ * says so and the pane has room; otherwise the default browser, as before.
+ */
+export function openChatLink(app: App, controller: BrowserController | null, url: string): void {
+  if (chatLinkTarget(url, app.config().browser) === 'pane' && controller?.openLink(url)) {
+    app.push('browser:show', null);
+    return;
+  }
+  void shell.openExternal(url).catch((err: unknown) => console.warn('[browser] could not open a link:', err instanceof Error ? err.message : String(err)));
+}
 
 /** `list` with `value` added (once, whatever its case) or removed. */
 export function editedList(list: readonly string[], op: 'add' | 'remove', value: string): string[] {
@@ -61,6 +91,7 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     dir: () => downloadsDir(app.config().browser?.downloadsDir, electronApp.getPath('downloads')),
     defaultDir: () => electronApp.getPath('downloads'),
     stamps: () => controller()?.stamps() ?? null,
+    userStarted: (url) => controller()?.userDownload(url) ?? false,
     tabOf: (wc) => controller()?.tabIdOf(wc) ?? null,
     onChange: (list) => app.push('browser:downloads', list),
     openPath: (p) => shell.openPath(p),
@@ -86,6 +117,19 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
   });
   app.rpc.handle('browser.profileNote', () => profileNoteDue(app.userData));
   app.rpc.handle('browser.dismissProfileNote', () => dismissProfileNote(app.userData));
+
+  // ---------- Find, zoom, the blocked-popup strip, DevTools ----------
+  app.rpc.handle('browser.find', (text, opts) => need().findInPage(String(text ?? ''), opts?.forward !== false));
+  app.rpc.handle('browser.stopFind', (opts) => need().stopFindInPage(opts?.focusPage === true));
+  app.rpc.handle('browser.zoom', (change) => {
+    if (!ZOOMS.includes(change)) throw new Error(`Unknown zoom ${String(change)}`);
+    return need().zoom(change);
+  });
+  app.rpc.handle('browser.blockedPopup', (tabId, action) => {
+    if (action !== 'show' && action !== 'dismiss') throw new Error(`Unknown action ${String(action)}`);
+    need().blockedPopup(String(tabId), action);
+  });
+  app.rpc.handle('browser.devTools', () => need().toggleDevTools());
 
   // ---------- Browser safety ----------
   app.rpc.handle('browser.permissions', () => permissions.pending());

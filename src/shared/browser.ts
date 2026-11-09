@@ -46,9 +46,25 @@ export interface TabState {
   canGoForward: boolean;
   /** Popups this tab asked for that were refused since its last navigation (a fourth one while three are open) */
   blockedPopups: number;
+  /** The address the last refused popup wanted (the strip's Show opens it in a tab), or null */
+  blockedPopupUrl: string | null;
   /** The certificate error the tab is stopped at, or null */
   certError: CertErrorState | null;
   security: PageSecurity;
+  /** The page's zoom in percent (100: none; the URL pill shows a chip otherwise) */
+  zoom: number;
+}
+
+/** What a search in the find bar found on a tab (pushed as browser:found). */
+export interface FindResultState {
+  tabId: string;
+  /** The text searched for; '' when the search was stopped (a new page, an empty field) */
+  text: string;
+  matches: number;
+  /** The highlighted match, from 1; 0 when none */
+  active: number;
+  /** Chromium's last update for this search */
+  final: boolean;
 }
 
 /**
@@ -186,6 +202,18 @@ export interface BrowserRpc {
    */
   'browser.go': (target: string) => string;
 
+  // ---------- Find, zoom, popups, DevTools (the pane's chrome) ----------
+  /** The find bar's text changed (a new search), or Enter (forward) / ⇧Enter (backward) on the same text; '' stops */
+  'browser.find': (text: string, opts?: { forward?: boolean }) => void;
+  /** The find bar closed: the search stops and its highlight goes; `focusPage` gives the page the focus back */
+  'browser.stopFind': (opts?: { focusPage?: boolean }) => void;
+  /** ⌘+ / ⌘− / ⌘0 or the chip: one step on the active tab, kept for its site. Returns the level in percent */
+  'browser.zoom': (change: 'in' | 'out' | 'reset') => number;
+  /** The blocked-popup strip: Show opens the last refused popup in a new tab; dismiss hides the strip. Both clear the count */
+  'browser.blockedPopup': (tabId: string, action: 'show' | 'dismiss') => void;
+  /** ⌥⌘I with the pane focused: the active tab's DevTools, detached, opened or closed */
+  'browser.devTools': () => void;
+
   // ---------- Permissions (the bar under the URL bar) ----------
   /** The requests waiting for an answer, every tab's (the bar shows the active tab's first) */
   'browser.permissions': () => PermissionRequestState[];
@@ -224,6 +252,12 @@ export interface BrowserEvents {
   'browser:popups': PopupState[];
   /** ⌘L inside a page: the window should focus the URL bar */
   'browser:focus-url': null;
+  /** ⌘F inside a page: the window should open the find bar and focus its field */
+  'browser:find-open': null;
+  /** What a search in the find bar found (or that it stopped, text '') */
+  'browser:found': FindResultState;
+  /** A link from the chat opened in a new tab: the window should bring the pane's Browser tab forward */
+  'browser:show': null;
   /** The permission requests waiting for an answer changed */
   'browser:permissions': PermissionRequestState[];
   /** The downloads changed (a new one, progress, done, cleared) */
