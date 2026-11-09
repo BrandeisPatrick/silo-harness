@@ -3,6 +3,7 @@ import {
   actionLine,
   actionOf,
   clickRule,
+  CREDENTIAL_REFUSAL,
   isExempt,
   keyRule,
   navigationRule,
@@ -323,8 +324,16 @@ const tools: Tool[] = [
     },
     run: async (args, ctx) => {
       const ref = args.ref ? String(args.ref) : args.field ? await ctx.browser.findRef(String(args.field), 'field') : undefined;
-      const r = await ctx.browser.type(ref, String(args.text), Boolean(args.submit), args.clear !== false);
-      return r.secret ? { content: r.content, hiddenArgs: { ...args, text: MASK } } : { content: r.content };
+      // The controller asks the page again after its own click (a click can move the focus into a password field)
+      const allowSecret = isExempt(activeUrl(ctx), lists(ctx).exempt, ctx.cwd);
+      try {
+        const r = await ctx.browser.type(ref, String(args.text), Boolean(args.submit), args.clear !== false, { allowSecret });
+        return r.secret ? { content: r.content, hiddenArgs: { ...args, text: MASK } } : { content: r.content };
+      } catch (err) {
+        // Nothing was typed; the text was meant for a credential field after all, so the stored call hides it too
+        if (err instanceof Error && err.message === CREDENTIAL_REFUSAL) return { content: CREDENTIAL_REFUSAL, hiddenArgs: { ...args, text: MASK } };
+        throw err;
+      }
     },
   },
   {

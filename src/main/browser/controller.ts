@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState, PopupState, TabState } from '../../shared/browser';
 import { clickTargetScript, describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, passwordFieldScript, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
-import type { ClickTarget } from './policy';
+import { CREDENTIAL_REFUSAL, type ClickTarget } from './policy';
 import { PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
@@ -571,12 +571,17 @@ export class BrowserController {
     });
   }
 
-  /** Types `text` into the field; `secret`: it was a credential field, so the result leaves the text out. */
-  type(ref: string | undefined, text: string, submit = false, clear = true): Promise<{ content: string; secret: boolean }> {
-    return this.stamp(() => this.typeNow(ref, text, submit, clear));
+  /**
+   * Types `text` into the field; `secret`: it was a credential field, so the result leaves the text out. The field is
+   * asked again after the click, since a page can move the focus on a click (a text field whose handler focuses the
+   * password field): a credential field then gets nothing and the call throws CREDENTIAL_REFUSAL, unless `allowSecret`
+   * (an exempt host: the user's own app under development).
+   */
+  type(ref: string | undefined, text: string, submit = false, clear = true, opts: { allowSecret?: boolean } = {}): Promise<{ content: string; secret: boolean }> {
+    return this.stamp(() => this.typeNow(ref, text, submit, clear, opts.allowSecret === true));
   }
 
-  private async typeNow(ref: string | undefined, text: string, submit: boolean, clear: boolean): Promise<{ content: string; secret: boolean }> {
+  private async typeNow(ref: string | undefined, text: string, submit: boolean, clear: boolean, allowSecret: boolean): Promise<{ content: string; secret: boolean }> {
     const before = this.state();
     let what = { role: 'the focused element', name: '' };
     if (ref) {
@@ -586,10 +591,12 @@ export class BrowserController {
       this.wc.focus();
       this.clickAt(pt.x, pt.y);
       await sleep(120);
-      if (clear) await this.wc.executeJavaScript(SELECT_ALL_SCRIPT, true);
     }
-    // A credential field's text is never echoed: the result says how much was typed, not what.
+    // Where the focus is now decides, before a key reaches the page. A credential field's text is never echoed: the
+    // result says how much was typed, not what.
     const secret = await this.targetKind(ref, true);
+    if (secret && !allowSecret) throw new Error(CREDENTIAL_REFUSAL);
+    if (ref && clear) await this.wc.executeJavaScript(SELECT_ALL_SCRIPT, true);
     await this.wc.insertText(text);
     if (submit) {
       await sleep(100);
