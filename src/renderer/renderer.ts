@@ -4134,7 +4134,7 @@ window.__oc_debug = {
 
 // [feature:mods]
 // The mod host: the rail, mod tabs, the composer strip, backgrounds, injected styles and the bridge (mods-host.ts).
-paneMods = createModsHost({
+const modsHost = createModsHost({
   currentSessionId: () => currentSessionId,
   sessions: () => sessions,
   config: () => config,
@@ -4151,7 +4151,8 @@ paneMods = createModsHost({
   paneLayoutChanged,
   syncBrowserView,
   browserDebug: () => ({ ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: (() => { const r = browserView.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })(), tab: paneTab, paneVisible, dialog: dialogOpen() }),
-}).pane;
+});
+paneMods = modsHost.pane;
 
 // [feature:pages]
 // Scheduled tasks and Dreaming: pages in the main column (pages.ts), each a list and a page per task or project.
@@ -4246,6 +4247,8 @@ const settingsPage = createSettingsPage({
   openSession: (id) => void openFromPage(id),
   openPage: (target) => (target === 'scheduled:new' ? openTaskForm() : openPage({ page: target })),
   sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
+  fillComposer: (text) => fillComposer(text),
+  modPreviews: () => modsHost.previews,
   beforeOpen: () => {
     if (confirmDialog.open) return false;
     closeMenu();
@@ -4259,7 +4262,7 @@ const settingsPage = createSettingsPage({
  * Opens Settings at the section last open, or at `section`: a section id ("mods"), a section and a tab ("mods" with
  * { tab: 'backgrounds' }, or "mods:backgrounds"), or the id of a field on the page ("ollama-baseURL", "mcp-section").
  */
-function openSettings(section?: string, opts?: { tab?: string }): void {
+function openSettings(section?: string, opts?: { tab?: string; preview?: string }): void {
   // Scheduled and Dreaming were sections of Settings; they are pages now
   if (section === 'scheduled' || section === 'dreaming') return openPage({ page: section });
   settingsPage.open(typeof section === 'string' ? section : undefined, opts && typeof opts === 'object' ? opts : undefined);
@@ -4455,6 +4458,17 @@ const SUGGESTIONS = [
   'Find the failing tests, fix them, and run the suite again',
   'Open https://example.com in the browser and summarise the page',
 ];
+/** Puts `text` in the composer, replacing what was there, with the caret at its end (Ask the agent… in Settings). */
+function fillComposer(text: string): void {
+  mentionPicker.close();
+  // A draft stays: the prompt goes on a line of its own after it
+  if (inputEl.value.trim()) text = `${inputEl.value.replace(/\s+$/, '')}\n${text}`;
+  inputEl.value = text;
+  autosize();
+  updateSendButton();
+  inputEl.focus();
+  inputEl.setSelectionRange(text.length, text.length);
+}
 const suggestionsEl = $('empty-suggestions');
 suggestionsEl.innerHTML = SUGGESTIONS.map((s) => `<button type="button" class="suggestion">${escapeHtml(s)}</button>`).join('');
 suggestionsEl.querySelectorAll<HTMLButtonElement>('.suggestion').forEach((b, i) => {

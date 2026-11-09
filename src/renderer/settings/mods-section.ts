@@ -1,54 +1,45 @@
-// Settings → Mods: a tab strip (Mods, Backgrounds, Chat bar, Conversation, Themes), each tab's picker at the top
-// (the background, the chat bar look, the conversation look in use, or the themes in the order they apply), then
-// install, create and reload, and the list (Built-in / Yours / This project) of the tab's kind of mod with each mod's
-// switch, what it asks for, what it adds, its problems and its own settings. A mod of several kinds is one card,
-// shown in each of its tabs; while searching, every card and every tab's rows are searched. Follows mods:changed live.
+// Settings → Mods: a tab strip (Mods, Background, Chat bar, Conversation, Theme). The Mods tab lists the mods that
+// add something (panels, side-pane tabs, composer strips, workers, slash commands), Built-in / Yours / This project,
+// each with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, install,
+// create and reload. The other four are the looks (look-tab.ts): no switches, a preview of what is in use or of the
+// version tried, Use, and every version as a card. While searching, every card and every tab's rows are searched.
+// Follows mods:changed live.
 
-import type { ModInfo, ModLayout, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
-import { basename, escapeHtml, h } from '../dom.js';
+import type { LookKind, ModInfo, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
+import { escapeHtml, h } from '../dom.js';
 import { icon, isIconName } from '../icons.js';
 import { onPush } from '../rpc.js';
 import {
-  backgroundChoices,
-  currentLookSet,
   deriveModId,
   grantSheet,
+  isLookOnly,
   isModTab,
-  lookChoices,
-  lookSetPatch,
-  lookSets,
+  LOOK_TABS,
   LOOK_WORDS,
+  lookSets,
+  lookTabOf,
   MOD_GROUPS,
   MOD_TABS,
   modChip,
   modIconFile,
   modTabs,
-  offModsOfTab,
   parseInteger,
   permissionWords,
-  refMod,
   SEAT_WORDS,
-  themeMods,
   validModId,
   type ModTab,
   type NewModKind,
 } from './model.js';
+import { lookTab, type LookTab } from './look-tab.js';
 import { actions, button, chip, group, note, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
-const NEW_LABEL: Record<ModTab, string> = { mods: 'New mod…', backgrounds: 'New background…', 'chat-bar': 'New chat bar look…', conversation: 'New conversation look…', themes: 'New theme…' };
-const EMPTY_WORDS: Record<ModTab, string> = {
-  mods: 'None yet. Install one, make one with New mod…, or ask the agent to build one.',
-  backgrounds: 'No backgrounds of yours yet. Install one, make one with New background…, or ask the agent to build one.',
-  'chat-bar': 'No chat bar looks of yours yet. Install one, make one with New chat bar look…, or ask the agent to build one.',
-  conversation: 'No conversation looks of yours yet. Install one, make one with New conversation look…, or ask the agent to build one.',
-  themes: 'No themes of yours yet. Install one, make one with New theme…, or ask the agent to build one.',
-};
+const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look', theme: 'New theme' };
 const safeKey = (key: string) => key.replace(/[^a-z0-9-]+/gi, '_');
 
 export function modsSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('Mods'));
-  el.append(note('Mods add panels, tabs, looks, styles and commands to Silo Harness. Built-in mods are on, except the ones that restyle the app; mods of yours and of a project stay off until you turn them on. Backgrounds, chat bar looks, conversation looks and themes have tabs of their own, where you pick the one in use.', 'sp-intro'));
+  el.append(note('Mods add panels, tabs and commands to Silo Harness, and looks: a background, a chat bar, a conversation, a theme. Built-in mods are on; mods of yours and of a project stay off until you turn them on. Looks have no switch: each has a tab where you preview a version and use it, one at a time.', 'sp-intro'));
 
   let mods: ModInfo[] = [];
   const expanded = new Set<string>();
@@ -66,7 +57,7 @@ export function modsSection(ctx: Ctx): Section {
   };
 
   const installBtn = button('Install…', () => toggleForm(installForm, installBtn), { icon: 'download' });
-  const newBtn = button(NEW_LABEL.mods, () => toggleForm(createForm, newBtn), { icon: 'plus' });
+  const newBtn = button('New mod…', () => toggleForm(createForm, newBtn), { icon: 'plus' });
   const reloadBtn = button('Reload', async (b) => {
     b.disabled = true;
     try {
@@ -97,7 +88,15 @@ export function modsSection(ctx: Ctx): Section {
       expanded.add(made.key);
       mods = await ctx.call('mods.list');
       renderAll();
-      showStatus(`Installed ${made.manifest?.name ?? made.id}. It stays off until you turn it on.`);
+      if (isLookOnly(made.manifest)) {
+        // A look lands on its tab, previewed there
+        const t = LOOK_TABS.find((x) => modTabs(made).includes(x.tab));
+        if (t) {
+          const set = lookSets([made], 1)[0];
+          showTab(t.tab, { preview: set?.[t.kind] ?? undefined });
+        }
+        lookStatus(`Installed ${made.manifest?.name ?? made.id}. It is previewed above; Use applies it.`);
+      } else showStatus(`Installed ${made.manifest?.name ?? made.id}. It stays off until you turn it on.`);
     } catch (err) {
       formProblem(installProblem, ctx.cleanError(err));
     } finally {
@@ -155,6 +154,8 @@ export function modsSection(ctx: Ctx): Section {
   );
   scopeSeg.setAttribute('aria-label', 'Where the mod lives');
   const createProblem = h('div', { class: 'sp-problem', role: 'alert', hidden: true });
+  /** A look tab that opened the form: the mod it writes shows there, previewed (and Finder does not open) */
+  let madeHere: ((m: ModInfo) => void) | null = null;
   const createGo = button('Create', async (b) => {
     const name = nameInput.input.value.trim();
     const id = idInput.input.value.trim() || deriveModId(name);
@@ -167,13 +168,21 @@ export function modsSection(ctx: Ctx): Section {
       nameInput.set('');
       idInput.set('');
       idEdited = false;
+      const here = madeHere;
       closeForms();
       expanded.add(made.key);
       mods = await ctx.call('mods.list');
+      const fresh = mods.find((m) => m.key === made.key) ?? made;
+      if (here && isLookOnly(fresh.manifest)) {
+        renderAll();
+        here(fresh);
+        lookStatus(`Created ${name} in ${tildePath(made.dir)}. It is previewed above; Use applies it. Ask the agent to build it out.`);
+        return;
+      }
       const madeTabs = modTabs(made);
       if (!madeTabs.includes(tab)) showTab(madeTabs[0]);
       renderAll();
-      showStatus(`Created ${name} in ${tildePath(made.dir)}. Edit its files, then turn it on.`);
+      showStatus(isLookOnly(fresh.manifest) ? `Created ${name} in ${tildePath(made.dir)}. Preview it and use it on its tab.` : `Created ${name} in ${tildePath(made.dir)}. Edit its files, then turn it on.`);
       void ctx.call('mods.reveal', made.key).catch(() => {});
     } catch (err) {
       formProblem(createProblem, ctx.cleanError(err));
@@ -182,10 +191,11 @@ export function modsSection(ctx: Ctx): Section {
     }
   }, { primary: true });
   const field = (label: string, control: HTMLElement) => h('label', { class: 'sp-form-field' }, h('span', { class: 'sp-form-label' }, label), control);
+  const createTitle = h('div', { class: 'sp-form-title' }, 'New mod');
   const createForm = h(
     'div',
     { class: 'sp-form sp-only-browse', hidden: true, role: 'group', 'aria-label': 'Create a mod' },
-    h('div', { class: 'sp-form-title' }, 'New mod'),
+    createTitle,
     h('p', { class: 'sp-form-hint' }, 'Writes a starter mod (mod.json and one page, or one stylesheet for a look or a theme) and shows its folder. Ask the agent to build it out.'),
     h('div', { class: 'sp-form-grid' }, field('Name', nameInput), field('Id', idInput), field('Adds', seatSel), h('div', { class: 'sp-form-field' }, h('span', { class: 'sp-form-label' }, 'Where'), scopeSeg)),
     h('div', { class: 'sp-form-line end' }, button('Cancel', () => closeForms()), createGo),
@@ -201,6 +211,9 @@ export function modsSection(ctx: Ctx): Section {
     createForm.hidden = true;
     installBtn.classList.remove('active');
     newBtn.classList.remove('active');
+    madeHere = null;
+    // Back under the Mods tab's toolbar, where they live
+    if (toolbar.nextElementSibling !== installForm) toolbar.after(installForm, createForm);
   }
   function toggleForm(form: HTMLElement, btn: HTMLButtonElement): void {
     const show = Boolean(form.hidden);
@@ -208,10 +221,28 @@ export function modsSection(ctx: Ctx): Section {
     if (show && form === createForm) {
       seat = MOD_TABS.find((t) => t.id === tab)!.newKind;
       seatSel.set(seat);
+      createTitle.textContent = NEW_TITLE[seat];
     }
     form.hidden = !show;
     btn.classList.toggle('active', show);
     if (show) form.querySelector<HTMLElement>('input')?.focus();
+  }
+  /** The New form in a look tab, preset to its kind; what it writes is handed to `made` */
+  function openCreateIn(kind: NewModKind, slot: HTMLElement, made: (m: ModInfo) => void): void {
+    closeForms();
+    slot.append(createForm);
+    seat = kind;
+    seatSel.set(kind);
+    createTitle.textContent = NEW_TITLE[kind];
+    madeHere = made;
+    createForm.hidden = false;
+    createForm.querySelector<HTMLElement>('input')?.focus();
+  }
+  function openInstallIn(slot: HTMLElement): void {
+    closeForms();
+    slot.append(installForm);
+    installForm.hidden = false;
+    installForm.querySelector<HTMLElement>('input')?.focus();
   }
 
   // ---------- Safe mode ----------
@@ -257,30 +288,10 @@ export function modsSection(ctx: Ctx): Section {
     tabBtns.get(ids[next])!.focus();
   });
 
-  // ---------- Each tab's head: its picker (or safe mode on the Mods tab) ----------
+  // ---------- Each tab's head: safe mode on the Mods tab, a look tab on the others ----------
 
-  const liveSelect = (first: string, onChange: (v: string) => void) => {
-    const c = selectControl<string>([{ value: '', label: first }], '', () => {}, 240);
-    c.select.addEventListener('change', () => onChange(c.select.value));
-    return c;
-  };
-  const offNote = () => {
-    const text = h('span', {});
-    const n = h('p', { class: 'sp-note sp-tab-off', hidden: true }, text);
-    return { el: n, set: (t: string) => ((text.textContent = t), (n.hidden = !t)) };
-  };
-  /** The settings of the mod whose part is chosen, under the picker */
-  const ownerBox = () => h('div', { class: 'sp-mod-settings sp-pick-settings' });
-
-  // Backgrounds
-  const bgSelect = liveSelect('None', (v) => void setBackground(v));
-  const bgRow = row({ id: 'background', title: 'Background', desc: 'A picture or a mod’s live background behind the window. The app’s surfaces turn translucent over it.', keywords: 'wallpaper image picture mod' }, bgSelect);
-  const bgOwner = ownerBox();
-  const pictureName = h('span', { class: 'sp-file-name' });
-  const pictureRow = row(
-    { id: 'background-image', title: 'Your picture', desc: 'A PNG, JPEG, WebP or GIF. Silo Harness keeps its own copy.', keywords: 'wallpaper image picture choose background' },
-    h('span', { class: 'sp-control-group' }, pictureName, button('Choose image…', () => void chooseImage(), { icon: 'image' })),
-  );
+  /** The picture of yours last chosen, kept while the app runs (Default forgets it in the layout) */
+  let lastImage: string | null = null;
   const dim = h('input', { type: 'range', min: '0', max: '100', step: '5', class: 'sp-range' });
   const dimValue = h('span', { class: 'sp-range-value' });
   dim.addEventListener('input', () => (dimValue.textContent = `${dim.value}%`));
@@ -294,40 +305,86 @@ export function modsSection(ctx: Ctx): Section {
     }
   });
   const dimRow = row({ id: 'background-dim', title: 'Dim', desc: 'How strongly the app’s surfaces cover the background.', keywords: 'opacity translucent background' }, h('span', { class: 'sp-control-group' }, dim, dimValue));
-  const bgOff = offNote();
 
-  // Chat bar and conversation
-  const lookPicker = (target: ModLookTarget) => {
-    const select = liveSelect('Default', (v) => void setLook(target, v));
-    const r = target === 'conversation'
-      ? row({ id: 'look-conversation', title: 'Conversation look', desc: 'How the messages, tool rows and code blocks look.', keywords: 'look transcript messages chat style mod conversation' }, select)
-      : row({ id: 'look-composer', title: 'Chat bar look', desc: 'How the box you type in looks.', keywords: 'look composer input message box style mod chat bar' }, select);
-    return { row: r, select, owner: ownerBox(), off: offNote() };
+  const lookStatusEl = h('div', { class: 'sp-inline-status sp-look-status', role: 'status', hidden: true });
+  const lookStatus = (text: string, error = false) => {
+    lookStatusEl.hidden = !text;
+    lookStatusEl.classList.toggle('error', error);
+    lookStatusEl.innerHTML = text ? `${icon(error ? 'circle-alert' : 'circle-check', 14)}<span>${escapeHtml(text)}</span>` : '';
   };
-  const looks: Record<ModLookTarget, ReturnType<typeof lookPicker>> = { conversation: lookPicker('conversation'), composer: lookPicker('composer') };
 
-  // Themes
-  const themeList = h('div', { class: 'sp-theme-list' });
-  const themeOff = offNote();
+  /** Each look's and theme's preview CSS, by kind, ref and the mod's rev (an edit compiles it again) */
+  const cssCache = new Map<string, Promise<string>>();
+  const previewCss = (kind: 'theme' | ModLookTarget, ref: string, rev: string): Promise<string> => {
+    const k = `${kind}|${ref}|${rev}`;
+    let p = cssCache.get(k);
+    if (!p) {
+      p = ctx.call('mods.previewCss', { kind, ref }).then((r) => r?.css ?? '');
+      p.catch(() => cssCache.delete(k));
+      if (cssCache.size > 200) cssCache.clear();
+      cssCache.set(k, p);
+    }
+    return p;
+  };
+
+  const lookTabs = new Map<ModTab, LookTab>();
+  for (const info of LOOK_TABS) {
+    lookTabs.set(
+      info.tab,
+      lookTab({
+        ctx,
+        info,
+        previews: () => ctx.modPreviews?.() ?? null,
+        mods: () => mods,
+        adoptMods: (list) => {
+          mods = list;
+          renderAll();
+        },
+        picture: () => lastImage,
+        settingRow: (m, f, prefix, pill) => settingRow(m, f, prefix, pill),
+        dimRow: info.kind === 'background' ? dimRow : undefined,
+        openCreate: (kind, slot, made) => openCreateIn(kind, slot, made),
+        openInstall: (slot) => openInstallIn(slot),
+        chooseImage: () => chooseImage(),
+        css: (kind, ref, rev) => previewCss(kind, ref, rev),
+        reveal: (m) => void ctx.call('mods.reveal', m.key).catch((err) => lookStatus(`Couldn't show the folder: ${ctx.cleanError(err)}`, true)),
+        customise: (m) => customise(m, lookStatus),
+        remove: async (m) => {
+          await removeMod(m, lookStatus);
+        },
+      }),
+    );
+  }
 
   const heads: Record<ModTab, HTMLElement> = {
     mods: group(null, safe),
-    backgrounds: group(null, bgRow, bgOwner, pictureRow, dimRow, bgOff.el),
-    'chat-bar': group(null, looks.composer.row, looks.composer.owner, looks.composer.off.el),
-    conversation: group(null, looks.conversation.row, looks.conversation.owner, looks.conversation.off.el),
-    themes: group(null, note('Themes apply in this order: where two change the same thing, the later one wins.', 'sp-tab-order'), themeList, themeOff.el),
+    backgrounds: lookTabs.get('backgrounds')!.el,
+    'chat-bar': lookTabs.get('chat-bar')!.el,
+    conversation: lookTabs.get('conversation')!.el,
+    themes: lookTabs.get('themes')!.el,
   };
   for (const [id, head] of Object.entries(heads)) {
     head.classList.add('sp-tab-head');
     head.dataset.subtab = id;
   }
+  for (const lt of lookTabs.values()) lt.el.querySelector('.sp-look-grid-head')!.after(lookStatusEl.cloneNode() as HTMLElement);
+  // One status line, moved to the tab on screen
+  const placeLookStatus = () => {
+    const lt = lookTabs.get(tab);
+    lt?.el.querySelectorAll('.sp-look-status').forEach((n) => n !== lookStatusEl && n.remove());
+    if (lt) lt.el.querySelector('.sp-look-grid-head')!.after(lookStatusEl);
+  };
 
+  let dialogOpen = false;
   const panel = h('div', { id: 'sp-modpanel', role: 'tabpanel' }, ...Object.values(heads), toolbar, installForm, createForm, status, listEl);
   el.append(tabsEl, panel);
 
-  function showTab(next: ModTab): void {
+  function showTab(next: ModTab, opts?: { preview?: string }): void {
     if (!isModTab(next)) return;
-    if (next !== tab) closeForms();
+    if (next !== tab) {
+      closeForms();
+      lookStatus('');
+    }
     tab = next;
     for (const [id, b] of tabBtns) {
       const on = id === tab;
@@ -337,21 +394,25 @@ export function modsSection(ctx: Ctx): Section {
     }
     panel.setAttribute('aria-labelledby', `sp-modtab-${tab}`);
     for (const [id, head] of Object.entries(heads)) head.classList.toggle('current', id === tab);
-    newBtn.querySelector('span')!.textContent = NEW_LABEL[tab];
+    // The Mods tab's toolbar and list belong to it alone (the search still finds the cards from any tab)
+    toolbar.classList.toggle('sp-tab-out', tab !== 'mods');
+    listEl.classList.toggle('sp-tab-out', tab !== 'mods');
+    status.classList.toggle('sp-tab-out', tab !== 'mods');
+    placeLookStatus();
+    for (const [t, lt] of lookTabs) lt.shown(dialogOpen && t === tab);
+    if (opts?.preview !== undefined) lookTabs.get(tab)?.preview(opts.preview);
     applyTab();
   }
 
-  /** Shows the cards of the tab's kind (the rest stay in the page for the search) and each group's empty note. */
+  /** Each group's empty note on the Mods tab. */
   function applyTab(): void {
-    for (const card of listEl.querySelectorAll<HTMLElement>('.sp-mod[data-tabs]')) card.classList.toggle('sp-tab-out', !card.dataset.tabs!.split(' ').includes(tab));
     for (const grp of listEl.querySelectorAll<HTMLElement>('.sp-group')) {
-      const shown = grp.querySelectorAll('.sp-mod:not(.sp-tab-out)').length;
+      const shown = grp.querySelectorAll('.sp-mod').length;
       const emptyNote = grp.querySelector<HTMLElement>('.sp-empty-group');
       if (emptyNote) {
         emptyNote.hidden = shown > 0;
-        emptyNote.textContent = EMPTY_WORDS[tab];
+        emptyNote.textContent = 'None yet. Install one, make one with New mod…, or ask the agent to build one.';
       }
-      grp.classList.toggle('sp-tab-out', !shown && !emptyNote);
     }
   }
 
@@ -366,7 +427,8 @@ export function modsSection(ctx: Ctx): Section {
     pendingRender = false;
     listEl.innerHTML = '';
     for (const g of MOD_GROUPS) {
-      const items = mods.filter((m) => m.scope === g.scope);
+      // A mod that is only looks has no card here: its looks are on their tabs
+      const items = mods.filter((m) => m.scope === g.scope && !isLookOnly(m.manifest));
       if (!items.length && g.scope !== 'user') continue;
       const grp = group(g.title);
       // Yours always has its group, with a note while none of its mods are of the tab's kind
@@ -375,7 +437,6 @@ export function modsSection(ctx: Ctx): Section {
       listEl.append(grp);
     }
     applyTab();
-    updateSetLines();
     ctx.refreshSearch();
     if (active instanceof HTMLElement && active.dataset.focusKey) listEl.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(active.dataset.focusKey)}"]`)?.focus();
   }
@@ -384,159 +445,58 @@ export function modsSection(ctx: Ctx): Section {
   });
 
   function renderAll(): void {
-    renderPickers();
+    renderLooks();
     render();
   }
 
-  // ---------- The pickers ----------
+  // ---------- The look tabs ----------
 
-  let lastImage: string | null = null;
-  const layout = (): ModLayout | null => ctx.config().mods?.layout ?? null;
-  const modName = (key: string) => mods.find((x) => x.key === key)?.manifest?.name ?? key;
-
-  /** Options with the chosen value kept visible: a choice whose mod is off or gone shows as "… (off)". */
-  function fill(sel: HTMLSelectElement, choices: { value: string; label: string }[], value: string): void {
-    sel.innerHTML = '';
-    for (const c of choices) sel.append(h('option', { value: c.value }, c.label));
-    if (value && !choices.some((c) => c.value === value)) {
-      const i = value.lastIndexOf('/');
-      sel.append(h('option', { value }, i > 0 ? `${modName(value.slice(0, i))}: ${value.slice(i + 1)} (off)` : `${value} (off)`));
-    }
-    sel.value = value;
-  }
-
-  /** The chosen part's mod's own settings under the picker; rebuilt only when they change and nothing in them has focus. */
-  function fillOwner(box: HTMLElement, ref: string | null): void {
-    const m = ref ? mods.find((x) => x.key === refMod(ref) && x.state === 'on') : undefined;
-    const fields = m?.manifest?.contributes?.settings ?? [];
-    const sig = m && fields.length ? `${m.key}|${m.rev}|${JSON.stringify(m.settings)}` : '';
-    if (box.dataset.sig === sig) return;
-    if (box.contains(document.activeElement) && (document.activeElement as HTMLElement).matches('input:not([type=checkbox]), textarea')) return;
-    box.dataset.sig = sig;
-    box.innerHTML = '';
-    if (m) for (const f of fields) box.append(settingRow(m, f, `pick-${tabOf(box)}`, m.manifest?.name ?? m.id));
-  }
-  const tabOf = (box: HTMLElement) => box.closest<HTMLElement>('[data-subtab]')?.dataset.subtab ?? '';
-
-  function renderPickers(): void {
-    const l = layout();
+  function renderLooks(): void {
+    const l = ctx.config().mods?.layout ?? null;
     if (!l) return;
-    // Backgrounds
     if (l.backgroundImage) lastImage = l.backgroundImage;
-    const bgNow = l.background ?? (l.backgroundImage ? 'image' : '');
-    fill(bgSelect.select, [{ value: '', label: 'None' }, ...backgroundChoices(mods), ...(lastImage ? [{ value: 'image', label: 'Your picture' }] : [])], bgNow);
-    fillOwner(bgOwner, l.background);
-    pictureName.textContent = lastImage ? basename(lastImage).replace(/^\d+-/, '') : 'None chosen';
-    pictureName.title = lastImage ?? '';
-    dim.value = String(Math.round((l.backgroundDim ?? 0.5) * 100));
+    dim.value = String(Math.round((l.backgroundDim ?? 0.82) * 100));
     dimValue.textContent = `${dim.value}%`;
-    dimRow.el.classList.toggle('sp-off', !bgNow);
-    dim.disabled = !bgNow;
-    bgOff.set(offWords('backgrounds', 'background'));
-    // Looks
-    for (const target of ['conversation', 'composer'] as const) {
-      const p = looks[target];
-      const ref = l.looks?.[target] ?? '';
-      fill(p.select.select, [{ value: '', label: 'Default' }, ...lookChoices(mods, target)], ref);
-      fillOwner(p.owner, ref || null);
-      p.off.set(offWords(target === 'composer' ? 'chat-bar' : 'conversation', target === 'composer' ? 'chat bar look' : 'conversation look'));
-    }
-    renderThemes();
-    updateSetLines();
-  }
-
-  function offWords(t: ModTab, what: string): string {
-    const off = offModsOfTab(mods, t);
-    if (!off.length) return '';
-    return `${off.join(', ')} ${off.length === 1 ? 'has a' : 'have a'} ${what} too, and ${off.length === 1 ? 'is' : 'are'} off: turn ${off.length === 1 ? 'it' : 'them'} on below to pick ${off.length === 1 ? 'it' : 'one'} here.`;
-  }
-
-  function renderThemes(): void {
-    if (themeList.contains(document.activeElement)) return;
-    themeList.innerHTML = '';
-    const list = themeMods(mods);
-    if (!list.length) themeList.append(note('No themes yet. Make one with New theme…, or install one.', 'sp-empty-group'));
-    list.forEach((m, i) => {
-      const name = m.manifest?.name ?? m.id;
-      const sw = switchControl(m.state === 'on', (on) => void setEnabled(m, on, sw));
-      sw.setAttribute('aria-label', `${name}: ${m.state === 'on' ? 'on' : 'off'}`);
-      sw.disabled = m.state === 'invalid';
-      const r = row({ id: `theme-${safeKey(m.key)}`, title: `${i + 1}. ${name}`, desc: m.manifest?.description ?? '', keywords: `${m.id} theme styles colours colors` }, sw);
-      const c = modChip(m);
-      if (c && m.state !== 'off') r.el.querySelector('.sp-row-title')!.append(chip(c.label, c.tone));
-      r.el.classList.add('clickable');
-      themeList.append(r.el);
-    });
-  }
-
-  async function setLook(target: ModLookTarget, v: string): Promise<void> {
-    const r = looks[target].row;
-    try {
-      await ctx.call('mods.setLayout', { looks: { [target]: v || null } as ModLayout['looks'] });
-      r.saved();
-      r.problem(null);
-    } catch (err) {
-      r.problem(`Couldn't change the look: ${ctx.cleanError(err)}`);
-      renderPickers();
-    }
-  }
-
-  async function setBackground(v: string): Promise<void> {
-    try {
-      if (v === 'image') {
-        if (!lastImage) return void chooseImage();
-        await ctx.call('mods.setLayout', { background: null, backgroundImage: lastImage });
-      } else if (v === '') await ctx.call('mods.setLayout', { background: null, backgroundImage: null });
-      else await ctx.call('mods.setLayout', { background: v });
-      bgRow.saved();
-      bgRow.problem(null);
-    } catch (err) {
-      bgRow.problem(`Couldn't change the background: ${ctx.cleanError(err)}`);
-      renderPickers();
-    }
+    for (const lt of lookTabs.values()) lt.render();
   }
 
   async function chooseImage(): Promise<void> {
     try {
-      const before = layout()?.backgroundImage ?? null;
+      const before = ctx.config().mods?.layout?.backgroundImage ?? null;
       const l = await ctx.call('mods.chooseBackgroundImage');
       if (l.backgroundImage && l.backgroundImage !== before) {
         lastImage = l.backgroundImage;
-        pictureRow.saved();
+        lookStatus('Your picture is behind the window now.');
       }
-      pictureRow.problem(null);
-      renderPickers();
+      renderLooks();
     } catch (err) {
-      pictureRow.problem(ctx.cleanError(err));
+      lookStatus(ctx.cleanError(err), true);
     }
   }
 
-  // ---------- "Use the whole set" on the card of a mod that brings several parts ----------
-
-  function updateSetLines(): void {
-    const l = layout();
-    const now = l ? currentLookSet(mods, l) : '';
-    for (const line of listEl.querySelectorAll<HTMLElement>('.sp-mod-set')) {
-      const key = line.dataset.set!;
-      const inUse = now === key;
-      if (line.dataset.state === String(inUse)) continue;
-      line.dataset.state = String(inUse);
-      line.innerHTML = '';
-      const act = h('button', { type: 'button', class: 'link-btn', 'data-focus-key': `${key}|set` }, inUse ? 'Stop using the set' : 'Use the whole set');
-      act.addEventListener('click', () => void useSet(key, !inUse, line));
-      if (inUse) line.append(chip('Whole set in use', 'ok'), act);
-      else line.append(act, h('span', { class: 'sp-detail-muted' }, ' its conversation look, chat bar look and background together'));
-    }
-  }
-
-  async function useSet(key: string, on: boolean, line: HTMLElement): Promise<void> {
-    const set = lookSets(mods).find((x) => x.key === key) ?? null;
-    if (on && !set) return;
+  async function customise(m: ModInfo, say: (text: string, error?: boolean) => void): Promise<void> {
     try {
-      await ctx.call('mods.setLayout', lookSetPatch(on ? set : null));
-      setRowProblem(line, null);
+      mods = await ctx.call('mods.customise', m.key);
+      const copy = mods.find((x) => x.id === m.id && x.scope === 'user');
+      if (copy) expanded.add(copy.key);
+      renderAll();
+      say(`Copied ${m.manifest?.name ?? m.id} to your mods folder. Your copy replaces the built-in one.`);
     } catch (err) {
-      setRowProblem(line, `Couldn't apply the set: ${ctx.cleanError(err)}`);
+      say(`Couldn't customise: ${ctx.cleanError(err)}`, true);
+    }
+  }
+
+  async function removeMod(m: ModInfo, say: (text: string, error?: boolean) => void): Promise<boolean> {
+    const ok = await ctx.confirm({ title: `Remove ${m.manifest?.name ?? m.id}?`, description: `Its folder moves to the Trash${m.overrides ? ' and the built-in mod comes back' : ''}.${m.inUse?.length ? ' What of it is in use goes back to Default.' : ''}`, confirmLabel: 'Move to Trash', danger: true });
+    if (!ok) return false;
+    try {
+      mods = await ctx.call('mods.remove', m.key);
+      expanded.delete(m.key);
+      renderAll();
+      return true;
+    } catch (err) {
+      say(`Couldn't remove: ${ctx.cleanError(err)}`, true);
+      return false;
     }
   }
 
@@ -554,7 +514,7 @@ export function modsSection(ctx: Ctx): Section {
     const tabs = modTabs(m);
     const r = row({ id: `mod-${safeKey(m.key)}`, title: name, desc: m.manifest?.description ?? (m.problems[0]?.message || ''), keywords: `${m.id} mod ${m.manifest?.author ?? ''} ${tabs.map((t) => MOD_TABS.find((x) => x.id === t)!.title).join(' ')}` });
     r.el.classList.add('sp-mod');
-    r.el.dataset.tabs = tabs.join(' ');
+    r.el.dataset.tabs = 'mods';
     r.el.classList.toggle('open', open);
     const titleEl = r.el.querySelector('.sp-row-title')!;
     if (m.manifest?.version) titleEl.append(h('span', { class: 'sp-mod-version' }, m.manifest.version));
@@ -566,8 +526,6 @@ export function modsSection(ctx: Ctx): Section {
     const iconEl = h('span', { class: 'sp-mod-icon', html: modIcon(m) });
     const text = r.el.querySelector<HTMLElement>('.sp-row-text')!;
     text.before(expand, iconEl);
-    // A mod that brings several parts (a conversation look, a chat bar look, a background) can be used as a whole
-    if (lookSets(mods).some((x) => x.key === m.key)) r.descEl.after(h('div', { class: 'sp-mod-set', 'data-set': m.key }));
 
     const sw = switchControl(m.state === 'on', (on) => void setEnabled(m, on, sw));
     sw.setAttribute('aria-label', `${name}: ${m.state === 'on' ? 'on' : 'off'}`);
@@ -606,7 +564,7 @@ export function modsSection(ctx: Ctx): Section {
         title: sheet.title,
         icon: 'puzzle',
         quote: { label: sheet.lines.length ? 'It will be able to' : 'It asks for nothing', text: sheet.lines.length ? sheet.lines.map((l) => `•  ${l}`).join('\n') : 'It only shows its own views and keeps its own storage.' },
-        description: [...sheet.warnings, 'You can turn it off here at any time.'].join(' '),
+        description: [...sheet.warnings, m.manifest && modTabs(m).some((t) => t !== 'mods') ? 'Its looks are not part of this: they ask when you first use them, on their tabs.' : '', 'You can turn it off here at any time.'].filter(Boolean).join(' '),
         confirmLabel: m.state === 'paused' ? 'Allow and resume' : 'Turn on',
       });
       if (!ok) {
@@ -650,13 +608,13 @@ export function modsSection(ctx: Ctx): Section {
 
     // What it adds
     const adds: string[] = [];
-    for (const v of m.manifest?.contributes?.views ?? []) adds.push(`${v.title}: ${SEAT_WORDS[v.seat] ?? v.seat}${v.seat === 'background' ? ' (pick it on the Backgrounds tab)' : ''}`);
-    for (const l of m.manifest?.contributes?.looks ?? []) adds.push(`${l.title}: ${LOOK_WORDS[l.target] ?? l.target} (pick it on the ${l.target === 'composer' ? 'Chat bar' : 'Conversation'} tab)`);
+    for (const v of m.manifest?.contributes?.views ?? []) adds.push(`${v.title}: ${SEAT_WORDS[v.seat] ?? v.seat}${v.seat === 'background' ? ' (use it on the Background tab)' : ''}`);
+    for (const l of m.manifest?.contributes?.looks ?? []) adds.push(`${l.title}: ${LOOK_WORDS[l.target] ?? l.target} (use it on the ${l.target === 'composer' ? 'Chat bar' : 'Conversation'} tab)`);
     for (const c of m.manifest?.contributes?.commands ?? []) adds.push(`/${c.name}: ${c.description}`);
     const hooks = m.manifest?.contributes?.hooks ?? [];
     if (hooks.length) adds.push(`Hooks: ${hooks.map((x) => x.event).join(', ')} (listed in Settings → Hooks)`);
     const styles = m.manifest?.contributes?.styles ?? [];
-    if (styles.length) adds.push(`Styles for the whole app: ${styles.join(', ')} (in order on the Themes tab)`);
+    if (styles.length) adds.push(`A theme: ${styles.join(', ')} (use it on the Theme tab)`);
     d.append(block('What it adds', adds.length ? h('ul', { class: 'sp-detail-list' }, ...adds.map((a) => h('li', {}, a))) : h('p', { class: 'sp-detail-muted' }, 'Nothing yet.')));
 
     // Permissions
@@ -703,33 +661,15 @@ export function modsSection(ctx: Ctx): Section {
       m.scope === 'bundled'
         ? button('Customise', async (b) => {
             b.disabled = true;
-            try {
-              mods = await ctx.call('mods.customise', m.key);
-              const copy = mods.find((x) => x.id === m.id && x.scope === 'user');
-              if (copy) expanded.add(copy.key);
-              renderAll();
-              showStatus(`Copied ${m.manifest?.name ?? m.id} to your mods folder. Your copy replaces the built-in one.`);
-            } catch (err) {
-              r.problem(`Couldn't customise: ${ctx.cleanError(err)}`);
-            } finally {
-              b.disabled = false;
-            }
+            await customise(m, (text, error) => (error ? r.problem(text) : showStatus(text)));
+            b.disabled = false;
           }, { icon: 'copy' })
         : null,
       m.scope === 'user'
         ? button('Remove', async (b) => {
-            const ok = await ctx.confirm({ title: `Remove ${m.manifest?.name ?? m.id}?`, description: `Its folder moves to the Trash${m.overrides ? ' and the built-in mod comes back' : ''}.`, confirmLabel: 'Move to Trash', danger: true });
-            if (!ok) return;
             b.disabled = true;
-            try {
-              mods = await ctx.call('mods.remove', m.key);
-              expanded.delete(m.key);
-              renderAll();
-            } catch (err) {
-              r.problem(`Couldn't remove: ${ctx.cleanError(err)}`);
-            } finally {
-              b.disabled = false;
-            }
+            await removeMod(m, (text) => r.problem(text));
+            b.disabled = false;
           }, { icon: 'trash', danger: true })
         : null,
     );
@@ -796,16 +736,26 @@ export function modsSection(ctx: Ctx): Section {
 
   showTab(tab);
 
+  // For the live checks: what each look tab shows, and trying a version there
+  const dbgHost = (window as unknown as { __oc_debug?: Record<string, unknown> }).__oc_debug;
+  if (dbgHost) {
+    dbgHost.looks = {
+      state: (t: ModTab) => lookTabs.get(t)?.state() ?? null,
+      preview: (t: ModTab, ref: string | null | undefined) => lookTabs.get(t)?.preview(ref),
+      kindOf: (t: ModTab): LookKind | null => lookTabOf(t)?.kind ?? null,
+    };
+  }
+
   return {
     id: 'mods',
     el,
     sync(cfg) {
       safeInput.checked = Boolean(cfg.mods?.safeMode);
-      renderPickers();
+      renderLooks();
     },
     tab: () => tab,
-    showTab: (t) => {
-      if (isModTab(t)) showTab(t);
+    showTab: (t, opts) => {
+      if (isModTab(t)) showTab(t, opts);
     },
     uncover(target) {
       const head = target.closest<HTMLElement>('[data-subtab]');
@@ -815,6 +765,7 @@ export function modsSection(ctx: Ctx): Section {
       if (tabs.length && !tabs.includes(tab)) showTab(tabs[0]);
     },
     async load() {
+      dialogOpen = true;
       try {
         mods = await ctx.call('mods.list');
       } catch (err) {
@@ -823,11 +774,15 @@ export function modsSection(ctx: Ctx): Section {
         return 'ok';
       }
       renderAll();
+      for (const [t, lt] of lookTabs) lt.shown(t === tab);
       return 'ok';
     },
     closed() {
+      dialogOpen = false;
       closeForms();
       showStatus('');
+      lookStatus('');
+      for (const lt of lookTabs.values()) lt.closed();
     },
   };
 }

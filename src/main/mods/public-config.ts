@@ -82,7 +82,7 @@ export function applyPublicPatch(cfg: AppConfig, patch: unknown, mods: ModInfo[]
     } else if (typeof b === 'string' && isBackgroundView(b, mods)) {
       next.mods.layout.background = b;
     } else {
-      throw new PatchError('patch.background: must be null, "image", or "<mod key>/<view id>" of a background view of a mod that is on');
+      throw new PatchError('patch.background: must be null, "image", or "<mod key>/<view id>" of a background view whose looks may be used (a bundled mod, or one the user approved)');
     }
   }
   return next;
@@ -94,5 +94,5 @@ export function isBackgroundView(ref: string, mods: ModInfo[]): boolean {
   const key = ref.slice(0, i);
   const view = ref.slice(i + 1);
   const m = mods.find((x) => x.key === key);
-  return !!m && m.state === 'on' && !!m.manifest?.contributes?.views?.some((v) => v.id === view && v.seat === 'background');
+  return !!m && (m.approved ?? m.state === 'on') && !!m.manifest?.contributes?.views?.some((v) => v.id === view && v.seat === 'background');
 }

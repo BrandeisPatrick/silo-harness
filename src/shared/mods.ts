@@ -53,6 +53,8 @@ export interface ModViewManifest {
   maxHeight?: number;
   /** A built-in icon name or an SVG file in the mod (default: the mod's icon) */
   icon?: string;
+  /** background: a picture of it (PNG, JPEG, WebP, GIF or SVG in the mod) for its card in Settings → Mods → Background */
+  preview?: string;
 }
 
 /** The region a look restyles: conversation is the transcript (#messages), composer the chat bar (#chatbar). */
@@ -67,7 +69,15 @@ export interface ModLookManifest {
   /** CSS files in the mod, applied in order inside the region's scope */
   styles: string[];
   description?: string;
+  /** A picture of it (PNG, JPEG, WebP, GIF or SVG in the mod) for its card in Settings; without one the card draws a sample */
+  preview?: string;
 }
+
+/**
+ * The four kinds of look, each with a tab of its own in Settings → Mods and one in use at a time: a background view,
+ * a chat bar look, a conversation look, a theme (a mod's styles). A look has no switch: it is available once installed.
+ */
+export type LookKind = 'background' | 'composer' | 'conversation' | 'theme';
 
 export interface ModCommandManifest {
   /** Without the slash; lower-case letters, digits and - */
@@ -122,7 +132,9 @@ export interface ModProblem {
 
 /**
  * on: loaded. off: the user has not turned it on (or turned it off). paused: it was on, then its manifest asked for
- * more than was granted (a permission, styles or a background) and it waits for approval. invalid: no usable manifest.
+ * more than was granted (a permission) and it waits for approval. invalid: no usable manifest.
+ * A mod that is only looks (no panel, tab, strip, worker or command) has no switch: it is on while one of its looks is
+ * in use and approved, paused while one is in use and it asks for more than was approved, and off otherwise.
  */
 export type ModState = 'on' | 'off' | 'paused' | 'invalid';
 
@@ -143,6 +155,13 @@ export interface ModInfo {
   wants: ModPermission[];
   /** True when the manifest contributes styles, looks or a background that were not part of what was approved */
   wantsStyles: boolean;
+  /**
+   * Its looks (backgrounds, chat bar and conversation looks, its theme) can be used without asking: a bundled mod, or
+   * one the user approved at a first Use and that asks for nothing new since. False in safe mode for user and project mods.
+   */
+  approved?: boolean;
+  /** The kinds of look of this mod in use right now (whether or not they apply: see `approved`) */
+  inUse?: LookKind[];
   problems: ModProblem[];
   /** Changes whenever a file of the mod changes; views reload when it does */
   rev: string;
@@ -170,12 +189,22 @@ export interface ModLayout {
   backgroundDim: number;
   /** The active look per region: "<mod key>/<look id>", or null for the app's own look */
   looks: Record<ModLookTarget, string | null>;
+  /**
+   * The theme in use: the key of a mod with styles, or null for the app's own. One at a time. Missing in a profile
+   * from 0.8.0 or before, which the mods code migrates on start (the last theme that was on, in apply order).
+   */
+  theme?: string | null;
 }
 
 /** The part of the config that belongs to mods (AppConfig.mods). */
 export interface ModsConfig {
-  /** By mod key: what was granted when it was turned on. A missing entry means off (bundled mods: on with their manifest's permissions). */
+  /**
+   * By mod key: what was granted when its switch was turned on (a mod with a panel, a tab, a strip, a worker or a
+   * command). A missing entry means off (bundled mods: on with their manifest's permissions).
+   */
   enabled: Record<string, { permissions: ModPermission[]; styles: boolean; at: number }>;
+  /** By mod key: the approval given at the first Use of a look of a user or project mod (bundled looks need none) */
+  approved?: Record<string, { permissions: ModPermission[]; at: number }>;
   /** Bundled mod ids the user turned off */
   disabledBundled: string[];
   /** By mod key */
@@ -422,6 +451,8 @@ export interface ModCaller {
   /** ModInfo.key */
   mod: string;
   view: string;
+  /** A preview in Settings (a background shown before it is used): answered with what the mod was granted, if anything */
+  preview?: boolean;
 }
 
 /**
@@ -432,8 +463,20 @@ export interface ModsRpc {
   'mods.list': () => ModInfo[];
   /** The permission each bridge method and each event needs (null: always available), so the window enforces the same table as the main process */
   'mods.permissions': () => { methods: Record<string, ModPermission | null>; events: Record<string, ModPermission | null> };
-  /** Turns a mod on with the permissions its manifest asks for right now (also resumes a paused one), or off */
+  /**
+   * Turns a mod on with the permissions its manifest asks for right now (also resumes a paused one), or off. For a mod
+   * that is only looks it means using it (its first look of each kind, unless one is in use already) or going back to
+   * Default for the kinds it is in use for.
+   */
   'mods.setEnabled': (key: string, on: boolean) => ModInfo[];
+  /**
+   * Puts looks in use, one per kind: "<mod key>/<look id>" (conversation, composer), "<mod key>/<view id>" or "image"
+   * (background: the user's picture), "<mod key>" (theme), or null for Default. A user or project mod not approved
+   * yet is refused unless `approve` is set, which records the approval (the Use confirmation was shown).
+   */
+  'mods.use': (patch: Partial<Record<LookKind, string | null>>, opts?: { approve?: boolean }) => ModInfo[];
+  /** A look's or a theme's CSS compiled for the previews in Settings (scoped to their own root, never the window's) */
+  'mods.previewCss': (input: { kind: 'theme' | ModLookTarget; ref: string }) => { css: string };
   'mods.setSetting': (key: string, setting: string, value: unknown) => ModInfo[];
   'mods.setLayout': (patch: Partial<ModLayout>) => ModLayout;
   'mods.setSafeMode': (on: boolean) => ModInfo[];
@@ -454,7 +497,7 @@ export interface ModsRpc {
   'mods.call': (caller: ModCaller, method: string, params: unknown) => { result?: unknown; error?: { code: number; message: string; data?: unknown } };
   /** A page reported an uncaught error */
   'mods.report': (caller: ModCaller, problem: { message: string; stack?: string }) => void;
-  /** The CSS text of every enabled mod's styles, in load order */
+  /** The CSS text of the theme in use (none, or one) */
   'mods.styles': () => { key: string; css: string }[];
   /** The active look of each region (its mod on, chosen in the layout), already scoped to the region */
   'mods.looks': () => { target: ModLookTarget; ref: string; mod: string; css: string }[];
@@ -465,6 +508,6 @@ export interface ModsEvents {
   'mods:changed': ModInfo[];
   /** An event for mod views, already filtered by permission: the renderer hands it to the views of `mod` that subscribed (all mods when `mod` is absent) */
   'mods:event': { mod?: string; name: string; data: unknown };
-  /** A mod the user has not turned on appeared or wants more than it has: show the card */
+  /** A mod the user has not turned on (or a look not in use) appeared or wants more than it has: show the card */
   'mods:offer': ModInfo;
 }

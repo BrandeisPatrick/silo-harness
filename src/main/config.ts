@@ -53,7 +53,7 @@ export function defaultConfig(): AppConfig {
       enabled: {},
       disabledBundled: [],
       settings: {},
-      layout: { railOpen: true, railWidth: 300, collapsed: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null } },
+      layout: { railOpen: true, railWidth: 300, collapsed: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null }, theme: null },
       safeMode: false,
     },
     remote: { enabled: false, bind: 'lan', port: 0 },
@@ -97,7 +97,8 @@ function modsSection(d: AppConfig['mods'], raw: unknown): AppConfig['mods'] {
   return {
     ...d,
     ...m,
-    layout: { ...d.layout, ...layout, looks: { conversation: ref(looks.conversation), composer: ref(looks.composer) } },
+    // A layout without `theme` is from 0.8.0 or before, when themes had switches: the mods code migrates it on start.
+    layout: { ...d.layout, ...layout, looks: { conversation: ref(looks.conversation), composer: ref(looks.composer) }, theme: 'theme' in layout ? ref(layout.theme) : undefined },
   } as AppConfig['mods'];
 }
 

@@ -41,6 +41,10 @@ export interface SettingsPageDeps {
   /** Opens the Scheduled tasks page (and its New task form) or the Dreaming page; Settings closes first */
   openPage(target: 'scheduled' | 'scheduled:new' | 'dreaming'): void;
   sessionTitle(id: string): string | undefined;
+  /** Puts text in the composer (Settings closes first) */
+  fillComposer(text: string): void;
+  /** Live previews of mod backgrounds for Settings → Mods → Background */
+  modPreviews?(): import('./mods-host.js').ModPreviews | null;
   /** Before the page opens (close menus and sheets, hide the browser view); false keeps it closed */
   beforeOpen(): boolean;
   /** After it closed (the browser view may come back) */
@@ -71,6 +75,8 @@ export interface SettingsDebug {
 export interface OpenOptions {
   /** A tab of the section: Mods has mods, backgrounds, chat-bar, conversation and themes */
   tab?: string;
+  /** On a look tab of Mods: the version to show in its preview ("<mod key>/<id>", a theme's mod key) */
+  preview?: string;
 }
 
 export interface SettingsPage {
@@ -314,6 +320,11 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       deps.openSession(id);
     },
     sessionTitle: (id) => deps.sessionTitle(id),
+    askAgent: (text) => {
+      dialog.close();
+      deps.fillComposer(text);
+    },
+    modPreviews: () => deps.modPreviews?.() ?? null,
   };
 
   // ---------- Building ----------
@@ -645,7 +656,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       clearSearch(false);
       showSection(sec);
       const tab = (opts && typeof opts.tab === 'string' ? opts.tab : null) ?? tabForTarget(t);
-      if (tab) sections.find((s) => s.id === sec)?.showTab?.(tab);
+      if (tab) sections.find((s) => s.id === sec)?.showTab?.(tab, typeof opts?.preview === 'string' ? { preview: opts.preview } : undefined);
       navItems.get(sec)?.focus({ preventScroll: true });
       return;
     }

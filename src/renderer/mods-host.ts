@@ -15,13 +15,15 @@ import { closeMenu, openMenu, type MenuSection } from './popover.js';
 import { appendTranscriptItem, registerTranscriptItem } from './transcript-items.js';
 import { homeDir } from './home.js';
 import { modeOf } from './modes.js';
-import { MOD_TABS, isSectionId, modTabs } from './settings/model.js';
+import { LOOK_TABS, MOD_TABS, isLookOnly, isSectionId, lookSetPatch, lookSets, modTabs, type ModTab } from './settings/model.js';
 import {
   ERR,
   HELLO_TIMEOUT_MS,
   RAIL_DEFAULT,
   activeBackground,
   askLines,
+  backgroundRef,
+  looksUsable,
   buildHello,
   clampRailWidth,
   eventsFromAgent,
@@ -60,7 +62,8 @@ export interface ModsHostDeps {
   toast(text: string, kind: 'info' | 'error'): void;
   /** Puts text into the composer at the caret */
   insertText(text: string): void;
-  openSettings(section?: string, opts?: { tab?: string }): void;
+  /** Opens Settings at a section; for Mods at one of its tabs, with a look previewed there ("<mod key>/<id>", or a theme's mod key) */
+  openSettings(section?: string, opts?: { tab?: string; preview?: string }): void;
   /** Opens the Scheduled tasks or the Dreaming page; `form: 'new'` opens the New task form on it */
   openPage(page: 'scheduled' | 'dreaming', opts?: { form?: 'new' }): void;
   switchSession(id: string): Promise<void>;
@@ -87,8 +90,25 @@ export interface ModPaneTabs {
   apply(active: string | null, paneVisible: boolean): void;
 }
 
+/** A background's live page for a preview in Settings: a sandboxed frame like the window's, answered as a preview. */
+export interface BackgroundPreview {
+  /** The element holding the frame (fills its container) */
+  el: HTMLElement;
+  /** Whether the frame is drawn: a card's preview says false once it has painted, and holds still */
+  setVisible(visible: boolean): void;
+  /** Whether the page said hello */
+  ready(): boolean;
+  dispose(): void;
+}
+
+export interface ModPreviews {
+  /** A live preview of the background view "<mod key>/<view id>" (null when there is no such view) */
+  background(viewKey: string): BackgroundPreview | null;
+}
+
 export interface ModsHost {
   pane: ModPaneTabs;
+  previews: ModPreviews;
 }
 
 // ---------- Frames and the places they sit ----------
@@ -131,6 +151,10 @@ interface Slot {
   badgeEl?: HTMLElement;
   // tab
   tabBtn?: HTMLButtonElement;
+  /** A preview in Settings (background seat): not the window's, answered with what the mod was granted, if anything */
+  preview?: boolean;
+  /** preview: what the Settings preview asked for */
+  previewVisible?: boolean;
 }
 
 interface LogEntry {
@@ -426,7 +450,18 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   // ---------- The bridge ----------
 
   function caller(f: Frame): ModCaller {
-    return { mod: f.slot.ref.mod.key, view: f.slot.ref.view.id };
+    return { mod: f.slot.ref.mod.key, view: f.slot.ref.view.id, ...(f.slot.preview ? { preview: true } : {}) };
+  }
+
+  /**
+   * The mod as a frame's calls see it: a background in the window belongs to a mod whose looks may apply, a preview
+   * in Settings to one that may be previewed; either counts as on, with only what the mod was granted.
+   */
+  function frameMod(f: Frame): ModInfo {
+    const mod = currentMod(f.slot.ref.mod.key) ?? f.slot.ref.mod;
+    if (mod.state === 'on' || mod.state === 'invalid') return mod;
+    if (f.slot.preview ? mod.state !== 'paused' : f.slot.seat === 'background' && looksUsable(mod)) return { ...mod, state: 'on' };
+    return mod;
   }
 
   function post(f: Frame, msg: unknown): void {
@@ -461,7 +496,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   }
 
   function sendEvent(f: Frame, name: string, data: unknown): boolean {
-    if (!f.helloAt || !f.subs.has(name) || !mayReceive(eventPerms, f.slot.ref.mod, name)) return false;
+    if (!f.helloAt || !f.subs.has(name) || !mayReceive(eventPerms, frameMod(f), name)) return false;
     note({ t: Date.now(), view: f.slot.ref.key, kind: 'event', method: name });
     post(f, { jsonrpc: '2.0', method: 'event', params: { name, data } });
     return true;
@@ -504,7 +539,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   }
 
   async function handle(f: Frame, method: string, raw: unknown): Promise<unknown> {
-    const mod = currentMod(f.slot.ref.mod.key) ?? f.slot.ref.mod;
+    const mod = frameMod(f);
     if (raw !== undefined && raw !== null && !isObj(raw)) throw bad('params: must be an object');
     const p = (raw ?? {}) as Record<string, unknown>;
     const need = methodNeeds(methodPerms, method);
@@ -825,6 +860,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   }
 
   function slotVisible(s: Slot): boolean {
+    if (s.preview) return s.previewVisible !== false;
     switch (s.seat) {
       case 'rail':
         return railShown() && !layout.collapsed.includes(s.ref.key);
@@ -1213,7 +1249,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     const mod = currentMod(req.mod);
     if (!mod || mod.state !== 'on' || !mod.granted.includes('hooks')) return { skipped: 'the mod is not on' };
     const live = frames()
-      .filter((f) => f.slot.ref.mod.key === req.mod && f.helloAt && f.slot.frame === f)
+      .filter((f) => f.slot.ref.mod.key === req.mod && f.helloAt && f.slot.frame === f && !f.slot.preview)
       .map((f) => ({ view: f.slot.ref.view.id, hooks: f.hooks, f }));
     const views = hookViewOrder(mod, live, req.event);
     if (!views.length) return { skipped: `no view of the mod handles ${req.event} (a view registers with harness.hooks.on)` };
@@ -1274,6 +1310,44 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     else root.style.removeProperty('--mod-cover');
   }
 
+  // ---------- Previews of backgrounds for Settings ----------
+
+  let previewSeq = 0;
+  const previewKeys = new WeakMap<Slot, string>();
+  const previewSigs = new WeakMap<Slot, string>();
+  const previewKeyOf = (s: Slot) => previewKeys.get(s) ?? '';
+
+  const previews: ModPreviews = {
+    background(key) {
+      const r = backgroundRef(mods, key);
+      if (!r || r.mod.state === 'invalid') return null;
+      const el = document.createElement('div');
+      el.className = 'mod-background-view mod-preview-view';
+      const s: Slot = { ref: r, seat: 'background', el, body: el, frame: null, next: null, title: r.view.title, badge: null, height: 0, failedEl: null, queued: [], preview: true, previewVisible: true };
+      const id = `preview:${++previewSeq}:${key}`;
+      previewKeys.set(s, id);
+      previewSigs.set(s, JSON.stringify([r.mod.rev, r.mod.origin, [...r.mod.granted].sort()]));
+      slots.set(id, s);
+      mountFrame(s);
+      return {
+        el,
+        setVisible(v) {
+          if (s.previewVisible === v) return;
+          s.previewVisible = v;
+          syncVisibility();
+        },
+        ready: () => !!s.frame?.helloAt,
+        dispose() {
+          dropFrame(s.frame);
+          dropFrame(s.next);
+          s.frame = s.next = null;
+          el.remove();
+          slots.delete(id);
+        },
+      };
+    },
+  };
+
   // ---------- Building the seats from the list ----------
 
   function currentMod(key: string): ModInfo | undefined {
@@ -1296,6 +1370,19 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     let tabsChanged = false;
     // Gone, off, paused or no longer that seat: removed at once.
     for (const s of [...slots.values()]) {
+      if (s.preview) {
+        // A preview in Settings follows its mod: gone (or no longer a background) closes it, an edit reloads it
+        const r = backgroundRef(mods, s.ref.key);
+        if (!r || r.mod.state === 'invalid') {
+          dropFrame(s.frame);
+          dropFrame(s.next);
+          s.frame = s.next = null;
+          slots.delete(previewKeyOf(s));
+          continue;
+        }
+        s.ref = r;
+        continue;
+      }
       if (s.seat === 'background') continue;
       const r = wanted.get(s.ref.key);
       if (!r || r.view.seat !== s.seat) {
@@ -1360,6 +1447,13 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       }
     }
     if (bgSlot && changedMods.has(bgSlot.ref.mod.key)) reloadSlot(bgSlot);
+    // Previews in Settings reload with their mod's files, whatever its state (it may be a look not in use yet)
+    for (const s of slots.values()) {
+      if (!s.preview) continue;
+      const sig = JSON.stringify([s.ref.mod.rev, s.ref.mod.origin, [...s.ref.mod.granted].sort()]);
+      if (s.frame && previewSigs.get(s) !== sig) reloadSlot(s);
+      previewSigs.set(s, sig);
+    }
     syncBackground();
     syncStrip();
     applyRail();
@@ -1513,7 +1607,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     const target = viewId ? slots.get(viewKey(modKey, viewId)) : undefined;
     if (target) openView(target.ref.key);
     for (const s of slots.values()) {
-      if (s.ref.mod.key !== modKey) continue;
+      if (s.ref.mod.key !== modKey || s.preview) continue;
       const f = s.frame;
       const sent = f ? sendEvent(f, 'command', data) : false;
       // A view that is only now starting has not subscribed yet: it hears the command once it does.
@@ -1541,6 +1635,19 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
 
   const SCOPE_WORDS: Record<string, string> = { user: 'your mods folder', project: 'this project', bundled: 'the app' };
 
+  /** A mod that is only looks: its card offers Preview and Use instead of a switch. */
+  const lookOnly = (info: ModInfo) => isLookOnly(info.manifest);
+
+  /** The look tab of a mod's first kind of look, and that look's ref (what Preview shows) */
+  function firstLook(info: ModInfo): { tab: ModTab; title: string; ref: string } | null {
+    const set = lookSets([info], 1)[0];
+    for (const t of LOOK_TABS) {
+      const ref = set?.[t.kind];
+      if (ref) return { tab: t.tab, title: t.title, ref };
+    }
+    return null;
+  }
+
   function makeOfferCard(info: ModInfo): HTMLElement {
     const m = info.manifest;
     const name = m?.name ?? info.id;
@@ -1548,19 +1655,26 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     el.className = 'mod-offer';
     el.dataset.mod = info.key;
     const paused = info.state === 'paused';
-    const kicker = paused ? `${name} asks for more` : info.overrides ? `${name} replaces the built-in panel` : 'New mod';
+    const looks = lookOnly(info);
+    if (looks) el.classList.add('look');
+    const kicker = paused ? `${name} asks for more` : info.overrides ? `${name} replaces the built-in ${looks ? 'look' : 'panel'}` : looks ? 'New look' : 'New mod';
     const lines = askLines(info)
       .map((l) => `<li class="${l.strong ? 'strong' : ''}">${l.strong ? icon('triangle-alert', 14) : icon('check', 14)}<span>${escapeHtml(l.text)}</span></li>`)
       .join('');
     const seats = [...new Set((m?.contributes?.views ?? []).map((v) => ({ rail: 'a panel in the right-hand rail', tab: 'a tab in the side pane', composer: 'a strip above the composer', background: 'a background', worker: 'a hidden page that handles hooks' })[v.seat]).filter(Boolean))];
     const lookWords = [...new Set((m?.contributes?.looks ?? []).map((l) => (l.target === 'composer' ? 'a look for the chat bar' : 'a look for the conversation')))];
-    const adds = [...seats, ...lookWords, ...(m?.contributes?.styles?.length ? ['styles for the app'] : []), ...(m?.contributes?.commands?.length ? [`${m.contributes.commands.length === 1 ? 'a slash command' : 'slash commands'}`] : [])];
+    const adds = [...seats, ...lookWords, ...(m?.contributes?.styles?.length ? [looks ? 'a theme' : 'styles for the app'] : []), ...(m?.contributes?.commands?.length ? [`${m.contributes.commands.length === 1 ? 'a slash command' : 'slash commands'}`] : [])];
+    const title = looks ? (paused ? `Use ${name} again?` : name) : paused ? `Turn ${name} back on?` : `Turn on ${name}?`;
+    const asksLabel = paused ? 'Its new version asks to' : looks ? (info.scope === 'bundled' || info.approved ? 'It' : 'Using it lets it') : 'It asks to';
+    const buttons = looks
+      ? `<button type="button" class="btn mod-offer-later">Not now</button><button type="button" class="btn mod-offer-preview">${icon('eye', 14)}<span>Preview</span></button><button type="button" class="btn primary mod-offer-use">${paused ? 'Allow and use' : 'Use'}</button>`
+      : `<button type="button" class="btn mod-offer-later">Not now</button><button type="button" class="btn primary mod-offer-on">${escapeHtml(paused ? 'Turn back on' : 'Turn on')}</button>`;
     el.innerHTML = `
       <div class="mod-offer-head">
         <span class="mod-offer-icon">${iconHtml(m?.icon, info, 16)}</span>
         <div class="mod-offer-heading">
           <div class="mod-offer-kicker">${escapeHtml(kicker)}</div>
-          <div class="mod-offer-title">${escapeHtml(paused ? `Turn ${name} back on?` : `Turn on ${name}?`)}</div>
+          <div class="mod-offer-title">${escapeHtml(title)}</div>
         </div>
       </div>
       ${m?.description ? `<p class="mod-offer-desc">${escapeHtml(m.description)}</p>` : ''}
@@ -1568,35 +1682,53 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         ${adds.length ? `<dt>Adds</dt><dd>${escapeHtml(adds.join(', '))}</dd>` : ''}
         <dt>Lives in</dt><dd><code>${escapeHtml(shortDir(info.dir, home()))}</code> <span class="mod-offer-scope">· ${escapeHtml(SCOPE_WORDS[info.scope] ?? info.scope)}</span></dd>
       </dl>
-      <div class="mod-offer-asks-label">${paused ? 'Its new version asks to' : 'It asks to'}</div>
+      <div class="mod-offer-asks-label">${asksLabel}</div>
       <ul class="mod-offer-asks">${lines}</ul>
       <div class="mod-offer-row">
         <button type="button" class="btn mod-offer-files">${icon('folder', 14)}<span>Show files</span></button>
         <span class="spacer"></span>
-        <button type="button" class="btn mod-offer-later">Not now</button>
-        <button type="button" class="btn primary mod-offer-on">${escapeHtml(paused ? 'Turn back on' : 'Turn on')}</button>
+        ${buttons}
       </div>`;
-    const on = el.querySelector<HTMLButtonElement>('.mod-offer-on')!;
     const later = el.querySelector<HTMLButtonElement>('.mod-offer-later')!;
     const files = el.querySelector<HTMLButtonElement>('.mod-offer-files')!;
+    const buttonsOf = () => [...el.querySelectorAll<HTMLButtonElement>('.mod-offer-row .btn')];
+    const failed = (what: string, err: unknown) => {
+      for (const b of buttonsOf()) b.disabled = false;
+      let msg = el.querySelector<HTMLElement>('.mod-offer-error');
+      if (!msg) {
+        msg = document.createElement('p');
+        msg.className = 'mod-offer-error';
+        msg.setAttribute('role', 'alert');
+        el.querySelector('.mod-offer-row')?.before(msg);
+      }
+      msg.textContent = `Couldn't ${what}: ${errText(err)}`;
+    };
     files.addEventListener('click', () => void rpc('mods.reveal', info.key).catch((err: unknown) => deps.toast(`Couldn't show the folder: ${errText(err)}`, 'error')));
     later.addEventListener('click', () => decide(info.key, 'later'));
-    on.addEventListener('click', async () => {
-      on.disabled = later.disabled = true;
+    el.querySelector<HTMLButtonElement>('.mod-offer-preview')?.addEventListener('click', () => {
+      const first = firstLook(currentMod(info.key) ?? info);
+      deps.openSettings('mods', first ? { tab: first.tab, preview: first.ref } : undefined);
+    });
+    el.querySelector<HTMLButtonElement>('.mod-offer-use')?.addEventListener('click', async () => {
+      for (const b of buttonsOf()) b.disabled = true;
+      try {
+        // The card is the approval: it says what the look may do. The whole mod is used (every kind it has).
+        const now = currentMod(info.key) ?? info;
+        const list = await rpc('mods.use', lookSetPatch(lookSets([now], 1)[0] ?? null, true), { approve: true });
+        decide(info.key, 'used');
+        applyMods(list);
+      } catch (err) {
+        failed('use it', err);
+      }
+    });
+    el.querySelector<HTMLButtonElement>('.mod-offer-on')?.addEventListener('click', async () => {
+      for (const b of buttonsOf()) b.disabled = true;
       try {
         const list = await rpc('mods.setEnabled', info.key, true);
         decide(info.key, 'on');
         applyMods(list);
       } catch (err) {
-        on.disabled = later.disabled = false;
-        let msg = el.querySelector<HTMLElement>('.mod-offer-error');
-        if (!msg) {
-          msg = document.createElement('p');
-          msg.className = 'mod-offer-error';
-          msg.setAttribute('role', 'alert');
-          el.querySelector('.mod-offer-row')?.before(msg);
-        }
-        msg.textContent = `Couldn't turn it on: ${errText(err)}`;
+        failed('turn it on', err);
       }
     });
     return el;
@@ -1606,21 +1738,33 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     return (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
   }
 
-  function decide(key: string, how: 'on' | 'later' | 'elsewhere'): void {
+  function decide(key: string, how: 'on' | 'used' | 'later' | 'elsewhere'): void {
     const o = offers.get(key);
     if (!o || o.decided) return;
     o.decided = true;
     const name = o.info.manifest?.name ?? o.info.id;
-    // The mod's place in Settings: the tab of its kind (a background lands on Backgrounds, where it is picked)
-    const tabs = modTabs(o.info);
-    const tab = tabs.find((t) => t !== 'mods' && t !== 'themes') ?? tabs[0];
-    const where = `Settings → Mods${tab === 'mods' ? '' : ` → ${MOD_TABS.find((t) => t.id === tab)!.title}`}`;
-    const picks = tab !== 'mods' && tab !== 'themes';
-    const text = how === 'later' ? `${name} stays off. Turn it on any time in` : how === 'on' ? (picks ? `${name} is on. Pick it in` : `${name} is on`) : `${name} was turned on in Settings`;
-    const link = how === 'later' || (how === 'on' && picks) ? ` <button type="button" class="link-btn mod-offer-where" data-tab="${escapeHtml(tab)}">${escapeHtml(where)}</button>` : '';
+    let text: string;
+    let tab: string;
+    let preview: string | undefined;
+    if (lookOnly(o.info)) {
+      // A look's place in Settings: the tab of its first kind, where it shows in a preview
+      const first = firstLook(currentMod(key) ?? o.info);
+      tab = first?.tab ?? 'mods';
+      preview = how === 'later' ? first?.ref : undefined;
+      text = how === 'later' ? `${name} waits for you in` : how === 'used' ? `${name} is in use. Change it in` : `${name} is in use.`;
+    } else {
+      // The mod's place in Settings: the tab of its kind (a background lands on Background, where it is used)
+      const tabs = modTabs(o.info);
+      tab = tabs.find((t) => t !== 'mods' && t !== 'themes') ?? tabs[0];
+      const picks = tab !== 'mods' && tab !== 'themes';
+      text = how === 'later' ? `${name} stays off. Turn it on any time in` : how === 'on' ? (picks ? `${name} is on. Use its looks in` : `${name} is on`) : `${name} was turned on in Settings`;
+      if (!(how === 'later' || (how === 'on' && picks))) tab = '';
+    }
+    const where = tab ? `Settings → Mods${tab === 'mods' ? '' : ` → ${MOD_TABS.find((t) => t.id === tab)!.title}`}` : '';
+    const link = where && how !== 'elsewhere' ? ` <button type="button" class="link-btn mod-offer-where" data-tab="${escapeHtml(tab)}">${escapeHtml(where)}</button>` : '';
     o.el.classList.add('done');
     o.el.innerHTML = `<div class="mod-offer-decided"><span class="${how === 'later' ? 'no' : 'ok'}">${icon(how === 'later' ? 'x' : 'check', 14)}</span><span>${escapeHtml(text)}${link}</span></div>`;
-    o.el.querySelector<HTMLButtonElement>('.mod-offer-where')?.addEventListener('click', () => deps.openSettings('mods', { tab }));
+    o.el.querySelector<HTMLButtonElement>('.mod-offer-where')?.addEventListener('click', () => deps.openSettings('mods', { tab, ...(preview ? { preview } : {}) }));
   }
 
   function showOffer(info: ModInfo): void {
@@ -1662,8 +1806,9 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
 
   const debug = {
     list: () => mods.map((m) => ({ ...m })),
+    previews: () => [...slots.values()].filter((s) => s.preview).map((s) => ({ key: s.ref.key, hello: !!s.frame?.helloAt, visible: slotVisible(s), src: s.frame?.iframe.src ?? null })),
     views: () =>
-      [...slots.values()].map((s) => ({
+      [...slots.values()].filter((s) => !s.preview).map((s) => ({
         key: s.ref.key,
         mod: s.ref.mod.key,
         view: s.ref.view.id,
@@ -1722,5 +1867,5 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     }
   })();
 
-  return { pane };
+  return { pane, previews };
 }

@@ -157,6 +157,8 @@ export interface BridgeOptions {
   usage: SkillUsageTracker;
   /** model.delta and other per-mod events */
   emit: (mod: string, name: string, data: unknown) => void;
+  /** Whether Settings may preview the mod's looks before they are used (its preview frames are answered then) */
+  previewable?: (mod: ModInfo) => boolean;
 }
 
 export class ModBridgeHandler {
@@ -173,7 +175,9 @@ export class ModBridgeHandler {
       const c = caller as ModCaller | null;
       if (!c || typeof c !== 'object' || typeof c.mod !== 'string') throw badParams('caller: must name the mod');
       const mod = this.o.registry.get(c.mod);
-      if (!mod || mod.state !== 'on') throw new BridgeError(ModError.unavailable, `The mod ${c.mod} is not on.`);
+      // A mod that is on, one whose looks may be used (its background in the window), or a preview in Settings
+      const live = !!mod && (mod.state === 'on' || mod.approved === true || (c.preview === true && !!this.o.previewable?.(mod)));
+      if (!mod || !live) throw new BridgeError(ModError.unavailable, `The mod ${c.mod} is not on.`);
       if (typeof method !== 'string' || !Object.prototype.hasOwnProperty.call(MOD_METHOD_PERMISSIONS, method)) {
         throw new BridgeError(ModError.unknownMethod, `Unknown method ${String(method)}.`);
       }
@@ -441,7 +445,7 @@ export function titleSearch(list: SessionMeta[], query: string, limit: number): 
   return hits;
 }
 
-/** Whether a mod holds a permission (for filtering events). */
+/** Whether a mod holds a permission (for filtering events): it is on, or its looks may be used, and was granted it. */
 export function holds(mod: ModInfo, need: ModPermission | null): boolean {
-  return mod.state === 'on' && (!need || mod.granted.includes(need));
+  return (mod.state === 'on' || mod.approved === true) && (!need || mod.granted.includes(need));
 }

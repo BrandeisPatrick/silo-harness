@@ -3,7 +3,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ModCommandManifest, ModHookContribution, ModLookManifest, ModLookTarget, ModManifest, ModPermission, ModProblem, ModSeat, ModSettingField, ModViewManifest } from '../../shared/mods';
+import type { LookKind, ModCommandManifest, ModHookContribution, ModLayout, ModLookManifest, ModLookTarget, ModManifest, ModPermission, ModProblem, ModSeat, ModSettingField, ModViewManifest } from '../../shared/mods';
 import { MOD_LOOK_TARGETS, MOD_PERMISSIONS, MOD_SEATS, RESERVED_SEATS } from './permissions';
 import { HOOK_EVENTS, OTHER_CLAUDE_EVENTS, isHookEvent } from '../hooks/config';
 
@@ -17,6 +17,8 @@ const SETTING_KEY_RE = /^[A-Za-z][\w.-]{0,63}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 /** mod.json larger than this is not read: a manifest is a few kilobytes */
 const MAX_MANIFEST_BYTES = 256 * 1024;
+/** What a look's or a background's `preview` picture may be */
+const PREVIEW_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'];
 
 export interface ManifestResult {
   /** The manifest with only the fields this protocol knows; null when it has problems */
@@ -169,11 +171,16 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
           const p = modFileProblem(dir, v.icon);
           if (p) ((ok = false), missing(`${at}.icon: ${p}`));
         }
+        if (v.preview !== undefined) {
+          const p = modFileProblem(dir, v.preview, { ext: PREVIEW_EXT });
+          if (p) ((ok = false), /does not exist|is not a file/.test(p) ? missing(`${at}.preview: ${p}`) : bad(`${at}.preview: ${p}`));
+        }
         if (!ok) return;
         const view: ModViewManifest = { id: v.id as string, title: (v.title as string).trim(), entry: v.entry as string, seat: v.seat as ModSeat };
         if (v.order !== undefined) view.order = v.order as number;
         if (v.maxHeight !== undefined) view.maxHeight = v.maxHeight as number;
         if (v.icon !== undefined) view.icon = v.icon as string;
+        if (v.preview !== undefined) view.preview = v.preview as string;
         views.push(view);
       });
     }
@@ -204,6 +211,10 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
         else lookIds.add(l.id);
         if (typeof l.title !== 'string' || !l.title.trim()) no(`${at}.title: missing; add the name shown in Settings, Mods`);
         if (l.description !== undefined && typeof l.description !== 'string') no(`${at}.description: must be a string`);
+        if (l.preview !== undefined) {
+          const p = modFileProblem(dir, l.preview, { ext: PREVIEW_EXT });
+          if (p) ((ok = false), /does not exist|is not a file/.test(p) ? missing(`${at}.preview: ${p}`) : bad(`${at}.preview: ${p}`));
+        }
         const files: string[] = [];
         if (!Array.isArray(l.styles) || !l.styles.length) no(`${at}.styles: must be a non-empty list of CSS files in the mod, e.g. ["look.css"]`);
         else {
@@ -222,6 +233,7 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
         if (!ok) return;
         const look: ModLookManifest = { id: l.id as string, title: (l.title as string).trim(), target: l.target as ModLookTarget, styles: files };
         if (typeof l.description === 'string') look.description = l.description;
+        if (typeof l.preview === 'string') look.preview = l.preview;
         looks.push(look);
       });
     }
@@ -358,13 +370,66 @@ export function needsStylesApproval(m: ModManifest | null): boolean {
 }
 
 /**
- * A bundled mod that restyles the app itself (a theme, a set of looks) starts off: it changes
- * how everything looks, so it is on only once the user turned it on (recorded in `enabled`, like a user mod). Other
- * bundled mods are on unless the user turned them off (`disabledBundled`).
+ * Whether a mod has parts behind a switch: a view in the rail, the side pane, the composer strip or the worker seat,
+ * or a slash command. A mod with none is only looks (backgrounds, looks, a theme): it has no switch.
  */
-export function bundledStartsOff(m: ModManifest | null): boolean {
-  return !!m?.contributes?.styles?.length || !!m?.contributes?.looks?.length;
+export function hasFeatureParts(m: ModManifest | null | undefined): boolean {
+  const c = m?.contributes;
+  return !!c && ((c.views ?? []).some((v) => v.seat !== 'background') || (c.commands ?? []).length > 0);
 }
+
+/** Whether a mod has looks: a background view, a look for a region, or styles (a theme). */
+export function hasLookParts(m: ModManifest | null | undefined): boolean {
+  const c = m?.contributes;
+  return !!c && ((c.views ?? []).some((v) => v.seat === 'background') || (c.looks ?? []).length > 0 || (c.styles ?? []).length > 0);
+}
+
+/** The mod key and the part id in "<mod key>/<id>" (a project mod's key holds "/" itself, so the last one splits). */
+export function splitRef(ref: string): { key: string; id: string } | null {
+  const i = ref.lastIndexOf('/');
+  return i > 0 && i < ref.length - 1 ? { key: ref.slice(0, i), id: ref.slice(i + 1) } : null;
+}
+
+/** A mod's first look of each kind, as the layout names it ("<key>/<id>", or the key for its theme); null where it has none. */
+export function lookPartsOf(key: string, m: ModManifest | null | undefined): Record<LookKind, string | null> {
+  const c = m?.contributes ?? {};
+  const look = (t: ModLookTarget) => {
+    const l = (c.looks ?? []).find((x) => x.target === t);
+    return l ? `${key}/${l.id}` : null;
+  };
+  const bg = (c.views ?? []).find((v) => v.seat === 'background');
+  return { background: bg ? `${key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation'), theme: (c.styles ?? []).length ? key : null };
+}
+
+/** Whether `ref` names a part of kind `kind` of the mod `key` with manifest `m`. */
+export function isPartOf(kind: LookKind, ref: string, key: string, m: ModManifest | null | undefined): boolean {
+  const c = m?.contributes;
+  if (!c) return false;
+  if (kind === 'theme') return ref === key && (c.styles ?? []).length > 0;
+  const at = splitRef(ref);
+  if (!at || at.key !== key) return false;
+  if (kind === 'background') return (c.views ?? []).some((v) => v.id === at.id && v.seat === 'background');
+  return (c.looks ?? []).some((l) => l.id === at.id && l.target === kind);
+}
+
+/** The ref the layout has in use for a kind ("image" for the user's picture counts as no mod's). */
+export function layoutRef(layout: Partial<ModLayout> | null | undefined, kind: LookKind): string | null {
+  if (!layout) return null;
+  if (kind === 'theme') return layout.theme ?? null;
+  if (kind === 'background') return layout.background ?? null;
+  return layout.looks?.[kind] ?? null;
+}
+
+/** The kinds of look of mod `key` that the layout has in use. */
+export function inUseKinds(key: string, m: ModManifest | null | undefined, layout: Partial<ModLayout> | null | undefined): LookKind[] {
+  return LOOK_KINDS.filter((k) => {
+    const ref = layoutRef(layout, k);
+    return !!ref && isPartOf(k, ref, key, m);
+  });
+}
+
+/** The kinds of look, in the order of the tabs of Settings → Mods */
+export const LOOK_KINDS: readonly LookKind[] = ['background', 'composer', 'conversation', 'theme'];
 
 /** Whether `value` fits a setting field (type, options, range). */
 export function settingFits(field: ModSettingField, value: unknown): boolean {
