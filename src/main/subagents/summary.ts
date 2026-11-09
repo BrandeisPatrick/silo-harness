@@ -2,12 +2,10 @@
 // bounded plain-text rendering of the messages. Kept apart from compact.ts on purpose: a compaction brief is for the
 // same agent to carry on, this one is a report for another session that only needs the outcome.
 
-import type OpenAI from 'openai';
 import type { AppConfig } from '../../shared/types';
 import { contextSize, ollamaComplete } from '../ollama';
 import { isOllama, makeClient, ollamaOf } from '../providers';
-
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+import type { Msg } from '../sessions';
 
 /** Characters of transcript the summariser sees at most; the middle goes first, since the brief and the outcome sit at the ends. */
 export const SUMMARY_INPUT_CHARS = 24_000;
