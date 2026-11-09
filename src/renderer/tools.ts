@@ -7,7 +7,7 @@ import { highlight, langFromPath } from './highlight.js';
 import { icon, type IconName } from './icons.js';
 import { artifactIcon } from './artifacts.js';
 import { cleanTasks, taskProgress, taskSnapshot, taskSummary } from './tasks.js';
-import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, isDeniedResult } from './tool-labels.js';
+import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, browserApproval, isDeniedResult, type BrowserCardRef } from './tool-labels.js';
 import { homeDir, tilde } from './home.js';
 import { answeredBody, answerMeta, questionsOf } from './questions.js';
 
@@ -128,6 +128,13 @@ function browserLabel(name: string, a: Args): ToolLabel | null {
     case 'browser_get_text': return { verb: 'Read page text', arg: '', icon: 'eye', mono: false };
     case 'browser_screenshot': return { verb: 'Screenshot', arg: '', icon: 'camera', mono: false };
     case 'browser_eval': return { verb: 'Run JS', arg: short(str(a, 'code').split('\n')[0], 80), icon: 'code', mono: true };
+    case 'browser_tabs': {
+      const action = str(a, 'action');
+      if (action === 'new') return { verb: 'Open a tab', arg: short(str(a, 'url'), 80), icon: 'globe', mono: false };
+      if (action === 'select') return { verb: 'Switch tab', arg: str(a, 'tab_id'), icon: 'globe', mono: true };
+      if (action === 'close') return { verb: 'Close tab', arg: str(a, 'tab_id'), icon: 'globe', mono: true };
+      return { verb: 'List tabs', arg: '', icon: 'globe', mono: false };
+    }
     default:
       if (name.startsWith('browser_')) return { verb: humanize(name), arg: short(firstString(a), 80), icon: 'globe', mono: false };
       return null;
@@ -298,7 +305,7 @@ const KNOWN_TOOLS = new Set([
   'read_file', 'write_file', 'edit_file', 'list_directory', 'glob', 'grep', 'bash', 'skill', 'create_artifact', 'update_tasks', 'show_image', 'ask_user',
   'terminal_run', 'terminal_read', 'terminal_list', 'terminal_stop',
   'browser_navigate', 'browser_get_text', 'browser_read_page', 'browser_find', 'browser_click',
-  'browser_type', 'browser_press_key', 'browser_scroll', 'browser_screenshot', 'browser_eval', 'browser_wait_for',
+  'browser_type', 'browser_press_key', 'browser_scroll', 'browser_screenshot', 'browser_eval', 'browser_wait_for', 'browser_tabs',
   ...AGENT_TOOLS,
 ]);
 
@@ -1017,7 +1024,9 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
 }
 
 /** Title for the approval card. */
-export function approvalTitle(name: string, detail: string, args?: Args): string {
+export function approvalTitle(name: string, detail: string, args?: Args, browser?: BrowserCardRef): string {
+  // A browser card: "Let the agent use example.com?", "Run JavaScript on example.com?", "Make a purchase?" …
+  if (browser && typeof browser === 'object') return browserApproval(browser).title;
   const target = (args && str(args, 'path')) || detail.split('\n')[0] || '';
   if (name === 'bash') return 'Allow Silo Harness to run this command?';
   if (name === 'terminal_run') return 'Allow Silo Harness to run this command in the terminal?';

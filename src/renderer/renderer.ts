@@ -1520,6 +1520,29 @@ document.addEventListener('keydown', (e) => {
     startTitleEdit();
   } else if (!meta) {
     return;
+  } else if (e.altKey && e.code === 'KeyI' && !e.shiftKey) {
+    // ⌥⌘I with the browser's chrome focused: the page's DevTools (elsewhere the View menu's, for the app's own window)
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.browserDevTools();
+  } else if (!e.altKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_' || (e.key === '0' && !e.shiftKey))) {
+    // ⌘+ ⌘− ⌘0 with the browser's chrome focused zoom the page (taken here, the View menu does not zoom the app too)
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.zoomBrowser(e.key === '0' ? 'reset' : e.key === '-' || e.key === '_' ? 'out' : 'in');
+  } else if (k === 'n' && e.shiftKey) {
+    // The browser's tabs, while its chrome has the focus (inside a page the main process handles the same keys)
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.newBrowserTab();
+  } else if (k === 'w' && !e.shiftKey) {
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.closeBrowserTab();
+  } else if (k === 'l' && !e.shiftKey) {
+    if (!pane.browserFocused()) return;
+    e.preventDefault();
+    pane.focusUrl();
   } else if (k === 'n' && !e.shiftKey) {
     e.preventDefault();
     void newSession();
@@ -1556,8 +1579,10 @@ document.addEventListener('keydown', (e) => {
       inputEl.focus();
     }
   } else if (k === 'f' && !e.shiftKey) {
+    // In the browser's chrome, find in the page; anywhere else, search the sessions
     e.preventDefault();
-    focusSearch();
+    if (pane.browserFocused()) pane.openFind();
+    else focusSearch();
   }
 });
 
@@ -2173,6 +2198,7 @@ void mcpPanel.refresh();
   reportBounds();
   autosize();
   applyBrowserState(await oc.browser.state());
+  void pane.refreshBrowserNote();
   inputEl.focus();
 })();
 

@@ -93,6 +93,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         ollama: { ...current.ollama, ...next.ollama },
         portkey: { ...current.portkey, ...next.portkey },
         dreaming: { ...current.dreaming, ...next.dreaming },
+        browser: { ...current.browser, ...next.browser },
         // Named providers change through the files, the command line and providers.setModel only.
         providers: current.providers,
         mcpServers: current.mcpServers,

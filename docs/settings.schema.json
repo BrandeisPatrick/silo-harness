@@ -218,6 +218,48 @@
         }
       }
     },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keepCookies": {
+          "type": "boolean",
+          "description": "Keep the Browser pane's cookies and site data when the app quits."
+        },
+        "downloadsDir": {
+          "type": "string",
+          "description": "Where downloads are saved; empty for the Downloads folder."
+        },
+        "openChatLinksInPane": {
+          "type": "boolean",
+          "description": "Open links from the chat in the Browser pane instead of the default browser."
+        },
+        "alwaysAllowed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Sites the agent may use without asking (example.com, *.example.com, localhost:3000)."
+        },
+        "sensitive": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Sites that always ask before the agent acts, beside the built-in list."
+        },
+        "exempt": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Hosts the agent may use freely, like localhost; a folder makes the files in it exempt."
+        }
+      }
+    },
     "providers": {
       "type": "object",
       "description": "Named providers. \"provider\" selects one by its name. The names \"ollama\" and \"portkey\" are taken by the built-in blocks.",

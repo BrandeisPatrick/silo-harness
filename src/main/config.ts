@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AppConfig, PermissionMode } from '../shared/types';
 import type { DreamingConfig } from '../shared/dreaming';
+import type { BrowserConfig } from '../shared/browser';
 import { DEFAULT_DREAMING } from './dreaming/names';
 import { applySettings, withoutSettings } from './settings';
 import { isRecord } from './json';
@@ -61,6 +62,7 @@ export function defaultConfig(): AppConfig {
     settingsTrusted: {},
     dreaming: { ...DEFAULT_DREAMING },
     providers: {},
+    browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] },
   };
 }
 
@@ -155,6 +157,7 @@ export function readStoredConfig(file: string): AppConfig {
       dreaming: { ...d.dreaming, ...(isRecord(raw.dreaming) ? raw.dreaming : {}) },
       // Named providers are kept as written, even a broken one: resolving reports what is wrong with it.
       providers: isRecord(raw.providers) ? (raw.providers as AppConfig['providers']) : {},
+      browser: normalizeBrowser(raw.browser),
     });
   } catch {
     return d;
@@ -189,10 +192,24 @@ export function normalizeDreaming(raw: unknown): DreamingConfig {
   };
 }
 
+/** The browser section over its defaults: a file from before the Browser pane had a profile of its own has none. */
+export function normalizeBrowser(raw: unknown): BrowserConfig {
+  const r = isRecord(raw) ? raw : {};
+  const list = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim()))] : []);
+  return {
+    keepCookies: typeof r.keepCookies === 'boolean' ? r.keepCookies : true,
+    downloadsDir: typeof r.downloadsDir === 'string' ? r.downloadsDir.trim() : '',
+    openChatLinksInPane: r.openChatLinksInPane === true,
+    alwaysAllowed: list(r.alwaysAllowed),
+    sensitive: list(r.sensitive),
+    exempt: list(r.exempt),
+  };
+}
+
 /** Keeps the legacy autoApprove flag consistent with permissionMode, and autoTitles a boolean (default on). */
 export function normalizeConfig(cfg: AppConfig): AppConfig {
   const mode: PermissionMode = (MODES as string[]).includes(cfg.permissionMode) ? cfg.permissionMode : 'ask';
-  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {} };
+  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {}, browser: normalizeBrowser(cfg.browser) };
 }
 
 export function saveConfig(cfg: AppConfig): void {

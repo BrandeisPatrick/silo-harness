@@ -2,14 +2,14 @@
 // Features never edit this file; they get `app` in their setup function (see docs/architecture.md).
 // First: carry over the folders of the app's older names, before any other module reads them.
 import './carry-over';
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, webContents } from 'electron';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
 import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
 import { loadConfig, saveConfig } from './config';
-import { BrowserController } from './browser';
+import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
 import { TerminalManager } from './terminal';
 import { createApp, type AppHost } from './app';
 import { registerCoreIpc } from './ipc';
@@ -49,11 +49,15 @@ function applyBranding(): void {
   });
 }
 
+/** Whether the window's chrome is dark: the theme setting, or the system's when it follows that. */
+function darkChrome(): boolean {
+  const theme = host?.config().theme;
+  return theme === 'dark' || (theme !== 'light' && nativeTheme.shouldUseDarkColors);
+}
+
 /** Window chrome colour before the renderer paints; matches the renderer's --bg tokens so launch does not flash. */
 function windowBackground(): string {
-  const theme = host?.config().theme;
-  const dark = theme === 'dark' || (theme !== 'light' && nativeTheme.shouldUseDarkColors);
-  return dark ? '#262624' : '#faf9f5';
+  return darkChrome() ? '#262624' : '#faf9f5';
 }
 
 /**
@@ -85,8 +89,9 @@ function createWindow(): void {
       backgroundThrottling: !LIVE_TEST,
     },
   });
+  // A link in the chat: the default browser, or a tab of the pane when Settings → Browser says so (browser/feature.ts)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openChatLink(host!, browser, url);
     return { action: 'deny' };
   });
   win.webContents.on('console-message', (event) => {
@@ -99,8 +104,15 @@ function createWindow(): void {
   const w = win;
   const a = host!;
   a.setWindow(w);
-  browser = new BrowserController(w, (state) => {
-    if (!w.isDestroyed()) w.webContents.send('browser:state', state);
+  browser = new BrowserController(w, {
+    onState: (state) => {
+      if (!w.isDestroyed()) w.webContents.send('browser:state', state);
+    },
+    onPopups: (popups) => a.push('browser:popups', popups),
+    onFocusUrl: () => a.push('browser:focus-url', null),
+    onFindOpen: () => a.push('browser:find-open', null),
+    onFound: (result) => a.push('browser:found', result),
+    dark: darkChrome,
   });
   const servers = a.mcp;
   const term = a.terminal!;
@@ -216,7 +228,21 @@ function buildMenu(): void {
       { role: 'appMenu' },
       { role: 'fileMenu' },
       { role: 'editMenu' },
-      { role: 'viewMenu' },
+      // The View menu's own items, but zoom of our own: a role zooms whichever page has the focus, the Browser pane's
+      // included, with steps of its own and nothing kept. A page of the browser zooms as ⌘+ in it does (per site);
+      // the app's window zooms as before.
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          ...zoomMenuItems((wc, change) => browser?.zoomContents(wc, change) ?? false, () => webContents.getFocusedWebContents() ?? win?.webContents ?? null),
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+        ],
+      },
       { role: 'windowMenu' },
     ]),
   );
@@ -235,12 +261,15 @@ app.whenReady().then(() => {
   applyBranding();
   host = buildApp();
   const a = host;
-  protocol.handle(ARTIFACT_SCHEME, async (req) => {
+  const serveArtifact = async (req: Request): Promise<Response> => {
     const r = a.artifacts?.resolve(req.url);
     if (!r) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     if (r.kind === 'page') return new Response(r.html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     return net.fetch(pathToFileURL(r.path).href);
-  });
+  };
+  protocol.handle(ARTIFACT_SCHEME, serveArtifact);
+  // The Browser pane has a session of its own (persist:browser): artifacts must be served there too.
+  browserSession().protocol.handle(ARTIFACT_SCHEME, serveArtifact);
   buildMenu();
   registerCoreIpc(a, { browser: () => browser });
   // The features, in this order. Each keeps its code in its own file and never needs to edit this one.
@@ -256,6 +285,7 @@ app.whenReady().then(() => {
   setupPower(a);
   setupDreaming(a);
   setupProviders(a);
+  setupBrowser(a, () => browser);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

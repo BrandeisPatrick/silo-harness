@@ -24,7 +24,7 @@ import type { AppConfig } from '../shared/types';
 import type { SettingsFileInfo, SettingsInfo } from '../shared/settings-info';
 import { ENV_NAME, expandEnvRefs } from './env';
 import { isRecord } from './json';
-import { between, bool, describe, kind, nonNegative, oneOf, positiveInt, str, timeOfDay, type Check } from './checks';
+import { between, bool, describe, kind, nonNegative, oneOf, positiveInt, str, stringList, timeOfDay, type Check } from './checks';
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
 import { configDir, projectConfigDir } from './paths';
 import { hooksSchema, validateHooks } from './hooks/config';
@@ -78,7 +78,7 @@ const SCALARS: Record<string, Check> = {
 };
 
 /** Sections a settings file may set field by field. */
-const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming', Record<string, Check>> = {
+const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser', Record<string, Check>> = {
   ollama: {
     baseURL: describe(str, "The Ollama server's OpenAI-compatible endpoint, e.g. http://localhost:11434/v1."),
     model: describe(str, 'The Ollama model tag, e.g. qwen3:8b.'),
@@ -102,6 +102,14 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming', Record<string, Check>>
     skills: describe(bool, 'Look for skills.'),
     mods: describe(bool, 'Look for mods.'),
     memory: describe(bool, 'Look for memory lines.'),
+  },
+  browser: {
+    keepCookies: describe(bool, "Keep the Browser pane's cookies and site data when the app quits."),
+    downloadsDir: describe(str, 'Where downloads are saved; empty for the Downloads folder.'),
+    openChatLinksInPane: describe(bool, 'Open links from the chat in the Browser pane instead of the default browser.'),
+    alwaysAllowed: describe(stringList, 'Sites the agent may use without asking (example.com, *.example.com, localhost:3000).'),
+    sensitive: describe(stringList, 'Sites that always ask before the agent acts, beside the built-in list.'),
+    exempt: describe(stringList, 'Hosts the agent may use freely, like localhost; a folder makes the files in it exempt.'),
   },
 };
 
@@ -330,7 +338,19 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       }
       value = block;
     }
-    if (key === 'ollama' || key === 'portkey' || key === 'dreaming') {
+    if (key === 'browser' && scope === 'project' && isRecord(value)) {
+      // The sites the agent may use without asking, and the exempt hosts, decide where it acts unasked: the user's
+      // alone. The rest of the block (cookies, the downloads folder, chat links, sites that always ask) applies.
+      const block: Record<string, unknown> = { ...value };
+      for (const f of ['alwaysAllowed', 'exempt']) {
+        if (f in block) {
+          bad(`browser.${f}`, "a project's settings.json may not choose where the agent acts without asking; add sites in Settings → Browser or your own settings.json");
+          delete block[f];
+        }
+      }
+      value = block;
+    }
+    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);
         continue;

@@ -6,7 +6,7 @@
 // Follows mods:changed live.
 
 import type { LookKind, ModInfo, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
-import { escapeHtml, h } from '../dom.js';
+import { dirname, escapeHtml, h } from '../dom.js';
 import { icon, isIconName } from '../icons.js';
 import { onPush } from '../rpc.js';
 import {
@@ -263,6 +263,47 @@ export function modsSection(ctx: Ctx): Section {
 
   const listEl = h('div', { class: 'sp-mod-list' });
 
+  // ---------- Delete all custom mods: every folder in the user mods folder goes to the Trash (mods.removeAll) ----------
+
+  const removeAllBtn = button('Delete all custom mods', async (b) => {
+    const mine = mods.filter((m) => m.scope === 'user');
+    if (!mine.length) return;
+    const names = mine.map((m) => m.manifest?.name ?? m.id);
+    const listed = names.length > 6 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    const one = mine.length === 1;
+    const inUse = mine.some((m) => m.inUse?.length);
+    const ok = await ctx.confirm({
+      title: 'Delete all custom mods?',
+      description: `${one ? 'Your mod' : `Your ${mine.length} mods`} (${listed}) move${one ? 's' : ''} to the Trash, where ${one ? 'it' : 'they'} can be recovered. What ${one ? 'it was' : 'they were'} granted or set is forgotten${inUse ? `, and what of ${one ? 'it' : 'them'} is in use goes back to Default` : ''}. Built-in mods and this project’s mods stay.`,
+      confirmLabel: 'Move to Trash',
+      danger: true,
+    });
+    if (!ok) return;
+    b.disabled = true;
+    try {
+      const r = await ctx.call('mods.removeAll');
+      mods = r.mods;
+      for (const key of r.removed) expanded.delete(key);
+      removeAllRow.problem(null);
+      renderAll();
+      showStatus(r.removed.length ? `Moved ${r.removed.length === 1 ? 'one mod' : `${r.removed.length} mods`} to the Trash.` : 'There were no mods of yours to delete.');
+    } catch (err) {
+      removeAllRow.problem(`Couldn't delete them: ${ctx.cleanError(err)}`);
+      b.disabled = false;
+    }
+  }, { icon: 'trash', danger: true });
+  removeAllBtn.disabled = true;
+  const removeAllRow = row({ id: 'mods-remove-all', title: 'Delete all custom mods', desc: '', keywords: 'remove everything clear wipe reset erase uninstall yours user mods folder trash' }, removeAllBtn);
+  const removeAllGroup = group(null, removeAllRow);
+
+  /** The row follows the list: how many mods of yours there are and where their folders live */
+  function renderRemoveAll(): void {
+    const mine = mods.filter((m) => m.scope === 'user');
+    const folder = mine.length ? tildePath(dirname(mine[0].dir).replace(/\/$/, '')) : 'your mods folder';
+    removeAllRow.setDesc(`Moves ${mine.length ? `your ${mine.length === 1 ? 'mod' : `${mine.length} mods`}` : 'every mod of yours'} (the folders in ${folder}) to the Trash, where they can be recovered. Built-in mods and this project’s mods stay; a look of yours in use goes back to Default.`);
+    removeAllBtn.disabled = !mine.length;
+  }
+
   // ---------- The tab strip ----------
 
   const tabsEl = h('div', { class: 'sp-tabs sp-only-browse', role: 'tablist', 'aria-label': 'Kinds of mod' });
@@ -378,7 +419,7 @@ export function modsSection(ctx: Ctx): Section {
   };
 
   let dialogOpen = false;
-  const panel = h('div', { id: 'sp-modpanel', role: 'tabpanel' }, ...Object.values(heads), toolbar, installForm, createForm, status, listEl);
+  const panel = h('div', { id: 'sp-modpanel', role: 'tabpanel' }, ...Object.values(heads), toolbar, installForm, createForm, status, listEl, removeAllGroup);
   el.append(tabsEl, panel);
 
   function showTab(next: ModTab, opts?: { preview?: string }): void {
@@ -400,6 +441,7 @@ export function modsSection(ctx: Ctx): Section {
     toolbar.classList.toggle('sp-tab-out', tab !== 'mods');
     listEl.classList.toggle('sp-tab-out', tab !== 'mods');
     status.classList.toggle('sp-tab-out', tab !== 'mods');
+    removeAllGroup.classList.toggle('sp-tab-out', tab !== 'mods');
     placeLookStatus();
     for (const [t, lt] of lookTabs) lt.shown(dialogOpen && t === tab);
     if (opts?.preview !== undefined) lookTabs.get(tab)?.preview(opts.preview);
@@ -438,6 +480,7 @@ export function modsSection(ctx: Ctx): Section {
       for (const m of items) grp.append(modRow(m));
       listEl.append(grp);
     }
+    renderRemoveAll();
     applyTab();
     ctx.refreshSearch();
     if (active instanceof HTMLElement && active.dataset.focusKey) listEl.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(active.dataset.focusKey)}"]`)?.focus();

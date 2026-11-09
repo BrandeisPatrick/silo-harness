@@ -15,6 +15,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.8.0 | Closer to Claude Code: hooks in Claude Code's format (settings.json and mods), the permission prompt and an ask_user question card in Claude Code's style, one quiet line per tool call, the rail, footer and status line laid out like Claude Code's | released 2026-11-07 |
 | 0.9.0 | Scheduled tasks and Dreaming as pages (cards, a task page with its runs, runs as regular ⚡ sessions); looks previewed and used without switches; the rail and mod tabs open and close like the browser | released 2026-11-09 |
 | 0.9.1 | Fixes: credentials typed into the Browser pane hidden from the agent, permission prompts for pages; the renderer and the agent split into modules | released 2026-11-09 |
+| 0.10.0 | The Browser pane as a browser: its own profile with sign-ins carried over, tabs, sign-in popups as cards, per-site approval for the agent, sensitive sites, credentials and CAPTCHAs refused, purchases and accounts asking, a permission bar, certificate warnings, downloads, find, zoom, a context menu, Settings → Browser; Delete all sessions and Delete all custom mods | released 2026-11-09 |
 
 ## Done in earlier rounds
 
@@ -55,6 +56,14 @@ MCP servers · context meter, auto-compaction and `/compact` · project instruct
 | 26 | **Many mod tabs**: let the pane's tab strip scroll or fold into a menu | Past icon-only, tabs at the end fall out of view | next |
 | 27 | **Provider wording**: "Gateway" instead of "Portkey" for any OpenAI-compatible endpoint; a long model name is cut in the sidebar footer | The label names one product among many | next |
 | 28 | **Test rig captures through the main process** (`invalidate` + `capturePage`), and `browser_screenshot` in a hidden window | Screenshots of the hidden test window can be stale or tiled; the built-in browser's screenshot fails there | later |
+| 29 | **Browser: real sign-in popups.** Sign in with Google, GitHub and Microsoft through their popups in a packaged build: the card opens, the sign-in completes in the opener, the card goes when the popup closes itself; Google does not refuse our user agent. Fall back to a child window in the same profile for a site that insists on a top-level window | The live suite covers the mechanics with a fixture only (docs/browser/review.md §5) | verify on a real build |
+| 30 | **Browser: keys against the menu.** ⌘W in the page and in the pane's chrome closes the tab, never the window (the File menu's Close Window); ⌘+ ⌘− ⌘0 there zoom the page once and not the app; ⌥⌘I opens the page's DevTools, not the app's; ⌘F in the page opens the find bar | Native menu accelerators are not reached by the hidden test window's keys (CDP and sendInputEvent skip the menu) | verify on a real build |
+| 31 | **Browser: dark mode** of the popup card's bar and frame, the permission and download bars, the find bar, the blocked-popup strip, the zoom chip and the interstitial | The live checks look at them in light; the popup card's bar is a page of its own, themed when it opens | verify on a real build |
+| 32 | **Browser: memory per idle tab**, to settle the cap of 12 (detached views keep rendering, throttled) | A cap set by guess | verify on a real build |
+| 33 | **Browser: the grey lock on a real HTTPS site**, "Not secure" on plain HTTP, the amber triangle after Proceed anyway on a real self-signed host | The fixture covers localhost only | verify on a real build |
+| 34 | **Browser: the downloads tray's progress ring** on a large file, and an agent's download allowed while it is still in progress (it resumes, then moves into the folder) | Fixture files finish at once | verify on a real build |
+| 35 | **Browser: USB, HID and serial refused** with a real device plugged in (WebUSB, WebHID, Web Serial pages) | The handlers are tested headless and with a page, not with a device | verify on a real build |
+| 36 | **Browser: the right click and the find bar by hand.** The native context menu's items (Print…, Save as PDF… with its dialog, Inspect Element, Copy Image, Save Image As…), the find bar's highlight in the page, and the focus going back to the page after Esc | A hidden window takes no mouse input and shows no native menu: the live check reads the menu's labels and the find count only | verify on a real build |
 
 Out of scope: hosted features (cloud sessions, remote control), Anthropic-specific fonts and branding, usage billing.
 

@@ -1,13 +1,18 @@
 // The side pane next to the transcript: the Browser, Diff and Terminal tabs (the mods' tabs join them through
 // mods-host.ts), the rail that resizes it, the browser's URL bar, and the native browser view's bounds and visibility,
-// which follow the pane because the view floats above the page.
+// which follow the pane because the view floats above the page. The browser's bars, interstitial and downloads tray
+// are browser-bars.ts; the find bar is browser-find.ts.
 
 import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi } from '../shared/types';
+import { createBrowserBars } from './browser-bars.js';
+import { createBrowserFind } from './browser-find.js';
+import { createBrowserPane } from './browser-pane.js';
 import { createChangesPane, mockChangesSource } from './changes.js';
 import { byId } from './dom.js';
 import type { ModPaneTabs } from './mods-host.js';
 import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { forgetFile } from './tools.js';
+import { onPush, rpc } from './rpc.js';
 
 /** A built-in tab, or a mod's tab view as 'mod:<mod key>/<view id>' (mods-host.ts makes those). */
 export type PaneTab = 'browser' | 'diff' | 'terminal' | `mod:${string}`;
@@ -53,6 +58,46 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   const browserToggle = byId<HTMLButtonElement>('browser-toggle');
   const resizer = byId('pane-resizer');
   const placeholder = browserView.querySelector<HTMLElement>('.browser-placeholder');
+  /** The tab strip, the popups' state and the profile note (browser-pane.ts) */
+  const browserTabs = createBrowserPane({
+    strip: byId('browser-tabs'),
+    newButton: byId<HTMLButtonElement>('browser-tab-new'),
+    note: byId('browser-note'),
+    noteClose: byId<HTMLButtonElement>('browser-note-close'),
+    urlField: urlEl,
+    zoomChip: byId<HTMLButtonElement>('zoom-chip'),
+    popupNote: byId('browser-popup-note'),
+    popupText: byId('browser-popup-note').querySelector<HTMLElement>('.browser-popup-text')!,
+    popupShow: byId<HTMLButtonElement>('browser-popup-show'),
+    popupClose: byId<HTMLButtonElement>('browser-popup-close'),
+    showError,
+    cleanError,
+  });
+  /** Find in page: the bar under the URL bar */
+  const browserFind = createBrowserFind({
+    bar: byId('browser-find'),
+    input: byId<HTMLInputElement>('browser-find-input'),
+    count: byId('browser-find-count'),
+    prev: byId<HTMLButtonElement>('browser-find-prev'),
+    next: byId<HTMLButtonElement>('browser-find-next'),
+    close: byId<HTMLButtonElement>('browser-find-close'),
+    showError,
+    cleanError,
+  });
+  /** The permission and download bars, the certificate interstitial, the pill's mark and the downloads tray */
+  const browserBars = createBrowserBars({
+    bars: byId('browser-bars'),
+    interstitial: byId('browser-interstitial'),
+    urlIcon: byId('url-icon'),
+    trayButton: byId<HTMLButtonElement>('downloads-btn'),
+    tray: byId('downloads-pop'),
+    // The tray's popover would sit under the native view: the view hides while it is open
+    onOverlay: () => syncBrowserView(),
+    showError,
+    cleanError,
+  });
+  /** The user's own navigation from the pane's chrome: not an agent action (a download it starts just starts). */
+  const go = (target: string, anchor: HTMLElement) => void rpc('browser.go', target).catch((err: unknown) => showError(anchor, `Couldn't open the page: ${cleanError(err)}`));
 
   let paneVisible = true;
   let paneTab: PaneTab = 'browser';
@@ -101,7 +146,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
 
   /** The native browser view floats above the page: it is shown only while its tab is on screen and no dialog is open. */
   function syncBrowserView(): void {
-    if (browserShown() && !dialogOpen()) {
+    if (browserShown() && !dialogOpen() && !browserBars.overlayOpen()) {
       reportBounds();
       setBrowserVisible(true);
       requestAnimationFrame(reportBounds);
@@ -122,7 +167,10 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     const showBrowser = browserShown();
     const showDiff = paneVisible && paneTab === 'diff';
     const showTerminal = paneVisible && paneTab === 'terminal';
-    if (!showBrowser) setBrowserVisible(false);
+    if (!showBrowser) {
+      browserBars.closeTray();
+      setBrowserVisible(false);
+    }
     // Focus would be lost with a hidden terminal: hand it back to the composer.
     if (!showTerminal && terminalPaneEl.contains(document.activeElement)) focusComposer();
     shell.classList.toggle('pane-hidden', !paneVisible);
@@ -268,7 +316,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   /** A link clicked in a terminal opens in the Browser pane. */
   function openTerminalLink(url: string): void {
     showPaneTab('browser');
-    void browser.navigate(url).catch((err: unknown) => showError(paneTabBrowser, `Couldn't open the link: ${cleanError(err)}`));
+    go(url, paneTabBrowser);
   }
 
   const terminalPane = createTerminalPane({
@@ -355,6 +403,9 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   });
 
   function applyBrowserState(s: BrowserState): void {
+    browserTabs.applyState(s);
+    browserBars.applyState(s);
+    browserFind.applyState(s);
     const blank = !s.url || s.url === 'about:blank';
     if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
     browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
@@ -365,10 +416,12 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     if (placeholder) placeholder.hidden = !blank;
   }
   browser.onState(applyBrowserState);
+  // A link from the chat opened in a new tab (Settings → Browser): the Browser tab of the pane comes forward
+  onPush('browser:show', () => showPaneTab('browser'));
   urlEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      void browser.navigate(urlEl.value);
+      go(urlEl.value, urlEl);
       urlEl.blur();
     } else if (e.key === 'Escape') {
       e.stopPropagation();
@@ -378,14 +431,15 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   });
   urlEl.addEventListener('focus', () => urlEl.select());
   document.querySelector('.url-pill')!.addEventListener('mousedown', (e) => {
-    if (e.target !== urlEl) {
+    // The zoom chip is a button of its own; the rest of the pill puts the cursor in the field
+    if (e.target !== urlEl && !(e.target as HTMLElement).closest('#zoom-chip')) {
       e.preventDefault();
       urlEl.focus();
     }
   });
-  backBtn.onclick = () => void browser.back();
-  fwdBtn.onclick = () => void browser.forward();
-  reloadBtn.onclick = () => void browser.reload();
+  backBtn.onclick = () => go('back', backBtn);
+  fwdBtn.onclick = () => go('forward', fwdBtn);
+  reloadBtn.onclick = () => go('reload', reloadBtn);
   openExternalBtn.onclick = async () => {
     try {
       if (typeof browser.openExternal !== 'function') throw new Error('No handler registered');
@@ -416,10 +470,15 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     if (w > 0) setBrowserWidth(w);
   }
 
-  /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view and where its slot is */
+  /** The pane's own chrome has the focus (the URL bar, the tab strip, a bar button): the browser's shortcuts apply. */
+  function browserFocused(): boolean {
+    return browserShown() && browserPane.contains(document.activeElement);
+  }
+
+  /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view, where its slot is, the tabs and popups */
   function browserDebug() {
     const r = browserView.getBoundingClientRect();
-    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen() };
+    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), safety: browserBars.debug(), find: browserFind.debug() };
   }
 
   return {
@@ -446,6 +505,16 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     applyBrowserState,
     restore,
     browserDebug,
+    browserFocused,
+    /** ⌘⇧N, ⌘W, ⌘L, ⌘F, ⌘+ ⌘− ⌘0 and ⌥⌘I while the pane's chrome has the focus (keys inside the page itself reach the main process) */
+    newBrowserTab: () => void browserTabs.newTab(),
+    closeBrowserTab: () => void browserTabs.closeActive(),
+    focusUrl: () => browserTabs.focusUrl(),
+    openFind: () => browserFind.openBar(),
+    zoomBrowser: (change: 'in' | 'out' | 'reset') => void browserTabs.zoom(change),
+    browserDevTools: () => void browserTabs.devTools(),
+    /** The one-time note about the browser's profile, when it is due */
+    refreshBrowserNote: () => browserTabs.refreshNote(),
     /** The debug hook: the Diff pane from memory (null: the real tracker again) */
     mockChanges: (list: ChangeEntry[] | null, diffs: Record<string, Partial<ChangeDiff>> = {}) => {
       debugChanges = list ? mockChangesSource(list, diffs) : null;

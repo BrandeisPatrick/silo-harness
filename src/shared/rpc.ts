@@ -15,6 +15,7 @@ import type { SettingsEvents, SettingsRpc } from './settings-info';
 import type { DreamingEvents, DreamingRpc } from './dreaming';
 import type { ProvidersRpc } from './providers';
 import type { HooksEvents, HooksRpc } from './hooks';
+import type { BrowserEvents, BrowserRpc } from './browser';
 
 export interface CoreRpc {
   'commands.list': () => CommandInfo[];
@@ -27,9 +28,9 @@ export interface CoreRpc {
 export interface CoreEvents {
   'config:changed': AppConfig;
   'sessions:changed': SessionMeta[];
-  /** Bring this session on screen (a notification was clicked) */
+  /** Bring this session on screen (a notification was clicked; every session was deleted and this is the fresh one) */
   'sessions:show': string;
 }
 
-export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc;
-export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents;
+export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc;
+export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents & BrowserEvents;

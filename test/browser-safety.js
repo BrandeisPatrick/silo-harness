@@ -1,14 +1,13 @@
 // Browser safety, headless: which form fields count as credentials (from fixture HTML, one per kind), how their
-// values are hidden in tool results, browser_type's hidden text all the way to the stored transcript, and the
-// permission policy for pages in the Browser pane (the dialog stood in for). The same code in a real page and a
-// real window: test/live/browser-safety.js.
+// values are hidden in tool results, browser_type's hidden text all the way to the stored transcript, and who may set
+// the lists of Settings → Browser that decide where the agent acts (not a project's settings.json). The permission
+// bar's policy is test/browser-permissions.js. The same code in a real page and a real window: test/live/browser-safety.js.
 // Run: npm run build && node test/browser-safety.js
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const safety = require(path.join(projectDir, 'dist/main/browser-safety.js'));
-const perms = require(path.join(projectDir, 'dist/main/browser-permissions.js'));
+const safety = require(path.join(projectDir, 'dist/main/browser/safety.js'));
 const { createApp } = require(path.join(projectDir, 'dist/main/app.js'));
 const { startMock } = require('./support/mock-model.js');
 const { check, done } = require('./support/check.js');
@@ -138,6 +137,11 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
   const page = { values: {}, typed: [] };
   const credentialFields = new Set(['Code', 'Later']);
   const browser = {
+    // The user's own app under development (an exempt host): the agent may type into its credential fields, hidden.
+    // Elsewhere they are refused before anything is typed (test/browser-approvals.js).
+    state() {
+      return { url: 'http://localhost:3000/login', title: 'Sign in', tabs: [], activeId: 'tab-1' };
+    },
     async secretValues() {
       return Object.entries(page.values).filter(([f]) => credentialFields.has(f)).map(([, v]) => v);
     },
@@ -204,65 +208,48 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
   check('3: the next request to the model holds neither secret', after && !sent.includes(CODE) && !sent.includes(LATER) && sent.includes(EMAIL));
   mock.close();
 
-  // ---------- 4. Permissions for pages in the pane ----------
-  check('4: sites are named by host', perms.siteName('https://www.example.com/a?b') === 'www.example.com' && perms.siteName('http://127.0.0.1:8123/x') === '127.0.0.1:8123');
-  check('4: a local file and an artifact are named as such', perms.siteName('file:///Users/a/page.html') === 'The local file page.html' && perms.siteName('artifact://view/s/a') === 'This artifact');
-  check('4: answers are kept per origin', perms.siteKey('https://example.com/a') === perms.siteKey('https://example.com/b') && perms.siteKey('https://example.com') !== perms.siteKey('https://example.org'));
-  check('4: camera and microphone are named per request', perms.permissionPhrase('media', { mediaTypes: ['video', 'audio'] }) === 'use your camera and microphone' && perms.permissionPhrase('media', { mediaTypes: ['audio'] }) === 'use your microphone' && perms.permissionPhrase('media', { mediaTypes: ['video'] }) === 'use your camera');
-  check('4: location, notifications and the clipboard have plain names', perms.permissionPhrase('geolocation') === 'know your location' && perms.permissionPhrase('notifications') === 'show notifications' && /clipboard/.test(perms.permissionPhrase('clipboard-read')));
-  check('4: opening another app names the link', perms.permissionPhrase('openExternal', { externalURL: 'mailto:a@b.c' }) === 'open an email link in your mail app' && perms.permissionPhrase('openExternal', { externalURL: 'zoommtg://x' }) === 'open a "zoommtg:" link in another app');
+  // ---------- 4. Settings → Browser: who may choose where the agent acts ----------
+  // The permission policy that was checked here is test/browser-permissions.js now (the bar replaced the dialog).
+  {
+    const { SettingsLayer } = require(path.join(projectDir, 'dist/main/settings.js'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-browser-settings-'));
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(root, 'proj-')));
+    fs.mkdirSync(path.join(cwd, '.silo-harness'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.silo-harness', 'settings.json'), JSON.stringify({ browser: { alwaysAllowed: ['bank.example'], exempt: ['evil.example', '/'], sensitive: ['mail.corp.example'], keepCookies: false, downloadsDir: '~/Project downloads', openChatLinksInPane: true } }));
+    const userFile = path.join(root, 'user-settings.json');
+    fs.writeFileSync(userFile, JSON.stringify({ browser: { alwaysAllowed: ['mine.example'], exempt: ['dev.mine.example'] } }));
+    const layer = new SettingsLayer({ userFile });
+    const baseCfg = { provider: 'ollama', ollama: { baseURL: 'http://localhost:11434/v1', model: 'm', numCtx: 16384, think: 'auto' }, portkey: { baseURL: 'https://api.portkey.ai/v1', apiKey: '', model: 'x', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 128000 }, workingDirectory: cwd, permissionMode: 'ask', autoApprove: false, maxTurns: 40, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: true, mcpServers: {}, mcpTrusted: {}, autoCompact: true, notifications: true, allowRules: {}, recentDirs: [], settingsTrusted: {}, browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] } };
+    let cfg = layer.load(baseCfg);
+    cfg = layer.recompute(layer.withTrust(cfg, true));
+    const proj = layer.info().files.find((f) => f.scope === 'project');
+    check("4: a project's settings.json may not set the sites the agent may always use", JSON.stringify(cfg.browser.alwaysAllowed) === '["mine.example"]' && proj.invalid.some((i) => i.key === 'browser.alwaysAllowed' && /may not choose where the agent acts without asking/.test(i.message)), { cfg: cfg.browser, invalid: proj.invalid });
+    check('4: … nor the exempt hosts', JSON.stringify(cfg.browser.exempt) === '["dev.mine.example"]' && proj.invalid.some((i) => i.key === 'browser.exempt'), cfg.browser.exempt);
+    check('4: … the rest of its browser block applies (cookies, the downloads folder, chat links, sites that always ask)', cfg.browser.keepCookies === false && cfg.browser.downloadsDir === '~/Project downloads' && cfg.browser.openChatLinksInPane === true && JSON.stringify(cfg.browser.sensitive) === '["mail.corp.example"]' && proj.applied, cfg.browser);
+    const owned = layer.info().owned;
+    check('4: … so the two lists stay yours, the rest is the project\'s', owned['browser.alwaysAllowed'] === 'user' && owned['browser.exempt'] === 'user' && owned['browser.sensitive'] === 'project' && owned['browser.keepCookies'] === 'project', owned);
+    const user = layer.info().files.find((f) => f.scope === 'user');
+    check('4: your own settings.json may set both lists', user.invalid.length === 0 && user.keys.includes('browser.alwaysAllowed') && user.keys.includes('browser.exempt'), user);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 
-  const pane = { id: 7, getURL: () => 'https://cam.example/room' };
-  const appWindow = { id: 1, getURL: () => 'file:///app/dist/renderer/index.html' };
-  const win = { isDestroyed: () => false };
-  let asked = [];
-  let answer = false;
-  let hasWindow = true;
-  const policy = perms.createPermissionPolicy({
-    isPane: (wc) => !!wc && wc.id === pane.id,
-    window: () => (hasWindow ? win : null),
-    ask: async (_w, q) => {
-      asked.push(q);
-      await sleep(20);
-      if (answer === 'throw') throw new Error('dialog failed');
-      return answer;
-    },
-  });
-  const request = (wc, permission, details = {}) => new Promise((resolve) => policy.request(wc, permission, resolve, { requestingUrl: wc.getURL(), isMainFrame: true, ...details }));
-
-  check('4: the app window keeps every permission without a question', (await request(appWindow, 'media', { mediaTypes: ['video', 'audio'] })) === true && (await request(appWindow, 'notifications')) === true && asked.length === 0);
-  check('4: … and its checks pass as before', policy.check(appWindow, 'notifications', 'file://', {}) === true && policy.check(null, 'media', 'file://', {}) === true);
-  check('4: full screen and clipboard writes are allowed in the pane without a question', (await request(pane, 'fullscreen')) === true && (await request(pane, 'clipboard-sanitized-write')) === true && asked.length === 0);
-  check('4: … and their checks pass', policy.check(pane, 'clipboard-sanitized-write', 'https://cam.example', {}) === true);
-  check('4: an undecided check is no (it never asks)', policy.check(pane, 'media', 'https://cam.example', { mediaType: 'video' }) === false && asked.length === 0);
-
-  answer = false;
-  const [a1, a2] = await Promise.all([request(pane, 'media', { mediaTypes: ['video', 'audio'] }), request(pane, 'media', { mediaTypes: ['audio', 'video'] })]);
-  check('4: a camera request asks once, even when the page asks twice at once', asked.length === 1 && a1 === false && a2 === false, asked.length);
-  check('4: … with the site and both devices in the question', asked[0] && asked[0].site === 'cam.example' && asked[0].phrase === 'use your camera and microphone' && asked[0].url === 'https://cam.example/room', asked[0]);
-  check('4: "Don\'t allow" is remembered: no second question', (await request(pane, 'media', { mediaTypes: ['video'] })) === false && asked.length === 1);
-  check('4: … and the check says no', policy.check(pane, 'media', 'https://cam.example', { mediaType: 'audio' }) === false);
-
-  answer = true;
-  check('4: notifications allowed', (await request(pane, 'notifications')) === true && asked.length === 2 && asked[1].phrase === 'show notifications');
-  check('4: … remembered, and the check now says yes', (await request(pane, 'notifications')) === true && asked.length === 2 && policy.check(pane, 'notifications', 'https://cam.example', {}) === true);
-  const other = { id: 7, getURL: () => 'https://other.example/' };
-  check('4: another site is asked on its own', (await request(other, 'notifications')) === true && asked.length === 3 && asked[2].site === 'other.example');
-
-  answer = true;
-  check('4: allowing the microphone alone does not allow the camera later', (await request(other, 'media', { mediaTypes: ['audio'] })) === true && asked.length === 4);
-  check('4: … the camera is asked for', (await request(other, 'media', { mediaTypes: ['video'] })) === true && asked.length === 5 && asked[4].phrase === 'use your camera');
-  check('4: … and both together need no question now', (await request(other, 'media', { mediaTypes: ['video', 'audio'] })) === true && asked.length === 5);
-
-  check('4: links that open other apps are asked per scheme', (await request(other, 'openExternal', { externalURL: 'mailto:x@y.z' })) === true && (await request(other, 'openExternal', { externalURL: 'zoommtg://join' })) === true && asked.length === 7);
-
-  hasWindow = false;
-  check('4: with no window the request is denied without a question', (await request(pane, 'geolocation')) === false && asked.length === 7);
-  hasWindow = true;
-  answer = true;
-  check('4: … and not remembered: with a window back it is asked', (await request(pane, 'geolocation')) === true && asked.length === 8 && asked[7].phrase === 'know your location');
-  answer = 'throw';
-  check('4: a dialog that fails denies', (await request(pane, 'clipboard-read')) === false && asked.length === 9);
+  // The field that adds a site in Settings → Browser (src/renderer/settings/model.ts, an ES module: a .mjs copy loads it)
+  {
+    const { pathToFileURL } = require('node:url');
+    const copy = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-site-pattern-')), 'model.mjs');
+    fs.copyFileSync(path.join(projectDir, 'dist/renderer/settings/model.js'), copy);
+    const { parseSitePattern: site } = await import(pathToFileURL(copy).href);
+    fs.rmSync(path.dirname(copy), { recursive: true, force: true });
+    const ok = (t, o, want) => {
+      const r = site(t, o);
+      return r.ok && r.value === want;
+    };
+    check('4: sites are read as the policy matches them', ok('example.com', {}, 'example.com') && ok('*.Example.com', {}, '*.example.com') && ok('localhost:3000', {}, 'localhost:3000') && ok('[::1]:8080', {}, '[::1]:8080') && ok('https://www.example.com/some/page?q', {}, 'www.example.com'));
+    check('4: an international name is stored as its ASCII form', ok('bücher.example', {}, 'xn--bcher-kva.example'));
+    check('4: nonsense, spaces and an empty field are refused', !site('not a site').ok && !site('').ok && !site('exa mple.com').ok && !site('-bad-.com').ok);
+    check('4: "login." is a prefix only where the list takes prefixes', !site('login.').ok && ok('login.', { prefixes: true }, 'login.'));
+    check('4: a folder only where the list takes folders', !site('/Users/me/site').ok && ok('/Users/me/site/', { folders: true }, '/Users/me/site') && ok('~/site', { folders: true }, '~/site') && ok('file:///Users/me/site', { folders: true }, '/Users/me/site'));
+  }
 
   done();
 })().catch((err) => {
