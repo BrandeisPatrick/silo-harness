@@ -6,7 +6,7 @@
 // screenshot (a strip of bare surface just inside each one's left edge, and the transcript's margins): text-100 at
 // least 7:1 and text-400 at least 4.5:1 over the theme's own canvas; with the Starfield behind the window, 4.5:1 and
 // 3:1 at the default Dim and at half of it, for all but the odd pixel (a star behind glass). Turning the background
-// off, and the theme off, restores the window pixel for pixel; the Themes tab lists Glass first, on.
+// off, and the theme off, restores the window pixel for pixel; the Theme tab shows Glass in use.
 // Screenshots: the empty page, a conversation, the menu, Settings, the Starfield and Aurora, in both schemes.
 // Run: npm run build && node test/live/glass.js [shots-dir]
 const fs = require('node:fs');
@@ -274,7 +274,7 @@ const readable = (r, names, text, muted, q = '') => names.every((n) => r[n] && r
     await app.key('Escape');
     await sleep(300);
 
-    // Settings: the dialog is glass over a blurred, dimmed window; the Themes tab lists Glass first, on
+    // Settings: the dialog is glass over a blurred, dimmed window; the Theme tab shows Glass in use
     for (const scheme of ['light', 'dark']) {
       await setTheme(app, scheme);
       await app.click('#settings-btn');
@@ -289,8 +289,9 @@ const readable = (r, names, text, muted, q = '') => names.every((n) => r[n] && r
       const r = await contrast(app, file(`glass-settings-${scheme}`), ['dialog-nav', 'dialog-page']);
       check(`${scheme}: text keeps 7:1 (muted 4.5:1) on the dialog's navigation and its page`, readable(r, ['dialog-nav', 'dialog-page'], 7, 4.5), r);
       if (scheme === 'light') {
-        const themes = await app.evaluate(`[...document.querySelectorAll('.sp-theme-list .sp-row')].map((r) => r.querySelector('.sp-row-name').textContent + ':' + (r.querySelector('input.switch').checked ? 'on' : 'off'))`);
-        check('the Themes tab lists Glass first, on, before Midnight and Paper, off', JSON.stringify(themes) === JSON.stringify(['1. Glass theme:on', '2. Midnight theme:off', '3. Paper theme:off']), themes);
+        const t = await app.evaluate(`window.__oc_debug.looks.state('themes')`);
+        const inUse = await app.evaluate(`[...document.querySelectorAll('.sp-look-tab[data-subtab="themes"] .sp-look-card.current .sp-look-name')].map((e) => e.textContent)`);
+        check('the Theme tab shows Glass in use, after Default and before Midnight and Paper, with no switches', t && t.current === 'theme-glass' && !t.previewing && JSON.stringify(t.versions) === JSON.stringify([null, 'theme-glass', 'theme-midnight', 'theme-paper']) && JSON.stringify(inUse) === JSON.stringify(['Glass theme']) && !(await app.exists('.sp-look-tab[data-subtab="themes"] input.switch')), { t, inUse });
       }
       await app.click('#settings-close');
       await sleep(400);
@@ -312,7 +313,7 @@ const readable = (r, names, text, muted, q = '') => names.every((n) => r[n] && r
     check('on again: the window is as it was (pixel diff)', again < 2000, `${again} pixels differ`);
 
     // ---------- Behind a background: the Starfield at the default Dim and at half, Aurora ----------
-    await enable(app, 'hyperspace', true);
+    // A built-in background is used as it is (no switch, no approval)
     await rpc(app, 'mods.setLayout', { background: 'hyperspace/starfield', backgroundDim: 0.82 });
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hyperspace/starfield' && v.hello)`, 15_000, 'the Starfield').catch(() => {});
     await sleep(1500);

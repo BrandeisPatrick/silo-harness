@@ -394,7 +394,8 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       });
       writeMod(userMods, 'tint', { name: 'Tint', contributes: { styles: ['theme.css'] } }, { 'theme.css': ':root { --accent: #2b6cb0; }' });
       await sleep(1200);
-      for (const id of ['tabby', 'stripy', 'backdrop', 'tint']) await rpc(app, 'mods.setEnabled', id, true);
+      // The background is a look: approved at its first Use (below), not turned on
+      for (const id of ['tabby', 'stripy', 'tint']) await rpc(app, 'mods.setEnabled', id, true);
       await sleep(800);
       // Tab
       const tabBtn = await app.waitFor(`document.querySelector('.mod-pane-tab[data-view="tabby/main"]') ? true : false`, 5000, 'the tab button').catch(() => false);
@@ -440,7 +441,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await app.evaluate(`document.activeElement.blur()`);
       await sleep(300);
       await shot(app, 'bg-before-light');
-      await rpc(app, 'mods.setLayout', { background: 'backdrop/main' });
+      await rpc(app, 'mods.use', { background: 'backdrop/main' }, { approve: true });
       await app.waitFor(`document.documentElement.classList.contains('mod-bg') && window.__oc_debug.mods.views().find((v) => v.key === 'backdrop/main')?.hello`, 5000, 'the background').catch(() => {});
       check('background mod: behind the window, no pointer events', await app.evaluate(`(() => { const l = document.querySelector('#mod-background'); return !l.hidden && getComputedStyle(l).pointerEvents === 'none' && getComputedStyle(l).zIndex === '-1' && !!l.querySelector('iframe'); })()`));
       check('background: composer and cards stay solid', await app.evaluate(`getComputedStyle(document.querySelector('#composer')).backgroundColor.startsWith('rgb(') && !getComputedStyle(document.querySelector('#composer')).backgroundColor.includes('0)')`));

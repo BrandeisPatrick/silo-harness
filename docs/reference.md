@@ -105,7 +105,7 @@ A dream is a background session that reads what happened in recent sessions and 
 
 ## Mods
 
-Panels in the right-hand rail, tabs beside the Browser, a strip above the composer, backgrounds, themes and slash commands are mods: folders of web files that run sandboxed and reload when a file is saved. The built-in ones (Environment, Context, Tasks, Plan, Outputs, Sub-sessions, Skills, Side chat, Scheduled) are written against the same protocol as yours. Settings → Mods has a tab per kind: Mods, Backgrounds, Chat bar, Conversation and Themes; the special tabs are where you pick the background (with your own picture and Dim), the chat bar look, the conversation look and the themes, and Settings → Appearance shows each choice with a row that opens its tab. Ask the agent to build one, or see [mods.md](mods.md). `node modkit/playground/serve.js` hosts mods outside the app while you work on them.
+Panels in the right-hand rail, tabs beside the Browser, a strip above the composer, backgrounds, themes and slash commands are mods: folders of web files that run sandboxed and reload when a file is saved. The built-in ones (Environment, Context, Tasks, Plan, Outputs, Sub-sessions, Skills, Side chat, Scheduled) are written against the same protocol as yours. Settings → Mods has a tab per kind: Mods, Background, Chat bar, Conversation and Theme. The Mods tab lists what adds something (panels, tabs, strips, commands), each with its switch. The other four are looks, which have no switch: each tab shows the one in use in a preview, lets you click another version to try it there first, and Use applies it, one per kind (Default first; the background with your own picture and Dim). The first Use of a look of yours or of a project's asks for your approval, once. Settings → Appearance shows each look in use, with a row that opens its tab. Ask the agent to build one, or see [mods.md](mods.md). `node modkit/playground/serve.js` hosts mods outside the app while you work on them.
 
 ## History
 
@@ -139,7 +139,7 @@ Settings is the place for all of it. On disk:
 - Before the app was renamed these were `~/Library/Application Support/Open Harness/`, `~/.open-harness/` (with `OPEN_HARNESS_CONFIG_DIR` and `OPENHARNESS.md`) and a project's `.open-harness/`. The first launch moves the two folders in your home and leaves a link at `~/.open-harness`; the old names in a project, the old file names and the old variables are still read when the new ones are absent.
 - In a project: `.silo-harness/settings.json`, `.silo-harness/skills/`, `.silo-harness/mods/`, `.mcp.json`, and an instructions file (`SILOHARNESS.md`, `AGENTS.md` or `CLAUDE.md`).
 
-A project's `.mcp.json` servers, its mods and its `settings.json` all stay off until you turn them on.
+A project's `.mcp.json` servers, its mods and its `settings.json` all stay off until you turn them on (a look of a project's applies only once you use it and approve it).
 
 ### settings.json
 

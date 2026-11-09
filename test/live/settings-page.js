@@ -319,64 +319,75 @@ const js = (v) => JSON.stringify(v);
       await sleep(150);
     };
     const layoutNow = async () => (await cfg(app)).mods.layout;
+    const looks = (t) => app.evaluate(`window.__oc_debug.looks.state(${js(t)})`);
+    /** A version used as a person does: its card (it shows in the preview), then Use */
+    const useCard = async (t, ref) => {
+      await tabTo(t);
+      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref="${ref}"]`);
+      await sleep(400);
+      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-use`);
+      await sleep(600);
+    };
     const TABS = ['mods', 'backgrounds', 'chat-bar', 'conversation', 'themes'];
     await open(app, 'mods');
-    check('the Mods page has five tabs in a tablist', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Mods,Backgrounds,Chat bar,Conversation,Themes');
+    check('the Mods page has five tabs in a tablist, named in the singular', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Mods,Background,Chat bar,Conversation,Theme');
     await tabTo('backgrounds');
     check('a tab is selected by a click', (await st()).tab === 'backgrounds' && (await app.evaluate(`document.querySelector('#sp-modtab-backgrounds').getAttribute('aria-selected')`)) === 'true');
-    // Hyperspace, a built-in that starts off, turned on from its card on the Backgrounds tab
-    await app.click('#sp-row-mod-hyperspace input.switch');
-    await app.waitFor(`window.__oc_debug.mods.list().find((m) => m.key === 'hyperspace')?.state === 'on'`, 10_000, 'Hyperspace on').catch(() => {});
-    check('Hyperspace turns on from its card on the Backgrounds tab', (await app.evaluate(`window.oc.rpc('mods.list')`)).find((m) => m.key === 'hyperspace')?.state === 'on');
+    // Hyperspace has no switch: no card on any tab, its looks are versions on theirs
     const onTabs = {};
     for (const t of TABS) {
       await tabTo(t);
-      onTabs[t] = { hyper: await shown('#sp-row-mod-hyperspace'), words: await shown('#sp-row-mod-word-count'), midnight: await shown('#sp-row-mod-theme-midnight') };
+      onTabs[t] = {
+        hyperCard: await shown('#sp-row-mod-hyperspace'),
+        words: await shown('#sp-row-mod-word-count'),
+        hyperVersion: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref^="hyperspace/"]`),
+        midnight: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref="theme-midnight"]`),
+      };
       await app.screenshot(path.join(shots, `mods-tab-${t}.png`));
     }
-    check('a general mod (Word count) is only on the Mods tab', TABS.every((t) => onTabs[t].words === (t === 'mods')), onTabs);
-    check('Hyperspace is on Backgrounds, Chat bar and Conversation, not on Mods or Themes', TABS.every((t) => onTabs[t].hyper === ['backgrounds', 'chat-bar', 'conversation'].includes(t)), onTabs);
-    check('the theme mod is only on Themes', TABS.every((t) => onTabs[t].midnight === (t === 'themes')), onTabs);
+    check('a general mod (Word count) is only on the Mods tab, with its switch', TABS.every((t) => onTabs[t].words === (t === 'mods')), onTabs);
+    check('Hyperspace has no card or switch anywhere; its looks are on Background, Chat bar and Conversation', TABS.every((t) => !onTabs[t].hyperCard && onTabs[t].hyperVersion === ['backgrounds', 'chat-bar', 'conversation'].includes(t)), onTabs);
+    check('the Midnight theme is a version on the Theme tab only', TABS.every((t) => onTabs[t].midnight === (t === 'themes')), onTabs);
 
-    // Backgrounds: pick Hyperspace's, see its settings under the picker, move Dim
+    // Background: use Hyperspace's, see its settings under it, move Dim
     await tabTo('backgrounds');
-    check('Backgrounds has the picker, Your picture and Dim; the New form starts at Background', (await shown('#sp-row-background select')) && (await shown('#sp-row-background-image')) && (await shown('#sp-row-background-dim')) && /New background/.test(await app.text('#sp-sec-mods .sp-toolbar')));
-    await app.fill('#sp-row-background select', 'hyperspace/starfield');
+    check('Background has the preview, the Dim row and New; no picker', (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane .lp-stage')) && (await shown('#sp-row-background-dim')) && (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-new')) && !(await app.exists('#sp-sec-mods select[aria-labelledby="sp-t-background"]')));
+    await useCard('backgrounds', 'hyperspace/starfield');
     await app.waitFor(`window.oc.getConfig().then((c) => c.mods.layout.background === 'hyperspace/starfield')`, 5000).catch(() => {});
-    check('picking the Hyperspace background applies it', (await layoutNow()).background === 'hyperspace/starfield' && (await app.evaluate(`document.documentElement.classList.contains('mod-bg')`)));
+    check('using the Hyperspace background applies it', (await layoutNow()).background === 'hyperspace/starfield' && (await app.evaluate(`document.documentElement.classList.contains('mod-bg')`)));
     await sleep(300);
-    check("… and Hyperspace's own settings show under the picker", (await shown('#sp-row-pick-backgrounds-modset-hyperspace-glow')) && (await shown('#sp-row-pick-backgrounds-modset-hyperspace-motion')));
+    check("… and Hyperspace's own settings show under it", (await shown('#sp-row-pick-backgrounds-modset-hyperspace-glow')) && (await shown('#sp-row-pick-backgrounds-modset-hyperspace-motion')));
     await app.evaluate(`(() => { const r = document.querySelector('#sp-row-background-dim input[type=range]'); r.value = '30'; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); })()`);
     await sleep(400);
-    check('the Dim slider on the Backgrounds tab applies', Math.abs((await layoutNow()).backgroundDim - 0.3) < 1e-9, (await layoutNow()).backgroundDim);
+    check('the Dim slider on the Background tab applies', Math.abs((await layoutNow()).backgroundDim - 0.3) < 1e-9, (await layoutNow()).backgroundDim);
     // Chat bar and Conversation
-    await tabTo('chat-bar');
-    await app.fill('#sp-row-look-composer select', 'hyperspace/cockpit');
+    await useCard('chat-bar', 'hyperspace/cockpit');
     await app.waitFor(`document.querySelector('#chatbar').dataset.look === 'hyperspace/cockpit'`, 5000).catch(() => {});
-    check('picking the Cockpit chat bar look applies it', (await layoutNow()).looks.composer === 'hyperspace/cockpit' && (await app.evaluate(`document.querySelector('#chatbar').dataset.look`)) === 'hyperspace/cockpit');
-    await tabTo('conversation');
-    await app.fill('#sp-row-look-conversation select', 'hyperspace/holo');
+    check('using the Cockpit chat bar look applies it', (await layoutNow()).looks.composer === 'hyperspace/cockpit' && (await app.evaluate(`document.querySelector('#chatbar').dataset.look`)) === 'hyperspace/cockpit');
+    await useCard('conversation', 'hyperspace/holo');
     await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo'`, 5000).catch(() => {});
-    check('picking the Holo conversation look applies it', (await layoutNow()).looks.conversation === 'hyperspace/holo' && (await app.evaluate(`document.querySelector('#messages').dataset.look`)) === 'hyperspace/holo');
+    check('using the Holo conversation look applies it', (await layoutNow()).looks.conversation === 'hyperspace/holo' && (await app.evaluate(`document.querySelector('#messages').dataset.look`)) === 'hyperspace/holo');
     await sleep(300);
-    check('with all three in use, the card says the whole set is in use', /Whole set in use/.test((await app.text('#sp-row-mod-hyperspace .sp-mod-set')) || ''));
-    // The whole set, from the card
-    await app.click('#sp-row-mod-hyperspace .sp-mod-set button');
+    check('with all three in use, the whole set is not offered again', !(await app.exists('.sp-look-tab[data-subtab="conversation"] .sp-look-acts button[aria-label^="Use the whole set"]')));
+    // The whole set, from the Chat bar tab
+    await app.evaluate(`window.oc.rpc('mods.use', { background: null, composer: null, conversation: null })`);
     await sleep(400);
     let L = await layoutNow();
-    check('"Stop using the set" puts all three back', !L.background && !L.looks.conversation && !L.looks.composer, L);
+    check('Default for all three puts them back', !L.background && !L.looks.conversation && !L.looks.composer, L);
     await tabTo('chat-bar');
-    await sleep(200);
-    check('… and the card on the Chat bar tab offers "Use the whole set"', (await shown('#sp-row-mod-hyperspace .sp-mod-set button')) && /Use the whole set/.test(await app.text('#sp-row-mod-hyperspace .sp-mod-set')));
-    await app.click('#sp-row-mod-hyperspace .sp-mod-set button');
+    await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-card[data-ref="hyperspace/cockpit"]');
+    await sleep(300);
+    check('… and Cockpit previewed on the Chat bar tab offers "Use the whole set"', await shown('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the whole set"]'));
+    await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-acts button[aria-label^="Use the whole set"]');
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hyperspace/starfield')`, 10_000).catch(() => {});
     L = await layoutNow();
     check('"Use the whole set" applies the conversation look, the chat bar look and the background', L.background === 'hyperspace/starfield' && L.looks.conversation === 'hyperspace/holo' && L.looks.composer === 'hyperspace/cockpit', L);
-    const pickers = await app.evaluate(`['look-conversation', 'look-composer', 'background'].map((r) => document.querySelector('#sp-row-' + r + ' select').value).join()`);
-    check('… and the pickers follow', pickers === 'hyperspace/holo,hyperspace/cockpit,hyperspace/starfield', pickers);
-    // Themes: the theme mods with their switches, in order
+    const inUse = (await Promise.all(['conversation', 'chat-bar', 'backgrounds'].map(looks))).map((x) => x.current).join();
+    check('… and the tabs follow', inUse === 'hyperspace/holo,hyperspace/cockpit,hyperspace/starfield', inUse);
+    // Theme: the themes are versions, one in use, no switches
     await tabTo('themes');
-    check('Themes lists the theme mods with switches, and says the later one wins', (await shown('#sp-row-theme-theme-midnight input.switch')) && /later one wins/.test(await app.text('#sp-sec-mods')) && /New theme/.test(await app.text('#sp-sec-mods .sp-toolbar')));
+    const th = await looks('themes');
+    check('Theme lists Default and the themes as versions, without switches, with New', JSON.stringify(th.versions) === JSON.stringify([null, 'theme-glass', 'theme-midnight', 'theme-paper']) && !(await app.exists('.sp-look-tab[data-subtab="themes"] input.switch')) && (await shown('.sp-look-tab[data-subtab="themes"] .sp-look-new')), th);
     // Keyboard: the arrows move between the tabs
     await app.evaluate(`document.querySelector('#sp-modtab-themes').focus()`);
     await app.key('ArrowRight');
@@ -393,24 +404,24 @@ const js = (v) => JSON.stringify(v);
     // Search: a row inside a tab is found, and choosing it opens its tab
     await tabTo('mods');
     s = await searchFor('dim');
-    check('search "dim" finds the Dim row on the Backgrounds tab', s.rows.includes('background-dim'), s.rows);
+    check('search "dim" finds the Dim row on the Background tab', s.rows.includes('background-dim'), s.rows);
     await app.click('#sp-row-background-dim .sp-row-name');
     await sleep(300);
     let now = await st();
-    check('choosing the hit clears the search and opens Mods → Backgrounds', now.section === 'mods' && now.tab === 'backgrounds' && now.query === '' && (await shown('#sp-row-background-dim')), now);
+    check('choosing the hit clears the search and opens Mods → Background', now.section === 'mods' && now.tab === 'backgrounds' && now.query === '' && (await shown('#sp-row-background-dim')), now);
     await app.screenshot(path.join(shots, 'search-opened-backgrounds.png'));
     s = await searchFor('chat bar look');
-    check('search "chat bar look" finds the chat bar picker', s.rows.includes('look-composer'), s.rows);
+    check('search "chat bar look" finds the Chat bar tab\'s look in use', s.rows.includes('look-composer'), s.rows);
     await app.evaluate(`document.querySelector('#settings-search').focus()`);
     await app.key('Enter');
     await sleep(300);
     now = await st();
-    check('Enter goes to the first hit, on its tab', now.tab === 'chat-bar' && now.query === '' && (await app.evaluate(`document.activeElement === document.querySelector('#sp-row-look-composer select')`)), now);
-    // Appearance: one row per kind with the current choice, opening its tab
+    check('Enter goes to the first hit, on its tab', now.tab === 'chat-bar' && now.query === '' && (await app.evaluate(`Boolean(document.activeElement.closest('#sp-row-look-composer'))`)), now);
+    // Appearance: Light, Dark and System, and one row per look with the one in use, opening its tab
     await open(app, 'appearance');
-    check('Appearance has no Looks group and no pickers', !(await app.exists('#sp-sec-appearance select')) && !/Looks/.test(await app.text('#sp-sec-appearance')));
+    check('Appearance keeps Light, Dark and System, a Looks group, and no pickers', !(await app.exists('#sp-sec-appearance select')) && /Looks/.test(await app.text('#sp-sec-appearance')) && (await app.evaluate(`[...document.querySelectorAll('#sp-row-theme input')].map((i) => i.value).join()`)) === 'system,light,dark');
     const kindText = await app.evaluate(`['background', 'composer', 'conversation', 'themes'].map((k) => document.querySelector('#sp-row-appearance-' + k + ' .sp-row-desc').textContent).join(' | ')`);
-    check('… it shows each choice in words', kindText === 'Hyperspace: Starfield | Hyperspace: Cockpit | Hyperspace: Holo terminal | None', kindText);
+    check('… it shows each look in use in words', kindText === 'Hyperspace: Starfield | Hyperspace: Cockpit | Hyperspace: Holo terminal | Default', kindText);
     await app.screenshot(path.join(shots, 'appearance.png'));
     await app.click('#sp-row-appearance-conversation button');
     await sleep(200);
@@ -432,7 +443,7 @@ const js = (v) => JSON.stringify(v);
     check('an element id on a tab opens that tab', (await st()).section === 'mods' && (await st()).tab === 'conversation');
     await app.evaluate(`window.oc.rpc('mods.setLayout', { looks: { conversation: null, composer: null }, background: null, backgroundImage: null, backgroundDim: 0.5 })`);
     await app.evaluate(`window.oc.rpc('mods.setEnabled', 'hyperspace', false)`);
-    // The card in the chat for a new background links to the Backgrounds tab
+    // The card in the chat for a new background links to the Background tab
     await app.evaluate(`document.querySelector('#settings').close()`);
     const bgDir = path.join(app.profile, 'home-config', 'mods', 'dusk-glow');
     fs.mkdirSync(bgDir, { recursive: true });
@@ -444,9 +455,10 @@ const js = (v) => JSON.stringify(v);
       await sleep(200);
       const where = (await app.text('.mod-offer[data-mod="dusk-glow"]')) || '';
       await app.click('.mod-offer[data-mod="dusk-glow"] .mod-offer-where');
-      await sleep(300);
+      await sleep(400);
       now = await st();
-      check("the chat card of a new background links to Settings → Mods → Backgrounds", /Settings → Mods → Backgrounds/.test(where) && now.open && now.section === 'mods' && now.tab === 'backgrounds', { where, now });
+      const bgTab = await looks('backgrounds');
+      check('the chat card of a new background links to Settings → Mods → Background, with it previewed', /Settings → Mods → Background/.test(where) && now.open && now.section === 'mods' && now.tab === 'backgrounds' && bgTab.shown === 'dusk-glow/main' && bgTab.previewing, { where, now, bgTab });
       await app.evaluate(`document.querySelector('#settings').close()`);
     } else check('the chat card of a new background appears', false);
 

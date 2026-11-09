@@ -233,10 +233,11 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
   console.log(`model: ${app.live ? 'real API' : 'mock model (no key)'}; screenshots: ${SHOTS}`);
   try {
     await app.waitFor(`window.__oc_debug.mods.views().filter((v) => v.hello).length >= 7`, 15_000, 'the rail to start');
-    // The look mods are bundled; the two that restyle the app start off, the backgrounds wait to be picked
+    // The look mods are bundled and have no switch: available (approved), off until one of their looks is used
     const list = await dbg(app, 'list()');
     const st = (id) => list.find((m) => m.id === id)?.state;
-    check('bundled: backgrounds on (nothing shown until picked), theme-midnight and theme-paper off', st('backgrounds') === 'on' && st('theme-midnight') === 'off' && st('theme-paper') === 'off' && !(await app.evaluate(`document.documentElement.classList.contains('mod-bg') || !!document.querySelector('style[data-mod]')`)), { b: st('backgrounds'), t: st('theme-midnight'), p: st('theme-paper') });
+    const ok = (id) => list.find((m) => m.id === id)?.approved === true;
+    check('bundled looks: backgrounds, theme-midnight and theme-paper available and off until used, nothing shown', ['backgrounds', 'theme-midnight', 'theme-paper'].every((id) => st(id) === 'off' && ok(id)) && !(await app.evaluate(`document.documentElement.classList.contains('mod-bg') || !!document.querySelector('style[data-mod]')`)), { b: st('backgrounds'), t: st('theme-midnight'), p: st('theme-paper') });
     const stale = list.filter((m) => m.id === 'composer-pill');
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l) && /composer-pill|mod/i.test(l));
     check('a stale composer-pill entry from an older profile: no such mod, no styles, no error', stale.length === 0 && !(await app.exists('style[data-mod="composer-pill"]')) && errors.length === 0, { stale, errors });

@@ -2,7 +2,7 @@
 
 A mod is a folder of web files that adds something to Silo Harness: a panel in the right-hand rail, a tab beside the Browser, a strip above the composer, a background behind the app, a look for the conversation or the chat bar, a theme, a slash command. The panels the app ships with (Context, Outputs, Tasks, Skills, Side chat, …) are mods written against this same protocol, so anything they do, yours can do.
 
-A mod page is an ordinary HTML page. It runs in a sandboxed frame, talks to the app through one small object (`harness`), and reloads the moment one of its files is saved. That last part is the point: the agent can write a mod for you in the middle of a session, you turn it on, and from then on every edit shows up live.
+A mod page is an ordinary HTML page. It runs in a sandboxed frame, talks to the app through one small object (`harness`), and reloads the moment one of its files is saved. That last part is the point: the agent can write a mod for you in the middle of a session, you turn it on (or, for a look, preview it and use it), and from then on every edit shows up live.
 
 Protocol version: **1**.
 
@@ -53,19 +53,31 @@ Save the two files, turn the mod on in Settings → Mods (or on the card that ap
 
 | Scope | Folder | Starts |
 | --- | --- | --- |
-| bundled | `mods/` inside the app | on (you can turn one off); a bundled mod that restyles the app (a theme) starts off |
-| user | `~/.silo-harness/mods/<id>/` | off until you turn it on once |
-| project | `<project>/.silo-harness/mods/<id>/` | off until you turn it on for that project |
+| bundled | `mods/` inside the app | on (you can turn one off); its looks are available and in use once you choose them |
+| user | `~/.silo-harness/mods/<id>/` | off until you turn it on once; its looks are available, and the first Use of one asks first |
+| project | `<project>/.silo-harness/mods/<id>/` | off until you turn it on for that project; its looks as yours |
 
 A user mod with the id of a bundled one replaces it, which is how you customise a built-in panel: Settings → Mods → Customise copies it into your folder, and you edit the copy.
 
-The app watches these folders. A new folder with a valid `mod.json` shows up in Settings → Mods right away, and as a card in the chat when a session is open. Nothing a mod contributes is loaded until it is on.
+The app watches these folders. A new folder with a valid `mod.json` shows up in Settings → Mods right away, and as a card in the chat when a session is open. Nothing behind a switch loads until the mod is on, and no look applies until it is used.
 
-Turning a mod on grants the permissions its manifest lists at that moment. Later edits to its pages reload it without asking again. An edit that adds a permission, or adds a `styles`, `looks` or `background` contribution it did not have, pauses the mod until you approve the change.
+Turning a mod on grants the permissions its manifest lists at that moment. Later edits to its pages reload it without asking again. An edit that adds a permission pauses the mod until you approve the change.
 
-Settings → Mods has a tab for each kind of mod, by what its manifest contributes: **Mods** (views in the rail, the side pane or above the composer, and slash commands), **Backgrounds** (a view in the `background` seat), **Chat bar** (a look for `composer`), **Conversation** (a look for `conversation`) and **Themes** (`styles`). A mod of several kinds is in each of those tabs, and one that is only of the special kinds is not in the Mods tab. Each special tab has its picker at the top (the one background, chat bar look or conversation look in use, with that mod's settings under it; the themes with their switches, in the order they apply), then the mods of that kind. `openSettings('mods', { tab: 'backgrounds' })` opens a tab; the tab ids are `mods`, `backgrounds`, `chat-bar`, `conversation` and `themes`.
+### Mods and looks
 
-`Settings → Mods → Safe mode` (on the Mods tab) turns every user and project mod off at once.
+Settings → Mods has a tab for each kind, by what the manifest contributes: **Mods**, **Background**, **Chat bar**, **Conversation** and **Theme**.
+
+- **Mods** lists what adds something to the window: views in the rail, the side pane, above the composer or in the `worker` seat, and slash commands. Each has its switch.
+- The other four are **looks**: a view in the `background` seat, a look for `composer`, a look for `conversation`, and a theme (`styles`). A look has no switch. It is available as soon as it is installed, and its tab decides which one is in use: one per kind, with Default (none) first.
+  - At the top of a look tab is a preview of the look in use: the background behind a miniature window (with Dim under it), a sample chat bar, a sample exchange, or a miniature window in the theme. Under it are the look's name and source, and its mod's settings.
+  - Under those is every version of the kind as a card: Default, then the built-in ones, yours and the project's. A click on a card shows that version in the preview, and the window stays as it is. **Use** applies it to the window; **Back to current** shows the one in use again. Using a look puts away the one of its kind that was in use.
+  - **New ⌄** asks the agent for one (Settings closes and the composer starts the request) or writes a starter from a template, which shows in the preview, not applied.
+  - The first Use of a look of yours or of a project's asks for your approval, once per mod: what its pages may do, and that its stylesheet restyles the app. That approval is the only gate a look has. A bundled look needs none.
+- A mod with both kinds keeps its switch in the Mods tab for its views and commands; its looks are on their tabs, and do not depend on the switch.
+
+`openSettings('mods', { tab: 'backgrounds' })` opens a tab, and `{ tab, preview: '<mod key>/<look id>' }` opens it with that version previewed; the tab ids are `mods`, `backgrounds`, `chat-bar`, `conversation` and `themes`.
+
+`Settings → Mods → Safe mode` (on the Mods tab) turns every user and project mod off at once, their looks included.
 
 ## mod.json
 
@@ -102,9 +114,9 @@ A view is one HTML page in one seat.
 | `tab` | a tab in the side pane, next to Browser, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections) |
 | `composer` | a strip directly above the composer | one row, sized to its content up to 120 px |
 | `worker` | nowhere: a hidden page, loaded whenever the mod is on | for a mod that handles hooks (or listens to events) without a panel; it is never visible, takes no input and does not report a size. *Added in 0.8.0.* |
-| `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); only one background is active, chosen in Settings → Mods → Backgrounds (with Your picture and Dim); the app's surfaces turn translucent over it |
+| `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); a look: one background is in use, chosen in Settings → Mods → Background (with your own picture and Dim); the app's surfaces turn translucent over it |
 
-View fields: `id` (unique in the mod), `title`, `entry` (a file in the mod), `seat`, and optionally `order`, `maxHeight`, `icon`.
+View fields: `id` (unique in the mod), `title`, `entry` (a file in the mod), `seat`, and optionally `order`, `maxHeight`, `icon`, and for a background `preview` (a PNG, JPEG, WebP, GIF or SVG in the mod: its card's picture in Settings; without one the card shows the background itself, drawn for a moment and then held still).
 
 Reserved for later protocol versions: `transcript` (cards after a turn), `status` (status-line items), `sidebar`.
 
@@ -114,7 +126,7 @@ Reserved for later protocol versions: `transcript` (cards after a turn), `status
 "styles": ["theme.css"]
 ```
 
-The CSS is added to the app's own page while the mod is on, so it can change colours, type, spacing and the look of the composer or sidebar. Prefer overriding the design tokens (`--bg-100`, `--text-100`, `--accent`, `--r-composer`, … on `:root`) to restyling individual elements: tokens keep working when the app changes. The bundled themes are the examples to copy: `mods/theme-midnight` (cool blue-black) and `mods/theme-paper` (the warm paper and terracotta of 0.4.0) change only the tokens; `mods/theme-glass` (liquid glass: the sidebar, the side pane, the chat bar, cards, menus and dialogs as frosted layers, with backdrop filters, hairlines and highlights) keeps the app's colours and restyles the surfaces themselves, through the app's own class names, which a bundled theme can rely on because it is kept in step with the app; its own tokens are the `--glass-…` ones, and it changes nothing of the app's but the shadows, the dialog backdrop and three radii. The app's own look is neutral, so a theme brings colour back through the tokens for each role: `--button-fill`, `--button-fill-hover` and `--button-text` (the button that confirms), `--switch-on`, `--spinner`, `--badge-bg` and `--badge-ink` (the icon on a card), `--mark` and `--mark-ink` (the mark beside the model name), `--segment-on` (the selected segment), `--answer-fill` and `--answer-ink` (the answer button of the approval and question cards, inverted by default; Paper and Midnight give it their confirming colour), `--quiet-fill` and `--quiet-fill-hover` (those cards' Deny and Skip, a grey that stays neutral), `--side-hover`, `--side-active` and `--tree-line` (the sidebar's rows). Because a stylesheet can restyle anything, including approval cards, a mod that contributes styles says so when you turn it on. Themes apply in the order Settings → Mods → Themes lists them (built-in, yours, the project's, each by id), so where two set the same thing the later one wins.
+A mod with styles is a theme, a look: its CSS is added to the app's own page while it is the theme in use (one at a time, chosen in Settings → Mods → Theme), so it can change colours, type, spacing and the look of the composer or sidebar. Prefer overriding the design tokens (`--bg-100`, `--text-100`, `--accent`, `--r-composer`, … on `:root`) to restyling individual elements: tokens keep working when the app changes. The bundled themes are the examples to copy: `mods/theme-midnight` (cool blue-black) and `mods/theme-paper` (the warm paper and terracotta of 0.4.0) change only the tokens; `mods/theme-glass` (liquid glass: the sidebar, the side pane, the chat bar, cards, menus and dialogs as frosted layers, with backdrop filters, hairlines and highlights) keeps the app's colours and restyles the surfaces themselves, through the app's own class names, which a bundled theme can rely on because it is kept in step with the app; its own tokens are the `--glass-…` ones, and it changes nothing of the app's but the shadows, the dialog backdrop and three radii. The app's own look is neutral, so a theme brings colour back through the tokens for each role: `--button-fill`, `--button-fill-hover` and `--button-text` (the button that confirms), `--switch-on`, `--spinner`, `--badge-bg` and `--badge-ink` (the icon on a card), `--mark` and `--mark-ink` (the mark beside the model name), `--segment-on` (the selected segment), `--answer-fill` and `--answer-ink` (the answer button of the approval and question cards, inverted by default; Paper and Midnight give it their confirming colour), `--quiet-fill` and `--quiet-fill-hover` (those cards' Deny and Skip, a grey that stays neutral), `--side-hover`, `--side-active` and `--tree-line` (the sidebar's rows). Because a stylesheet can restyle anything, including approval cards, the first Use of a theme of yours or of a project's says so and asks first. Only one theme is in use at a time.
 
 `@import`, `@charset`, `@namespace` and `@page` are removed: a stylesheet cannot pull in another one. A relative `url()` (an image, a font) points at the mod's own files, resolved from the stylesheet's folder; `https:` addresses load only as the app's page allows, which is not at all. Comments are removed too, so do not rely on them surviving.
 
@@ -122,7 +134,7 @@ The CSS is added to the app's own page while the mod is on, so it can change col
 
 *Added in 0.3 (the release after 0.2.0). An older app ignores `contributes.looks`, so the protocol version stays 1.*
 
-A look is a stylesheet for one region of the window. Unlike `styles`, which apply to the whole page, a look is contained: the app wraps it so that its selectors reach only its region, and only one look per region is active at a time, chosen in Settings → Mods → Chat bar or Settings → Mods → Conversation.
+A look is a stylesheet for one region of the window. Unlike `styles`, which apply to the whole page, a look is contained: the app wraps it so that its selectors reach only its region, and only one look per region is in use at a time, chosen in Settings → Mods → Chat bar or Settings → Mods → Conversation.
 
 ```json
 "looks": [
@@ -130,7 +142,9 @@ A look is a stylesheet for one region of the window. Unlike `styles`, which appl
 ]
 ```
 
-Look fields: `id` (unique among the mod's looks), `title` (shown in Settings), `target`, `styles` (one or more CSS files in the mod, applied in order), and optionally `description`.
+Look fields: `id` (unique among the mod's looks), `title` (shown in Settings), `target`, `styles` (one or more CSS files in the mod, applied in order), and optionally `description` and `preview` (a PNG, JPEG, WebP, GIF or SVG in the mod: its card's picture in Settings; without one the card draws a sample in the look).
+
+**Previews.** Settings shows a look before it is used: a sample chat bar or a sample exchange, built from the same class names and ids as the window, in a shadow root of its own. The app compiles the look for the preview's region (`.lp-root #chatbar`, `.lp-root #messages`) the way it compiles it for the window, so the same stylesheet works in both and never reaches the window from a preview. A theme is compiled for a miniature window the same way, with `:root` and `html` read as its root and `body` as its page. Write the look against the stable hooks below and it previews as it applies.
 
 | Target | Region | Root |
 | --- | --- | --- |
@@ -139,7 +153,7 @@ Look fields: `id` (unique among the mod's looks), `title` (shown in Settings), `
 
 **Scoping.** The app wraps the look's CSS in `@scope (<root>) { … }`. Inside it, a selector matches only the root and what is inside it, so `.sidebar { … }` or `:root { … }` in a look match nothing. `:scope` is the root itself, and custom properties set on `:scope` cascade through the region only, which is the simple way to retheme one region: `:scope { --accent: #3fd0ff; --bubble: … }`. The at-rules that cannot sit inside `@scope` (`@keyframes`, `@counter-style`, `@font-face`, `@property`, at the top level or inside `@media` or `@supports`) are moved in front of it, into a cascade layer (`@layer mod-looks`). Their names are shared with the whole page, and on a collision the app's own definition wins: a look's `@keyframes spin` or `pulse` never replaces the app's animation of that name, but it does not work for the look either, so give your names a prefix (`@keyframes holo-pulse`). Two of them register something for the whole page and are kept only in the namespace reserved for mods: `@property --mod-<mod id>-…` (an `@property` for one of the app's tokens, such as `--bg-100`, would change how every surface of the app inherits its colour) and an `@font-face` whose `font-family` starts with `mod-<mod id>` (one for a family the app's stack names would replace that font everywhere); any other `@property` or `@font-face` in a look is removed. Themes (`styles`) keep both. `@import` and the other at-rules listed under Styles are removed, and relative `url()`s point at the mod's files, as for styles. A `}` that closes nothing is dropped and an unclosed block is closed, so no stylesheet can end the scope early.
 
-**Containment.** While a conversation look is active, `#messages` has `contain: paint`: whatever the look draws, a fixed-position pseudo-element included, stays inside the transcript's box. The chat bar is not contained (its focus ring and glow sit just outside `#chatbar`), so a chat bar look can still paint over the window; either kind of look gets the same "it restyles the app" approval as styles.
+**Containment.** While a conversation look is active, `#messages` has `contain: paint`: whatever the look draws, a fixed-position pseudo-element included, stays inside the transcript's box. The chat bar is not contained (its focus ring and glow sit just outside `#chatbar`), so a chat bar look can still paint over the window; either kind of look asks for the same approval at its first Use as a theme.
 
 **State.** While a look is active, the app keeps these attributes on its region's root, so a look can react without any script:
 
@@ -204,7 +218,7 @@ A minimal look, with a choice in Settings:
 :scope[data-running="true"] .tool-status.spin { animation: teal-breathe 1.2s ease-in-out infinite; }
 ```
 
-**Sets.** A mod that contributes at least two of a conversation look, a chat bar look and a background is offered as a set: its card in Settings → Mods has "Use the whole set", which applies all its parts in one choice (its first look for each region and its first background), and "Stop using the set" while they are in use. A bundled mod with looks starts off, like a theme; `mods/hyperspace` is the example to copy.
+**Sets.** A mod that contributes at least two kinds of look (a background, a chat bar look, a conversation look, a theme) is a set: while one of its looks is in the preview, "Use the whole set" next to Use applies all its parts in one choice (its first look of each kind). Kinds it has none of stay as they are. `mods/hyperspace` is the example to copy.
 
 ### Commands
 
@@ -395,9 +409,9 @@ Method names are the call names above (`ui.setBadge`, `storage.get`, `session.tr
 
 ## Building one with the agent
 
-Ask for it: "make a mod that shows the git branch and how many files changed". The agent loads the `create-mod` skill, writes the folder, and checks it with the `mod_check` tool, which reports manifest problems and any errors the page threw. A card in the chat offers to turn the new mod on; after that the agent's edits reload it as they land, and `mod_check` gives it the page's errors to fix.
+Ask for it: "make a mod that shows the git branch and how many files changed". The agent loads the `create-mod` skill, writes the folder, and checks it with the `mod_check` tool, which reports manifest problems and any errors the page threw. A card in the chat offers to turn the new mod on; after that the agent's edits reload it as they land, and `mod_check` gives it the page's errors to fix. For a look the card offers **Preview** (its tab in Settings, with it in the preview) and **Use** (the card says what it may do, so using it there is the approval), and the agent's edits show in the preview as they land.
 
-By hand: Settings → Mods → New mod writes a starter folder (a view in the seat you pick, a conversation or chat bar look, or a theme; each tab starts the form at its own kind) and opens it. `mod_check` is also what the Settings page shows under a mod's Problems.
+By hand: Settings → Mods → New mod writes a starter folder (a view in the seat you pick, a conversation or chat bar look, or a theme) and opens it; on a look tab, New ⌄ → From a template writes one of that kind and shows it previewed. `mod_check` is also what the Settings page shows under a mod's Problems.
 
 ## Installing and sharing
 
@@ -409,5 +423,6 @@ A mod is its folder. Copy it into `~/.silo-harness/mods/`, or use Settings → M
 - Every request to the app is checked against the permissions you granted that mod. The frame, not the message, says which mod is asking.
 - Without `network` a mod cannot make a request or navigate anywhere, so reading your session and sending it somewhere takes two permissions you can see.
 - Mods never get the powers listed under Permissions as unavailable. In particular a mod, and therefore an agent that writes mods, cannot approve its own tool calls.
-- Mods that came from a project folder, or that the agent wrote, stay off until you turn them on. Growing a mod's permissions pauses it until you agree.
-- Styles are the exception to the sandbox: a stylesheet applies to the app's own page. Treat a mod with styles like a browser theme from someone you trust. A look is scoped to its region, so its selectors cannot reach the rest of the app, but it is still CSS on the app's page and asks for the same approval.
+- Mods that came from a project folder, or that the agent wrote, stay off until you turn them on, and their looks apply only once you used one and approved it. Growing a mod's permissions pauses it until you agree.
+- Styles are the exception to the sandbox: a stylesheet applies to the app's own page. Treat a theme like a browser theme from someone you trust. A look is scoped to its region, so its selectors cannot reach the rest of the app, but it is still CSS on the app's page and asks for the same approval at its first Use.
+- A preview in Settings is not the window: a look or a theme previewed there is compiled for the preview's own root, in a shadow root that takes no input, so trying one before approving it cannot restyle the app. A background previewed before its first Use runs its page with nothing granted.

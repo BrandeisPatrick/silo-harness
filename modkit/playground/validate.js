@@ -61,6 +61,13 @@
       else if (ICONS.indexOf(icon) < 0) warn(where + 'icon "' + icon + '" is not a built-in icon name');
     };
     checkIcon(m.icon, '');
+    // A picture of a look or a background for its card in Settings (optional)
+    var checkPreview = function (pic, where) {
+      if (pic === undefined) return;
+      if (typeof pic !== 'string' || !pic) { err(where + 'preview must be the path of a picture in the mod'); return; }
+      if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(pic)) err(where + 'preview "' + pic + '" must be a PNG, JPEG, WebP, GIF or SVG file');
+      else checkFile(pic, where + 'preview');
+    };
 
     if (m.permissions !== undefined) {
       if (!Array.isArray(m.permissions)) err('permissions must be an array');
@@ -97,6 +104,7 @@
         if (v.maxHeight !== undefined && (typeof v.maxHeight !== 'number' || !(v.maxHeight > 0))) err(at + 'maxHeight must be a positive number');
         if ((v.order !== undefined || v.maxHeight !== undefined) && v.seat !== 'rail' && SEATS.indexOf(v.seat) >= 0) warn(at + 'order and maxHeight only apply to the rail seat');
         checkIcon(v.icon, at);
+        checkPreview(v.preview, at);
       });
     }
 
@@ -126,6 +134,7 @@
             if (typeof f !== 'string') err(at + 'styles: every entry must be a file name');
             else { checkFile(f, 'looks[' + i + '].styles'); if (!/\.css$/i.test(f)) err(at + 'styles "' + f + '" is not a .css file'); }
           });
+          checkPreview(l.preview, at);
         });
       }
     }

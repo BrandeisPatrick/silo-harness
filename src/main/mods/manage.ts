@@ -116,7 +116,7 @@ export function starterLook(id: string, name: string, target: ModLookTarget): { 
  *   data-running="true|false"  a run is in progress in the session on screen
  *   data-scheme="light|dark"   the colour scheme in effect
  *   data-mode="ask|…"          the permission mode
- *   data-set-<key>="<value>"   each of this mod's settings (Settings → Mods → this mod)
+ *   data-set-<key>="<value>"   each of this mod's settings (under the look on its tab in Settings → Mods)
  * Keep text at the app's size and line height: dress the conversation, do not make it harder to read.
  */
 
@@ -160,9 +160,9 @@ export function starterLook(id: string, name: string, target: ModLookTarget): { 
 export function starterTheme(id: string, name: string): { manifest: ModManifest; css: string } {
   const manifest: ModManifest = { protocol: 1, id, name, version: '0.1.0', description: 'A theme for the whole app.', contributes: { styles: ['theme.css'] } };
   const css = `/*
- * A theme: this file is added to the app's own page while the mod is on. Prefer the design tokens on :root to
- * restyling elements; they keep working when the app changes. Themes apply in the order Settings → Mods → Themes
- * lists them, and where two set the same thing the later one wins.
+ * A theme: this file is added to the app's own page while it is the theme in use (Settings → Mods → Theme, one at
+ * a time; the tab previews it first). Prefer the design tokens on :root to restyling elements; they keep working when
+ * the app changes.
  */
 
 :root {

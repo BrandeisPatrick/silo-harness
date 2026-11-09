@@ -13,6 +13,19 @@
 - **Dreaming.** The same layout: a card per project that has dreams or that the next dream reads, with the mode, its last dream's report and what waits ("Daily at 03:00 · 2 suggestions waiting"), and a Suggestions tab with every proposal that waits, to apply or dismiss, as in the dream's session. Run a dream ⌄ dreams about every project with new activity or the one you pick. A project's page has Run a dream now, its dreams newest first, each opening its session, and the settings beside them: the daily dream and its time, the mode, and what to look for. The banner says whether the daily dream is on and that a dream sends parts of your past sessions to the model you configured.
 - **For mods:** `harness.ui.openPage('scheduled' | 'dreaming', { form: 'new' })` opens a page (and the New task form), and `harness.ui.openSettings('scheduled')` or `('dreaming')` opens the page instead of the old section.
 
+### Looks without switches
+
+- **Backgrounds, chat bar looks, conversation looks and themes have no switch any more.** They are looks: each is available as soon as it is installed, and its tab in Settings → Mods (Background, Chat bar, Conversation, Theme) decides which one is in use, one of each kind, with Default first. Using a look puts away the one of its kind that was in use; there is nothing to turn on first.
+- **See it before you use it.** At the top of each look tab is a preview of what is in use: the background, live, behind a miniature window with the Dim slider under it; a sample chat bar; a short sample exchange; or a miniature window in the theme. Click any version in the grid under it and the preview shows that one while the window stays as it is. **Use** applies it; **Back to current** returns to what you have. The look's own settings are right under its name.
+- **New ⌄** on each look tab: *Ask the agent…* closes Settings and starts the request in the composer ("Make a chat bar look that …"), and *From a template…* writes a starter that shows up in the grid, previewed, not applied.
+- **One question, once.** The first Use of a look of yours or of a project's asks what its pages may do and says that it restyles the app; after that it is used without asking. Built-in looks never ask.
+- **Sets.** A mod with several kinds of look, like Hyperspace, has *Use the whole set* next to Use.
+- **The chat card** for a new look the agent wrote offers **Preview** (its tab, with it in the preview) and **Use**, instead of Turn on.
+- **One theme at a time.** Themes no longer stack. If you had several themes on, the last one in the order they applied stays in use.
+- **Nothing changes on screen when you update.** The background and looks you had chosen stay in use, the theme as above, and a look of yours that was turned on but not chosen is simply available.
+- **For mod authors:** a look and a background view may name a `preview` picture for their card. `mod_check` says whether a look is in use and approved. A mod with panels or commands as well as looks keeps its switch for those only.
+- **Settings → Appearance** keeps Light, Dark and System (now called Colour scheme) and its rows that open each look tab.
+
 ## 0.8.0
 
 Closer to Claude Code: hooks in Claude Code's own format, from settings.json and from mods; the permission prompt and a new question card drawn as Claude Code draws them; one quiet line per tool call; and the rail, the footer and the status line laid out like Claude Code's.
