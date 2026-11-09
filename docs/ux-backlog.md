@@ -14,6 +14,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.7.0 | A liquid glass look (translucent, layered materials in the style of macOS 26) for the app and for the website: a bundled Glass theme mod, off by default, and the same treatment on the website. The user said it is not important, so it waited until 0.5.0 and 0.6.0 were out | released 2026-11-06 |
 | 0.8.0 | Closer to Claude Code: hooks in Claude Code's format (settings.json and mods), the permission prompt and an ask_user question card in Claude Code's style, one quiet line per tool call, the rail, footer and status line laid out like Claude Code's | released 2026-11-07 |
 | 0.9.0 | Scheduled tasks and Dreaming as pages (cards, a task page with its runs, runs as regular ⚡ sessions); looks previewed and used without switches; the rail and mod tabs open and close like the browser | released 2026-11-09 |
+| 0.9.1 | Fixes: credentials typed into the Browser pane hidden from the agent, permission prompts for pages; the renderer and the agent split into modules | released 2026-11-09 |
 
 ## Done in earlier rounds
 

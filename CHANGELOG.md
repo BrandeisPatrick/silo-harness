@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.1
+
+Fixes in the Browser pane: what you or the agent type into a password, one-time code or card field never reaches the agent, and sites ask before using your camera, microphone, location or notifications. Under the hood, the window's and the agent's code is split into smaller modules, with no change in behaviour.
 
 ### Fixes
 
