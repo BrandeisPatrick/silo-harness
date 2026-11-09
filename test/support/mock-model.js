@@ -28,6 +28,15 @@ function startMock() {
       // requests never take a `nonStream` reply.
       if (!payload.stream && (req.url === '/api/chat' || req.url === '/v1/chat/completions')) {
         const at = state.replies.findIndex((r) => r.nonStream && (typeof r.when !== 'function' || r.when(payload)));
+        // `classifierDefault` ({ decision, reason }): the standing answer of Auto mode's safety check when no reply
+        // for it is queued (the screenshot scripts, where every check should pass)
+        if (at < 0 && state.classifierDefault && isClassifierRequest(payload)) {
+          const d = state.classifierDefault;
+          const content = JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' });
+          return req.url === '/api/chat'
+            ? json(200, { model: payload.model, message: { role: 'assistant', content }, done: true, prompt_eval_count: 300, eval_count: 20 })
+            : json(200, { id: 'c', object: 'chat.completion', created: 0, model: payload.model, choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 20 } });
+        }
         if (at >= 0) {
           const reply = state.replies.splice(at, 1)[0];
           setTimeout(() => {
