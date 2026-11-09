@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.11.1
+## 0.11.1 — 2026-11-09
 
-A fix for models served by Ollama: a tool's result no longer ends up shown with another call.
+Fixes tool results being shown with the wrong tool call when using Ollama models.
 
-### Fixes
+### Fixed
 
-- **Each tool result stays with its own call.** Ollama numbers a reply's tool calls from the start again every time (and Silo Harness's own fallback ids restarted with every run), so two calls in one session could share an id. The transcript, the Markdown export and the history sent back to Ollama then showed or named the later result for the earlier call, and compaction could cut a call off from its result. Now every new call gets an id no other call in the session has, a streamed reply keeps two calls apart even when they share an id, and results are paired with the call just before them, so sessions saved before this release read correctly too.
+- **Tool results with Ollama.** Each result now stays with the call that produced it, including in sessions saved before this release.
 
 ## 0.11.0
 
