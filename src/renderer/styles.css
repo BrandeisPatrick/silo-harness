@@ -1654,7 +1654,6 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .rules-empty { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: var(--r-card); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
 .rules-empty .icon { flex: none; }
 .rules-empty p { margin: 0; }
-.rules-empty strong { font-weight: 500; color: var(--text-200); }
 
 /* ---------- Tick 2: message actions on user bubbles, rewind, the task list ---------- */
 
