@@ -2,6 +2,7 @@ import { app, BrowserWindow, WebContentsView } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState } from '../shared/types';
+import { installPermissionHandlers } from './browser-permissions';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, maskedState, SAFETY_WORLD, typedSecretMessage } from './browser-safety';
 
 const REF_ATTR = 'data-oc-ref';
@@ -216,6 +217,7 @@ export class BrowserController {
     wc.setUserAgent(wc.getUserAgent().replace(/ Electron\/[\d.]+/, '').replace(/ (?:silo|open)-harness\/[\d.]+/i, ''));
     // Start watching each page's credential fields as soon as it is there (see pagePrelude in browser-safety.ts)
     wc.on('dom-ready', () => void this.safety('return true;').catch(() => undefined));
+    installPermissionHandlers(wc.session, wc, () => (win.isDestroyed() ? null : win));
     void wc.loadURL('about:blank');
   }
 
