@@ -26,6 +26,7 @@ const SCRIPTS = [
   { name: 'regression', needsApi: true },
   { name: 'settings' },
   { name: 'settings-page' },
+  { name: 'settings-delete' },
   { name: 'providers' },
   { name: 'sidebar' },
   { name: 'images' },
@@ -51,6 +52,13 @@ const SCRIPTS = [
   { name: 'questions' },
   { name: 'remote-page', electron: true },
   { name: 'browser-safety' },
+  { name: 'browser-permissions' },
+  { name: 'browser-cert' },
+  { name: 'browser-downloads' },
+  { name: 'browser-tabs' },
+  { name: 'browser-oauth' },
+  { name: 'browser-approvals' },
+  { name: 'browser-polish' },
 ];
 
 const words = process.argv.slice(2);

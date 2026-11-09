@@ -2,6 +2,7 @@
 // approval card's wider answers. Pure: the agent keeps the pending cards and the per-session allow lists.
 
 import type { PermissionMode, StoredRules } from '../../shared/types';
+import { siteCardLabels, type Site } from '../browser/policy';
 import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from '../guard';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
@@ -33,10 +34,12 @@ export interface ApprovalContext {
 }
 
 /**
- * Decides, per permission mode, whether an action runs, asks, or is refused. MCP tools: read-only ones run
- * everywhere; the rest ask once per server (auto mode asks only for destructive ones). Plan mode refuses edits and
- * commands that change anything. Otherwise a guard reason asks unless allowed; auto mode and Accept edits (or a
- * saved rule) run the rest; a command runs when every program in it is allowed.
+ * Decides, per permission mode, whether an action runs, asks, or is refused. A browser card asks: the browser policy
+ * (browser/policy.ts siteDecision, clickRule) already weighed the mode, the site and the user's lists, and a purchase
+ * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
+ * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything. Otherwise a guard
+ * reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
+ * program in it is allowed.
  */
 export function decideApproval(name: string, detail: string, target: string | undefined, opts: ApproveOptions, ctx: ApprovalContext): ApprovalDecision {
   const { mode, cwd, rules } = ctx;
@@ -45,6 +48,8 @@ export function decideApproval(name: string, detail: string, target: string | un
   const allow: ApprovalDecision = { kind: 'allow' };
   const refuse = (message: string): ApprovalDecision => ({ kind: 'refuse', message });
   const ask = (reason: string | null, programs: string[], custom = false): ApprovalDecision => ({ kind: 'ask', reason, programs, custom });
+  // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
+  if (opts.browser) return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
   if (opts.custom) {
     if (mode === 'plan') return refuse(PLAN_CUSTOM_BLOCKED);
     if (mode === 'bypass' && !opts.alwaysAsk) return allow;
@@ -73,8 +78,12 @@ export function decideApproval(name: string, detail: string, target: string | un
   return ask(null, programs);
 }
 
-/** The card's wider answers: "Allow git, npm for this session", "Always allow this server in this project". */
-export function approvalLabels(name: string, reason: string | null, programs: string[]): { alwaysLabel: string; projectLabel: string } {
+/**
+ * The card's wider answers: "Allow git, npm for this session", "Always allow this server in this project"; for a
+ * browser site card "Allow example.com for this session" and "Always allow example.com" (saved on this Mac, not per project).
+ */
+export function approvalLabels(name: string, reason: string | null, programs: string[], site?: Site): { alwaysLabel: string; projectLabel: string } {
+  if (site) return siteCardLabels(site);
   const what = name.startsWith('mcp__')
     ? programs[0] ?? 'this server'
     : reason

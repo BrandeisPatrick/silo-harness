@@ -25,6 +25,7 @@ const ICONS = {
   stop: '<rect x="2" y="2" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>',
   'chevron-right': '<path d="M6.25 3.75L10.5 8l-4.25 4.25"/>',
   'chevron-down': '<path d="M3.75 6.25L8 10.5l4.25-4.25"/>',
+  'chevron-up': '<path d="M3.75 9.75L8 5.5l4.25 4.25"/>',
   copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>',
   check: '<path d="M3.25 8.25l3 3 6.5-6.5"/>',
   refresh: '<path d="M13.25 8A5.25 5.25 0 1 1 8 2.75c1.4 0 2.75.55 3.75 1.5l1.5 1.5M13.25 2.5v3.25H10"/>',

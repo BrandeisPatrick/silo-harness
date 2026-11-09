@@ -15,15 +15,52 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
 context-window.ts  contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports them)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)
-browser.ts     BrowserController: the Browser pane's view and what the browser_* tools do in it
-browser-safety.ts       credential fields (credentialKind) and their redaction; the script prelude that runs in the page's
-                        own isolated world (SAFETY_WORLD), out of reach of the page and of browser_eval
-browser-permissions.ts  the permission handlers on the pane's session: the app's window as before, the pane asks
+browser/       the Browser pane's main-process side (below)
+tools/browser.ts  the browser_* tools and their guard (below)
 ```
+
+## The browser (src/main/browser/, tools/browser.ts)
+
+```
+index.ts         what the rest of the app imports: BrowserController, setupBrowser, openChatLink, browserSession, zoomMenuItems
+controller.ts    BrowserController: the tabs (MAX_TABS 12; one active, the others hidden), the active view's bounds, what the
+                 browser_* tools do on the active tab, the agent's action stamps (acting()), find, zoom, the context menu's
+                 actions, DevTools, the blocked-popup strip, a popup's tab (tabIdOf), the certificate interstitial's state
+tab.ts           BrowserTab: one WebContentsView in persist:browser, its TabState, the shortcuts pressed in the page
+                 (shortcutOf: ⌘⇧N ⌘W ⌘L ⌘F ⌘+ ⌘− ⌘0 ⌥⌘I, taken in before-input-event so neither the page nor the menu sees them)
+page-scripts.ts  the scripts run in the page: the outline with refs, text, find, wait, scroll, click targets, credential checks
+safety.ts        credential fields (credentialKind) and their redaction; the prelude in the page's own isolated world
+                 (SAFETY_WORLD), out of reach of the page and of browser_eval
+policy.ts        pure: sites (siteOf), exempt hosts, sensitive sites, navigationRule, siteDecision, the eval guard, clickRule
+                 (CAPTCHA, purchase, account), typeRule/keyRule (CREDENTIAL_REFUSAL), the card's words
+session.ts       the persist:browser profile: user agent, spell checker, the cookie migration and its one-time note, Keep
+                 cookies, Clear browsing data
+popups.ts        window.open and target=_blank: a tab, a background tab, a floating card (createWindow keeps the opener),
+                 or blocked (a fourth popup); the card's bar (popup-bar-preload.ts)
+permissions.ts   the permission bar's policy and store (userData/browser/permissions.json), requests per tab, USB/HID/serial refused
+certificates.ts  certificate errors: the tab's interstitial state, Proceed for this run (host + fingerprint), the pill's security
+downloads.ts     will-download: sanitised unique names, the list (userData/browser/downloads.json), the agent's downloads paused for the bar
+find.ts          find in page: findStep (new search or next/previous), PageFinder over findInPage / found-in-page, "3 of 12"
+zoom.ts          zoom per site: Chrome's steps, the store (userData/browser/zoom.json, by host), applySavedZoom, the View menu's items
+context-menu.ts  contextMenuTemplate(params, state), pure; the native menu (not popped up in the live tests: lastContextMenu)
+feature.ts       setupBrowser(app): the browser.* RPC methods and pushes (shared/browser.ts), the safety wiring, quit;
+                 openChatLink (the main window's window-open handler: the pane or the default browser)
+```
+
+`tools/browser.ts` is the guard every browser tool passes before it runs: `credentialCheck` (a password, code or card
+field away from an exempt host is refused before anything is typed), `siteCheck` (the site card, the sensitive and sign-in
+cards, browser_eval's card, refused schemes and plan mode, all from `policy.siteDecision` through `ctx.approve` with
+`browser: { card, site }`), and for browser_click `clickCheck` (CAPTCHA refused, purchase and account cards). browser_type
+also has the controller ask the page again after its own click (`allowSecret` only on an exempt host). Results and errors
+have the page's credential values replaced with `•••`. The window's side: `browser-pane.ts` (the tab strip, the popups'
+state, the profile note, the zoom chip, the blocked-popup strip), `browser-bars.ts` (the permission and download bars, the
+certificate interstitial, the lock in the URL pill, the downloads tray), `browser-find.ts` (the find bar), all created by
+`side-pane.ts`; `settings/browser-section.ts` is Settings → Browser. None of them can answer a bar for the agent: the
+answers are RPC methods only the window calls.
 
 Feature setups, in this order, before the window opens: `setupSettings` (settings-service.ts), `setupHistory` (history.ts),
 `setupContext` (context-service.ts), `setupImages`, `setupMods`, `setupSchedules`, `setupSubagents`, `setupRemote`,
-`setupPower`, `setupDreaming`, `setupProviders` (providers-service.ts) (each in its own file).
+`setupPower`, `setupDreaming`, `setupProviders` (providers-service.ts), `setupBrowser` (browser/feature.ts) (each in its own file).
 
 ## Providers (src/main/providers.ts, provider-presets.ts)
 
@@ -145,7 +182,7 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 `app.push(channel, payload)` → one `'rpc:push'` channel → `oc.onPush(channel, cb)`. Features extend
 `RpcMethods = CoreRpc & …` and `RpcEvents = CoreEvents & …` in rpc.ts. Core methods: `commands.list`,
 `commands.run(name, args)`, `sessions.live(id)`, `sessions.transcript(id)`. Core pushes: `config:changed`,
-`sessions:changed` (the list with statuses), `sessions:show` (a notification was clicked).
+`sessions:changed` (the list with statuses), `sessions:show` (a notification was clicked, or every session was deleted and this is the fresh one).
 
 `sessions:switch` takes the transcript and the LiveState at the same instant (after flushing that session's
 pending deltas); the next `sessions.live(id)` returns that snapshot, and every later event reaches the window
@@ -167,6 +204,10 @@ tool-groups.ts    tool rows and the runs that fold into one line (settleRun, upd
 approvals.ts      the approval card and the question card, and which one waits
 status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter
 side-pane.ts      the Browser, Diff and Terminal tabs (the mods' tabs join through mods-host.ts), the resizer, the URL bar, the native browser view's bounds
+browser-pane.ts   the browser's tab strip, popups, profile note, zoom chip and blocked-popup strip
+browser-bars.ts   the permission and download bars, the certificate interstitial, the URL pill's lock, the downloads tray
+browser-find.ts   the find bar under the URL bar
+settings/browser-section.ts  Settings → Browser
 connection.ts     the Ollama check and banner, the setup strip and its actions ("Start Ollama"), the folder picker, the recent-projects row
 sessions-view.ts  the session list and statuses, the session on screen (showSession), new/delete/fork, title editing
 header.ts         the mode and model chips and their menus, applyConfigToUi, config:changed

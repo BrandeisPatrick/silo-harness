@@ -215,9 +215,30 @@ What the model can do (images, tools) is detected for Ollama; for the other serv
   - the built-in gateway block's `portkey.baseURL` is ignored (the gateway key would follow it); `portkey.model`, `virtualKey`, `provider` and `configId` still apply, since they go to the address you chose;
   - a `baseURL` for `ollama` or `lmstudio` (no key) is fine. For a provider with another variable or address, define it in your own settings.json and select it from the project with `"provider"`.
 
+### The browser
+
+The `browser` block is what Settings → Browser edits.
+
+| Field | Default | What it is |
+| --- | --- | --- |
+| `keepCookies` | `true` | Keep the Browser pane's cookies and site data when the app quits; `false` clears them at quit. |
+| `downloadsDir` | `""` | Where the pane's downloads are saved (`~` allowed); empty is the Downloads folder. |
+| `openChatLinksInPane` | `false` | Web links (http, https) clicked in the chat open in a new tab of the pane instead of the default browser. |
+| `alwaysAllowed` | `[]` | Sites the agent may read and act on without the site card: what "Always allow example.com" saves (`example.com`, `localhost:3000`, `file:/path`), or a pattern (`*.example.com`). A sensitive site still asks before acting. |
+| `sensitive` | `[]` | Your own sites that always ask before the agent acts, beside the built-in list: `host` (and its subdomains), `*.host`, `host:port`, or a prefix such as `login.`. |
+| `exempt` | `[]` | Your own hosts the agent may use with no card and where it may type test passwords, beside `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` and `*.test`: `host`, `*.host`, `host:port`, or a folder (`/path`, `~/path`) whose files count. |
+
+```json
+{
+  "browser": { "keepCookies": true, "openChatLinksInPane": true, "exempt": ["myapp.local:8080"], "sensitive": ["intranet.example.com"] }
+}
+```
+
+**A project's settings.json may not set `alwaysAllowed` or `exempt`**: they decide where the agent acts without asking you, which a repository must not choose. They are ignored there with a problem line; add sites in Settings → Browser or in your own settings.json. The rest of the block applies from a trusted project's file. The saved permission answers, the zoom per site and the downloads list are the browser's own files in the data folder, not settings.
+
 ### The other settings
 
-`permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
+`permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
 
 ## For coding agents
 

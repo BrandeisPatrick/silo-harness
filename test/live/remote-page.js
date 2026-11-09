@@ -352,6 +352,45 @@ async function main() {
   f.emit(A, { type: 'question_resolved', id: 'qq-2', answers: [{ selected: ['Export', 'Filters'] }] });
   check('answered on the Mac, the card says what was picked', await waitFor(win, `[...document.querySelectorAll('.card.question')].pop()?.querySelector('.decision')?.textContent === 'Export, Filters'`));
 
+  // 5c. Browser cards, worded as the desktop words them: a site's first approval with its answer for the session, and
+  // a purchase with Allow and Deny only; the action, the model's reason in grey under it, the amber note.
+  const lastCard = `[...document.querySelectorAll('.card.approval')].pop()`;
+  const cardInfo = () =>
+    js(win, `(() => { const c = ${lastCard}; const probe = (v) => { const s = document.createElement('span'); s.style.color = 'var(' + v + ')'; document.body.append(s); const col = getComputedStyle(s).color; s.remove(); return col; };
+      return { title: c.querySelector('.card-title').textContent, action: c.querySelector('.card-action')?.textContent ?? null, why: c.querySelector('.card-why')?.textContent ?? null, whyColor: c.querySelector('.card-why') ? getComputedStyle(c.querySelector('.card-why')).color : null, grey: probe('--text-400'),
+        note: c.querySelector('.card-note')?.textContent ?? null, noteColor: c.querySelector('.card-note') ? getComputedStyle(c.querySelector('.card-note')).color : null, amber: probe('--warn'), reason: c.querySelector('.card-reason')?.textContent ?? null,
+        buttons: [...c.querySelectorAll('.card-actions button')].map((b) => b.textContent).join('|'), decided: c.classList.contains('decided'), decision: c.querySelector('.decision')?.textContent ?? null }; })()`);
+  const siteCard = { type: 'approval_request', id: 'ap-b1', name: 'browser_navigate', detail: 'Open docs.example.com\nTo read the retry guide the user linked', mode: 'ask', alwaysLabel: 'Allow docs.example.com for this session', projectLabel: 'Always allow docs.example.com', browser: { card: 'site', site: 'docs.example.com' } };
+  live.approvals = [siteCard];
+  f.status.set(A, { running: true, attention: 'approval' });
+  f.emit(A, siteCard);
+  await waitFor(win, `${lastCard}?.querySelector('.card-title')?.textContent.startsWith('Let the agent')`);
+  let bc = await cardInfo();
+  check("a browser site card reads as the desktop's: \"Let the agent use docs.example.com?\", the action, the reason in grey", bc.title === 'Let the agent use docs.example.com?' && bc.action === 'Open docs.example.com' && bc.why === 'To read the retry guide the user linked' && bc.whyColor === bc.grey && bc.note === null, bc);
+  check('… with Deny, Allow docs.example.com for this session and Allow (no Always: that is for the Mac)', bc.buttons === 'Deny|Allow docs.example.com for this session|Allow', bc.buttons);
+  await shot(win, '5c-browser-site');
+  f.calls.length = 0;
+  await tap(win, `.card.approval:not(.decided) button[data-a="session"]`);
+  await waitFor(win, `${lastCard}.classList.contains('decided')`);
+  bc = await cardInfo();
+  check('… "for this session" reaches the runtime and the card says "Allowed docs.example.com for this session"', JSON.stringify(f.calls.find((c) => c[0] === 'respondApproval')) === JSON.stringify(['respondApproval', 'ap-b1', true, true, 'session']) && bc.decision === 'Allowed docs.example.com for this session', { calls: f.calls, bc });
+  const buyCard = { type: 'approval_request', id: 'ap-b2', name: 'browser_click', detail: 'Click "Pay now" on shop.example\nTo finish the order the user asked for', mode: 'bypass', reason: '"Pay now" looks like a purchase', alwaysLabel: '', projectLabel: '', note: 'This looks like a payment page', browser: { card: 'purchase', site: 'shop.example' } };
+  live.approvals = [buyCard];
+  f.status.set(A, { running: true, attention: 'approval' });
+  f.emit(A, buyCard);
+  await waitFor(win, `${lastCard}?.querySelector('.card-title')?.textContent === 'Make a purchase?'`);
+  bc = await cardInfo();
+  check('a purchase card: "Make a purchase?", what was seen, the action and reason, the amber note', bc.title === 'Make a purchase?' && /looks like a purchase/.test(bc.reason ?? '') && bc.action === 'Click "Pay now" on shop.example' && bc.why === 'To finish the order the user asked for' && bc.note === 'This looks like a payment page' && bc.noteColor === bc.amber, bc);
+  check('… with Allow and Deny only', bc.buttons === 'Deny|Allow', bc.buttons);
+  await shot(win, '5c-browser-purchase');
+  f.calls.length = 0;
+  await tap(win, `.card.approval:not(.decided) button[data-a="deny"]`);
+  await waitFor(win, `${lastCard}.classList.contains('decided')`);
+  bc = await cardInfo();
+  check('… Deny reaches the runtime and the card says "Denied on shop.example"', JSON.stringify(f.calls.find((c) => c[0] === 'respondApproval')) === JSON.stringify(['respondApproval', 'ap-b2', false, false, 'session']) && bc.decision === 'Denied on shop.example', { calls: f.calls, bc });
+  f.status.set(A, { running: true });
+  live.approvals = [];
+
   // 6. The queued message is delivered and the run ends.
   f.emit(A, { type: 'queue_delivered', id: 'q-1' });
   f.emit(A, { type: 'user_message', text: 'Also add a test for three attempts', images: 0, origin: 'queue' });

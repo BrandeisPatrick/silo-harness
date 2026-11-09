@@ -97,6 +97,8 @@ Where this app's tool is the same thing as one of Claude Code's, a hook sees Cla
 
 `terminal_run` (a command in the Terminal pane) also answers to a `Bash` matcher and to `Bash(…)` rules, with its `command` in `tool_input`, so a Bash policy hook covers it too.
 
+The browser tools keep their own names and arguments. `browser_tabs` lists and switches the pane's tabs (`action`: `list`, `new`, `select` or `close`, with `url`, `tab_id` and `background`); every other browser tool acts on the active tab. The tools that can need an approval (`browser_navigate`, `browser_click`, `browser_type`, `browser_press_key`, `browser_eval`, `browser_tabs`) take an optional `reason`, the model's one sentence on why, which the approval card shows; a hook sees it in `tool_input` like any argument, and an `updatedInput` may change or drop it. A PreToolUse hook that allows a call skips the browser's site, sensitive-site and JavaScript cards, but never a purchase or account card, and never a refusal (a credential field, a CAPTCHA, a scheme the browser does not open).
+
 Credentials never reach a hook. When `browser_type` types into a password, one-time code or card field, its `text` reads `•••` in `tool_input` (as it does in the transcript); an `updatedInput` that hands `•••` back keeps the real text. In `tool_response`, the value of such a field reads `•••` in every browser tool's result.
 
 ## Output

@@ -11,7 +11,7 @@ import type { IconName } from '../icons.js';
 
 // ---------- Sections ----------
 
-export type SectionId = 'general' | 'model' | 'permissions' | 'context' | 'mods' | 'mcp' | 'skills' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about' | 'pages';
+export type SectionId = 'general' | 'model' | 'permissions' | 'browser' | 'context' | 'mods' | 'mcp' | 'skills' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about' | 'pages';
 
 export interface SectionInfo {
   id: SectionId;
@@ -27,6 +27,7 @@ export const SECTIONS: SectionInfo[] = [
   { id: 'general', title: 'General', icon: 'settings', group: 0 },
   { id: 'model', title: 'Model', icon: 'server', group: 0 },
   { id: 'permissions', title: 'Permissions', icon: 'shield-check', group: 0 },
+  { id: 'browser', title: 'Browser', icon: 'globe', group: 0 },
   { id: 'context', title: 'Context', icon: 'gauge', group: 0 },
   { id: 'mods', title: 'Mods', icon: 'puzzle', group: 1 },
   { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 1 },
@@ -116,6 +117,36 @@ export function parseUrl(text: string): Parsed<string> {
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'Use an http:// or https:// address.' };
   return { ok: true, value: t.replace(/\/+$/, '') };
+}
+
+/**
+ * A site for one of Settings → Browser's lists, as the browser's policy reads them: `example.com`, `*.example.com`,
+ * `localhost:3000`, `[::1]`; a pasted URL keeps its host (and port). `prefixes`: `login.` (every host that starts
+ * with it) is allowed too; `folders`: a folder (`/path`, `~/path`, `file:///path`) makes the files in it count.
+ */
+export function parseSitePattern(text: string, opts: { prefixes?: boolean; folders?: boolean } = {}): Parsed<string> {
+  const t = String(text ?? '').trim();
+  if (!t) return { ok: false, error: 'Enter a site, like example.com.' };
+  if (/^(\/|~\/|~$|file:\/\/)/i.test(t)) {
+    if (!opts.folders) return { ok: false, error: 'Enter a site, like example.com, not a folder.' };
+    const p = t.replace(/^file:\/\//i, '').replace(/(.)\/+$/, '$1');
+    return /^[/~]/.test(p) ? { ok: true, value: p } : { ok: false, error: 'A folder starts with / or ~/.' };
+  }
+  let v = t.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '');
+  if (/[^\x00-\x7f]/.test(v)) {
+    try {
+      const wild = v.startsWith('*.');
+      v = (wild ? '*.' : '') + new URL(`http://${wild ? v.slice(2) : v}`).host;
+    } catch {
+      return { ok: false, error: 'This is not a site name.' };
+    }
+  }
+  const ipv6 = /^\[[0-9a-f:.]+\](:\d{1,5})?$/;
+  const host = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:\d{1,5})?$/;
+  const prefix = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+$/;
+  if (ipv6.test(v) || host.test(v)) return { ok: true, value: v };
+  if (opts.prefixes && prefix.test(v)) return { ok: true, value: v };
+  return { ok: false, error: 'Enter a site like example.com, *.example.com or localhost:3000.' };
 }
 
 /** Free text with surrounding space removed (an empty value is allowed). */

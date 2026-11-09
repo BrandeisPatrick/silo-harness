@@ -23,6 +23,7 @@ import { modsSection } from './settings/mods-section.js';
 import { pagesSection, remoteSection, skillsSection } from './settings/feature-sections.js';
 import { aboutSection, appearanceSection, filesSection, historySection, mcpSection } from './settings/info-sections.js';
 import { hooksSection } from './settings/hooks-section.js';
+import { browserSection } from './settings/browser-section.js';
 
 export interface SettingsPageDeps {
   dialog: HTMLDialogElement;
@@ -336,6 +337,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       generalSection(ctx),
       modelSection(ctx),
       permissionsSection(ctx, document.getElementById('rules-section')!),
+      browserSection(ctx),
       contextSection(ctx),
       modsSection(ctx),
       mcpSection(ctx, document.getElementById('mcp-section')!),
