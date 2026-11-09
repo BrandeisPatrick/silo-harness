@@ -1,10 +1,10 @@
 // What a page in the Browser pane may use: the camera, the microphone, the location, notifications and the rest.
-// Electron grants every permission when a session has no handler, and the pane shares the default session with the
-// app's own window, so both handlers are set on that session here. The app's own window (its pages and the mod
-// frames inside it) keeps every permission, as before. In the pane only full screen and writing to the clipboard
-// are allowed without asking; anything else asks the user with a native dialog on the main window, and the answer
-// holds for that site and permission until the app quits. The agent cannot answer: the dialog is not a tool or a
-// card, and with no window to show it on the request is denied.
+// Electron grants every permission when a session has no handler. The pane has a session of its own
+// (persist:browser, see session.ts), and these handlers are set on that one; the app's own window (its pages and the
+// mod frames inside it) keeps the default session with no handler, and so every permission, as before. In the pane
+// only full screen and writing to the clipboard are allowed without asking; anything else asks the user with a
+// native dialog on the main window, and the answer holds for that site and permission until the app quits. The
+// agent cannot answer: the dialog is not a tool or a card, and with no window to show it on the request is denied.
 
 import { dialog, type BrowserWindow, type Session, type WebContents } from 'electron';
 
@@ -198,7 +198,7 @@ export function createPermissionPolicy(opts: PolicyOptions) {
     },
     /** A synchronous check (navigator.permissions.query, Notification.permission): never asks, says what was decided. */
     check(wc: WebContents | null, permission: string, requestingOrigin: string, details: PermissionDetails): boolean {
-      if (wc ? !opts.isPane(wc) : !/^https?:/i.test(requestingOrigin)) return true;
+      if (!opts.isPane(wc)) return true;
       if (HARMLESS.has(permission)) return true;
       const site = siteKey(details?.requestingUrl || requestingOrigin || wc?.getURL() || '');
       const keys = capabilities(permission, details ?? {}).map((c) => `${site} ${c}`);
@@ -209,20 +209,17 @@ export function createPermissionPolicy(opts: PolicyOptions) {
   };
 }
 
-/** The Browser pane's contents, by id: the window can be closed and made again, with a new pane. */
-const paneIds = new Set<number>();
 let currentWindow: () => BrowserWindow | null = () => null;
 let policy: ReturnType<typeof createPermissionPolicy> | null = null;
 const installed = new WeakSet<Session>();
 
 /**
- * Sets the permission handlers on the pane's session (the default session today, shared with the app's window).
- * Called by each BrowserController; the answers given so far stay until the app quits.
+ * Sets the permission handlers on the browser's session, where everything is the pane. Called once at launch
+ * (session.ts); the answers given so far stay until the app quits.
  */
-export function installPermissionHandlers(ses: Session, pane: WebContents, win: () => BrowserWindow | null): void {
-  paneIds.add(pane.id);
+export function installPermissionHandlers(ses: Session, win: () => BrowserWindow | null): void {
   currentWindow = win;
-  policy ??= createPermissionPolicy({ isPane: (wc) => !!wc && paneIds.has(wc.id), window: () => currentWindow() });
+  policy ??= createPermissionPolicy({ isPane: () => true, window: () => currentWindow() });
   if (installed.has(ses)) return;
   installed.add(ses);
   const p = policy;

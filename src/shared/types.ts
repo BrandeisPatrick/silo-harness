@@ -1,3 +1,4 @@
+import type { Bounds, BrowserConfig, BrowserState } from './browser';
 // Types shared by the main process, preload and renderer.
 
 import type { ModsConfig } from './mods';
@@ -275,6 +276,8 @@ export interface AppConfig {
   settingsTrusted: Record<string, string>;
   /** Dreaming: once a day at a time (off by default), the mode, and what to look for (see src/shared/dreaming.ts) */
   dreaming: DreamingConfig;
+  /** The Browser pane: whether its profile's cookies survive a quit (see src/shared/browser.ts) */
+  browser: BrowserConfig;
 }
 
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */
@@ -485,20 +488,8 @@ export interface CommandResult {
   editTitle?: boolean;
 }
 
-export interface BrowserState {
-  url: string;
-  title: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  loading: boolean;
-}
-
-export interface Bounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+// The Browser pane's state shapes live in browser.ts (tabs, popups, the config section); kept here for the imports.
+export type { Bounds, BrowserState, TabState, PopupState, BrowserConfig } from './browser';
 
 /** One file changed in the session's working directory. */
 export interface ChangeEntry {

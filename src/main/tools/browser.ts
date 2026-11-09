@@ -1,4 +1,4 @@
-import { looksLikeCredentialLabel, MASK, scrubSecrets } from '../browser-safety';
+import { looksLikeCredentialLabel, MASK, scrubSecrets } from '../browser/safety';
 import type { Tool, ToolContext, ToolResult } from './types';
 
 /** The values of the page's filled credential fields; none when the page (or a test's stand-in) cannot say. */
@@ -30,7 +30,59 @@ function guarded(tool: Tool): Tool {
   };
 }
 
+/** One line per tab for browser_tabs list: the active one marked. */
+function tabLines(tabs: { id: string; title: string; url: string; loading: boolean }[], activeId: string): string {
+  return tabs
+    .map((t) => `${t.id === activeId ? '*' : ' '} ${t.id}  ${t.title ? `"${t.title}"  ` : ''}${t.url || 'about:blank'}${t.loading ? '  (loading)' : ''}${t.id === activeId ? '  (active)' : ''}`)
+    .join('\n');
+}
+
 const tools: Tool[] = [
+  {
+    name: 'browser_tabs',
+    description:
+      'The browser pane\'s tabs: list; new (opens url, or a blank tab; background=true leaves the current tab in front); select (tab_id); close (tab_id, default the active tab). Every other browser_* tool acts on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'new', 'select', 'close'] },
+        url: { type: 'string', description: 'For new: the URL or search to open' },
+        tab_id: { type: 'string', description: 'For select and close, e.g. tab-2' },
+        background: { type: 'boolean', description: 'For new: do not switch to the tab' },
+      },
+      required: ['action'],
+    },
+    readOnly: true,
+    run: async (args, ctx) => {
+      const b = ctx.browser;
+      const action = String(args.action ?? 'list');
+      const list = () => {
+        const s = b.state();
+        return `${s.tabs.length} tab${s.tabs.length === 1 ? '' : 's'}:\n${tabLines(s.tabs, s.activeId)}`;
+      };
+      if (action === 'list') return { content: list() };
+      if (action === 'new') {
+        const url = typeof args.url === 'string' ? args.url.trim() : '';
+        if (!url) {
+          const t = b.newTab(undefined, { background: Boolean(args.background) });
+          return { content: `Opened ${t.id}, a blank tab${args.background ? ', in the background' : ''}.` };
+        }
+        return { content: await b.openTab(url, { background: Boolean(args.background) }) };
+      }
+      if (action === 'select') {
+        if (!args.tab_id) throw new Error('select needs tab_id (see list).');
+        b.activate(String(args.tab_id));
+        const s = b.state();
+        return { content: `Now on ${s.activeId}: ${s.url}${s.title ? ` — "${s.title}"` : ''}` };
+      }
+      if (action === 'close') {
+        const id = args.tab_id ? String(args.tab_id) : b.state().activeId;
+        b.closeTab(id);
+        return { content: `Closed ${id}.\n${list()}` };
+      }
+      throw new Error(`Unknown action "${action}": use list, new, select or close.`);
+    },
+  },
   {
     name: 'browser_navigate',
     description: 'Open a URL in the built-in browser pane and wait for it to load. Also accepts "back", "forward", or a path relative to the current page (e.g. "form.html"). A bare search phrase is sent to DuckDuckGo.',

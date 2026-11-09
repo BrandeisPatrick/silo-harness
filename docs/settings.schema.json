@@ -218,6 +218,16 @@
         }
       }
     },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keepCookies": {
+          "type": "boolean",
+          "description": "Keep the Browser pane's cookies and site data when the app quits."
+        }
+      }
+    },
     "providers": {
       "type": "object",
       "description": "Named providers. \"provider\" selects one by its name. The names \"ollama\" and \"portkey\" are taken by the built-in blocks.",

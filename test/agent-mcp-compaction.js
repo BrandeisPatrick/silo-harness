@@ -154,7 +154,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('G: the next model call sees the system prompt, the brief and the kept tail', after.stream === true && after.messages.map((m) => m.role).join(',') === 'system,user,user,assistant,tool' && after.messages[1].content.startsWith('[Context compacted]') && /Build the widget; it is blue\./.test(after.messages[1].content) && after.messages[2].content === 'Build the widget please', after.messages.map((m) => m.role));
   const cs = events.filter((e) => e.type === 'compact_start');
   const ce = events.filter((e) => e.type === 'compact_end');
-  check('G: compact events', cs.length === 1 && cs[0].reason === 'auto' && ce.length === 1 && ce[0].compaction && ce[0].compaction.reason === 'auto' && ce[0].compaction.messages === 2 && ce[0].compaction.kept === 3 && ce[0].compaction.stage === 'summary' && ce[0].compaction.tokensBefore >= 14000 && ce[0].compaction.tokensAfter < ce[0].compaction.tokensBefore * 0.75, ce[0]);
+  // The size after is mostly the floor every request pays, the system prompt and the tool definitions (about 10.5k tokens
+  // with browser_tabs), so the ratio leaves room for that floor to grow with the tools.
+  check('G: compact events', cs.length === 1 && cs[0].reason === 'auto' && ce.length === 1 && ce[0].compaction && ce[0].compaction.reason === 'auto' && ce[0].compaction.messages === 2 && ce[0].compaction.kept === 3 && ce[0].compaction.stage === 'summary' && ce[0].compaction.tokensBefore >= 14000 && ce[0].compaction.tokensAfter < ce[0].compaction.tokensBefore * 0.8, ce[0]);
   check('G: session stores the compaction with folded messages', agent.session.compactions.length === 1 && agent.session.compactions[0].folded.length === 2 && agent.session.messages.length === 5 && toMeta(agent.session).compactions === 1);
   const items = toTranscript(agent.session);
   check('G: transcript: folded turn, divider, then the kept turn and the reply', items.map((i) => i.role).join(',') === 'user,assistant,compaction,user,tool,assistant' && items[2].compaction.summary === state.summary && !items[2].compaction.folded, items.map((i) => i.role));

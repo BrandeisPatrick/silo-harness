@@ -1,12 +1,20 @@
-import { app, BrowserWindow, WebContentsView } from 'electron';
+// The Browser pane's controller: it owns the tabs (at most MAX_TABS; one is active and on screen, the others keep
+// their pages hidden), places the active tab's view where the window's pane is, hands popups to popups.ts, and does
+// what the browser_* tools ask, on the active tab and nothing else (browser_tabs switches). Every change is pushed
+// to the window as a BrowserState.
+
+import { app, type BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Bounds, BrowserState } from '../shared/types';
-import { installPermissionHandlers } from './browser-permissions';
-import { fieldPhrase, frameCheckScript, inSafetyWorld, maskedState, SAFETY_WORLD, typedSecretMessage } from './browser-safety';
+import type { Bounds, BrowserState, PopupState, TabState } from '../../shared/browser';
+import { describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
+import { PopupManager } from './popups';
+import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
+import { BrowserTab, type TabShortcut } from './tab';
 
-const REF_ATTR = 'data-oc-ref';
-const REF_RE = /^ref_\d+$/;
+export const MAX_TABS = 12;
+export const TOO_MANY_TABS = `Close a tab first: the browser keeps at most ${MAX_TABS}`;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const KEY_MAP: Record<string, string> = {
@@ -33,193 +41,237 @@ const KEY_MAP: Record<string, string> = {
 };
 
 /**
- * Runs inside the page (in the safety world, see browser-safety.ts): labels visible interactive elements with ref ids
- * and returns a compact outline. A credential field's value is never in it: its line ends = "•••" or (empty).
+ * What the URL bar (and browser_navigate) makes of what was typed: a URL as it is, a path relative to the current
+ * page, a bare host with https://, anything else a DuckDuckGo search.
  */
-function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
-  return inSafetyWorld(`
-    const REF = ${JSON.stringify(REF_ATTR)};
-    const MODE = ${JSON.stringify(mode)};
-    const MAX = ${maxChars};
-    if (!document.body) return { text: '(empty page)', count: 0, truncated: false, title: document.title, url: location.href };
-    const INTERACTIVE = 'a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="tab"],[role="menuitem"],[role="checkbox"],[role="radio"],[role="textbox"],[role="combobox"],[role="option"],[role="switch"],[contenteditable="true"]';
-    const visible = (el) => {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return false;
-      const s = getComputedStyle(el);
-      return s.visibility !== 'hidden' && s.display !== 'none';
-    };
-    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-    const label = (el, secret) => clean(
-      el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
-      (secret ? '' : ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.value : '') || el.innerText || el.textContent)
-    ).slice(0, 120);
-    document.querySelectorAll('[' + REF + ']').forEach((e) => e.removeAttribute(REF));
-    const lines = []; let n = 0; let size = 0;
-    const push = (line) => { lines.push(line); size += line.length + 1; };
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const tag = node.tagName;
-          if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE' || tag === 'svg') return NodeFilter.FILTER_REJECT;
-          if (!visible(node)) return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    let node;
-    while ((node = walker.nextNode())) {
-      if (size > MAX) break;
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node;
-        if (el.matches(INTERACTIVE)) {
-          const ref = 'ref_' + (++n);
-          el.setAttribute(REF, ref);
-          const tag = el.tagName.toLowerCase();
-          const type = el.getAttribute('type');
-          const secret = S.check(el);
-          let desc = '[' + ref + '] ' + tag + (type ? '[type=' + type + ']' : '') + ' "' + label(el, secret) + '"';
-          if (tag === 'a') { const href = el.getAttribute('href') || ''; if (href && !href.startsWith('javascript:')) desc += ' -> ' + href.slice(0, 100); }
-          if (tag === 'input' && (type === 'checkbox' || type === 'radio')) desc += el.checked ? ' (checked)' : ' (unchecked)';
-          if (secret) desc += el.value ? ${JSON.stringify(maskedState('x'))} : ${JSON.stringify(maskedState(''))};
-          else if (tag === 'select') desc += ' = "' + clean(el.options[el.selectedIndex] && el.options[el.selectedIndex].text) + '"';
-          push(desc);
-        } else if (MODE === 'all' && /^H[1-6]$/.test(el.tagName)) {
-          push(el.tagName.toLowerCase() + ': ' + clean(el.innerText).slice(0, 200));
-        }
-      } else if (MODE === 'all') {
-        const t = clean(node.textContent);
-        if (!t) continue;
-        const p = node.parentElement;
-        if (!p || p.closest(INTERACTIVE) || p.closest('h1,h2,h3,h4,h5,h6')) continue;
-        push(t.slice(0, 300));
-      }
+export function resolveTarget(input: string, current: string): string {
+  let url = input.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  const looksLikePath = /^(\.{1,2}\/|\/)/.test(url) || (/^[\w.-]+(\/[\w.-]*)*\.[a-z0-9]{1,5}(\?.*)?(#.*)?$/i.test(url) && !/\.(com|org|net|io|dev|ai|co|edu|gov|app)(\/|$)/i.test(url));
+  if (current && current !== 'about:blank' && looksLikePath) {
+    try {
+      return new URL(url, current).href;
+    } catch {
+      /* fall through */
     }
-    return { text: lines.join('\\n'), count: n, truncated: size > MAX, title: document.title, url: location.href };
-  `);
+  }
+  return /\s/.test(url) || !url.includes('.') ? `https://duckduckgo.com/?q=${encodeURIComponent(url)}` : `https://${url}`;
 }
 
-function rectScript(ref: string): string {
-  return `(() => {
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center', inline: 'center' });
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, tag: el.tagName.toLowerCase() };
-  })()`;
-}
-
-/** Runs inside the page (in the safety world): a human-readable description of a ref'd element. */
-function describeScript(ref: string): string {
-  return inSafetyWorld(`
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return null;
-    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-    const tag = el.tagName.toLowerCase();
-    const type = (el.getAttribute('type') || '').toLowerCase();
-    const role = el.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'button' || type === 'submit' || type === 'button' ? 'button' : tag === 'select' ? 'combobox' : type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'input' || tag === 'textarea' || el.isContentEditable ? 'textbox' : tag);
-    const secret = S.check(el);
-    const name = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || (secret ? '' : el.innerText || el.textContent || el.value)).slice(0, 80);
-    return { role, name };
-  `);
-}
-
-/**
- * Runs inside the page (in the safety world): the kind of credential the field about to be typed into holds, or
- * null. It looks at the element with `ref` (and the field it leads to: a label's control, or the field inside a
- * wrapper) and, with `active`, also at the focused one (through shadow roots and frames of the same site); a
- * credential field found is remembered as one from now on. crossOrigin: the focus is in a frame from another site,
- * which only that frame can answer for.
- */
-function targetScript(ref: string | undefined, active: boolean): string {
-  return inSafetyWorld(`
-    const el = ${ref ? `document.querySelector('[${REF_ATTR}="${ref}"]')` : 'null'};
-    const FIELDS = 'input, textarea, select';
-    const inner = el && !el.matches(FIELDS) ? el.control || el.querySelector(FIELDS) || (el.shadowRoot && el.shadowRoot.querySelector(FIELDS)) || null : null;
-    const act = ${active ? 'S.deepActive()' : '{ el: null, crossOrigin: false }'};
-    const kind = (el && S.check(el)) || (inner && S.check(inner)) || (act.el && S.check(act.el)) || null;
-    for (const f of [el, inner, act.el]) if (f) S.mark(f);
-    return { kind, crossOrigin: !kind && act.crossOrigin };
-  `);
-}
-
-/**
- * Runs inside the page (in the safety world), changing nothing: the kind of the visible credential field whose label
- * or placeholder contains `field`, or null. browser_type asks before the call is stored, when earlier calls of the
- * same reply have not run yet, so it must not renumber the refs as browser_read_page does.
- */
-function fieldKindScript(field: string): string {
-  return inSafetyWorld(`
-    const q = ${JSON.stringify(field.trim().toLowerCase())};
-    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-    for (const el of document.querySelectorAll('input, textarea, select')) {
-      const kind = S.check(el);
-      if (!kind) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;
-      const label = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt'));
-      if (q && label.includes(q)) return kind;
-    }
-    return null;
-  `);
-}
-
-/** Runs inside the page: briefly outlines the element the agent is about to act on, so the user can follow along. */
-function flashScript(ref: string): string {
-  return `(() => {
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    const box = document.createElement('div');
-    box.setAttribute('data-oc-flash', '1');
-    box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #277de2;border-radius:6px;background:rgba(39,125,226,0.16);box-shadow:0 0 0 4px rgba(39,125,226,0.22);transition:opacity 0.45s ease 0.25s;left:' + (r.left - 3) + 'px;top:' + (r.top - 3) + 'px;width:' + (r.width + 6) + 'px;height:' + (r.height + 6) + 'px;';
-    document.documentElement.appendChild(box);
-    requestAnimationFrame(() => { box.style.opacity = '0'; });
-    setTimeout(() => box.remove(), 800);
-    return true;
-  })()`;
-}
-
-function waitScript(text: string | undefined, selector: string | undefined): string {
-  return `(() => {
-    const text = ${JSON.stringify(text ?? '')}.toLowerCase();
-    const selector = ${JSON.stringify(selector ?? '')};
-    if (selector) { try { const el = document.querySelector(selector); if (el) return { line: (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200) }; } catch (e) { return 'bad-selector'; } }
-    if (text && document.body) {
-      const lines = document.body.innerText.split('\\n');
-      const hit = lines.find((l) => l.toLowerCase().includes(text));
-      if (hit !== undefined) return { line: hit.replace(/\\s+/g, ' ').trim().slice(0, 200) };
-    }
-    return false;
-  })()`;
+export interface BrowserControllerOptions {
+  /** The state changed (pushed to the window as browser:state) */
+  onState(state: BrowserState): void;
+  /** The popups over the pane changed (browser:popups) */
+  onPopups(popups: PopupState[]): void;
+  /** ⌘L inside a page: the window has the focus again and should put it in the URL bar */
+  onFocusUrl?(): void;
+  /** The window's chrome is dark (the popup cards' bars follow) */
+  dark?(): boolean;
 }
 
 export class BrowserController {
-  readonly view: WebContentsView;
+  private readonly tabs: BrowserTab[] = [];
+  private activeTab: BrowserTab;
   private bounds: Bounds = { x: 0, y: 0, width: 0, height: 0 };
   private visible = true;
+  private readonly popups: PopupManager;
+  private stateTimer: NodeJS.Immediate | null = null;
 
   constructor(
     private readonly win: BrowserWindow,
-    private readonly onState: (state: BrowserState) => void,
+    private readonly opts: BrowserControllerOptions,
   ) {
-    this.view = new WebContentsView({
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    this.popups = new PopupManager({
+      win,
+      pane: () => this.rounded(),
+      visible: () => this.visible && !win.isDestroyed(),
+      dark: () => opts.dark?.() ?? false,
+      onChange: () => this.emitPopups(),
     });
-    win.contentView.addChildView(this.view);
-    const wc = this.view.webContents;
-    const events = ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading', 'did-fail-load'] as const;
-    for (const ev of events) wc.on(ev as 'did-navigate', () => this.emitState());
-    wc.setWindowOpenHandler(({ url }) => {
-      void wc.loadURL(url);
-      return { action: 'deny' };
-    });
-    wc.setUserAgent(wc.getUserAgent().replace(/ Electron\/[\d.]+/, '').replace(/ (?:silo|open)-harness\/[\d.]+/i, ''));
-    // Start watching each page's credential fields as soon as it is there (see pagePrelude in browser-safety.ts)
-    wc.on('dom-ready', () => void this.safety('return true;').catch(() => undefined));
-    installPermissionHandlers(wc.session, wc, () => (win.isDestroyed() ? null : win));
-    void wc.loadURL('about:blank');
+    this.activeTab = this.makeTab();
+    void this.activeTab.webContents.loadURL('about:blank');
+    this.layout();
   }
+
+  // ---------- Tabs ----------
+
+  /** A new tab, attached under the popups and hidden until it is activated; nothing loaded yet. */
+  private makeTab(): BrowserTab {
+    if (this.tabs.length >= MAX_TABS) throw new Error(TOO_MANY_TABS);
+    const tab = new BrowserTab({ onChange: () => this.scheduleState(), onShortcut: (t, key) => this.shortcut(t, key) });
+    tab.webContents.setWindowOpenHandler(this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background)));
+    // Tabs sit below the popup cards: at the index of the last tab, never at the end of the window's views.
+    this.win.contentView.addChildView(tab.view, this.tabs.length);
+    this.tabs.push(tab);
+    tab.view.setVisible(false);
+    return tab;
+  }
+
+  /**
+   * Opens a tab, blank or at `url` (resolved as the URL bar would), active unless `background` is set (the agent
+   * reading another site while the user keeps theirs). The 13th throws TOO_MANY_TABS.
+   */
+  newTab(url?: string, opts: { background?: boolean } = {}): TabState {
+    const tab = this.makeTab();
+    const target = url && url.trim() ? resolveTarget(url, '') : 'about:blank';
+    tab.webContents.loadURL(target).catch(() => undefined);
+    if (opts.background) this.layout();
+    else this.activate(tab.id);
+    this.scheduleState();
+    return tab.state();
+  }
+
+  /** browser_tabs new: a tab at `url`, loaded like browser_navigate loads, with the same "Now at …" answer. */
+  async openTab(url: string, opts: { background?: boolean } = {}): Promise<string> {
+    const tab = this.makeTab();
+    if (opts.background) this.layout();
+    else this.activate(tab.id);
+    this.scheduleState();
+    const where = await this.navigateIn(tab, url);
+    return `Opened ${tab.id}${opts.background ? ' in the background' : ''}. ${where}`;
+  }
+
+  /** A link or window.open from a page: a tab (the active one when the cap is reached, as a plain navigation). */
+  private openFromPage(url: string, background: boolean): void {
+    try {
+      this.newTab(url, { background });
+    } catch {
+      this.activeTab.webContents.loadURL(url).catch(() => undefined);
+    }
+  }
+
+  private tabById(id: string): BrowserTab {
+    const tab = this.tabs.find((t) => t.id === id);
+    if (!tab) throw new Error(`No tab ${id}. The tabs are: ${this.tabs.map((t) => t.id).join(', ')}.`);
+    return tab;
+  }
+
+  activate(id: string): void {
+    const tab = this.tabById(id);
+    if (tab !== this.activeTab) {
+      this.activeTab = tab;
+      this.layout();
+    }
+    this.scheduleState();
+  }
+
+  /** Closes a tab (its popups with it). Closing the last tab leaves one blank tab; the next tab, else the one before, becomes active. */
+  closeTab(id: string): void {
+    const tab = this.tabById(id);
+    if (this.tabs.length === 1) this.newTab();
+    const at = this.tabs.indexOf(tab);
+    this.tabs.splice(at, 1);
+    this.popups.closeFor(tab.id);
+    if (this.activeTab === tab) this.activeTab = this.tabs[Math.min(at, this.tabs.length - 1)];
+    try {
+      this.win.contentView.removeChildView(tab.view);
+    } catch {
+      /* the window is going */
+    }
+    tab.dispose();
+    this.layout();
+    this.scheduleState();
+  }
+
+  listTabs(): TabState[] {
+    return this.tabs.map((t) => t.state());
+  }
+
+  /** Every tab loads its page again (after the browsing data was cleared). */
+  reloadAll(): void {
+    for (const t of this.tabs) if (!t.webContents.isDestroyed() && t.webContents.getURL() && t.webContents.getURL() !== 'about:blank') t.webContents.reload();
+  }
+
+  private shortcut(tab: BrowserTab, key: TabShortcut): void {
+    if (key === 'new-tab') {
+      try {
+        this.newTab();
+      } catch {
+        /* at the cap: nothing opens */
+      }
+    } else if (key === 'close-tab') this.closeTab(tab.id);
+    else if (key === 'focus-url') {
+      if (!this.win.isDestroyed()) this.win.webContents.focus();
+      this.opts.onFocusUrl?.();
+    }
+  }
+
+  // ---------- Popups ----------
+
+  popupStates(): PopupState[] {
+    return this.popups.list();
+  }
+
+  closePopup(id: string): void {
+    this.popups.close(id);
+  }
+
+  movePopup(id: string, x: number, y: number): void {
+    this.popups.move(id, x, y);
+  }
+
+  private emitPopups(): void {
+    if (!this.win.isDestroyed()) this.opts.onPopups(this.popups.list());
+  }
+
+  // ---------- State and layout ----------
+
+  private get wc() {
+    return this.activeTab.webContents;
+  }
+
+  state(): BrowserState {
+    const active = this.activeTab.state();
+    return {
+      tabs: this.tabs.map((t) => t.state()),
+      activeId: active.id,
+      url: active.url,
+      title: active.title,
+      canGoBack: active.canGoBack,
+      canGoForward: active.canGoForward,
+      loading: active.loading,
+    };
+  }
+
+  /** One push per burst of changes (a navigation fires several events at once). */
+  private scheduleState(): void {
+    if (this.stateTimer) return;
+    this.stateTimer = setImmediate(() => {
+      this.stateTimer = null;
+      this.emitState();
+    });
+  }
+
+  private emitState(): void {
+    if (this.win.isDestroyed()) return;
+    this.opts.onState(this.state());
+  }
+
+  setBounds(b: Bounds): void {
+    this.bounds = b;
+    this.layout();
+  }
+
+  setVisible(v: boolean): void {
+    this.visible = v;
+    this.layout();
+  }
+
+  private rounded(): Bounds {
+    return { x: Math.round(this.bounds.x), y: Math.round(this.bounds.y), width: Math.round(this.bounds.width), height: Math.round(this.bounds.height) };
+  }
+
+  /** The active tab's view has the pane's bounds and shows while the pane does; the others keep their size, hidden. */
+  private layout(): void {
+    const b = this.rounded();
+    for (const tab of this.tabs) {
+      tab.view.setBounds(b);
+      tab.view.setVisible(tab === this.activeTab && this.visible);
+    }
+    this.popups.layout();
+  }
+
+  // ---------- The tools, on the active tab ----------
 
   /** Runs `body` in the page's safety world, which the page and browser_eval cannot see or change. */
   private safety<T>(body: string): Promise<T> {
@@ -266,99 +318,63 @@ export class BrowserController {
     return this.targetKind(undefined, true);
   }
 
-  private get wc() {
-    return this.view.webContents;
-  }
-
-  state(): BrowserState {
-    const wc = this.wc;
-    return {
-      url: wc.getURL(),
-      title: wc.getTitle(),
-      canGoBack: wc.navigationHistory.canGoBack(),
-      canGoForward: wc.navigationHistory.canGoForward(),
-      loading: wc.isLoading(),
-    };
-  }
-
-  private emitState(): void {
-    if (this.win.isDestroyed()) return;
-    this.onState(this.state());
-  }
-
-  setBounds(b: Bounds): void {
-    this.bounds = b;
-    this.applyBounds();
-  }
-
-  setVisible(v: boolean): void {
-    this.visible = v;
-    this.applyBounds();
-  }
-
-  private applyBounds(): void {
-    const b = this.visible ? this.bounds : { x: 0, y: 0, width: 0, height: 0 };
-    this.view.setBounds({ x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) });
-  }
-
-  private async waitForLoad(timeoutMs = 20_000): Promise<void> {
-    const wc = this.wc;
+  private async waitForLoad(wc = this.wc, timeoutMs = 20_000): Promise<void> {
     await new Promise<void>((resolve) => {
       let settled = false;
       const done = () => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        wc.removeListener('did-finish-load', done);
-        wc.removeListener('did-fail-load', done);
-        wc.removeListener('did-stop-loading', done);
+        if (!wc.isDestroyed()) {
+          wc.removeListener('did-finish-load', done);
+          wc.removeListener('did-fail-load', done);
+          wc.removeListener('did-stop-loading', done);
+        }
         resolve();
       };
       const timer = setTimeout(done, timeoutMs);
       wc.once('did-finish-load', done);
       wc.once('did-fail-load', done);
       wc.once('did-stop-loading', done);
+      wc.once('destroyed', done);
     });
     await sleep(250);
   }
 
-  async navigate(target: string): Promise<string> {
-    const wc = this.wc;
+  /** browser_navigate on the active tab: a URL, "back", "forward", a relative path or a search. */
+  navigate(target: string): Promise<string> {
+    return this.navigateIn(this.activeTab, target);
+  }
+
+  private async navigateIn(tab: BrowserTab, target: string): Promise<string> {
+    const wc = tab.webContents;
     const t = target.trim();
     if (t === 'back' || t === 'forward') {
       const can = t === 'back' ? wc.navigationHistory.canGoBack() : wc.navigationHistory.canGoForward();
       if (!can) return `Cannot go ${t}: no history in that direction.`;
-      const wait = this.waitForLoad();
+      const wait = this.waitForLoad(wc);
       if (t === 'back') wc.navigationHistory.goBack();
       else wc.navigationHistory.goForward();
       await wait;
     } else {
-      let url = t;
-      if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
-        const current = wc.getURL();
-        const looksLikePath = /^(\.{1,2}\/|\/)/.test(url) || /^[\w.-]+(\/[\w.-]*)*\.[a-z0-9]{1,5}(\?.*)?(#.*)?$/i.test(url) && !/\.(com|org|net|io|dev|ai|co|edu|gov|app)(\/|$)/i.test(url);
-        if (current && current !== 'about:blank' && looksLikePath) url = new URL(url, current).href;
-        else url = /\s/.test(url) || !url.includes('.') ? `https://duckduckgo.com/?q=${encodeURIComponent(url)}` : `https://${url}`;
-      }
-      const wait = this.waitForLoad();
+      const url = resolveTarget(t, wc.getURL());
+      const wait = this.waitForLoad(wc);
       wc.loadURL(url).catch(() => undefined);
       await wait;
     }
-    const s = this.state();
+    const s = tab.state();
     return `Now at ${s.url}${s.title ? ` — "${s.title}"` : ''}`;
   }
 
   async reload(): Promise<void> {
-    const wait = this.waitForLoad();
-    this.wc.reload();
+    const wc = this.wc;
+    const wait = this.waitForLoad(wc);
+    wc.reload();
     await wait;
   }
 
   async getText(maxChars = 50_000): Promise<string> {
-    const text = (await this.wc.executeJavaScript(
-      `(() => { const m = document.querySelector('main, article, [role="main"]'); const el = (m && m.innerText && m.innerText.length > 200) ? m : document.body; return el ? el.innerText : ''; })()`,
-      true,
-    )) as string;
+    const text = (await this.wc.executeJavaScript(GET_TEXT_SCRIPT, true)) as string;
     const s = this.state();
     const body = text.length > maxChars ? text.slice(0, maxChars) + `\n…[truncated ${text.length - maxChars} characters]` : text;
     return `URL: ${s.url}\nTitle: ${s.title}\n\n${body || '(no visible text)'}`;
@@ -445,7 +461,7 @@ export class BrowserController {
   /** Lets an action land: a short pause, the rest of any navigation it started, then "Now at …" when the page changed. */
   private async settle(before: BrowserState): Promise<string> {
     await sleep(300);
-    if (this.wc.isLoading()) await this.waitForLoad(5000);
+    if (this.wc.isLoading()) await this.waitForLoad(this.wc, 5000);
     const after = this.state();
     if (after.url !== before.url || after.title !== before.title) return ` Now at: ${after.title ? `${after.title} — ` : ''}${after.url}`;
     return '';
@@ -497,12 +513,7 @@ export class BrowserController {
       this.wc.focus();
       this.clickAt(pt.x, pt.y);
       await sleep(120);
-      if (clear) {
-        await this.wc.executeJavaScript(
-          `(() => { const el = document.activeElement; if (!el) return; if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.select(); else if (el.isContentEditable) { const s = getSelection(); s.selectAllChildren(el); } })()`,
-          true,
-        );
-      }
+      if (clear) await this.wc.executeJavaScript(SELECT_ALL_SCRIPT, true);
     }
     // A credential field's text is never echoed: the result says how much was typed, not what.
     const secret = await this.targetKind(ref, true);
@@ -515,7 +526,6 @@ export class BrowserController {
     if (secret) return { content: typedSecretMessage(secret, [...text].length, what.name, ref, submit) + suffix, secret: true };
     return { content: `Typed ${JSON.stringify(text)} into ${what.role}${what.name ? ` '${what.name}'` : ''}${ref ? ` (${ref})` : ''}${submit ? ' and pressed Enter' : ''}.${suffix}`, secret: false };
   }
-
 
   async pressKey(combo: string): Promise<string> {
     const parts = combo.split('+').map((p) => p.trim()).filter(Boolean);
@@ -535,10 +545,7 @@ export class BrowserController {
   async scroll(direction: 'up' | 'down' | 'left' | 'right', amount = 600): Promise<string> {
     const dx = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
     const dy = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
-    const pos = (await this.wc.executeJavaScript(
-      `(() => { window.scrollBy({ left: ${dx}, top: ${dy}, behavior: 'instant' }); return { x: scrollX, y: scrollY, h: document.documentElement.scrollHeight, vh: innerHeight }; })()`,
-      true,
-    )) as { x: number; y: number; h: number; vh: number };
+    const pos = (await this.wc.executeJavaScript(scrollScript(dx, dy), true)) as { x: number; y: number; h: number; vh: number };
     await sleep(150);
     return `Scrolled ${direction}. Now at y=${Math.round(pos.y)} of ${pos.h} (viewport ${pos.vh}).`;
   }

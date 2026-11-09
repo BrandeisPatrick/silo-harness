@@ -78,7 +78,7 @@ const SCALARS: Record<string, Check> = {
 };
 
 /** Sections a settings file may set field by field. */
-const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming', Record<string, Check>> = {
+const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser', Record<string, Check>> = {
   ollama: {
     baseURL: describe(str, "The Ollama server's OpenAI-compatible endpoint, e.g. http://localhost:11434/v1."),
     model: describe(str, 'The Ollama model tag, e.g. qwen3:8b.'),
@@ -102,6 +102,9 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming', Record<string, Check>>
     skills: describe(bool, 'Look for skills.'),
     mods: describe(bool, 'Look for mods.'),
     memory: describe(bool, 'Look for memory lines.'),
+  },
+  browser: {
+    keepCookies: describe(bool, "Keep the Browser pane's cookies and site data when the app quits."),
   },
 };
 
@@ -330,7 +333,7 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       }
       value = block;
     }
-    if (key === 'ollama' || key === 'portkey' || key === 'dreaming') {
+    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);
         continue;

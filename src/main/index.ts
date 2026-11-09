@@ -9,7 +9,7 @@ import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
 import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
 import { loadConfig, saveConfig } from './config';
-import { BrowserController } from './browser';
+import { BrowserController, browserSession, setupBrowser } from './browser';
 import { TerminalManager } from './terminal';
 import { createApp, type AppHost } from './app';
 import { registerCoreIpc } from './ipc';
@@ -49,11 +49,15 @@ function applyBranding(): void {
   });
 }
 
+/** Whether the window's chrome is dark: the theme setting, or the system's when it follows that. */
+function darkChrome(): boolean {
+  const theme = host?.config().theme;
+  return theme === 'dark' || (theme !== 'light' && nativeTheme.shouldUseDarkColors);
+}
+
 /** Window chrome colour before the renderer paints; matches the renderer's --bg tokens so launch does not flash. */
 function windowBackground(): string {
-  const theme = host?.config().theme;
-  const dark = theme === 'dark' || (theme !== 'light' && nativeTheme.shouldUseDarkColors);
-  return dark ? '#262624' : '#faf9f5';
+  return darkChrome() ? '#262624' : '#faf9f5';
 }
 
 /**
@@ -99,8 +103,13 @@ function createWindow(): void {
   const w = win;
   const a = host!;
   a.setWindow(w);
-  browser = new BrowserController(w, (state) => {
-    if (!w.isDestroyed()) w.webContents.send('browser:state', state);
+  browser = new BrowserController(w, {
+    onState: (state) => {
+      if (!w.isDestroyed()) w.webContents.send('browser:state', state);
+    },
+    onPopups: (popups) => a.push('browser:popups', popups),
+    onFocusUrl: () => a.push('browser:focus-url', null),
+    dark: darkChrome,
   });
   const servers = a.mcp;
   const term = a.terminal!;
@@ -235,12 +244,15 @@ app.whenReady().then(() => {
   applyBranding();
   host = buildApp();
   const a = host;
-  protocol.handle(ARTIFACT_SCHEME, async (req) => {
+  const serveArtifact = async (req: Request): Promise<Response> => {
     const r = a.artifacts?.resolve(req.url);
     if (!r) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     if (r.kind === 'page') return new Response(r.html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     return net.fetch(pathToFileURL(r.path).href);
-  });
+  };
+  protocol.handle(ARTIFACT_SCHEME, serveArtifact);
+  // The Browser pane has a session of its own (persist:browser): artifacts must be served there too.
+  browserSession().protocol.handle(ARTIFACT_SCHEME, serveArtifact);
   buildMenu();
   registerCoreIpc(a, { browser: () => browser });
   // The features, in this order. Each keeps its code in its own file and never needs to edit this one.
@@ -256,6 +268,7 @@ app.whenReady().then(() => {
   setupPower(a);
   setupDreaming(a);
   setupProviders(a);
+  setupBrowser(a, () => browser);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
