@@ -4,7 +4,7 @@ import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
 import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
-import { contextSize, ollamaComplete, type ToolCall, type ToolSpec, type Usage } from './ollama';
+import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
 import { contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
 import {
