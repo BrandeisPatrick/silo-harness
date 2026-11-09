@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Delete all sessions.** Settings → History has the row: after a confirmation that says how many sessions there are, every one of them goes the way a deleted session goes, into the trash for as long as Keep deleted sessions for says (and away at once when it is Off). Running sessions are stopped first, and the window opens on a fresh session.
+
 ## 0.9.0
 
 Scheduled tasks and Dreaming have pages of their own, laid out like Claude Code's; looks (background, chat bar, conversation, theme) are previewed and used without switches; and the rail and the mods' tabs open and close like the browser.

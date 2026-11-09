@@ -51,7 +51,43 @@ export function historySection(ctx: Ctx): Section {
     }
   }, { icon: 'trash', danger: true });
   const emptyRow = row({ id: 'history-empty', title: 'Empty trash', desc: 'Removes every deleted session for good.', keywords: 'purge delete' }, emptyBtn);
-  el.append(group(null, stored, keep), trashGroup);
+
+  // Every session goes the way one deleted session goes (the main process does it: history.deleteAll), after a
+  // confirmation that says how many there are and where they go. The window then shows a fresh session.
+  const deleteAllBtn = button('Delete all sessions', async (b) => {
+    const n = stats?.sessions ?? 0;
+    const days = Number(ctx.config().historyTrashDays);
+    const kept = !Number.isFinite(days) || days > 0;
+    const one = n === 1;
+    const where = kept
+      ? `${one ? 'goes' : 'go'} to the trash, where ${one ? 'it is' : 'they are'} kept for ${Number.isFinite(days) ? days : 30} days and can be restored.`
+      : `${one ? 'is' : 'are'} removed for good at once. This cannot be undone.`;
+    const ok = await ctx.confirm({
+      title: 'Delete all sessions?',
+      description: `${n} session${one ? '' : 's'} with ${one ? 'its' : 'their'} history ${where} A running session is stopped first, and the window opens on a fresh session.`,
+      confirmLabel: 'Delete all sessions',
+      danger: true,
+    });
+    if (!ok) return;
+    b.disabled = true;
+    try {
+      await ctx.call('history.deleteAll');
+      trash = await ctx.call('history.trash');
+      await refreshStats();
+      render();
+      deleteRow.problem(null);
+    } catch (err) {
+      deleteRow.problem(`Couldn't delete them: ${ctx.cleanError(err)}`);
+    } finally {
+      b.disabled = !stats?.sessions;
+    }
+  }, { icon: 'trash', danger: true });
+  deleteAllBtn.disabled = true;
+  const deleteRow = row(
+    { id: 'history-delete-all', title: 'Delete all sessions', desc: 'Every session goes to the trash for the period above (or away at once when it is Off), a running session is stopped first, and the window opens on a fresh session.', keywords: 'remove everything clear wipe reset erase all sessions conversations' },
+    deleteAllBtn,
+  );
+  el.append(group(null, stored, keep, deleteRow), trashGroup);
 
   let stats: HistoryStats | null = null;
   let trash: TrashEntry[] = [];
@@ -59,6 +95,7 @@ export function historySection(ctx: Ctx): Section {
   async function refreshStats(): Promise<void> {
     stats = await ctx.call('history.stats');
     stored.setDesc(`${stats.sessions} session${stats.sessions === 1 ? '' : 's'} · ${formatBytes(stats.bytes)} on disk${stats.trash ? ` · ${stats.trash} in the trash (${formatBytes(stats.trashBytes)})` : ''}`);
+    deleteAllBtn.disabled = !stats.sessions;
   }
 
   function render(): void {

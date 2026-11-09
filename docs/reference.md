@@ -111,6 +111,7 @@ Panels in the right-hand rail, tabs beside the Browser, a strip above the compos
 
 - Every message, tool call, approval, plan and error is appended to `history/<session>.jsonl` in the data folder as it happens, and never rewritten: a rewind or a compaction adds a record. After a crash or a force-quit the session is restored from it, with a notice.
 - Deleting a session moves it to a trash for 30 days (Settings → History: restore, delete now, change the period).
+- Settings → History → **Delete all sessions** deletes every session at once, each the way a single delete does: into the trash for the period set there, or away at once when it is Off. Running sessions are stopped first, and the window opens on a fresh session.
 - Search in the sidebar looks through titles, messages, tool calls and what compactions folded away.
 - A session's menu exports it as Markdown; `history.export` also writes JSON or the raw log.
 
