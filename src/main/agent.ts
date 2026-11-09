@@ -4,7 +4,8 @@ import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
 import { isOllama, makeClient, modelCapabilities, ollamaOf, plainError, resolveProvider, scrubSecrets } from './providers';
-import { contextSize, ollamaChat, ollamaComplete, type Usage } from './ollama';
+import { contextSize, ollamaChat, ollamaComplete, type ToolCall, type ToolSpec, type Usage } from './ollama';
+import { contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
 import {
   PRUNE_HARD,
@@ -39,7 +40,7 @@ import { truncate } from './tools/types';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
-import { clip, latestPlan, toMeta, turnSnapshot, type Session, type SessionStore, type Turn } from './sessions';
+import { clip, latestPlan, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
 import { generateTitle, titlePrompt } from './titles';
 import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from './guard';
 import { TerminalManager } from './terminal';
@@ -53,9 +54,8 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
-type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
+// The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
+export { contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW } from './context-window';
 
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
@@ -74,29 +74,9 @@ const MIN_COMPACT_MESSAGES = 2;
 
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'bash', 'terminal_run']);
 
-/** Below this window the optional tool families are left out unless the user asks for all tools. */
-export const FULL_TOOLS_WINDOW = 32_000;
-
-/**
- * Whether only the essential tools are offered. Every tool definition is sent with every request: with a 16k window
- * the optional families (scheduled tasks, sub-sessions, mod authoring) would take a fifth of it before a word is said.
- */
-export function essentialToolsOnly(cfg: AppConfig): boolean {
-  if (cfg.toolSet === 'essential') return true;
-  if (cfg.toolSet === 'all') return false;
-  return contextLimit(cfg) < FULL_TOOLS_WINDOW;
-}
-
 /** Tells the model what is missing, so it can say so instead of improvising. */
 const ESSENTIAL_NOTE =
   'To save context for this model\'s small window, the tools for scheduled tasks, sub-sessions and writing mods are turned off. If the user asks for one of those, say that all tools can be turned on in Settings → Context ("Tools offered to the model").';
-
-/** The context window the configured model has, in tokens. */
-export function contextLimit(cfg: AppConfig): number {
-  const r = resolveProvider(cfg);
-  if (r.type === 'ollama') return contextSize(ollamaOf(cfg).numCtx);
-  return Math.max(4096, Number(r.contextWindow) || 128000);
-}
 
 /** The system prompt in the pieces the context breakdown counts separately; joined in this order they are the prompt. */
 interface PromptParts {

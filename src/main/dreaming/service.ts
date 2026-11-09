@@ -11,7 +11,7 @@ import type { HistoryService } from '../services';
 import type { Dream, DreamingConfig, DreamingState, DreamMode, DreamProject, DreamProposal, DreamTrigger, ProposalKind } from '../../shared/dreaming';
 import { DEFAULT_DREAMING } from './names';
 import type { AgentEvent, AppConfig, PlanInfo } from '../../shared/types';
-import { contextLimit } from '../agent';
+import { contextLimit } from '../context-window';
 import { normalizeDreaming } from '../config';
 import { instructionsFile, applyProposal, checkMemory, checkMod, checkSkill, DreamError, revertProposal, type Roots } from './apply';
 import { buildDigest, DIGEST_SHARE, listMods, sessionTurns, when, type DigestSession, type ExistingThings } from './digest';
