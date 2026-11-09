@@ -35,7 +35,7 @@ import type {
   TranscriptItem,
 } from '../shared/types';
 import { brandMark, hydrateIcons, icon, isIconName, type IconName } from './icons.js';
-import { basename, copyWithFeedback, escapeHtml, formatCount, isTextField, writeClipboard } from './dom.js';
+import { basename, byId, copyWithFeedback, escapeHtml, formatCount, isTextField, writeClipboard } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { lineDiff, numberRows, parseEditPreview, renderDiff, setDiffBaseDir, statHtml } from './diff.js';
 import { highlight } from './highlight.js';
@@ -86,6 +86,7 @@ import { unframe } from './origin.js';
 import { activityWords } from './tool-activity.js';
 import { tilde } from './home.js';
 import { activeProvider, allProviders, usesOllama } from './provider-view.js';
+import { createShortcutsSheet } from './shortcuts.js';
 
 declare global {
   interface Window {
@@ -147,11 +148,7 @@ declare global {
 }
 
 const oc = window.oc;
-const $ = <T extends HTMLElement>(id: string): T => {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing element #${id}`);
-  return el as T;
-};
+const $ = byId;
 
 hydrateIcons();
 
@@ -3995,55 +3992,16 @@ const rulesPanel = createRulesPanel({
 
 // ---------- Shortcuts sheet ----------
 
-/** Label, keys, and an alternative (shown as "⌘↑ / ⌘↓") */
-const SHORTCUTS: [string, string[], string[]?][] = [
-  ['New session', ['⌘', 'N']],
-  ['Toggle sidebar', ['⌘', 'B']],
-  ['Toggle browser', ['⌘', '⇧', 'B']],
-  ['Toggle diff', ['⌘', '⇧', 'D']],
-  ['Toggle terminal', ['⌘', '⇧', 'T']],
-  ['Toggle the mods rail', ['⌘', '⇧', 'E']],
-  ['New terminal tab', ['⌘', 'T']],
-  ['Settings', ['⌘', ',']],
-  ['Cycle permission mode', ['⇧', 'Tab']],
-  ['Stop the run', ['Esc']],
-  ['Allow once, or submit the answers', ['⌘', '↵']],
-  ['Deny, or skip the questions (while a card waits)', ['Esc']],
-  ['Allow for the session or in the project', ['A'], ['P']],
-  ['Rewind to your last message', ['Esc', 'Esc']],
-  ['Focus the composer', ['⌘', 'K']],
-  ['Clear the terminal (in a terminal)', ['⌘', 'K']],
-  ['Search sessions', ['⌘', 'F']],
-  ['Back a page (Scheduled tasks, Dreaming)', ['⌘', '[']],
-  ['Rename session', ['F2']],
-  ['New line in the composer', ['⇧', '↵']],
-  ['Previous or next message you sent', ['⌘', '↑'], ['⌘', '↓']],
-  ['Copy the last reply', ['⌘', '⇧', 'C']],
-  ['Mention a file', ['@']],
-  ["Add to the project's instructions", ['#']],
-  ['Keyboard shortcuts', ['⌘', '/']],
-];
-const kbds = (keys: string[]) => keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('');
-$('shortcut-list').innerHTML = SHORTCUTS.map(
-  ([label, keys, alt]) => `<dt>${escapeHtml(label)}</dt><dd>${kbds(keys)}${alt ? `<span class="kbd-sep">/</span>${kbds(alt)}` : ''}</dd>`,
-).join('');
+const { openShortcuts } = createShortcutsSheet({
+  dialog: shortcutsDialog,
+  dialogOpen,
+  hideBrowser: () => oc.browser.setVisible(false),
+  afterClose: () => {
+    syncBrowserView();
+    inputEl.focus();
+  },
+});
 
-function openShortcuts(): void {
-  if (dialogOpen()) return;
-  closeMenu();
-  oc.browser.setVisible(false);
-  shortcutsDialog.showModal();
-  shortcutsDialog.focus({ preventScroll: true });
-}
-$('shortcuts-btn').onclick = openShortcuts;
-$('shortcuts-close').onclick = () => shortcutsDialog.close();
-shortcutsDialog.addEventListener('click', (e) => {
-  if (e.target === shortcutsDialog) shortcutsDialog.close();
-});
-shortcutsDialog.addEventListener('close', () => {
-  syncBrowserView();
-  inputEl.focus();
-});
 
 // ---------- Debug hook (renders into the UI only; nothing reaches the main process) ----------
 

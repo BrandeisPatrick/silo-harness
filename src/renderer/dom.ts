@@ -2,6 +2,13 @@
 
 import { icon } from './icons.js';
 
+/** The element with this id; the window's markup is static, so a missing one is a bug worth throwing for. */
+export function byId<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element #${id}`);
+  return el as T;
+}
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
