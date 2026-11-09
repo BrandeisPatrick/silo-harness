@@ -367,11 +367,9 @@ export function modsSection(ctx: Ctx): Section {
     head.classList.add('sp-tab-head');
     head.dataset.subtab = id;
   }
-  for (const lt of lookTabs.values()) lt.el.querySelector('.sp-look-grid-head')!.after(lookStatusEl.cloneNode() as HTMLElement);
-  // One status line, moved to the tab on screen
+  // One status line, moved under the grid's head of the look tab on screen
   const placeLookStatus = () => {
     const lt = lookTabs.get(tab);
-    lt?.el.querySelectorAll('.sp-look-status').forEach((n) => n !== lookStatusEl && n.remove());
     if (lt) lt.el.querySelector('.sp-look-grid-head')!.after(lookStatusEl);
   };
 

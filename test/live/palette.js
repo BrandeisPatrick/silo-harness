@@ -105,7 +105,7 @@ async function setTheme(app, scheme) {
       // Settings: a switch that is on is blue; no terracotta on any of the pages
       await app.click('#settings-btn');
       await app.waitFor(`document.querySelector('#settings').open`, 10_000, 'Settings');
-      for (const s of ['general', 'appearance', 'mods', 'dreaming', 'permissions', 'model']) {
+      for (const s of ['general', 'appearance', 'mods', 'skills', 'permissions', 'model']) {
         await app.click(`#sp-nav-${s}`);
         await sleep(500);
         const p = await app.evaluate(READ);
