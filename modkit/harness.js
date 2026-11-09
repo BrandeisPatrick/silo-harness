@@ -367,6 +367,7 @@
       openExternal: function (url) { return call('ui.openExternal', { url: String(url) }); },
       markdown: function (text) { return call('ui.markdown', { text: String(text == null ? '' : text) }); },
       openSettings: function (section) { return call('ui.openSettings', section === undefined ? {} : { section: String(section) }); },
+      openPage: function (page, opts) { return call('ui.openPage', Object.assign({ page: String(page) }, opts && opts.form ? { form: String(opts.form) } : {})); },
     },
 
     storage: storage,

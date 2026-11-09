@@ -1,4 +1,5 @@
-// The sidebar: navigation rows (New session, Search, Scheduled, Customize, Dreaming), the sessions as a tree in day groups,
+// The sidebar: navigation rows (New session, Search, Scheduled, Customize, Dreaming; Scheduled and Dreaming open their
+// pages in the main column), the sessions as a tree in day groups,
 // search across titles and conversations, and the footer (model chip, shortcuts, settings). The logic without the
 // DOM is in sidebar-model.ts; renderer.ts keeps the session list, the switch and the actions, and hands them in.
 
@@ -11,7 +12,7 @@ import { closeMenu, menuAnchoredTo, openMenu, type MenuSection } from './popover
 import { bus } from './bus.js';
 import { activeProvider } from './provider-view.js';
 import { onPush, rpc } from './rpc.js';
-import { ancestorsOf, groupOf, parentOf, shapeResults, shortDate, visibleRows, type Indicator, type Row, type SearchResult } from './sidebar-model.js';
+import { ancestorsOf, groupOf, leadFor, parentOf, shapeResults, shortDate, visibleRows, type Indicator, type Row, type SearchResult } from './sidebar-model.js';
 
 export interface SidebarDeps {
   /** <aside id="sidebar"> */
@@ -27,6 +28,10 @@ export interface SidebarDeps {
   /** Re-reads the session list */
   refresh(): Promise<unknown>;
   openSettings(section?: string): void;
+  /** Opens the Scheduled tasks or the Dreaming page in the main column */
+  openPage(page: 'scheduled' | 'dreaming'): void;
+  /** The page in the main column, when one is open (its row shows selected) */
+  page(): 'scheduled' | 'dreaming' | null;
   confirm(opts: ConfirmOptions): Promise<boolean>;
   showError(anchor: HTMLElement, message: string): void;
   cleanError(err: unknown): string;
@@ -127,11 +132,17 @@ function indicatorHtml(ind: Indicator): string {
       return `<span class="trail-meta kind" data-tip="Forked session">${icon('git-branch', 14)}</span>`;
     case 'spawn':
       return `<span class="trail-meta kind" data-tip="Sub-session">${icon('sub-session', 14)}</span>`;
-    case 'schedule':
-      return `<span class="trail-meta kind" data-tip="Scheduled run">${icon('clock', 14)}</span>`;
     case 'dream':
-      return `<span class="trail-meta kind dream" data-tip="${ind.waiting ? 'Dream · waiting for you' : 'Dream'}">${icon('moon', 14)}${ind.waiting ? '<span class="status-dot attention" aria-label="Waiting for you"></span>' : ''}</span>`;
+      return ind.waiting ? '<span class="trail-meta dream" data-tip="Suggestions wait for you"><span class="status-dot attention" aria-label="Waiting for you"></span></span>' : '';
   }
+}
+
+/** The mark in front of a title: a scheduled run's lightning, a dream's moon */
+function leadHtml(m: SessionMeta): string {
+  const lead = leadFor(m);
+  if (lead === 'schedule') return `<span class="lead schedule" data-tip="Scheduled run" aria-label="Scheduled run:">${icon('zap', 14)}</span>`;
+  if (lead === 'dream') return `<span class="lead dream" data-tip="Dream" aria-label="Dream:">${icon('moon', 14)}</span>`;
+  return '';
 }
 
 export function createSidebar(d: SidebarDeps): SidebarView {
@@ -201,6 +212,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
   const focusables = () => [...list.querySelectorAll<HTMLElement>('.session-group, .session-item, .search-result')];
 
   function render(): void {
+    syncNav();
     const focusKey = rowKey(document.activeElement);
     list.innerHTML = '';
     if (searchOpen && query()) renderResults();
@@ -274,6 +286,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
       : '';
     el.innerHTML =
       lines +
+      leadHtml(m) +
       `<span class="label">${escapeHtml(m.title)}</span>${toggle}` +
       (r.merged ? '<span class="merged-tag" data-tip="Merged into its parent">merged</span>' : '') +
       `<span class="trail">${indicatorHtml(r.indicator)}<button type="button" class="icon-btn sm row-more" tabindex="-1" aria-label="Session actions" aria-haspopup="menu" data-tip="More">${icon('more')}</button></span>`;
@@ -704,9 +717,18 @@ export function createSidebar(d: SidebarDeps): SidebarView {
 
   // ---------- Navigation rows and footer ----------
 
-  scheduledRow.addEventListener('click', () => d.openSettings('scheduled'));
+  scheduledRow.addEventListener('click', () => d.openPage('scheduled'));
   customizeRow.addEventListener('click', () => d.openSettings('mods'));
-  dreamingRow.addEventListener('click', () => d.openSettings('dreaming'));
+  dreamingRow.addEventListener('click', () => d.openPage('dreaming'));
+  /** The row of the page in the main column shows selected, like a session on screen */
+  function syncNav(): void {
+    const page = d.page();
+    for (const [row, id] of [[scheduledRow, 'scheduled'], [dreamingRow, 'dreaming']] as const) {
+      row.classList.toggle('active', page === id);
+      if (page === id) row.setAttribute('aria-current', 'page');
+      else row.removeAttribute('aria-current');
+    }
+  }
   /** A quiet dot on the row while a dream's proposals wait for the user */
   const syncDreaming = (s: { waiting?: number } | null | undefined) => {
     const n = Number(s?.waiting) || 0;
@@ -782,6 +804,7 @@ export function createSidebar(d: SidebarDeps): SidebarView {
             parent: el.dataset.parent ?? null,
             collapsed: el.classList.contains('collapsed'),
             merged: el.classList.contains('merged'),
+            lead: el.querySelector('.lead.schedule') ? 'schedule' : el.querySelector('.lead.dream') ? 'dream' : null,
             indicator: el.querySelector('.trail-meta .spinner') ? 'running' : el.querySelector('.status-dot.attention') ? 'attention' : el.querySelector('.status-dot.unread') ? 'unread' : el.querySelector('.trail-meta.family') ? 'family' : el.querySelector('.trail-meta.kind') ? 'kind' : null,
             count: el.querySelector('.family-count')?.textContent ?? null,
           };

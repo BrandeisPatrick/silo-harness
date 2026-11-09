@@ -61,6 +61,8 @@ export interface ModsHostDeps {
   /** Puts text into the composer at the caret */
   insertText(text: string): void;
   openSettings(section?: string, opts?: { tab?: string }): void;
+  /** Opens the Scheduled tasks or the Dreaming page; `form: 'new'` opens the New task form on it */
+  openPage(page: 'scheduled' | 'dreaming', opts?: { form?: 'new' }): void;
   switchSession(id: string): Promise<void>;
   newSession(): Promise<void>;
   openLightbox(src: string, name?: string, caption?: string): void;
@@ -602,8 +604,21 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       }
       case 'ui.markdown':
         return { html: renderMarkdown(str('text', 500_000)) };
+      case 'ui.openPage': {
+        const page = str('page', 40);
+        if (page !== 'scheduled' && page !== 'dreaming') throw bad(`page: no page "${page}" (scheduled or dreaming)`);
+        if (p.form !== undefined && p.form !== 'new') throw bad('form: only "new" (the New task form)');
+        if (p.form === 'new' && page !== 'scheduled') throw bad('form: the New task form is on the scheduled page');
+        deps.openPage(page, p.form === 'new' ? { form: 'new' } : undefined);
+        return null;
+      }
       case 'ui.openSettings': {
         const section = p.section === undefined ? 'general' : str('section', 100);
+        // Scheduled and Dreaming were sections of Settings; a mod that asks for them gets their pages
+        if (section === 'scheduled' || section === 'dreaming') {
+          deps.openPage(section);
+          return null;
+        }
         if (!isSectionId(section)) throw bad(`section: no Settings section "${section}"`);
         deps.openSettings(section);
         return null;

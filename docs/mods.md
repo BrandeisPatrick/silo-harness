@@ -265,7 +265,8 @@ Rail and composer views are sized to their content automatically. Use the app's 
 | `harness.ui.copy(text)` | copy to the clipboard |
 | `harness.ui.openExternal(url)` | open an http(s) link in the default browser |
 | `harness.ui.markdown(text)` | `{ html }` rendered the way the chat renders Markdown |
-| `harness.ui.openSettings(section?)` | open Settings at a section (`general` when left out; `model`, `permissions`, `context`, `mods`, …) |
+| `harness.ui.openSettings(section?)` | open Settings at a section (`general` when left out; `model`, `permissions`, `context`, `mods`, …); `scheduled` and `dreaming` open their pages |
+| `harness.ui.openPage(page, { form }?)` | open the Scheduled tasks (`scheduled`) or the Dreaming (`dreaming`) page in the main column; `{ form: 'new' }` with `scheduled` opens the New task form there |
 | `harness.storage.get(key, fallback)`, `.set(key, value)`, `.remove(key)`, `.keys()` | this mod's own JSON storage, kept across sessions; `get` resolves with the value (or `fallback` when nothing is stored), `keys` with an array; `harness.storage.session` is the same per session. A value may be up to 256 KB, a mod's storage 5 MB |
 | `harness.settings.get()` | the values of the mod's settings; event `settings.changed` |
 

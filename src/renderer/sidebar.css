@@ -40,6 +40,9 @@
 .nav-row:hover { background: var(--side-hover); color: var(--text-100); }
 .nav-row:active { background: var(--side-active); }
 .nav-row:focus-visible { outline-offset: -2px; }
+/* The row of the page open in the main column (Scheduled, Dreaming): filled like the session on screen */
+.nav-row.active { background: var(--side-active); color: var(--text-100); }
+.nav-row.active .nav-icon { color: var(--text-100); }
 .nav-icon { display: inline-flex; flex: none; color: var(--text-200); }
 .nav-row:hover .nav-icon { color: var(--text-100); }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -92,6 +95,9 @@
 .session-item.active { background: var(--side-active); color: var(--text-100); }
 .session-item:focus-visible { outline-offset: -2px; }
 .session-item .label { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* In front of the title: a scheduled run's lightning, a dream's moon */
+.session-item .lead { display: inline-flex; flex: none; margin-right: 6px; color: var(--text-400); }
+.session-item.active .lead, .session-item:hover .lead { color: var(--text-200); }
 
 /* A parent: a small chevron right after its title (collapses its children) */
 .tree-toggle {

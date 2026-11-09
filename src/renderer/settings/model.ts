@@ -11,7 +11,7 @@ import type { IconName } from '../icons.js';
 
 // ---------- Sections ----------
 
-export type SectionId = 'general' | 'model' | 'permissions' | 'context' | 'mods' | 'mcp' | 'skills' | 'scheduled' | 'dreaming' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about';
+export type SectionId = 'general' | 'model' | 'permissions' | 'context' | 'mods' | 'mcp' | 'skills' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about' | 'pages';
 
 export interface SectionInfo {
   id: SectionId;
@@ -19,6 +19,8 @@ export interface SectionInfo {
   icon: IconName;
   /** Navigation group; a hairline separates groups */
   group: number;
+  /** Only a search shows it: no entry in the navigation, and openSettings cannot open it */
+  searchOnly?: boolean;
 }
 
 export const SECTIONS: SectionInfo[] = [
@@ -29,18 +31,21 @@ export const SECTIONS: SectionInfo[] = [
   { id: 'mods', title: 'Mods', icon: 'puzzle', group: 1 },
   { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 1 },
   { id: 'skills', title: 'Skills', icon: 'sparkles', group: 1 },
-  { id: 'scheduled', title: 'Scheduled', icon: 'clock', group: 1 },
-  { id: 'dreaming', title: 'Dreaming', icon: 'moon', group: 1 },
   { id: 'remote', title: 'Remote control', icon: 'smartphone', group: 1 },
   { id: 'history', title: 'History', icon: 'archive', group: 2 },
   { id: 'appearance', title: 'Appearance', icon: 'palette', group: 2 },
   { id: 'files', title: 'Configuration files', icon: 'file-text', group: 2 },
   { id: 'hooks', title: 'Hooks', icon: 'zap', group: 2 },
   { id: 'about', title: 'About', icon: 'info', group: 3 },
+  // Scheduled tasks and Dreaming have pages of their own; a search for them finds rows that open those pages
+  { id: 'pages', title: 'Pages', icon: 'list', group: 4, searchOnly: true },
 ];
 
+/** The sections that were in Settings and are pages now: openSettings('scheduled') opens the page */
+export const PAGE_SECTIONS = ['scheduled', 'dreaming'] as const;
+
 export function isSectionId(s: unknown): s is SectionId {
-  return typeof s === 'string' && SECTIONS.some((x) => x.id === s);
+  return typeof s === 'string' && SECTIONS.some((x) => x.id === s && !x.searchOnly);
 }
 
 /** Older callers name an element of the old form; these ids stand for a whole section. */
@@ -546,11 +551,3 @@ export function relativeDays(ms: number, now = Date.now()): string {
   return diff >= 0 ? `in ${words}` : `${words} ago`;
 }
 
-export const LAST_STATUS_WORDS: Record<string, string> = {
-  running: 'Running now',
-  ok: 'Last run finished',
-  error: 'Last run failed',
-  stopped: 'Last run was stopped',
-  skipped: 'Skipped: the previous run was still going',
-  missed: 'Missed: the app was closed',
-};

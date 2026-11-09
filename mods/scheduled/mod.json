@@ -3,7 +3,7 @@
   "id": "scheduled",
   "name": "Scheduled",
   "version": "1.0.0",
-  "description": "Prompts that run later or on a rhythm: create, edit, pause, run now and see how the last run went.",
+  "description": "Prompts that run later or on a rhythm, in a side-pane tab: edit, pause, run now and see how the last run went; New and Open page go to the Scheduled tasks page.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "clock",

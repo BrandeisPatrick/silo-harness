@@ -17,7 +17,9 @@ const { check, done } = require('./support/check.js');
   fs.rmSync(path.dirname(copy), { recursive: true, force: true });
 
   // --- sections ---------------------------------------------------------------
-  check('fifteen sections in four groups', m.SECTIONS.length === 15 && new Set(m.SECTIONS.map((s) => s.group)).size === 4);
+  const nav = m.SECTIONS.filter((s) => !s.searchOnly);
+  check('thirteen sections in four groups in the navigation', nav.length === 13 && new Set(nav.map((s) => s.group)).size === 4, nav.map((s) => s.id));
+  check('Scheduled and Dreaming are pages now, not sections; a search-only Pages section stands for them', !m.SECTIONS.some((s) => s.id === 'scheduled' || s.id === 'dreaming') && m.SECTIONS.filter((s) => s.searchOnly).map((s) => s.id).join() === 'pages' && !m.isSectionId('pages') && !m.isSectionId('scheduled') && JSON.stringify(m.PAGE_SECTIONS) === JSON.stringify(['scheduled', 'dreaming']));
   check('Hooks sits after Configuration files', m.SECTIONS.findIndex((s) => s.id === 'hooks') === m.SECTIONS.findIndex((s) => s.id === 'files') + 1);
   check('section ids are recognised', m.isSectionId('mods') && !m.isSectionId('nope'));
   check('old targets map to sections', m.sectionForTarget('mcp-section') === 'mcp' && m.sectionForTarget('rules-section') === 'permissions' && m.sectionForTarget('mods') === 'mods');

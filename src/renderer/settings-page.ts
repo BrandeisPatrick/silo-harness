@@ -20,8 +20,7 @@ import { row, segmented, selectControl, switchControl, textControl, type Row } f
 import type { Call, Ctx, Section } from './settings/ctx.js';
 import { contextSection, generalSection, modelSection, permissionsSection } from './settings/config-sections.js';
 import { modsSection } from './settings/mods-section.js';
-import { remoteSection, scheduledSection, skillsSection } from './settings/feature-sections.js';
-import { dreamingSection } from './settings/dreaming-section.js';
+import { pagesSection, remoteSection, skillsSection } from './settings/feature-sections.js';
 import { aboutSection, appearanceSection, filesSection, historySection, mcpSection } from './settings/info-sections.js';
 import { hooksSection } from './settings/hooks-section.js';
 
@@ -39,6 +38,8 @@ export interface SettingsPageDeps {
   currentSessionId(): string;
   /** Brings a session on screen (Settings closes first) */
   openSession(id: string): void;
+  /** Opens the Scheduled tasks page (and its New task form) or the Dreaming page; Settings closes first */
+  openPage(target: 'scheduled' | 'scheduled:new' | 'dreaming'): void;
   sessionTitle(id: string): string | undefined;
   /** Before the page opens (close menus and sheets, hide the browser view); false keeps it closed */
   beforeOpen(): boolean;
@@ -328,14 +329,16 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       modsSection(ctx),
       mcpSection(ctx, document.getElementById('mcp-section')!),
       skillsSection(ctx),
-      scheduledSection(ctx),
-      dreamingSection(ctx),
       remoteSection(ctx),
       historySection(ctx),
       appearanceSection(ctx),
       filesSection(ctx, (info) => applyOwned(info)),
       hooksSection(ctx),
       aboutSection(ctx),
+      pagesSection((target) => {
+        dialog.close();
+        deps.openPage(target);
+      }),
     ];
     for (const s of sections) {
       s.el.classList.add('sp-section');
@@ -362,6 +365,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     navEl.innerHTML = '';
     let group = -1;
     for (const s of SECTIONS) {
+      if (s.searchOnly) continue;
       if (group !== -1 && s.group !== group) navEl.append(h('div', { class: 'sp-nav-sep', role: 'presentation' }));
       group = s.group;
       const btn = h('button', { type: 'button', class: 'sp-nav-item', id: `sp-nav-${s.id}`, role: 'tab', 'aria-controls': `sp-sec-${s.id}`, 'data-section': s.id });
@@ -528,6 +532,14 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   function goTo(r: HTMLElement): void {
     const owner = r.closest<HTMLElement>('.sp-section');
     if (!owner) return;
+    // A row that stands for a page (Scheduled tasks, Dreaming) opens that page
+    const page = r.dataset.page;
+    if (page === 'scheduled' || page === 'scheduled:new' || page === 'dreaming') {
+      clearSearch(false);
+      dialog.close();
+      deps.openPage(page);
+      return;
+    }
     clearSearch(false);
     showSection(owner.dataset.section as SectionId);
     reveal(r);

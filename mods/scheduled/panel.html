@@ -12,6 +12,7 @@
   .bar { flex: none; border-bottom: 1px solid var(--border-subtle); }
   .bar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; }
   .bar .summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .actions { display: flex; align-items: center; gap: 6px; flex: none; }
   .scroller { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .content { padding-top: 12px; padding-bottom: 24px; }
 
@@ -102,7 +103,10 @@
 <header class="bar">
   <div class="wrap">
     <span class="h-muted summary" id="summary"></span>
-    <button class="h-btn primary sm" id="new"></button>
+    <span class="actions">
+      <button class="h-btn ghost sm" id="page" type="button" title="Open the Scheduled tasks page, with each task's runs">Open page</button>
+      <button class="h-btn primary sm" id="new" type="button"></button>
+    </span>
   </div>
 </header>
 <main class="scroller" id="scroller">
@@ -327,13 +331,13 @@
     const body = el('div');
     body.appendChild(el('h2', '', 'Scheduled tasks'));
     body.appendChild(el('p', '', 'A scheduled task sends a prompt later or on a rhythm: once at a time you pick, every so many minutes, hours or days, or on a cron schedule. Each run starts a new session, or arrives in this one as a follow-up.'));
-    body.appendChild(el('p', '', 'They run while Silo Harness is open. A run that falls while it is closed is marked missed.'));
+    body.appendChild(el('p', '', 'They run only while Silo Harness is open and your Mac is awake. A run missed while it was closed or asleep happens once when it is back, if it was due less than a day before; an older one is marked missed.'));
     body.appendChild(el('p', '', 'The agent can schedule tasks too; each one it creates is shown to you for approval first.'));
     const b = el('button', 'h-btn primary sm');
     b.type = 'button';
     b.innerHTML = ICON.plus;
     b.appendChild(document.createTextNode('New scheduled task'));
-    b.onclick = () => openForm(null);
+    b.onclick = () => newTask();
     body.appendChild(b);
     box.appendChild(body);
   }
@@ -723,11 +727,18 @@
     }
   });
 
+  /** A new task is made in the app's own form, on the Scheduled tasks page; this tab's form is the fallback for an older app. */
+  function newTask() {
+    harness.ui.openPage('scheduled', { form: 'new' }).catch(() => openForm(null));
+  }
+
   // ---------- go ----------
 
   $('new').innerHTML = ICON.plus;
   $('new').appendChild(document.createTextNode('New scheduled task'));
-  $('new').onclick = () => openForm(null);
+  $('new').onclick = () => newTask();
+  // The Scheduled tasks page in the main column: every task as a card, and a page per task with all its runs
+  $('page').onclick = () => harness.ui.openPage('scheduled').catch(() => {});
   $('retry').onclick = () => { loadError = null; schedules = null; render(); load(); };
   renderIntro();
   render();

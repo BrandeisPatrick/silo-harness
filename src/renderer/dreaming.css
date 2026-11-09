@@ -1,4 +1,4 @@
-/* Dreaming: the sidebar row's dot, a dream session's row, the proposal cards and Settings → Dreaming.
+/* Dreaming: the sidebar row's dot, a dream session's row and the proposal cards (the pages are in pages.css).
    Type from the scale in styles.css only; few boxes: a card has one hairline, the list has hairlines between rows. */
 
 /* ---------- Sidebar ---------- */
@@ -45,30 +45,3 @@
 .proposal-state.applied { color: var(--success); }
 .proposal-state.failed { color: var(--danger); }
 .proposal-card[data-state='dismissed'] .proposal-why, .proposal-card[data-state='withdrawn'] .proposal-why, .proposal-card[data-state='reverted'] .proposal-why { color: var(--text-400); }
-
-/* ---------- Settings → Dreaming ---------- */
-.dream-toolbar { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
-.dream-run { width: 28px; height: 28px; margin-left: -6px; border-radius: 8px; color: var(--text-100); }
-.dream-run:hover { background: var(--hover); }
-.dream-run.running { color: var(--text-100); }
-.dream-run-text { min-width: 0; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
-.dream-time { width: 132px; }
-.dream-privacy { margin-top: 16px; }
-.dream-item { border-top: 1px solid var(--border-subtle); }
-.dream-line { display: flex; align-items: center; gap: 12px; }
-.dream-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; text-align: left; color: inherit; background: none; border: 0; cursor: pointer; }
-.dream-head:focus-visible { outline-offset: 2px; border-radius: var(--r-control); }
-.dream-chev { display: inline-flex; flex: none; color: var(--text-400); transition: transform 0.12s; }
-.dream-item.open .dream-chev { transform: rotate(90deg); }
-.dream-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.dream-project { font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dream-meta { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
-.dream-status { flex: none; max-width: 40%; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dream-status.wait { color: var(--text-100); }
-.dream-status.ok { color: var(--success); }
-.dream-status.bad { color: var(--danger); }
-.dream-status.run { color: var(--text-200); }
-.dream-open { flex: none; }
-.dream-body { padding: 0 0 12px 24px; }
-.dream-body > .sp-note { margin: 0 0 8px; }
-.dream-actions { display: flex; justify-content: flex-end; margin-bottom: 4px; }

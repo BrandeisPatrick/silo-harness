@@ -12,7 +12,7 @@ const { check, done } = require('./support/check.js');
 (async () => {
   const src = fs.readFileSync(path.join(projectDir, 'dist/renderer/sidebar-model.js'), 'utf8');
   const M = await import('data:text/javascript,' + encodeURIComponent(src));
-  const { dayGroup, shortDate, buildTree, groupFamilies, visibleRows, indicatorFor, shapeResults, cleanSnippet, matchRange, ancestorsOf, groupOf, titleMatches } = M;
+  const { dayGroup, shortDate, buildTree, groupFamilies, visibleRows, indicatorFor, leadFor, shapeResults, cleanSnippet, matchRange, ancestorsOf, groupOf, titleMatches } = M;
 
   const at = (y, mo, d, h = 12, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 
@@ -109,7 +109,10 @@ const { check, done } = require('./support/check.js');
   check('unread is not shown for the session on screen', ind({ running: false, unread: true }, { current: true }) === 'fork');
   check('a parent shows the family glyph', ind({ running: false }, { children: 2 }) === 'family');
   check('a fork shows the fork glyph', ind({ running: false }) === 'fork');
-  check('a sub-session and a scheduled run show theirs', indicatorFor(meta('s', { origin: 'spawn', parentId: 'q' }), { running: false })?.kind === 'spawn' && indicatorFor(meta('r', { origin: 'schedule' }), undefined)?.kind === 'schedule');
+  check('a sub-session shows its glyph; a scheduled run nothing at the end (its lightning is in front)', indicatorFor(meta('s', { origin: 'spawn', parentId: 'q' }), { running: false })?.kind === 'spawn' && indicatorFor(meta('r', { origin: 'schedule' }), undefined) === null);
+  check('a scheduled run shows unread and waiting like any session', indicatorFor(meta('r2', { origin: 'schedule' }), { running: false, unread: true })?.kind === 'unread' && indicatorFor(meta('r3', { origin: 'schedule' }), { running: false, attention: 'approval' })?.kind === 'attention');
+  check('a dream: the dot while it waits, else nothing at the end; unread still shows', indicatorFor(meta('dw', { origin: 'dream', dream: { id: 'x', waiting: 2 } }), { running: false })?.kind === 'dream' && indicatorFor(meta('dn', { origin: 'dream', dream: { id: 'x', waiting: 0 } }), { running: false }) === null && indicatorFor(meta('du', { origin: 'dream', dream: { id: 'x', waiting: 0 } }), { running: false, unread: true })?.kind === 'unread');
+  check('the lead: lightning for a scheduled run, the moon for a dream, nothing for the rest', leadFor(meta('l1', { origin: 'schedule' })) === 'schedule' && leadFor(meta('l2', { origin: 'dream' })) === 'dream' && leadFor(meta('l3', { origin: 'user' })) === null && leadFor(meta('l4', { origin: 'fork' })) === null);
   check('a plain session shows nothing', indicatorFor(meta('u', { origin: 'user' }), { running: false }) === null);
   check('the status on the meta is used when none is passed', indicatorFor(meta('v', { status: { running: true } }), undefined)?.kind === 'running');
 

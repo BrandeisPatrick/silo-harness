@@ -304,6 +304,8 @@ export interface ModBridge {
   'ui.markdown': (p: { text: string }) => { html: string };
   /** Opens Settings at a section (default "general") */
   'ui.openSettings': (p: { section?: string }) => void;
+  /** Opens the Scheduled tasks or the Dreaming page in the main column; form "new": the New task form on Scheduled tasks */
+  'ui.openPage': (p: { page: 'scheduled' | 'dreaming'; form?: 'new' }) => void;
 
   'storage.get': (p: { key: string; scope?: 'mod' | 'session' }) => { value: unknown };
   'storage.set': (p: { key: string; value: unknown; scope?: 'mod' | 'session' }) => void;

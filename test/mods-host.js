@@ -74,7 +74,7 @@ process.emitWarning = () => {};
     const windowSide = Object.keys(MOD_METHOD_PERMISSIONS).filter(L.isWindowMethod).sort();
     const { isWindowMethod: mainSide } = require(path.join(projectDir, 'dist/main/mods/permissions.js'));
     check('the window and the main process agree on the window methods', JSON.stringify(Object.keys(MOD_METHOD_PERMISSIONS).filter(mainSide).sort()) === JSON.stringify(windowSide));
-    check('window methods match the brief', JSON.stringify(windowSide) === JSON.stringify(['composer.insert', 'events.subscribe', 'events.unsubscribe', 'hello', 'hooks.subscribe', 'hooks.unsubscribe', 'log.error', 'outputs.open', 'sessions.create', 'sessions.open', 'ui.copy', 'ui.markdown', 'ui.open', 'ui.openExternal', 'ui.openSettings', 'ui.resize', 'ui.setBadge', 'ui.setTitle', 'ui.theme', 'ui.toast']), windowSide);
+    check('window methods match the brief', JSON.stringify(windowSide) === JSON.stringify(['composer.insert', 'events.subscribe', 'events.unsubscribe', 'hello', 'hooks.subscribe', 'hooks.unsubscribe', 'log.error', 'outputs.open', 'sessions.create', 'sessions.open', 'ui.copy', 'ui.markdown', 'ui.open', 'ui.openExternal', 'ui.openPage', 'ui.openSettings', 'ui.resize', 'ui.setBadge', 'ui.setTitle', 'ui.theme', 'ui.toast']), windowSide);
     check('http(s) only for openExternal', L.isHttpUrl('https://a.b/x') && L.isHttpUrl('http://a') && !L.isHttpUrl('file:///etc/passwd') && !L.isHttpUrl('javascript:alert(1)') && !L.isHttpUrl('mod://x/y') && !L.isHttpUrl(3));
   }
 
