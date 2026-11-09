@@ -122,8 +122,8 @@ declare global {
        */
       setup(checks: Partial<SetupChecks> | null): void;
       /**
-       * Renders the welcome screen's Recent projects row from these folders instead of config.recentDirs (the current
-       * working directory is still left out; clicking a chip really switches to it); null goes back to config.recentDirs
+       * The welcome screen's folder menu lists these folders instead of config.recentDirs (after the Silo folder;
+       * picking one really switches to it); null goes back to config.recentDirs
        */
       recent(dirs: string[] | null): void;
     };
@@ -2294,13 +2294,8 @@ document.addEventListener('drop', (e) => {
   if (paths.length) insertAtCursor(paths.join(' ') + ' ');
 });
 
-// ---------- Empty-state suggestions ----------
+// ---------- Filling the composer ----------
 
-const SUGGESTIONS = [
-  'Explain what this project does and how it is organised',
-  'Find the failing tests, fix them, and run the suite again',
-  'Open https://example.com in the browser and summarise the page',
-];
 /** Puts `text` in the composer, replacing what was there, with the caret at its end (Ask the agent… in Settings). */
 function fillComposer(text: string): void {
   // A page in the main column covers the composer: back to the session
@@ -2314,16 +2309,5 @@ function fillComposer(text: string): void {
   inputEl.focus();
   inputEl.setSelectionRange(text.length, text.length);
 }
-const suggestionsEl = $('empty-suggestions');
-suggestionsEl.innerHTML = SUGGESTIONS.map((s) => `<button type="button" class="suggestion">${escapeHtml(s)}</button>`).join('');
-suggestionsEl.querySelectorAll<HTMLButtonElement>('.suggestion').forEach((b, i) => {
-  b.onclick = () => {
-    mentionPicker.close();
-    inputEl.value = SUGGESTIONS[i];
-    autosize();
-    updateSendButton();
-    inputEl.focus();
-  };
-});
 
 export {};

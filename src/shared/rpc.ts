@@ -24,6 +24,8 @@ export interface CoreRpc {
   'sessions.live': (id: string) => LiveState;
   /** A session's transcript without bringing it on screen (sessions.switch does both) */
   'sessions.transcript': (id: string) => TranscriptItem[];
+  /** The folder a session works in when none was chosen (~/Documents/Silo), made again if it is missing */
+  'config.defaultWorkDir': () => string;
 }
 
 export interface CoreEvents {

@@ -421,8 +421,6 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .empty { margin-top: auto; margin-bottom: auto; padding-bottom: 48px; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .empty-mark { margin-bottom: 20px; display: flex; }
 .empty-title { margin: 0 0 8px; font: 500 28px/34px var(--font-display); letter-spacing: normal; color: var(--text-100); }
-.empty-text { margin: 0; max-width: 440px; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); }
-.empty-text kbd { vertical-align: 1px; }
 
 .msg { margin-bottom: 16px; }
 .msg.user { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 24px; padding: 0 4px; }
@@ -1272,7 +1270,7 @@ dialog.dialog.confirm-dialog { width: 440px; }
   *, *::before, *::after { transition-duration: 0s !important; }
 }
 
-/* ---------- Round 4: jump pill, connection banner, drop target, suggestions, openable screenshots ---------- */
+/* ---------- Round 4: jump pill, connection banner, drop target, openable screenshots ---------- */
 .jump-latest { position: absolute; left: 50%; top: -56px; transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 10px; border-radius: 999px; background: var(--bg-000); border: 1px solid var(--border); box-shadow: var(--shadow-pop); color: var(--text-200); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; cursor: pointer; animation: fade-in 120ms ease-out; }
 .jump-latest:hover { color: var(--text-100); background: var(--surface-hover); }
 .jump-latest .icon { color: var(--text-400); }
@@ -1282,10 +1280,6 @@ dialog.dialog.confirm-dialog { width: 440px; }
 .conn-banner .btn.sm { height: 26px; padding: 0 10px; font-size: var(--fs-small); }
 .composer.dragging { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer.dragging textarea::placeholder { color: var(--text-200); }
-.empty-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; max-width: 520px; }
-.suggestion { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-000); color: var(--text-200); font-size: var(--fs-ui); line-height: var(--lh-ui); cursor: pointer; }
-.suggestion:hover { background: var(--surface-hover); color: var(--text-100); border-color: var(--border); }
-.suggestion:active { background: var(--pressed); }
 img.shot.openable { cursor: zoom-in; }
 img.shot.openable:hover { filter: brightness(1.03); }
 
@@ -1695,14 +1689,13 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 
 /* ---------- Tick 3: the setup strip, the "#" and rewind confirms, the Copied flash, shortcut sheet ---------- */
 
-/* Setup strip: on the welcome screen, above the suggestions; one line per missing piece, each with its fix */
+/* Setup strip: on the welcome screen, above the folder row; one line per missing piece, each with its fix */
 .setup-strip {
   display: flex; flex-direction: column; width: min(520px, 100%); margin-top: 20px;
   background: var(--bg-000); border: 1px solid var(--border-subtle); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
   text-align: left; animation: fade-in 0.12s ease-out both;
   container-type: inline-size;
 }
-.setup-strip:not([hidden]) + .empty-suggestions { margin-top: 14px; }
 /* A narrow column keeps the titles and drops the details rather than squeezing both */
 @container (max-width: 400px) { .setup-detail { display: none; } }
 .setup-item + .setup-item { border-top: 1px solid var(--border-subtle); }
@@ -1759,27 +1752,17 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
   .status-flash { transition: none; }
 }
 
-/* ---------- Tick 4: recent projects, paths that open in the editor, long tool output ---------- */
+/* ---------- Tick 4: the welcome screen's folder row, paths that open in the editor, long tool output ---------- */
 
-/* Recent projects: under the setup strip, above the suggestions; a chip per folder used before */
-.recent-dirs { display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(520px, 100%); margin-top: 20px; }
-.setup-strip:not([hidden]) + .recent-dirs { margin-top: 14px; }
-.setup-strip:not([hidden]) + .recent-dirs[hidden] + .empty-suggestions { margin-top: 14px; }
-.recent-label { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
-.recent-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 100%; }
-.recent-dir {
-  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px;
-  height: 28px; padding: 0 10px 0 8px; border-radius: 999px;
-  border: 1px solid var(--border-subtle); background: transparent;
-  font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200);
-  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
-}
-.recent-dir:hover { background: var(--surface-hover); border-color: var(--border); color: var(--text-100); }
-.recent-dir:active { background: var(--pressed); }
-.recent-dir.busy { opacity: 0.6; cursor: progress; }
-.recent-icon { display: inline-flex; flex: none; color: var(--text-400); transition: color 0.12s; }
-.recent-dir:hover .recent-icon { color: var(--text-200); }
-.recent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Folder row: under the title (and the setup strip); the working folder's path and Choose folder, a menu of folders */
+.folder-row { display: flex; align-items: center; justify-content: center; gap: 8px; width: min(520px, 100%); margin-top: 16px; font-size: var(--fs-ui); line-height: var(--lh-ui); }
+.setup-strip:not([hidden]) + .folder-row { margin-top: 14px; }
+.folder-row-icon { display: inline-flex; flex: none; color: var(--text-400); }
+/* Too long even shortened: the start gives way, so the folder's own name stays (rtl clips the start; the bdi keeps the order) */
+.folder-row-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--text-200); }
+.folder-row-btn { flex: none; gap: 4px; }
+.folder-row-btn.busy { opacity: 0.6; cursor: progress; }
+.folder-row-chev { display: inline-flex; color: var(--text-400); }
 
 /* Paths in Read / Write / Edit / List rows, their diff headers and approval cards open in the editor */
 .path-link { cursor: pointer; border-radius: 4px; }
