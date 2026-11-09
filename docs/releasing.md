@@ -21,13 +21,45 @@ Before 1.0.0, which is where the project is now:
 
 The mod protocol has its own number, the `"protocol": 1` in every `mod.json`. Adding to the protocol (a field, a seat, an event, a permission) keeps that number, because an older app ignores what it does not know; [mods.md](mods.md) says which app version added each part. Only a change that breaks existing mods raises it.
 
-Work that is merged but not released sits under `## Unreleased` at the top of [CHANGELOG.md](../CHANGELOG.md). A release renames that heading to the version. If the section has only fixes it is a patch; otherwise a minor.
+Work that is merged but not released sits under `## Unreleased` at the top of [CHANGELOG.md](../CHANGELOG.md). A release renames that heading to `## X.Y.Z — YYYY-MM-DD`. If the section has only fixes it is a patch; otherwise a minor.
+
+## Release notes
+
+The changelog section is the release notes (`scripts/release-notes.js` adds the screenshot, Install and the Full changelog link), so every section has the same shape.
+
+1. **A summary line** right under the heading: one sentence of at most 30 words saying what the release is about.
+2. **Sections in this order**, each only when it has something, and no others:
+
+| Section | What goes in it |
+| --- | --- |
+| `### Highlights` | Minor releases only: the one to three changes the release is about. The notes put the screenshot under the summary line when this section is there. |
+| `### New` | Things you can now do. |
+| `### Improved` | Existing features that work better or look different. |
+| `### Fixed` | What was wrong and works now. |
+| `### Security` | Permissions, credentials, what the agent may or may not do. |
+| `### For developers` | Mods, hooks, settings keys, the command line, tools the model sees. |
+| `### Upgrade notes` | Anything the user has to do, or data that moves on first launch. |
+| `### Known issues` | What does not work yet. |
+
+3. **One bullet per change, one pattern:** a bold label of two to four words ending in a full stop, then one plain sentence of at most 25 words, present tense. Say what the user gets, not how it is built or what it was like before. `code` only for what you type; names in the app in quotes. Detail belongs in the docs, linked at the end of the bullet when it helps.
+
+Example:
+
+```
+## 0.11.1 — 2026-11-09
+
+Fixes tool results being shown with the wrong tool call when using Ollama models.
+
+### Fixed
+
+- **Tool results with Ollama.** Each result now stays with the call that produced it, including in sessions saved before this release.
+```
 
 ## Making a release
 
 Development happens on `next`; `main` is what was released.
 
-1. On `next`, rename `## Unreleased` in CHANGELOG.md to `## X.Y.Z` and set the version: `npm version X.Y.Z --no-git-tag-version`. If the window changed, redo the screenshots (`npm run build && node scripts/readme-shots.js && node scripts/readme-shots.js --dark && node scripts/looks-shot.js && node scripts/tool-activity-shot.js && node scripts/dreaming-shot.js`) and look at them: the README uses the light ones, the website both. The website is `docs/index.html`, served by GitHub Pages from the `/docs` folder of `main`, so it changes when a release is merged.
+1. On `next`, rename `## Unreleased` in CHANGELOG.md to `## X.Y.Z — YYYY-MM-DD`, check the section against [Release notes](#release-notes), and set the version: `npm version X.Y.Z --no-git-tag-version`. If the window changed, redo the screenshots (`npm run build && node scripts/readme-shots.js && node scripts/readme-shots.js --dark && node scripts/looks-shot.js && node scripts/tool-activity-shot.js && node scripts/dreaming-shot.js`) and look at them: the README uses the light ones, the website both. The website is `docs/index.html`, served by GitHub Pages from the `/docs` folder of `main`, so it changes when a release is merged.
 2. Check the code: `npm run typecheck`, `npm test`, and `npm run test:live` with `ANTHROPIC_API_KEY` set, so the live scripts run against a real model.
 3. Build what will ship: `npm run dist` (a DMG and a zip in `release/`). Unpack the zip and run the live scripts against that app (`SILO_HARNESS_LIVE_APP=<path to the binary inside the .app> npm run test:live`), and at least `smoke` against the copy in the mounted DMG.
 4. Push `next` and open the pull request into `main`.

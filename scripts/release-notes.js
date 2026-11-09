@@ -3,10 +3,11 @@
 //   npm run dist                                   (the DMG and zip must be in release/)
 //   node scripts/release-notes.js <version> [out]  default: prints the notes
 //
-// The notes are the "## <version>" section of the changelog with three changes: links to files in the repository
-// point at the current commit, so they work in a draft before the tag exists; the README's hero screenshot sits
-// under the opening paragraph; and an Install section gives the size and SHA-256 of both downloads. The "Not
-// notarized" line under Known limits is left out because Install says it.
+// The notes are the "## <version> — <date>" section of the changelog (its format is in docs/releasing.md) with four
+// changes: links to files in the repository point at the current commit, so they work in a draft before the tag
+// exists; a release with Highlights gets the README's hero screenshot under its summary line; an Install section
+// gives the size and SHA-256 of both downloads; and a Full changelog line links the comparison with the version
+// before. The "Not notarized" line under Known issues is left out because Install says it.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -28,11 +29,14 @@ if (!/^[\w.-]+\/[\w.-]+$/.test(slug)) throw new Error('package.json has no GitHu
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim();
 
 const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
-const heading = `## ${version}\n`;
-const start = changelog.indexOf(heading);
-if (start < 0) throw new Error(`CHANGELOG.md has no "## ${version}" section`);
-const next = changelog.indexOf('\n## ', start + heading.length);
-let body = changelog.slice(start + heading.length, next < 0 ? undefined : next).trim();
+const headingRe = new RegExp(`^## ${version.replace(/\./g, '\\.')}(?: — \\d{4}-\\d{2}-\\d{2})?\\n`, 'm');
+const found = headingRe.exec(changelog);
+if (!found) throw new Error(`CHANGELOG.md has no "## ${version}" section`);
+const start = found.index;
+const next = changelog.indexOf('\n## ', start + found[0].length);
+let body = changelog.slice(start + found[0].length, next < 0 ? undefined : next).trim();
+// The version before, for the Full changelog link: the next "## x.y.z" heading down the file
+const prev = next < 0 ? null : /^## (\d+\.\d+\.\d+)/.exec(changelog.slice(next + 1))?.[1] ?? null;
 
 // Links to files in the repository, pinned to the commit
 const blob = `https://github.com/${slug}/blob/${sha}/`;
@@ -45,12 +49,14 @@ for (const [, url] of body.matchAll(/\]\((https:\/\/github\.com\/[^)]+)\)/g)) {
 
 body = body.replace(/\n- Not notarized:[^\n]*/, '');
 
-// The screenshot goes under the opening paragraph
-const hero = 'docs/screenshots/hero.png';
-if (!fs.existsSync(path.join(root, hero))) throw new Error(`missing ${hero}`);
-const firstBreak = body.indexOf('\n\n');
-const image = `![${pkg.build?.productName ?? 'Silo Harness'}](https://raw.githubusercontent.com/${slug}/${sha}/${hero})`;
-body = firstBreak < 0 ? `${body}\n\n${image}` : `${body.slice(0, firstBreak)}\n\n${image}${body.slice(firstBreak)}`;
+// A release with Highlights (a minor one) shows the screenshot under its summary line; a fixes-only one does not
+if (/^### Highlights$/m.test(body)) {
+  const hero = 'docs/screenshots/hero.png';
+  if (!fs.existsSync(path.join(root, hero))) throw new Error(`missing ${hero}`);
+  const firstBreak = body.indexOf('\n\n');
+  const image = `![${pkg.build?.productName ?? 'Silo Harness'}](https://raw.githubusercontent.com/${slug}/${sha}/${hero})`;
+  body = firstBreak < 0 ? `${body}\n\n${image}` : `${body.slice(0, firstBreak)}\n\n${image}${body.slice(firstBreak)}`;
+}
 
 // Downloads
 const files = [`Silo-Harness-${version}-arm64.dmg`, `Silo-Harness-${version}-arm64.zip`];
@@ -72,6 +78,7 @@ const install = [
   ...rows,
 ].join('\n');
 
-const notes = `${body}\n\n${install}\n`;
+const full = prev ? `\n\n**Full changelog:** https://github.com/${slug}/compare/v${prev}...v${version}` : '';
+const notes = `${body}\n\n${install}${full}\n`;
 if (out) fs.writeFileSync(out, notes);
 else process.stdout.write(notes);

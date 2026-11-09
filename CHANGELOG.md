@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1 — 2026-11-09
+
+Fixes tool results being shown with the wrong tool call when using Ollama models.
+
+### Fixed
+
+- **Tool results with Ollama.** Each result now stays with the call that produced it, including in sessions saved before this release.
+
 ## 0.11.0
 
 Pull requests, documents and artifacts show as cards in the chat, as in Claude Code, and sessions can message each other, each message one quiet line in both conversations.

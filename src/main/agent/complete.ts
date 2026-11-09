@@ -1,6 +1,7 @@
 // One model call: streamed through the OpenAI client (or Ollama's native chat), the fallbacks when a gateway rejects
 // stream_options or streaming with tools, and the plain-chat retry for an Ollama model that takes no tools.
 
+import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
 import type { AgentEvent, AppConfig } from '../../shared/types';
 import { isContextLengthError } from '../compact';
@@ -127,13 +128,31 @@ async function completeStreaming(
     }
     for (const tc of delta.tool_calls ?? []) {
       let call: ToolCall;
-      const known = tc.id ? byId.get(tc.id) : undefined;
-      if (known) call = known;
-      else if (tc.id) {
-        call = { id: tc.id, type: 'function', function: { name: '', arguments: '' } };
-        calls.push(call);
-        byId.set(tc.id, call);
-        byIndex.set(tc.index ?? calls.length - 1, call);
+      const fresh = (id: string): ToolCall => {
+        const c: ToolCall = { id, type: 'function', function: { name: '', arguments: '' } };
+        calls.push(c);
+        if (id) byId.set(id, c);
+        return c;
+      };
+      if (typeof tc.index === 'number') {
+        // The position decides which call a chunk belongs to (OpenAI sends the id only on a call's first chunk; Ollama
+        // can give two calls of one reply the same id). A new id at a known position is a new call (a provider that
+        // numbers every call 0).
+        const at = byIndex.get(tc.index);
+        if (at && (!tc.id || !at.id || at.id === tc.id)) {
+          call = at;
+          if (tc.id && !at.id) at.id = tc.id;
+        } else {
+          call = fresh(tc.id ?? '');
+          byIndex.set(tc.index, call);
+        }
+      } else if (tc.id) {
+        const known = byId.get(tc.id);
+        if (known) call = known;
+        else {
+          call = fresh(tc.id);
+          byIndex.set(calls.length - 1, call);
+        }
       } else {
         const existing = byIndex.get(tc.index ?? 0) ?? calls[calls.length - 1];
         if (existing) call = existing;
@@ -181,4 +200,23 @@ async function completeOnce(
     });
   });
   return { text, toolCalls };
+}
+
+/**
+ * Gives every call of a reply an id no other call in the session has, in place: a call whose id is empty, already
+ * used by an earlier call or result in `history`, or taken by an earlier call of the same reply gets a fresh one.
+ * Models served by Ollama number their calls per reply (and our own fallback ids restart every run), so without this
+ * a result could be paired with another run's call. Ids that are already unique (OpenAI's, Anthropic's) are kept.
+ */
+export function uniqueCallIds(calls: ToolCall[], history: Msg[]): ToolCall[] {
+  const used = new Set<string>();
+  for (const m of history) {
+    if (m.role === 'assistant') for (const tc of m.tool_calls ?? []) used.add(tc.id);
+    else if (m.role === 'tool') used.add(m.tool_call_id);
+  }
+  for (const call of calls) {
+    if (!call.id || used.has(call.id)) call.id = `call_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    used.add(call.id);
+  }
+  return calls;
 }

@@ -53,7 +53,7 @@ import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage } from './agent/prompt';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, type CompletionHost } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
 import { approvalLabels, decideApproval, DENIED } from './agent/permissions';
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
@@ -725,7 +725,9 @@ export class Agent {
           this.lastUsage = null;
           reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages], activeSpecs, signal, turn);
         }
-        const { text, toolCalls } = reply;
+        const { text } = reply;
+        // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
+        const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
         this.emit({ type: 'thinking_done' });
 
         if (!text.trim() && !toolCalls.length) {

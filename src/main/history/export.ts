@@ -1,7 +1,7 @@
 // Export of one session: a readable Markdown transcript, the stored session object (JSON), or the raw log (JSONL).
 
 import type { Msg, Session } from '../sessions';
-import { displayText } from '../sessions';
+import { displayText, pairToolResults, type StoredToolCall } from '../sessions';
 import { isCompactPreamble } from '../compact';
 
 export type ExportFormat = 'markdown' | 'json' | 'jsonl';
@@ -34,8 +34,8 @@ function prettyArgs(raw: string): string {
 }
 
 function messagesMarkdown(s: Session, messages: Msg[], out: string[]): void {
-  const results = new Map<string, string>();
-  for (const m of messages) if (m.role === 'tool') results.set(m.tool_call_id, typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+  const results = new Map<StoredToolCall, string>();
+  for (const [call, m] of pairToolResults(messages)) results.set(call, typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
   for (const m of messages) {
     if (m.role === 'user') {
       if (isCompactPreamble(m)) continue;
@@ -64,7 +64,7 @@ function messagesMarkdown(s: Session, messages: Msg[], out: string[]): void {
             continue;
           }
         }
-        const result = results.get(call.id) ?? '(no result)';
+        const result = results.get(call) ?? '(no result)';
         out.push(`### Tool: ${name}\n\n${fence(cut(prettyArgs(call.function.arguments), ARGS_CHARS), 'json')}\n\nResult:\n\n${fence(cut(result, RESULT_CHARS))}\n`);
       }
     }
