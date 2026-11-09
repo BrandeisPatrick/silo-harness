@@ -62,12 +62,57 @@ function writeMod(root, id, manifest, files) {
     await ev(`document.querySelector('#settings').open && document.querySelector('#settings-close').click()`);
     await sleep(400);
   };
-  const shotSettings = (name) => app.screenshotOf(path.join(SHOTS, `${name}.png`), '#settings', 0);
+  // In the hidden window a capture right after Settings changed can come back as a stale surface tiled 2 × 2 inside the
+  // clip, where the rig cannot tell it from the page: a tiny capture first makes the compositor draw a fresh frame.
+  const fresh = () => app.cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } });
+  const shotOf = async (name, selector, margin = 0) => {
+    await fresh();
+    return app.screenshotOf(path.join(SHOTS, `${name}.png`), selector, margin);
+  };
+  const shotSettings = (name) => shotOf(name, '#settings');
   const setScheme = async (scheme) => {
     await ev(`(async () => { const c = await window.oc.getConfig(); c.theme = ${js(scheme)}; await window.oc.setConfig(c); document.documentElement.dataset.theme = ${js(scheme)}; })()`);
     await sleep(900);
   };
   const TABS = ['backgrounds', 'chat-bar', 'conversation', 'themes'];
+  /** The background preview's geometry: the background fills the stage, which fills the pane; the window is inset */
+  const BG_GEOMETRY = `(() => {
+    const pane = document.querySelector('.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane');
+    const st = pane && pane.querySelector('.lp-stage');
+    const bd = st && st.querySelector(':scope > .lp-stage-backdrop');
+    const host = st && st.querySelector(':scope > .lp-host');
+    if (!pane || !st || !bd || !host) return null;
+    const p = pane.getBoundingClientRect(), s = st.getBoundingClientRect(), b = bd.getBoundingClientRect(), h = host.getBoundingClientRect();
+    const f = bd.querySelector('iframe');
+    const fr = f && f.getBoundingClientRect();
+    // Nothing of the page between the background and the eye in the band around the window
+    const x = s.left + (h.left - s.left) / 2, y = s.top + (h.top - s.top) / 2;
+    const top = document.elementFromPoint(x, y);
+    return {
+      src: f ? f.src : '',
+      // the stage's box inside its hairline border
+      fills: Math.abs(p.width - s.width) < 2 && Math.abs(b.width - st.clientWidth) < 1 && Math.abs(b.height - st.clientHeight) < 1,
+      frameFills: !!fr && Math.abs(fr.width - st.clientWidth) < 1 && Math.abs(fr.height - st.clientHeight) < 1,
+      size: [p.width, s.width, st.clientWidth, b.width, fr ? fr.width : 0].map(Math.round),
+      inset: (h.left - s.left) / s.width,
+      covered: !!top && top !== bd && top !== st && !bd.contains(top),
+    };
+  })()`;
+  const BACKGROUNDS = ['backgrounds/aurora', 'backgrounds/constellation', 'backgrounds/grid', 'backgrounds/dusk', 'hyperspace/starfield'];
+  /** Each bundled background previewed in the pane, the live page said hello, and a picture of the pane */
+  const backgroundShots = async (scheme) => {
+    await openTab('backgrounds');
+    for (const ref of BACKGROUNDS) {
+      await ev(`window.__oc_debug.looks.preview('backgrounds', ${js(ref)})`);
+      await app.waitFor(`window.__oc_debug.mods.previews().some((p) => p.key === ${js(ref)} && p.hello && p.visible)`, 10_000, `the ${ref} preview`).catch(() => {});
+      await sleep(1600);
+      const g = await ev(BG_GEOMETRY);
+      check(`${scheme}: ${ref} fills the preview, live`, g && g.fills && g.frameFills && !g.covered && (await ev(`window.__oc_debug.mods.previews().some((p) => p.key === ${js(ref)} && p.hello && p.visible)`)), g);
+      await shotOf(`background-${ref.split('/')[1]}-${scheme}`, '.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane');
+    }
+    await ev(`window.__oc_debug.looks.preview('backgrounds', undefined)`);
+    await sleep(600);
+  };
 
   try {
     await ev(`(() => { window.__oc_debug.user('Make the retry backoff configurable.'); window.__oc_debug.renderMarkdown('Sure. The retry loop in \`login.ts\` waits a fixed **3 seconds**; I will take the delay from the options instead.'); })()`);
@@ -89,8 +134,23 @@ function writeMod(root, id, manifest, files) {
     check('Conversation: a sample exchange (bubble, reply with code and a list, a folded tool line, tasks) in the Holo look', (await inPane('conversation', `r.querySelector('#messages')?.dataset.look`)) === 'hyperspace/holo' && (await inPane('conversation', `!!r.querySelector('.msg.user .bubble') && !!r.querySelector('.msg.assistant .md .code-block') && !!r.querySelector('.msg.assistant .md ul') && !!r.querySelector('.tool-group > summary') && r.querySelectorAll('.task-row').length === 3`)));
     await openTab('backgrounds');
     await app.waitFor(`window.__oc_debug.mods.previews().some((p) => p.key === 'hyperspace/starfield' && p.hello && p.visible)`, 10_000, 'the live preview of the Starfield').catch(() => {});
-    check('Background: the live Starfield behind a miniature window, translucent as in the window', (await inPane('backgrounds', `r.querySelector('.lp-root').classList.contains('mod-bg') && /hyperspace\\.html/.test(r.querySelector('.lp-backdrop iframe')?.src || '') && !!r.querySelector('.sidebar .session-item')`)) === true);
+    const bgGeo = await ev(BG_GEOMETRY);
+    check('Background: the live Starfield fills the whole preview, undimmed, around the miniature window', bgGeo && /hyperspace\.html/.test(bgGeo.src) && bgGeo.fills && bgGeo.frameFills && bgGeo.inset > 0.05 && !bgGeo.covered, bgGeo);
+    check('… and shows through the window\'s surfaces at the chosen Dim, as in the window', (await inPane('backgrounds', `r.querySelector('.lp-root').classList.contains('mod-bg') && r.querySelector('.lp-root').style.getPropertyValue('--mod-cover') === '82%' && /\\/ 0\\.82\\)$|, 0\\.82\\)$/.test(getComputedStyle(r.querySelector('.main')).backgroundColor) && !!r.querySelector('.sidebar .session-item')`)) === true, await inPane('backgrounds', `getComputedStyle(r.querySelector('.main')).backgroundColor`));
     check('Background: the Dim slider is under it', await app.evaluate(`!!document.querySelector('.sp-look-tab[data-subtab="backgrounds"] #sp-row-background-dim input[type=range]:not(:disabled)')`));
+    await ev(`(() => { const r = document.querySelector('#sp-row-background-dim input[type=range]'); r.value = '30'; r.dispatchEvent(new Event('input')); })()`);
+    await sleep(300);
+    const dimmed = await inPane('backgrounds', `[r.querySelector('.lp-root').style.getPropertyValue('--mod-cover'), getComputedStyle(r.querySelector('.main')).backgroundColor]`);
+    check('moving Dim changes the preview at once (the window once it is let go)', dimmed[0] === '30%' && /0\.3\)$/.test(dimmed[1]) && (await layout()).backgroundDim === 0.82, dimmed);
+    await shotOf('background-dim-30-light', '.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane');
+    await ev(`(() => { const r = document.querySelector('#sp-row-background-dim input[type=range]'); r.dispatchEvent(new Event('change')); })()`);
+    await app.waitFor(`window.oc.getConfig().then((c) => c.mods.layout.backgroundDim === 0.3)`, 5000, 'Dim saved').catch(() => {});
+    check('… and let go, it is the window\'s Dim', (await layout()).backgroundDim === 0.3 && (await ev(`document.documentElement.style.getPropertyValue('--mod-cover')`)) === '30%');
+    await ev(`(() => { const r = document.querySelector('#sp-row-background-dim input[type=range]'); r.value = '80'; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); })()`);
+    await sleep(500);
+    const cardGeo = await ev(`(() => { const c = document.querySelector('.sp-look-tab[data-subtab="backgrounds"] .sp-look-card[data-ref="hyperspace/starfield"] .lp-stage'); const b = c && c.querySelector(':scope > .lp-stage-backdrop'); const h = c && c.querySelector(':scope > .lp-host'); if (!c || !b || !h) return null; const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect(), hr = h.getBoundingClientRect(); return { frame: !!b.querySelector('iframe'), fills: Math.abs(br.width - cr.width) < 1 && Math.abs(br.height - cr.height) < 1, inset: (hr.left - cr.left) / cr.width }; })()`);
+    check('a background\'s card shows the background itself, undimmed, around a small window', cardGeo && cardGeo.frame && cardGeo.fills && cardGeo.inset > 0.1, cardGeo);
+    await backgroundShots('light');
     await openTab('themes');
     check('Theme: a miniature window in the Paper tokens (sidebar rows, transcript, a card, a confirming button, a switch)', (await paneAccent('themes')) === PAPER && (await inPane('themes', `!!r.querySelector('.sidebar .session-item') && !!r.querySelector('#messages .msg.user') && !!r.querySelector('.mod-offer') && !!r.querySelector('.btn.primary') && !!r.querySelector('input.switch')`)));
     check('the previews take no input and live in their own shadow roots (no #chatbar of theirs in the document)', onlyTheWindowsIds(await ev(`document.querySelectorAll('#chatbar').length + ':' + document.querySelectorAll('#messages').length`)) && (await inPane('themes', `r.querySelector('.lp-root').hasAttribute('inert')`)));
@@ -135,7 +195,7 @@ function writeMod(root, id, manifest, files) {
     await app.waitFor(`document.querySelector('#confirm-dialog').open`, 5000, 'the Use confirmation').catch(() => {});
     const confirmText = await app.text('#confirm-dialog');
     check('its first Use asks: what its pages may do and that it restyles the chat bar', /Use Teal bar\?/.test(confirmText || '') && /Read the session on screen/.test(confirmText || '') && /restyles the chat bar/.test(confirmText || ''), confirmText);
-    await app.screenshotOf(path.join(SHOTS, 'use-confirmation-light.png'), '#confirm-dialog', 16);
+    await shotOf('use-confirmation-light', '#confirm-dialog', 16);
     await app.click('#confirm-cancel');
     await sleep(600);
     check('Cancel leaves the window and the layout as they were', (await ev(`document.querySelector('#chatbar').dataset.look`)) === 'hyperspace/cockpit' && (await layout()).looks.composer === 'hyperspace/cockpit' && (await st('chat-bar')).shown === 'teal-bar/main');
@@ -198,9 +258,9 @@ function writeMod(root, id, manifest, files) {
     await ev(`document.querySelector('.mod-offer[data-mod="dusk-chat"]').scrollIntoView({ block: 'center' })`);
     await ev(`document.activeElement && document.activeElement.blur()`);
     await sleep(400);
-    await app.screenshotOf(path.join(SHOTS, 'chat-card-light.png'), '.mod-offer[data-mod="dusk-chat"]', 16);
+    await shotOf('chat-card-light', '.mod-offer[data-mod="dusk-chat"]', 16);
     await setScheme('dark');
-    await app.screenshotOf(path.join(SHOTS, 'chat-card-dark.png'), '.mod-offer[data-mod="dusk-chat"]', 16);
+    await shotOf('chat-card-dark', '.mod-offer[data-mod="dusk-chat"]', 16);
     await setScheme('light');
     await app.click('.mod-offer[data-mod="dusk-chat"] .mod-offer-preview');
     await sleep(1200);
@@ -215,7 +275,7 @@ function writeMod(root, id, manifest, files) {
     check("the card's Use approves and applies it (the card is the approval)", (await ev(`document.querySelector('#messages').dataset.look`)) === 'dusk-chat/main' && (await ev(`document.querySelector('.mod-offer[data-mod="dusk-chat"]').classList.contains('done')`)) && /in use/i.test((await app.text('.mod-offer[data-mod="dusk-chat"]')) || ''));
 
     // ---------- Dark: each tab, one with another version previewed ----------
-    await rpc('mods.use', { theme: 'theme-paper', conversation: 'hyperspace/holo' });
+    await rpc('mods.use', { theme: 'theme-paper', conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit', background: 'hyperspace/starfield' });
     await setScheme('dark');
     await app.click('#settings-btn');
     await sleep(500);
@@ -223,6 +283,7 @@ function writeMod(root, id, manifest, files) {
       await openTab(tab);
       await shotSettings(`tab-${tab}-dark`);
     }
+    await backgroundShots('dark');
     await openTab('themes');
     await clickCard('themes', 'theme-glass');
     await sleep(600);

@@ -215,13 +215,14 @@ async function launch(opts = {}) {
     /** PNG of the window's page (2x, or the launch's `scale`). `clip` is { x, y, width, height } in CSS pixels. */
     async screenshot(file, clip) {
       let r = await cdp('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) });
-      // In the hidden window, a full-page capture after some changes (seen every time Settings opens or closes) can
+      // In the hidden window, a capture after some changes (seen every time Settings opens or closes) can
       // come back as a stale surface at half the emulated size, repeated 2 × 2. A tiny clipped capture makes the
       // compositor draw a fresh frame at the emulated scale, and the capture after it is whole. Only then: the extra
       // frame re-rasterises the page, which a pixel comparison of two captures would count as change.
-      if (!clip && looksTiled(Buffer.from(r.data, 'base64'))) {
+      // A clipped capture of such a surface shows the same 2 × 2 repeat inside the clip, and gets the same remedy.
+      if (looksTiled(Buffer.from(r.data, 'base64'))) {
         await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } });
-        r = await cdp('Page.captureScreenshot', { format: 'png' });
+        r = await cdp('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) });
       }
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
