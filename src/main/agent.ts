@@ -52,6 +52,7 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
+import { modelMessages } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
@@ -892,7 +893,7 @@ export class Agent {
           reason = 'aborted';
           break;
         }
-        const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages];
+        const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
         this.lastUsage = null;
         let reply: { text: string; toolCalls: ToolCall[] };
         try {
@@ -906,7 +907,7 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
-          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages], activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn);
         }
         const { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
@@ -1187,6 +1188,11 @@ export class Agent {
     }
     this.emitContext();
     return r.saved;
+  }
+
+  /** The stored conversation as the model is sent it (agent/context-view.ts): long output cut, old screenshots left out. */
+  private modelView(): Msg[] {
+    return modelMessages(this.session.messages);
   }
 
   /**
