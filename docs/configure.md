@@ -236,6 +236,28 @@ The `browser` block is what Settings → Browser edits.
 
 **A project's settings.json may not set `alwaysAllowed` or `exempt`**: they decide where the agent acts without asking you, which a repository must not choose. They are ignored there with a problem line; add sites in Settings → Browser or in your own settings.json. The rest of the block applies from a trusted project's file. The saved permission answers, the zoom per site and the downloads list are the browser's own files in the data folder, not settings.
 
+### Auto mode
+
+The `autoMode` block tells Auto mode's safety check about your setup (see [Auto mode](reference.md#auto-mode)).
+
+| Field | Default | What it is |
+| --- | --- | --- |
+| `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
+| `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
+| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: the session's own model. |
+
+```json
+{
+  "autoMode": {
+    "environment": "aisolutions-dev is a dev AWS account; the staging cluster is disposable.",
+    "allow": ["Deploys to staging", "terraform apply in infra/dev"],
+    "model": "openrouter:anthropic/claude-haiku-4.5"
+  }
+}
+```
+
+**Only your own settings.json may set `autoMode`.** A project's file may not, since a repository could otherwise allow its own actions or send your conversation to a model of its choosing; it is ignored there with a problem line.
+
 ### The other settings
 
 `permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.

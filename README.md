@@ -63,7 +63,7 @@ npm install && npm start
 | <img src="docs/screenshots/images.png" width="400"> | **Images in replies.** The model shows a screenshot or a chart inline; tool rows carry thumbnails. |
 | <img src="docs/screenshots/settings.png" width="400"> | **Settings.** One control per row, applied as you change it, searchable; a Mods section with permissions in plain words. |
 | <img src="docs/screenshots/remote.png" width="220"> | **Remote control.** Follow a session and answer its approval cards from your phone. Off until you turn it on. |
-| <img src="docs/screenshots/approval.png" width="400"> | **Approvals.** Enter allows, `a` for the session, `p` for the project. Auto mode pauses only on risky actions. |
+| <img src="docs/screenshots/approval.png" width="400"> | **Approvals.** Enter allows, `a` for the session, `p` for the project. Auto mode blocks only risky actions, with a reason. |
 | <img src="docs/screenshots/dreaming.png" width="400"> | **Dreaming.** Once a day, or when you ask, a dream reads your recent sessions and suggests skills, memory lines and mods, each quoting your words and linking the sessions it came from. You apply or dismiss each one, and can revert what you applied. |
 
 Also: scheduled tasks, plan mode, rewind, artifacts, skills, MCP servers, compaction, a history log with a trash, vision models, macOS notifications, keep-awake. Details, keys and tools: [docs/reference.md](docs/reference.md). What changed: [CHANGELOG.md](CHANGELOG.md).

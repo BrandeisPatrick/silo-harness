@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+Auto mode asks a safety-check model about risky actions instead of stopping on a card, and a blocked action is a reason the agent reads.
+
+### New
+
+- **Allow a blocked action.** "Allow" on the line, on the phone or in "Recently blocked" in Settings → Permissions runs it once when the agent tries again.
+
+### Improved
+
+- **Auto mode's safety check.** A second model call decides what the rules do not, so read-only commands like `aws sts get-caller-identity` run without a card.
+- **Blocks the agent reads.** A blocked action is one quiet line, "Auto mode blocked … · Allow", and the agent gets the reason and carries on.
+- **Pauses after repeated blocks.** After 3 blocks in a row or 20 in a session, Auto mode pauses and actions ask again.
+
+### Security
+
+- **Fails closed.** An error, a timeout or an unclear answer from the check blocks the action; with no model to run it, risky actions ask.
+- **Always asks.** `sudo`, and deleting the home folder, `/`, the working directory or a system folder, ask even in Auto mode.
+- **Your rules only.** A project's settings.json may not set `autoMode`, so a repository cannot widen what the check allows.
+
+### For developers
+
+- **Auto mode settings.** `autoMode.environment`, `autoMode.allow` and `autoMode.model` describe your setup to the check, add allow rules and choose its model ([configure.md](docs/configure.md#auto-mode)).
+- **Block events.** The agent emits `auto_blocked` and `auto_allowed`, and a blocked call is an `auto_blocked` transcript item.
+
 ## 0.11.1 — 2026-11-09
 
 Fixes tool results being shown with the wrong tool call when using Ollama models.
