@@ -251,6 +251,10 @@ function fakeBrowser(page) {
   check('3: a search phrase is a visit to the search engine', r.cards.length === 1 && r.card.browser.site === 'duckduckgo.com', r.card);
   r = await step('browser_tabs', { action: 'new', url: 'https://tabs.example/' }, [DENY]);
   check('3: browser_tabs new asks for where it goes', r.cards.length === 1 && r.card.browser.site === 'tabs.example' && r.card.detail === 'Open a new tab at tabs.example', r.card);
+  page.url = 'https://unasked.example/';
+  r = await step('browser_tabs', { action: 'list' }, [DENY]);
+  check('3: listing the tabs on a site never allowed asks nothing', r.cards.length === 0 && !/Not permitted/.test(r.result ?? ''), r);
+  page.url = 'about:blank';
 
   // ---------- 4. browser_eval ----------
   page.url = 'https://example.com/';

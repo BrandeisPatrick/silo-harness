@@ -108,6 +108,8 @@ async function credentialCheck(name: string, args: Record<string, unknown>, ctx:
  * go on; otherwise the message the model reads.
  */
 async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<string | null> {
+  // Listing, switching and closing tabs read nothing of a page: the next call on the tab in front is checked as usual.
+  if (name === 'browser_tabs' && args.action !== 'new') return null;
   const action = actionOf(name, args);
   const settings = lists(ctx);
   let url = activeUrl(ctx);
