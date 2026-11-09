@@ -2,20 +2,14 @@
 // list the tabs, interrupt a command. Like Claude Code's terminal tools, this is for work the user should
 // be able to watch or take over (servers, watchers, a tab they are already using); bash stays the default.
 
-import os from 'node:os';
 import type { TerminalTabInfo } from '../../shared/types';
-import { describeTabs, type TerminalManager } from '../terminal';
+import { describeTabs, tilde, type TerminalManager } from '../terminal';
 import type { Tool } from './types';
 import { truncate } from './types';
 
 const MAX_TIMEOUT = 120_000;
 const DEFAULT_LINES = 100;
 const MAX_LINES = 2000;
-
-function tilde(p: string): string {
-  const home = os.homedir();
-  return p.startsWith(home) ? '~' + p.slice(home.length) : p;
-}
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   const n = Number(value);
