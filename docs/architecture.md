@@ -15,6 +15,10 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
 context-window.ts  contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports them)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)
+browser.ts     BrowserController: the Browser pane's view and what the browser_* tools do in it
+browser-safety.ts       credential fields (credentialKind) and their redaction; the script prelude that runs in the page's
+                        own isolated world (SAFETY_WORLD), out of reach of the page and of browser_eval
+browser-permissions.ts  the permission handlers on the pane's session: the app's window as before, the pane asks
 ```
 
 Feature setups, in this order, before the window opens: `setupSettings` (settings-service.ts), `setupHistory` (history.ts),
@@ -125,6 +129,10 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 - `ToolContext` adds `sessionId`, `app?`, `foreground()`, and `approve(name, detail, target?, { custom?, alwaysAsk? })`:
   a custom approval is refused in plan mode, asks in ask/acceptEdits/auto, runs in bypass unless `alwaysAsk`; its
   card has only Allow and Deny (`alwaysLabel`/`projectLabel` are '').
+- A tool whose arguments can hold a secret has `shownArgs(args, ctx)`: asked before the assistant message is stored, it
+  gives the arguments the transcript, the tool row and hooks get (browser_type's text into a password field is
+  `•••`); the call runs on the real ones. A call that finds a secret only while it runs returns `hiddenArgs`, and the
+  stored call is hidden then (the history log's copy of the message, written before, keeps the text).
 - `SessionStore.append(s, msg)`, `truncate(s, length)`, `replaceAll(s, msgs, reason)` are the only writes to
   `session.messages`. `onMutation(cb: (session, op: SessionMutation) => void)` also reports `save`, `create`,
   `fork { from, seedLength }`, `rename { title }` and `delete` (before the file goes). Compaction uses reason 'compaction'.
