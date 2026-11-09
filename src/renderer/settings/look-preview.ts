@@ -35,9 +35,12 @@ export interface PreviewState {
   settings?: Record<string, unknown>;
   /** The permission mode the sample shows (data-mode) */
   mode?: string;
-  /** Background: what is behind the miniature window (a picture's URL, a live view's element, or nothing) */
+  /**
+   * Background: the background itself (a picture's URL, a live view's element, or nothing). It fills the whole stage,
+   * undimmed, behind and around the miniature window, and shows through the window's surfaces at `dim`.
+   */
   backdrop?: { image?: string; view?: HTMLElement | null } | null;
-  /** Background: how much the surfaces cover what is behind them (0 to 1) */
+  /** Background: how much the miniature window's surfaces cover what is behind them (0 to 1), as Dim does in the window */
   dim?: number;
 }
 
@@ -47,6 +50,8 @@ export interface LookPreview {
   /** The shadow root (open, for the live checks) */
   root: ShadowRoot;
   set(state: PreviewState): void;
+  /** Background: Dim as the slider moves, before it is saved */
+  setDim(dim: number): void;
   dispose(): void;
 }
 
@@ -100,12 +105,13 @@ function own(): CSSStyleSheet {
   if (ownSheet) return ownSheet;
   ownSheet = new CSSStyleSheet();
   ownSheet.replaceSync(`
-:host { display: block; position: absolute; inset: 0; overflow: hidden; }
+:host { display: block; position: absolute; inset: 0; overflow: visible; }
 .lp-root { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; pointer-events: none; user-select: none; }
 .lp-root, .lp-root * { transition: none !important; }
 .lp-body { position: relative; z-index: 1; width: 100%; height: 100%; overflow: hidden; }
-.lp-backdrop { position: absolute; inset: 0; z-index: 0; background-position: center; background-size: cover; background-repeat: no-repeat; }
-.lp-root.mod-bg > .lp-body { background: transparent !important; }
+.lp-root.mod-bg, .lp-root.mod-bg > .lp-body { background: transparent !important; }
+/* Background: a window floating over the background, which shows around it and through its surfaces */
+.lp-root.lp-background { border-radius: 16px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 24px 64px rgba(0, 0, 0, 0.32); }
 .lp-root .shell { height: 100%; }
 .lp-root .sidebar { --sidebar-w: 236px; }
 .lp-root .session-list { padding: 8px 8px 0; }
@@ -256,6 +262,13 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
   el.style.aspectRatio = `${size.w} / ${size.h}`;
   el.setAttribute('role', 'img');
   if (opts.label) el.setAttribute('aria-label', opts.label);
+  // Background: the background fills the stage (in the page, behind the shadow root's host), the window is inset in it
+  const backdrop = document.createElement('div');
+  backdrop.className = 'lp-stage-backdrop';
+  if (kind === 'background') {
+    el.classList.add('lp-stage-bg');
+    el.append(backdrop);
+  }
   const hostEl = document.createElement('div');
   hostEl.className = 'lp-host';
   el.append(hostEl);
@@ -266,13 +279,10 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
   lpRoot.style.height = `${size.h}px`;
   lpRoot.setAttribute('inert', '');
   lpRoot.setAttribute('aria-hidden', 'true');
-  const backdrop = document.createElement('div');
-  backdrop.className = 'lp-backdrop';
-  backdrop.hidden = true;
   const body = document.createElement('div');
   body.className = 'lp-body';
   body.innerHTML = sampleHtml(kind);
-  lpRoot.append(backdrop, body);
+  lpRoot.append(body);
   root.append(lpRoot);
   mirrorScheme(lpRoot);
 
@@ -280,12 +290,12 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
   const region = () => (kind === 'composer' || kind === 'conversation' ? body.querySelector<HTMLElement>(kind === 'composer' ? '#chatbar' : '#messages') : null);
 
   const fit = () => {
-    const w = el.clientWidth;
+    const w = hostEl.clientWidth;
     if (!w) return;
     lpRoot.style.transform = `scale(${w / size.w})`;
   };
   const ro = new ResizeObserver(fit);
-  ro.observe(el);
+  ro.observe(hostEl);
   const mo = new MutationObserver(() => {
     mirrorScheme(lpRoot);
     paintAttrs();
@@ -303,13 +313,16 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
     for (const [n, v] of Object.entries(lookAttributes({ ref: state.lookRef, running: false, scheme: schemeNow(), mode: state.mode ?? 'ask', settings: state.settings ?? {} }))) r.setAttribute(n, v);
   }
 
+  function setCover(dim: number): void {
+    lpRoot.style.setProperty('--mod-cover', `${Math.round(Math.min(1, Math.max(0, dim)) * 100)}%`);
+  }
+
   function setBackdrop(): void {
     const b = state.backdrop;
     const on = kind === 'background' && !!b && (!!b.image || !!b.view);
     lpRoot.classList.toggle('mod-bg', on);
-    if (on) lpRoot.style.setProperty('--mod-cover', `${Math.round(Math.min(1, Math.max(0, state.dim ?? 0.82)) * 100)}%`);
+    if (on) setCover(state.dim ?? 0.82);
     else lpRoot.style.removeProperty('--mod-cover');
-    backdrop.hidden = !on;
     backdrop.style.backgroundImage = on && b!.image ? `url("${b!.image.replace(/"/g, '%22')}")` : '';
     const view = on ? (b!.view ?? null) : null;
     if (view && view.parentNode !== backdrop) backdrop.replaceChildren(view);
@@ -325,6 +338,10 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
       paintAttrs();
       setBackdrop();
       fit();
+    },
+    setDim(dim) {
+      state = { ...state, dim };
+      if (lpRoot.classList.contains('mod-bg')) setCover(dim);
     },
     dispose() {
       ro.disconnect();

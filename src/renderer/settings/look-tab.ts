@@ -52,6 +52,8 @@ export interface LookTab {
   shown(on: boolean): void;
   /** Settings closed */
   closed(): void;
+  /** Background: Dim as its slider moves, shown in the preview before it is saved */
+  dim(value: number): void;
   /** For __oc_debug.settings.looks() */
   state(): { kind: LookKind; current: string | null; shown: string | null; previewing: boolean; versions: (string | null)[]; ready: boolean };
 }
@@ -405,6 +407,9 @@ export function lookTab(d: LookTabDeps): LookTab {
     closed() {
       previewRef = undefined;
       this.shown(false);
+    },
+    dim(value) {
+      big.setDim(value);
     },
     state: () => ({
       kind,

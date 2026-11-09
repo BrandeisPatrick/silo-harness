@@ -251,6 +251,14 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 /* The preview: a stage that keeps its proportions; what it draws lives in a shadow root (look-preview.ts) */
 .lp-stage { position: relative; width: 100%; overflow: hidden; contain: paint; isolation: isolate; border: 1px solid var(--border-subtle); border-radius: var(--r-card-lg); background: var(--bg-100); }
 .lp-host { position: absolute; inset: 0; }
+/* Background: the background fills the stage undimmed, and the miniature window floats inset in it (on a card, with
+   more of the background around it); through the window's surfaces it shows at the chosen Dim, as in the window */
+.lp-stage-bg { background: var(--bg-200); }
+.lp-stage-bg > .lp-stage-backdrop { position: absolute; inset: 0; background-position: center; background-size: cover; background-repeat: no-repeat; }
+.lp-stage-bg > .lp-host { inset: 7%; }
+.lp-stage-bg.lp-stage-card > .lp-host { inset: 16%; }
+.sp-look-tab[data-kind="background"] .sp-look-pane { padding: 0; background: none; }
+.sp-look-tab[data-kind="background"] .sp-look-pane .lp-stage { max-width: none; box-shadow: none; }
 .sp-look-pane { display: flex; justify-content: center; margin: 16px 0 0; padding: 24px; border-radius: var(--r-card-lg); background: var(--bg-200); }
 .sp-look-pane .lp-stage { max-width: 600px; box-shadow: var(--shadow-pop); }
 .sp-look-tab[data-kind="composer"] .sp-look-pane .lp-stage { max-width: none; }

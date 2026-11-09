@@ -294,7 +294,11 @@ export function modsSection(ctx: Ctx): Section {
   let lastImage: string | null = null;
   const dim = h('input', { type: 'range', min: '0', max: '100', step: '5', class: 'sp-range' });
   const dimValue = h('span', { class: 'sp-range-value' });
-  dim.addEventListener('input', () => (dimValue.textContent = `${dim.value}%`));
+  // The preview follows the slider as it moves; the window, once it is let go (change)
+  dim.addEventListener('input', () => {
+    dimValue.textContent = `${dim.value}%`;
+    lookTabs.get('backgrounds')?.dim(Number(dim.value) / 100);
+  });
   dim.addEventListener('change', async () => {
     try {
       await ctx.call('mods.setLayout', { backgroundDim: Number(dim.value) / 100 });
