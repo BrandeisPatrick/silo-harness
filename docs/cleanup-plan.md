@@ -143,3 +143,16 @@ save a line each; low value, done last if there is time.
 - `src/shared` stays types only (see above).
 - Casts (`as unknown as`) over `window` and DOM globals, where the shape really is unknown to the compiler.
 - Anything whose behaviour-neutrality is in doubt is left and listed in the report instead.
+
+## What was done (status at the end of the pass)
+
+Done as planned: the main-process dedups (`json.ts`, `tilde`, the `Msg`/`ToolCall`/`ToolSpec`/`Disposer` aliases),
+the dead exports (except `src/shared/mods.ts`'s three RPC types, which document the mod protocol's wire shape and
+stay), `context-window.ts`, the `agent/` split (prompt, complete, permissions, errors), and the renderer modules
+`shortcuts`, `slash-menu`, `confirm`, `side-pane`, `connection`, `tool-groups`, `approvals`, `transcript`,
+`status-line`, `sessions-view` and `header`. `renderer.ts` went from 4486 to 2265 lines, `agent.ts` from 1701 to 1396.
+
+Left for a follow-up, in the composition root for now: the composer wiring (`composer-view.ts` in the plan: the @
+picker, autosize, history, key handling, attachments, the vision note, the lightbox, sending with the "#" line and the
+local commands, registered commands), rewind, `handleEvent` and the keyboard shortcuts, the MCP and rules panel
+wiring. Also not done: the `ArtifactStore` test helper.
