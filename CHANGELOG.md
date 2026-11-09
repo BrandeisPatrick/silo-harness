@@ -1,18 +1,29 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 — 2026-11-09
 
-Auto mode asks a safety-check model about risky actions instead of stopping on a card, and a blocked action is a reason the agent reads.
+Auto mode now works like Claude Code's, the app says much less, and sessions work in a Silo folder in Documents by default.
+
+### Highlights
+
+- **Auto mode with a safety check.** A second model decides what the rules do not, so read-only commands like `aws sts get-caller-identity` run without a card.
+- **Less text everywhere.** Settings, pages, cards and notices keep a label and at most one short line.
 
 ### New
 
+- **A Silo folder.** Sessions work in `~/Documents/Silo` by default; the app makes it if it is missing.
+- **Choose a folder.** The welcome screen shows the folder's path and a menu of the Silo folder, recent folders and any other.
 - **Allow a blocked action.** "Allow" on the line, on the phone or in "Recently blocked" in Settings → Permissions runs it once when the agent tries again.
 
 ### Improved
 
-- **Auto mode's safety check.** A second model call decides what the rules do not, so read-only commands like `aws sts get-caller-identity` run without a card.
 - **Blocks the agent reads.** A blocked action is one quiet line, "Auto mode blocked … · Allow", and the agent gets the reason and carries on.
 - **Pauses after repeated blocks.** After 3 blocks in a row or 20 in a session, Auto mode pauses and actions ask again.
+- **A quieter welcome screen.** The paragraph and the suggested prompts are gone.
+
+### Fixed
+
+- **Typing a question mark.** `?` in an empty chat box types instead of opening the shortcuts, which stay on ⌘/.
 
 ### Security
 
