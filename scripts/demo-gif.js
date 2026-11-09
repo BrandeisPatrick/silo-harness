@@ -210,7 +210,7 @@ function scriptMod(mock) {
   main({ delayMs: 700, promptTokens: 11900, toolCalls: [F.call('write_file', { path: '.silo-harness/mods/test-runs/panel.html', content: PANEL_HTML })] });
   // The manifest last, and checked straight away: the card that offers to turn the mod on follows the check
   main({ delayMs: 700, promptTokens: 12600, toolCalls: [F.call('write_file', { path: '.silo-harness/mods/test-runs/mod.json', content: MOD_JSON }), F.call('mod_check', { id: 'test-runs' })] });
-  main({ ...say('**Test runs** checks out clean. Turn it on from the card above and it sits at the top of the rail, updating after every test run.'), delayMs: 800, promptTokens: 13100 });
+  main({ ...say('**Test runs** checks out clean. Once it is on, it sits at the top of the rail and updates after every test run.'), delayMs: 800, promptTokens: 13100 });
 }
 
 // ---------- the recording ----------
