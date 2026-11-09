@@ -389,7 +389,7 @@ function rig(opts = {}) {
   const { h, svc } = r;
   check('timer checks about every 15 s', r.tickMs() === 15_000, r.tickMs());
   check('service provided as schedules', h.services.schedules === svc);
-  for (const m of ['schedules.list', 'schedules.create', 'schedules.update', 'schedules.remove', 'schedules.runNow']) check(`rpc ${m} registered`, typeof h.rpc[m] === 'function');
+  for (const m of ['schedules.list', 'schedules.create', 'schedules.update', 'schedules.remove', 'schedules.runNow', 'schedules.preview', 'schedules.chooseFolder']) check(`rpc ${m} registered`, typeof h.rpc[m] === 'function');
 
   const pushesBefore = h.pushed('schedules:changed').length;
   const s = h.rpc['schedules.create']({ name: 'Triage', prompt: 'Summarise new issues.', when: { kind: 'every', minutes: 30 }, cwd: '/proj' });
@@ -435,6 +435,12 @@ function rig(opts = {}) {
   check('run_end error -> error', svc.list()[0].lastStatus === 'error' && svc.list()[0].runs === 3);
   h.end('s3', 'done');
   check('a run_end not for a schedule run changes nothing', svc.list()[0].lastStatus === 'error');
+  const hist = svc.list()[0].history;
+  check('history: one entry per run, oldest first, with its session and how it ended', Array.isArray(hist) && hist.map((x) => `${x.sessionId}:${x.status}`).join() === 's1:ok,s2:stopped,s3:error' && hist.every((x) => !x.continued && typeof x.at === 'number'), hist);
+  hist[0].status = 'tampered';
+  check('history: the list hands out copies', svc.list()[0].history[0].status === 'ok');
+  check('rpc schedules.preview describes a rhythm and its first run, storing nothing', (() => { const p = h.rpc['schedules.preview']({ kind: 'cron', expr: '0 9 * * 1-5' }); return p.describe === 'weekdays at 09:00' && typeof p.nextRunAt === 'number' && svc.list().length === 1; })());
+  check('rpc schedules.preview refuses a bad rhythm', errCode(() => h.rpc['schedules.preview']({ kind: 'every', minutes: 2 })) === 'frequency_too_high');
 
   // A run whose end was never heard does not block the schedule forever
   r.advance(30 * MIN);
@@ -455,6 +461,7 @@ function rig(opts = {}) {
   check('one-shot disables itself and stays listed', oneNow && oneNow.enabled === false && oneNow.nextRunAt === null && oneNow.runs === 1);
   h.end('chat', 'done');
   check('queued run ends with the session run: ok', svc.get(one.id).lastStatus === 'ok');
+  check('history: a run into an existing session is marked continued', JSON.stringify(svc.get(one.id).history.map((x) => [x.sessionId, x.status, x.continued])) === JSON.stringify([['chat', 'ok', true]]));
   r.advance(DAY);
   check('a fired one-shot never fires again', svc.get(one.id).runs === 1);
 
@@ -547,7 +554,7 @@ function rig(opts = {}) {
     mk('twoday', { kind: 'every', minutes: 2880 }, T0 - 30 * HOUR + HOUR), // newest missed 30 h before start
     mk('soon', { kind: 'at', at: iso(T0 - HOUR) }, T0 - HOUR, { target: 'session', sessionId: 'chat' }),
     mk('stale', { kind: 'at', at: iso(T0 - 30 * HOUR) }, T0 - 30 * HOUR),
-    mk('wasRunning', { kind: 'every', minutes: 60 }, T0 + 2 * HOUR, { lastStatus: 'running' }),
+    mk('wasRunning', { kind: 'every', minutes: 60 }, T0 + 2 * HOUR, { lastStatus: 'running', history: [{ at: T0 - HOUR, sessionId: 'x1', status: 'ok' }, { at: T0, sessionId: 'x2', status: 'running' }] }),
     mk('disabled', { kind: 'every', minutes: 60 }, null, { enabled: false }),
   ]);
   const h = fakeApp(dir);
@@ -565,6 +572,7 @@ function rig(opts = {}) {
   check('one-shot missed by 2 h: runs, then disabled', sentTo('soon') === 1 && by('soon').enabled === false && by('soon').nextRunAt === null && h.sent.find((m) => m.opts.from === 'soon').id === 'chat');
   check('one-shot missed by 30 h: missed and disabled', sentTo('stale') === 0 && by('stale').lastStatus === 'missed' && by('stale').enabled === false && by('stale').nextRunAt === null);
   check('a run the app quit during is marked stopped', by('wasRunning').lastStatus === 'stopped' && sentTo('wasRunning') === 0);
+  check('… and so is its entry in the history', by('wasRunning').history.map((x) => x.status).join() === 'ok,stopped');
   check('disabled stays quiet', sentTo('disabled') === 0);
   tickFn();
   tickFn();

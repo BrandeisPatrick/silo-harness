@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { App, Disposer } from '../app';
 import type { HistoryService } from '../services';
-import type { Dream, DreamingConfig, DreamingState, DreamMode, DreamProposal, DreamTrigger, ProposalKind } from '../../shared/dreaming';
+import type { Dream, DreamingConfig, DreamingState, DreamMode, DreamProject, DreamProposal, DreamTrigger, ProposalKind } from '../../shared/dreaming';
 import { DEFAULT_DREAMING } from './names';
 import type { AgentEvent, AppConfig, PlanInfo } from '../../shared/types';
 import { contextLimit } from '../agent';
@@ -253,6 +253,24 @@ export class Dreaming {
     return ordered.filter((cwd) => this.projectSessions(cwd).length > 0).slice(0, MAX_PROJECTS);
   }
 
+  /** Every project folder with sessions (not dreams), most recently active first: for the Dreaming page. */
+  projectList(): DreamProject[] {
+    const by = new Map<string, { fresh: number; lastActivity: number }>();
+    for (const s of this.candidates()) {
+      const cwd = s.cwd!;
+      const e = by.get(cwd) ?? { fresh: 0, lastActivity: 0 };
+      if (s.updatedAt > (this.data.cursors[cwd] ?? 0)) e.fresh++;
+      e.lastActivity = Math.max(e.lastActivity, s.updatedAt);
+      by.set(cwd, e);
+    }
+    const next = new Set(this.projects());
+    return [...by.entries()]
+      .filter(([cwd]) => isDir(cwd))
+      .sort((a, b) => b[1].lastActivity - a[1].lastActivity)
+      .slice(0, 40)
+      .map(([cwd, e]) => ({ cwd, fresh: e.fresh, lastActivity: e.lastActivity, next: next.has(cwd) }));
+  }
+
   existing(cwd: string): ExistingThings {
     const r = this.roots(cwd);
     const skills = loadSkills(cwd, this.app.appRoot).map((s) => ({ name: s.name, description: s.description, source: s.source }));
@@ -374,6 +392,8 @@ export class Dreaming {
     const first = dream.status === 'running';
     if (first) {
       dream.endedAt = this.now();
+      const report = typeof ev.text === 'string' ? ev.text.replace(/\s+/g, ' ').trim() : '';
+      if (report) dream.summary = report.length > 400 ? `${report.slice(0, 399)}…` : report;
       if (ev.reason === 'aborted') dream.status = 'stopped';
       else if (ev.reason === 'error') {
         dream.status = 'failed';

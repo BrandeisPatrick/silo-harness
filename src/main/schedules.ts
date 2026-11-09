@@ -28,6 +28,16 @@ export function setupSchedules(app: App, opts: SchedulerOptions = {}): Scheduler
     return svc.list();
   });
   app.rpc.handle('schedules.runNow', (id) => svc.runNow(id));
+  app.rpc.handle('schedules.preview', (when) => svc.preview(when));
+  app.rpc.handle('schedules.chooseFolder', async (defaultPath) => {
+    const win = app.window();
+    if (!win) return null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { dialog } = require('electron') as typeof import('electron');
+    const start = typeof defaultPath === 'string' && defaultPath ? defaultPath : app.config().workingDirectory;
+    const res = await dialog.showOpenDialog(win, { title: 'The folder the task works in', properties: ['openDirectory', 'createDirectory'], defaultPath: start });
+    return res.canceled || !res.filePaths[0] ? null : res.filePaths[0];
+  });
 
   for (const tool of scheduleTools(svc, now)) app.tools.register({ ...tool, optional: true });
   app.prompt.add('schedules', () => PROMPT_SECTION, { optional: true });

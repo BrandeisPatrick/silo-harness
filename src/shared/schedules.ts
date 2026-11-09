@@ -7,6 +7,19 @@
  */
 export type ScheduleWhen = { kind: 'at'; at: string } | { kind: 'every'; minutes: number } | { kind: 'cron'; expr: string };
 
+/** One run of a schedule: the session it created or continued, and how it went. */
+export interface ScheduleRun {
+  /** Unix ms when it fired */
+  at: number;
+  sessionId: string;
+  /** running; ok (it ended); error (it failed, or could not start); stopped (by the user, or the app closed during it) */
+  status: 'running' | 'ok' | 'error' | 'stopped';
+  /** It went into a session that existed already (target 'session') instead of a new one */
+  continued?: boolean;
+  /** Why it could not start */
+  error?: string;
+}
+
 export interface Schedule {
   id: string;
   name: string;
@@ -31,6 +44,8 @@ export interface Schedule {
   /** The session of the last run */
   lastSessionId?: string;
   runs: number;
+  /** The runs that went to a session, oldest first (the last MAX_HISTORY); schedules from before 0.9 have none */
+  history?: ScheduleRun[];
   /** "every 30 minutes", "weekdays at 09:00", "once on Nov 6 at 09:00" */
   describe: string;
 }
@@ -56,6 +71,10 @@ export interface SchedulesRpc {
   'schedules.remove': (id: string) => Schedule[];
   /** Fires it now, whatever its time */
   'schedules.runNow': (id: string) => Schedule;
+  /** A rhythm checked and described, and its first run from now; nothing is stored (the New task form's preview) */
+  'schedules.preview': (when: ScheduleWhen) => { when: ScheduleWhen; describe: string; nextRunAt: number | null };
+  /** The folder picker for a task's folder; null when cancelled. Unlike the top bar's, it leaves the working directory alone. */
+  'schedules.chooseFolder': (defaultPath?: string) => string | null;
 }
 
 export interface SchedulesEvents {
