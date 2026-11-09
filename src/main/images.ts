@@ -23,9 +23,7 @@ export function setupImages(app: App): void {
   app.tools.register(showImageTool(app));
   app.prompt.add(
     'images',
-    () =>
-      'To show the user an image (a screenshot you took, a chart or diagram you generated, a picture in the project), call show_image with its path. ' +
-      'The image appears inline in your reply at that point, so write the text around it as usual. Use it when seeing is faster than reading, not for decoration.',
+    () => 'To show the user an image inline in your reply, call show_image with its path.',
   );
 
   const service: ImagesService = {

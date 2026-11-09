@@ -12,9 +12,8 @@ export type { SubagentsOptions } from './subagents/service';
 
 const PROMPT_SECTION = [
   '## Sub-sessions',
-  'You can start sub-sessions with session_spawn: real sessions in the same folder that run in the background, side by side with this one. They fit independent pieces of work that can run in parallel, or a side investigation that would otherwise fill this conversation; a small step you can do right away is quicker done yourself.',
-  'A sub-session knows nothing of this conversation: its prompt is its whole brief. Make it self-contained: the goal, the files or area, what done looks like, and what to report.',
-  'Each one reports here by itself when it finishes a turn, so do not poll it; end your turn if there is nothing else to do meanwhile. session_read shows what it did, session_send answers or steers it, session_list shows related sessions. Merge a finished one with session_merge before you use its result.',
+  'session_spawn starts a sub-session: a real session in the same folder that works in the background, for independent work that can run in parallel or a side investigation that would fill this conversation; a small step is quicker done yourself.',
+  'Each one reports here by itself when it finishes a turn, so do not poll it; end your turn if there is nothing else to do meanwhile. Merge a finished one with session_merge before you use its result.',
   'The user may name any other session by its name ("the session called deploy fix"): session_send and session_read take a name as well as an id, and session_list with a query finds it among all sessions. session_rename renames this session when the user asks.',
 ].join('\n');
 

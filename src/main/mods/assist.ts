@@ -127,7 +127,7 @@ export function modCheckTool(registry: ModRegistry, layout?: () => Partial<ModLa
 export function modsPrompt(list: ModInfo[]): string {
   const named = list.filter((m) => m.manifest).slice(0, 30).map((m) => `${m.id} (${m.scope}, ${m.state})`);
   return [
-    'Mods: the user can extend Silo Harness with mods, folders of web pages (mod.json plus HTML) that add a panel in the right rail, a side-pane tab, a strip above the composer, a background, a theme, a look for the conversation or the chat bar, or slash commands.',
+    'Mods: the user can extend Silo Harness with mods (folders with a mod.json and HTML: panels, tabs, themes, slash commands and more).',
     'Before writing or changing a mod, load the create-mod skill with the skill tool, and check every change with the mod_check tool.',
     `Installed mods: ${named.length ? named.join(', ') : 'none'}.`,
   ].join('\n');

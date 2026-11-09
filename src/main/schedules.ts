@@ -9,8 +9,7 @@ export type { Scheduler, SchedulerOptions } from './schedules/service';
 
 const PROMPT_SECTION = [
   '## Schedules',
-  'You can schedule a prompt to run later or regularly (once, every N minutes, or on a cron rhythm) with schedule_create; schedule_list, schedule_update and schedule_delete manage them.',
-  'The user approves every schedule you create. Runs only happen while the app is open; they work in the folder the schedule was made in, under the usual permission mode and rules.',
+  'schedule_create runs a prompt later or regularly while the app is open; the user approves every schedule. Runs work in the folder the schedule was made in, under the usual permission mode and rules.',
 ].join('\n');
 
 /** `opts` is for tests: an injected clock, timer and store. Returns the scheduler (also provided as 'schedules'). */
