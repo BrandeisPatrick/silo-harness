@@ -23,9 +23,14 @@ export interface ToolGroupsDeps {
   endAssistant(): void;
   finishThinking(): void;
   scrollToBottom(): void;
+  /**
+   * A call drawn as a line of its own rather than a tool row (session_send: "Messaged …", session-messages.ts), or
+   * null. Its element is not a .tool, so it never folds into a run of calls; the approval card attaches to it as usual.
+   */
+  ownRow?(name: string, args: unknown): ToolCard | null;
 }
 
-export function createToolGroups({ messages: messagesEl, config, running, addNode, endAssistant, finishThinking, scrollToBottom }: ToolGroupsDeps) {
+export function createToolGroups({ messages: messagesEl, config, running, addNode, endAssistant, finishThinking, scrollToBottom, ownRow }: ToolGroupsDeps) {
   /** The rows of the calls in flight, by call id */
   const toolCards = new Map<string, ToolCard>();
   let lastToolCard: ToolCard | null = null;
@@ -197,7 +202,7 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
   function addToolCard(name: string, args: unknown, id?: string): ToolCard {
     endAssistant();
     finishThinking();
-    const card = createToolCard(name, args);
+    const card = ownRow?.(name, args) ?? createToolCard(name, args);
     if (id) toolCards.set(id, card);
     cardByEl.set(card.el, card);
     lastToolCard = card;

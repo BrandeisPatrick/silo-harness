@@ -34,6 +34,7 @@ const SCRIPTS = [
   { name: 'carry-over', shots: 'none' },
   { name: 'compaction', needsApi: true },
   { name: 'subagents' },
+  { name: 'session-messages' },
   { name: 'names' },
   { name: 'tool-rows' },
   { name: 'quiet' },
@@ -59,6 +60,7 @@ const SCRIPTS = [
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
   { name: 'browser-polish' },
+  { name: 'chat-cards' },
 ];
 
 const words = process.argv.slice(2);

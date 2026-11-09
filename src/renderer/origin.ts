@@ -7,14 +7,17 @@
 import type { MessageOrigin } from '../shared/types.js';
 
 export interface Unframed {
-  /** What the bubble shows */
+  /** What the bubble (or the row, opened) shows */
   text: string;
   /** What the frame said about the sender, for the label ("finished a turn", "it was stopped") */
   note?: string;
+  /** The sending session's title as the frame gave it (a message or a report), for a sender that is gone since */
+  sender?: string;
 }
 
-const REPORT = /^\[Sub-session "[\s\S]*?" \([\w-]+\) finished a turn: ([^\]\n]+)\]\n([\s\S]*?)\n\nNext: read more with session_read[^\n]*$/;
-const MESSAGE = /^\[Message from (?:another session|session "[\s\S]*?" \([\w-]+\)[^\]\n]*)\]\n([\s\S]*)$/;
+const REPORT = /^\[Sub-session "([\s\S]*?)" \([\w-]+\) finished a turn: ([^\]\n]+)\]\n([\s\S]*?)\n\nNext: read more with session_read[^\n]*$/;
+/** The head line (src/main/subagents/service.ts messageHead): the sender, then a one-line note without "]" */
+const MESSAGE = /^\[Message from (?:another session|session "([\s\S]*?)" \([\w-]+\))[^\]\n]*\]\n([\s\S]*)$/;
 const MERGED = /^\[Merged from "[\s\S]*?"\]\n\n([\s\S]*)$/;
 const SCHEDULED = /^\[Scheduled task "[\s\S]*?" \([^\n]*\)\. This message was sent automatically[^\n]*\]\n[^\n]*\n\n([\s\S]*)$/;
 /** A dream's digest (src/main/dreaming/digest.ts): the frame line and the line that asks for the review */
@@ -24,9 +27,9 @@ export function unframe(origin: MessageOrigin | undefined, text: string): Unfram
   const raw = String(text ?? '');
   if (origin === 'session') {
     const report = REPORT.exec(raw);
-    if (report) return { text: report[2].trim(), note: report[1] === 'done' ? 'finished a turn' : report[1] };
+    if (report) return { text: report[3].trim(), note: report[2] === 'done' ? 'finished a turn' : report[2], sender: report[1] };
     const message = MESSAGE.exec(raw);
-    if (message) return { text: message[1].trim() };
+    if (message) return message[1] === undefined ? { text: message[2].trim() } : { text: message[2].trim(), sender: message[1] };
   } else if (origin === 'command') {
     const merged = MERGED.exec(raw);
     if (merged) return { text: merged[1].trim() };

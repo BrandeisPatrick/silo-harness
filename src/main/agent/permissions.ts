@@ -30,6 +30,8 @@ export interface ApprovalContext {
     mcp(server: string): boolean;
     reason(reason: string): boolean;
     program(program: string): boolean;
+    /** A custom action's key (ApproveOptions.sessionKey) the user allowed for this session */
+    custom?(key: string): boolean;
   };
 }
 
@@ -53,6 +55,8 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (opts.custom) {
     if (mode === 'plan') return refuse(PLAN_CUSTOM_BLOCKED);
     if (mode === 'bypass' && !opts.alwaysAsk) return allow;
+    // The user answered a card for this very action "for this session" already
+    if (opts.sessionKey && ctx.allowed.custom?.(opts.sessionKey)) return allow;
     return ask(null, [], true);
   }
   if (mode === 'bypass') return allow;

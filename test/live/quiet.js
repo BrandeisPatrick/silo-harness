@@ -33,7 +33,7 @@ const GROUPS = `[...document.querySelectorAll('#messages > .tool-group')].map((g
   live: g.classList.contains('live'),
 }))`;
 /** What the conversation is made of, top level: one letter per thing (u user, a reply, g group, t row, d decided approval line, c card) */
-const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden).map((e) => e.matches('.msg.user') ? 'u' : e.matches('.msg.assistant') ? 'a' : e.matches('.tool-group') ? 'g' : e.matches('.tool') ? 't' : e.matches('.approval.done') ? 'd' : e.matches('.approval') ? 'c' : e.matches('.compaction') ? '=' : e.matches('.msg.system') ? 's' : '?').join('')`;
+const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden).map((e) => e.matches('.msg.user') ? 'u' : e.matches('.msg.assistant') ? 'a' : e.matches('.tool-group') ? 'g' : e.matches('.tool') ? 't' : e.matches('.approval.done') ? 'd' : e.matches('.approval') ? 'c' : e.matches('.compaction') ? '=' : e.matches('.msg.system') ? 's' : e.matches('.chat-cards') ? 'k' : '?').join('')`;
 
 (async () => {
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-quiet-'));

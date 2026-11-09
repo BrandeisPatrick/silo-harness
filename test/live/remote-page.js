@@ -1,6 +1,6 @@
 // The remote page, for real: a scripted fake App plays a believable session (history, a streamed reply, a tool
-// call, an approval that waits, a plan in another session), the real remote server serves the page from it, and a
-// hidden Electron window at phone size loads it. Takes screenshots in light and dark, then drives the page (types
+// call, an approval that waits, a plan in another session, the cards of a pull request, a document and an artifact),
+// the real remote server serves the page from it, and a hidden Electron window at phone size loads it. Takes screenshots in light and dark, then drives the page (types
 // and sends a message, taps Allow) and checks the fixture received both. Never starts the app itself.
 //
 // Run (after npm run build):
@@ -73,7 +73,7 @@ function seed(store) {
   // The session, schedule and mod tools, and a command that exited non-zero: each gets a readable row on the phone.
   const tools = [
     [tc('s1', 'session_spawn', { title: 'Split the users module', prompt: 'Move the user routes into src/api/users.ts.' }), 'Started sub-session "Split the users module" (id x1).'],
-    [tc('s2', 'session_send', { to: b.id, message: 'The API client is split; rebase on it.' }), `Delivered to "${b.title}" (${b.id}) and it started working on it.`],
+    [tc('s2', 'session_send', { to: b.id, message: 'The API client is split; rebase on it.' }), `Delivered to "${b.title}" (${b.id}): it started a run on it. Its reply does not come back by itself: read it later with session_read ${b.id} or session_list, or it may answer with session_send.`],
     [tc('s3', 'session_list', {}), '3 sessions'],
     [tc('s4', 'session_read', { id: a.id }), 'user: The login test fails…'],
     [tc('s5', 'session_merge', { id: a.title }), 'Merged.'],
@@ -85,12 +85,15 @@ function seed(store) {
     [tc('s11', 'show_image', { path: '/Users/someone/shots/before.png' }), 'Error: no such file: /Users/someone/shots/before.png'],
     [tc('s12', 'bash', { command: 'npm run lint' }), 'src/api/users.ts\n  12:5  error  no-unused-vars\n\n1 problem\n[exit code: 1]'],
     [tc('s13', 'bash', { command: 'npm test' }), 'Tests: 24 passed\n[exit code: 0]'],
+    // A pull request opened with gh and a note written: cards under the reply that follows
+    [tc('s14', 'bash', { command: 'gh pr create --fill' }), 'Creating pull request for api-split into main in BrandeisPatrick/api\n\nhttps://github.com/BrandeisPatrick/api/pull/12\n[exit code: 0]'],
+    [tc('s15', 'write_file', { path: 'notes/release-notes.md', content: '# Release notes\n' }), 'Created notes/release-notes.md (1 line)'],
   ];
   c.messages.push(
     { role: 'user', content: 'Split api.ts into one module per resource.' },
     { role: 'assistant', content: '', tool_calls: tools.map(([call]) => call) },
     ...tools.map(([call, result]) => ({ role: 'tool', tool_call_id: call.id, content: result })),
-    { role: 'assistant', content: 'Done: 6 modules under `src/api/`, all imports updated, tests pass.' },
+    { role: 'assistant', content: 'Done: 6 modules under `src/api/`, all imports updated, tests pass. The pull request: https://github.com/BrandeisPatrick/api/pull/12' },
   );
   // Messages that were not typed, in the frames the app really writes around them (the sender's id, which tools to
   // use next): a sub-session's report, a message from another session, a merged summary, a scheduled prompt.
@@ -277,7 +280,6 @@ async function main() {
   const toolRows = await js(win, `[...document.querySelectorAll('#transcript .tool')].map((d) => ({ row: (d.querySelector('.tool-verb').textContent + ' ' + d.querySelector('.tool-arg').textContent).trim(), meta: d.querySelector('.tool-meta').textContent, err: d.querySelector('.tool-status').classList.contains('err') }))`);
   const wanted = [
     'Sub-session Split the users module',
-    'Message to Add dark mode to the settings page',
     'Sessions',
     'Read session Fix the flaky login test',
     'Merge Fix the flaky login test',
@@ -289,18 +291,33 @@ async function main() {
     'Show image before.png',
     'Bash npm run lint',
     'Bash npm test',
+    'Bash gh pr create --fill',
+    'Write notes/release-notes.md',
   ];
   check('session, schedule and mod tools have readable rows (no raw names or JSON)', JSON.stringify(toolRows.map((r) => r.row)) === JSON.stringify(wanted), toolRows.map((r) => r.row));
   const lint = toolRows.find((r) => r.row === 'Bash npm run lint');
   const passed = toolRows.find((r) => r.row === 'Bash npm test');
   check('a stored command that exited 1 shows as failed with "exit 1"; one that exited 0 as done', lint && lint.err && lint.meta === 'exit 1' && passed && !passed.err && passed.meta === '', { lint, passed });
   check('a failed show_image says failed', toolRows.find((r) => r.row === 'Show image before.png')?.meta === 'failed');
-  // Messages from elsewhere: what was said and who said it, not the frame written for the model
+  // The pull request and the note: one block of cards right under the reply that names the pull request
+  const cardsC = await js(win, `[...document.querySelectorAll('#transcript > .chat-cards')].map((b) => ({ after: b.previousElementSibling?.innerText.slice(0, 20), cards: [...b.querySelectorAll('.chat-card')].map((c) => ({ cls: c.className, title: c.querySelector('.chat-card-title').textContent, meta: c.querySelector('.chat-card-meta').textContent, href: c.getAttribute('href') })) }))`);
+  check('cards: the pull request and the note, in one block under the reply that names it', cardsC.length === 1 && cardsC[0].after === 'Done: 6 modules unde' && JSON.stringify(cardsC[0].cards) === JSON.stringify([
+    { cls: 'chat-card pr', title: 'BrandeisPatrick/api #12', meta: 'Pull request · opens on GitHub', href: 'https://github.com/BrandeisPatrick/api/pull/12' },
+    { cls: 'chat-card file', title: 'Release notes', meta: 'Document · MD · on your Mac', href: null },
+  ]), cardsC);
+  await js(win, `document.querySelector('#transcript > .chat-cards').scrollIntoView({ block: 'center' })`);
+  await shot(win, '4c-cards');
+  // A message sent to another session: its own line, as on the desktop, opening to the message and how it went
+  const sentLines = await js(win, `[...document.querySelectorAll('#transcript .session-msg.sent')].map((d) => { d.open = true; return { words: d.querySelector('summary').innerText.trim(), link: d.querySelector('.sm-link')?.dataset.session ?? null, md: d.querySelector('.sm-body .md')?.innerText.trim(), note: d.querySelector('.sm-note')?.innerText.trim() }; })`);
+  check('a message to another session is one line "Messaged …", the name a link, opening to the message', sentLines.length === 1 && sentLines[0].words === 'Messaged Add dark mode to the settings page' && sentLines[0].link === sessions.b.id && sentLines[0].md === 'The API client is split; rebase on it.' && sentLines[0].note === 'Delivered: it started a run on it.', sentLines);
+  // Messages from another session: one line each, "Received message from …", opening to what was said
+  const received = await js(win, `[...document.querySelectorAll('#transcript .session-msg.received')].map((d) => ({ words: d.querySelector('summary').innerText.trim(), link: d.querySelector('.sm-link')?.dataset.session ?? null, text: d.querySelector('.sm-body .md').textContent.trim(), bold: d.querySelector('.sm-body .md strong')?.textContent ?? '' }))`);
+  const heard = (text) => received.find((x) => x.text === text);
+  const report = heard('The plan is ready: tokens first, then the settings page.');
+  check('a sub-session report is a line naming its session (linked), opening to what it said as Markdown', report && report.bold === 'tokens first' && report.words === 'Received message from Add dark mode to the settings page' && report.link === sessions.b.id, received);
+  check('a message from another session is a line naming its sender', heard('The login fix is merged; rebase before you go on.')?.words === 'Received message from Fix the flaky login test', received);
   const bubbles = await js(win, `[...document.querySelectorAll('#transcript .msg.user')].map((m) => ({ text: m.querySelector('.bubble').innerText.trim(), from: m.querySelector('.from')?.innerText ?? '', bold: m.querySelector('.bubble strong')?.innerText ?? '' }))`);
   const said = (text) => bubbles.find((x) => x.text === text);
-  const report = said('The plan is ready: tokens first, then the settings page.');
-  check('a sub-session report shows what it said, as Markdown, labelled with its session', report && report.bold === 'tokens first' && report.from === 'From session Add dark mode to the settings page · finished a turn', bubbles.slice(-4));
-  check('a message from another session shows its text and sender', said('The login fix is merged; rebase before you go on.')?.from === 'From session Fix the flaky login test', bubbles.slice(-3));
   check('a merged summary shows the summary and where it came from', said('Dark mode needs two new tokens and one stylesheet.')?.from === 'Merged from Add dark mode to the settings page', bubbles.slice(-2));
   check('a scheduled run shows the prompt the schedule holds', said('Run the API smoke test and report failures.')?.from === 'From a schedule', bubbles.slice(-1));
   check('no frame, id or tool hint is left on the page', !/\[Sub-session "|\[Message from|\[Merged from|\[Scheduled task|session_read|Carry out the task below/.test(await js(win, `document.getElementById('transcript').innerText`)));
@@ -388,6 +405,19 @@ async function main() {
   await waitFor(win, `${lastCard}.classList.contains('decided')`);
   bc = await cardInfo();
   check('… Deny reaches the runtime and the card says "Denied on shop.example"', JSON.stringify(f.calls.find((c) => c[0] === 'respondApproval')) === JSON.stringify(['respondApproval', 'ap-b2', false, false, 'session']) && bc.decision === 'Denied on shop.example', { calls: f.calls, bc });
+  // A message to an unrelated session: Deny, "Allow messages to … for this session" and Allow, as on the Mac
+  const sendCard = { type: 'approval_request', id: 'ap-s1', name: 'session_send', detail: `Send to session "${sessions.b.title}" (${sessions.b.id}):\n\nThe API client is split; rebase on it.`, mode: 'ask', alwaysLabel: `Allow messages to "${sessions.b.title}" for this session`, projectLabel: '' };
+  live.approvals = [sendCard];
+  f.status.set(A, { running: true, attention: 'approval' });
+  f.emit(A, sendCard);
+  await waitFor(win, `${lastCard}?.querySelector('.card-title')?.textContent.startsWith('Send a message')`);
+  bc = await cardInfo();
+  check('a message card names the session and offers Deny, "Allow messages to … for this session" and Allow', bc.title === `Send a message to “${sessions.b.title}”?` && bc.buttons === `Deny|Allow messages to "${sessions.b.title}" for this session|Allow`, bc);
+  f.calls.length = 0;
+  await tap(win, `.card.approval:not(.decided) button[data-a="session"]`);
+  await waitFor(win, `${lastCard}.classList.contains('decided')`);
+  bc = await cardInfo();
+  check('… "for this session" reaches the runtime', JSON.stringify(f.calls.find((c) => c[0] === 'respondApproval')) === JSON.stringify(['respondApproval', 'ap-s1', true, true, 'session']) && bc.decision === 'Allowed for this session', { calls: f.calls, bc });
   f.status.set(A, { running: true });
   live.approvals = [];
 
@@ -395,6 +425,10 @@ async function main() {
   f.emit(A, { type: 'queue_delivered', id: 'q-1' });
   f.emit(A, { type: 'user_message', text: 'Also add a test for three attempts', images: 0, origin: 'queue' });
   f.emit(A, { type: 'tasks_updated', tasks: [{ id: '1', title: 'Make backoff configurable', status: 'completed' }, { id: '2', title: 'Fix the login test', status: 'completed' }, { id: '3', title: 'Add a three-attempt test', status: 'in_progress' }] });
+  // A pull request opened and an artifact made during the run: the artifact's card at once, the pull request's under the reply
+  f.emit(A, { type: 'tool_start', id: 'pr-1', name: 'bash', args: { command: 'git push -u origin fix-login && gh pr create --fill' } });
+  f.emit(A, { type: 'tool_end', id: 'pr-1', name: 'bash', result: 'https://github.com/BrandeisPatrick/web/pull/41\n[exit code: 0]', ok: true });
+  f.emit(A, { type: 'artifact', action: 'created', artifact: { id: 'notes', sessionId: A, title: 'Login fix notes', kind: 'html', version: 1, createdAt: 0, updatedAt: 0, bytes: 10, url: 'artifact://view/x/notes', path: '/secret/path' } });
   for (const chunk of ['Added ', '`retries three times`', ' to the suite; ', 'all **4** tests pass.']) f.emit(A, { type: 'text_delta', text: chunk });
   f.emit(A, { type: 'text_done' });
   f.emit(A, { type: 'assistant_message', text: 'Added `retries three times` to the suite; all **4** tests pass.', toolCalls: 0 });
@@ -402,6 +436,8 @@ async function main() {
   f.status.set(A, { running: false });
   f.emit(A, { type: 'run_end', reason: 'done' });
   check('run end: queue cleared, Stop hidden, idle mark', await waitFor(win, `document.getElementById('queue').hidden && document.getElementById('stop').hidden && document.getElementById('mark').classList.contains('idle')`));
+  const cardsA = await js(win, `(() => { const r = [...document.querySelectorAll('#transcript > .msg.assistant')].pop(); const b = r.nextElementSibling; const art = [...document.querySelectorAll('#transcript .chat-card.file')].pop(); return { under: b?.classList.contains('chat-cards') ? [...b.querySelectorAll('.chat-card')].map((c) => c.querySelector('.chat-card-title').textContent) : null, artifact: art && art.querySelector('.chat-card-title').textContent + ' | ' + art.querySelector('.chat-card-meta').textContent, leaked: document.body.innerHTML.includes('/secret/path') }; })()`);
+  check('cards, live: the pull request under the reply, the artifact as a card that says it is on the Mac', JSON.stringify(cardsA.under) === JSON.stringify(['BrandeisPatrick/web #41']) && cardsA.artifact === 'Login fix notes | Artifact · HTML · on your Mac' && !cardsA.leaked, cardsA);
   check('the delivered message appears once', (await js(win, `[...document.querySelectorAll('.msg.user .bubble')].filter(b => b.textContent === 'Also add a test for three attempts').length`)) === 1);
   await shot(win, '6-done');
 

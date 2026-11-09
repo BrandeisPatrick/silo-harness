@@ -171,7 +171,8 @@ They are removed when the look goes away. A setting is how a look offers a choic
 
 | In the conversation (`#messages`) | |
 | --- | --- |
-| `.msg.user`, `.msg.user .bubble` | a message of yours and its bubble (`.bubble.rich` holds Markdown: a report from another session) |
+| `.msg.user`, `.msg.user .bubble` | a message of yours and its bubble (`.bubble.rich` holds Markdown: a merged summary) |
+| `.session-msg.received`, `.session-msg.sent` | a message from another session (also a `.msg.user`) and one this session sent: one line (`summary`, the session's name `.session-msg-link`) that opens to `.session-msg-body` |
 | `.msg.assistant`, `.msg.assistant > .md` | a reply and its rendered Markdown; the reply streaming in is `.msg.assistant:last-child` while `data-running` is `"true"` |
 | `.md h1` … `.md h6`, `.md p`, `.md ul`, `.md ol`, `.md blockquote`, `.md table`, `.md code`, `.md a` | the parts of rendered Markdown |
 | `.code-block`, `.code-head`, `.code-lang`, `.code-copy`, `.code-block pre` | a code block, its header, language label, Copy button and code |

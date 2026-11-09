@@ -1013,7 +1013,7 @@ async function main() {
   }
 }
 
-module.exports = { HOME, PROJECT, CONFIG_DIR, makeProject, seedSessions, scriptHero, scriptImages, scriptApproval, panelPng, writeGrafanaServer, installWordCount, cropPng, encodePng, decodePng, mainEval, freePort, isMain, call };
+module.exports = { HOME, PROJECT, CONFIG_DIR, FILES, RATE_LIMIT_JS, makeProject, seedSessions, scriptHero, scriptImages, scriptApproval, panelPng, writeGrafanaServer, installWordCount, cropPng, encodePng, decodePng, mainEval, freePort, isMain, call };
 if (require.main !== module) return;
 
 const started = Date.now();

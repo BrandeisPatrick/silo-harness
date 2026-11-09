@@ -46,7 +46,9 @@ export function subagentTools(svc: Subagents): Tool[] {
   const send: Tool = {
     name: 'session_send',
     description:
-      'Send a message to another session, named by its id or its name (written loosely: case, quotes, punctuation, the start of the name or a small typo are fine). It starts a turn there, or waits behind the turn in progress. Use it to answer or steer one of your sub-sessions, or to tell your parent session something it needs before you finish. Messages to sessions other than your parent or your own sub-sessions need the user\'s approval.',
+      'Send a message to another session, named by its id or its name (written loosely: case, quotes, punctuation, the start of the name or a small typo are fine). It starts a turn there, or waits behind the turn in progress (or, while its plan waits for the user, until the plan is decided). The receiver sees it as a request from you, not from the user. ' +
+      'Use it to answer or steer one of your sub-sessions, to tell your parent session something it needs before you finish, or to ask another session for something. Messages to your parent and your own sub-sessions go without asking; a message to any other session needs the user\'s approval. ' +
+      'The reply does not come back by itself (a sub-session\'s report does): read it later with session_read.',
     parameters: {
       type: 'object',
       properties: {
@@ -61,14 +63,28 @@ export function subagentTools(svc: Subagents): Tool[] {
         const message = String(args?.message ?? '').trim();
         if (!message) throw new SubagentError('the message is empty.');
         if (target.id === ctx.sessionId) throw new SubagentError('that is this session.');
-        if (!svc.closeKin(ctx.sessionId, target)) {
-          // Words put into a conversation this model was never part of: the user decides
-          const ok = await ctx.approve('session_send', `Send to session "${target.title}" (${target.id}):\n\n${message}`, undefined, { custom: true });
+        const rule = svc.messageRule(ctx.sessionId, target);
+        if (rule.kind === 'refuse') return { content: `Not sent: ${rule.message}` };
+        if (rule.kind === 'ask') {
+          // Words put into a conversation this model was never part of: the user decides, once or for this target
+          const ok = await ctx.approve('session_send', `Send to session "${target.title}" (${target.id}):\n\n${message}`, undefined, {
+            custom: true,
+            sessionKey: `session_send:${target.id}`,
+            sessionLabel: `Allow messages to "${target.title}" for this session`,
+          });
           if (!ok.ok) return { content: `Not sent: ${ok.message}` };
         }
         const r = svc.message(ctx.sessionId, target.id, message);
         if (!r.ok) return { content: `Error: ${r.error ?? 'the message could not be delivered.'}` };
-        return { content: `Delivered to "${target.title}" (${target.id})${r.queued ? '; it is busy, so the message waits for its current step to end' : ' and it started working on it'}.` };
+        const how = r.held
+          ? 'its plan waits for the user, so the message is held until the user decides the plan'
+          : r.queued
+            ? 'it is busy, so the message waits behind its current step'
+            : 'it started a run on it';
+        const reply = svc.isChild(ctx.sessionId, target)
+          ? 'It is your sub-session, so its report comes back here by itself when it finishes the turn.'
+          : `Its reply does not come back by itself: read it later with session_read ${target.id} or session_list, or it may answer with session_send.`;
+        return { content: `Delivered to "${target.title}" (${target.id}): ${how}. ${reply}` };
       }),
   };
 

@@ -1365,29 +1365,88 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .queue-meta { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; }
 .queue-remove { margin-left: auto; color: var(--text-400); }
 
-/* ---------- Artifact card ---------- */
-.artifact-card {
-  margin-top: 8px; margin-bottom: 16px; overflow: hidden;
-  border: 1px solid var(--border-subtle); border-radius: var(--r-card-lg);
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+/* ---------- File cards: artifacts and documents (file-card.ts), as Claude Code draws them ---------- */
+/* 72px tall, 520px at most; a page tile rises from the card's foot with the file's icon on it, cut by the card's
+   edge; the title and "Document · MD" beside it. Measured from Claude Code at 1x. */
+.file-card {
+  position: relative; display: flex; align-items: center; gap: 20px; min-width: 0;
+  width: min(520px, 100%); height: 72px; padding: 0 12px 0 20px; overflow: hidden;
+  background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-card-lg);
+  box-shadow: var(--shadow-sm); color: var(--text-100); cursor: pointer; text-align: left;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.12s;
 }
-.artifact-card.flash { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
-.artifact-head { display: flex; align-items: center; gap: 12px; padding: 12px; }
-.artifact-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border-radius: var(--r-card); background: var(--badge-bg); color: var(--badge-ink); }
-.artifact-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.artifact-kicker { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); }
-.artifact-title { font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 600; color: var(--text-100); overflow-wrap: anywhere; }
-.artifact-meta { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); font-variant-numeric: tabular-nums; }
-.artifact-chip {
+.file-card:hover { background: var(--surface-hover); }
+.file-card:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.file-card.flash { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.file-card-tile {
+  flex: none; align-self: flex-end; display: flex; align-items: center; justify-content: center;
+  width: 56px; height: 55px; margin-bottom: -1px;
+  border: 1px solid var(--border); border-bottom: none; border-radius: 6px 6px 0 0;
+  background: linear-gradient(to bottom, var(--bg-000), var(--bg-200));
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.06); color: var(--text-400);
+}
+.file-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-card-title { font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card-meta { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card-chip {
   flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--bg-000); color: var(--text-200);
   font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; animation: pop-in 0.12s ease-out;
 }
-.artifact-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
-.artifact-actions .btn.done { color: var(--success); }
+/* Reveal in Finder, Save as… / Open with the default app: there on hover and focus, never in the way of the title */
+.file-card-actions { flex: none; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.file-card:hover .file-card-actions, .file-card:focus-within .file-card-actions { opacity: 1; }
+.file-card-actions:empty { display: none; }
+.file-card-action.done { color: var(--success); }
 @media (prefers-reduced-motion: reduce) {
-  .attachment, .queue-item, .artifact-chip, dialog.lightbox[open] { animation: none; }
+  .attachment, .queue-item, .file-card-chip, dialog.lightbox[open] { animation: none; }
 }
+
+/* ---------- Chat cards under a reply: pull requests and documents (chat-cards.ts) ---------- */
+/* A block of cards (an artifact is drawn in one of its own): 8px between cards, and between blocks in a row */
+.chat-cards { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 0; margin-bottom: 16px; }
+.transcript > .chat-cards + .chat-cards { margin-top: -8px; }
+
+/* The pull request card: the repository's icon, the state and where it lives, the title with its size, and a line
+   under a hairline when there is something to say (the checks, the review). Measured from Claude Code at 1x. */
+.pr-card {
+  display: block; width: 100%; min-width: 0; padding: 16px;
+  background: var(--bg-000); border: 1px solid var(--border-subtle); border-radius: 12px;
+  color: var(--text-100); text-decoration: none; cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.pr-card:hover { border-color: var(--border); }
+.pr-card:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.pr-card-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; color: var(--text-400); }
+.pr-card-icon svg { stroke-width: 1; }
+.pr-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 16px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+.pr-card-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 10px 0 8px; border-radius: 999px;
+  font-weight: 500; color: var(--text-400); background: var(--bg-200);
+}
+.pr-pill.open { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+.pr-pill.merged { color: var(--tok-kw); background: color-mix(in srgb, var(--tok-kw) 13%, transparent); }
+.pr-pill.closed { color: var(--danger); background: var(--danger-soft); }
+.pr-card-body { display: flex; align-items: center; gap: 12px; min-width: 0; margin-top: 8px; }
+.pr-card-title { flex: 1; min-width: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-card.loading .pr-card-title, .pr-card.bare .pr-card-title { color: var(--text-400); }
+.pr-stats { flex: none; display: flex; gap: 6px; }
+.pr-stat {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px;
+  background: var(--code-bg); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pr-diff { gap: 4px; }
+.pr-add { color: var(--success); }
+.pr-del { color: var(--danger); }
+.pr-card-foot {
+  display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 16px; padding-top: 15px;
+  border-top: 1px solid var(--border-subtle); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400);
+}
+.pr-foot-icon { flex: none; display: inline-flex; }
+.pr-card-foot[data-tone="bad"] .pr-foot-icon { color: var(--danger); }
+.pr-foot-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- Round 7: MCP tools in the transcript, context meter, compaction divider, MCP settings ---------- */
 
