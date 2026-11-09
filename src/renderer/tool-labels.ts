@@ -304,7 +304,8 @@ export function browserApproval(b: BrowserCardRef): AgentApproval {
     case 'eval': return { title: `Run JavaScript on ${site}?`, subject: `JavaScript on ${site}`, icon: 'code' };
     case 'purchase': return { title: 'Make a purchase?', subject: `a purchase on ${site}`, icon: 'globe' };
     case 'account': return { title: 'Create an account?', subject: `an account on ${site}`, icon: 'globe' };
-    default: return { title: `Let the agent use ${site}?`, subject: site, icon: 'globe' };
+    // A local file is named by its path, which the action under the title already shows in full
+    default: return { title: /^[~/]/.test(site) ? 'Let the agent read a local file?' : `Let the agent use ${site}?`, subject: site, icon: 'globe' };
   }
 }
 
