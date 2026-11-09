@@ -4460,6 +4460,8 @@ const SUGGESTIONS = [
 ];
 /** Puts `text` in the composer, replacing what was there, with the caret at its end (Ask the agent… in Settings). */
 function fillComposer(text: string): void {
+  // A page in the main column covers the composer: back to the session
+  pagesView?.close();
   mentionPicker.close();
   // A draft stays: the prompt goes on a line of its own after it
   if (inputEl.value.trim()) text = `${inputEl.value.replace(/\s+$/, '')}\n${text}`;
