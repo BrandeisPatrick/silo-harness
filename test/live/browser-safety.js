@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { launch, checker, sleep } = require('./rig.js');
+const { launch, checker, sleep, evalAt, cdpAt } = require('./rig.js');
 
 const { check, done } = checker();
 
@@ -40,44 +40,6 @@ const lastUserHas = (marker) => (payload) => {
   if (!m || m.role !== 'user') return false;
   return (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).includes(marker);
 };
-
-/** Runs an expression over CDP in a target (the main process's inspector, or a page) and returns its value. */
-async function evalAt(wsUrl, expression) {
-  const ws = new WebSocket(wsUrl);
-  await new Promise((r, j) => {
-    ws.addEventListener('open', r, { once: true });
-    ws.addEventListener('error', j, { once: true });
-  });
-  const res = await new Promise((resolve) => {
-    ws.addEventListener('message', (ev) => {
-      const m = JSON.parse(String(ev.data));
-      if (m.id === 1) resolve(m.result?.exceptionDetails ? { error: m.result.exceptionDetails.exception?.description || m.result.exceptionDetails.text } : m.result?.result?.value);
-    });
-    ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
-    setTimeout(() => resolve({ error: 'timed out' }), 15_000);
-  });
-  ws.close();
-  return res;
-}
-
-/** Sends one CDP command to a target. */
-async function cdpAt(wsUrl, method, params = {}) {
-  const ws = new WebSocket(wsUrl);
-  await new Promise((r, j) => {
-    ws.addEventListener('open', r, { once: true });
-    ws.addEventListener('error', j, { once: true });
-  });
-  const res = await new Promise((resolve) => {
-    ws.addEventListener('message', (ev) => {
-      const m = JSON.parse(String(ev.data));
-      if (m.id === 1) resolve(m.error ? { error: m.error.message } : m.result);
-    });
-    ws.send(JSON.stringify({ id: 1, method, params }));
-    setTimeout(() => resolve({ error: 'timed out' }), 15_000);
-  });
-  ws.close();
-  return res;
-}
 
 /** Every file under `dir` that contains one of `needles` (as UTF-8), with which. */
 function filesHolding(dir, needles) {
@@ -128,16 +90,8 @@ function filesHolding(dir, needles) {
   const app = await launch({ profile, mode: 'bypass', mock: true, args: [`--inspect=${inspectPort}`, '--use-fake-device-for-media-stream'] });
   const mainWs = async () => (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json())[0].webSocketDebuggerUrl;
   const mainEval = async (expr) => evalAt(await mainWs(), expr);
-  /** The Browser pane's page target (its URL starts with the fixture server's). */
-  const paneWs = async () => {
-    for (let i = 0; i < 50; i++) {
-      const list = await (await fetch(`http://127.0.0.1:${app.port}/json/list`)).json();
-      const t = list.find((x) => x.type === 'page' && x.url.startsWith(base));
-      if (t) return t.webSocketDebuggerUrl;
-      await sleep(100);
-    }
-    throw new Error('The Browser pane has no page from the fixture server');
-  };
+  /** The Browser pane's page from the fixture server, as a CDP target. */
+  const paneWs = () => app.pageTarget(base, 5000);
   const paneEval = async (expr) => evalAt(await paneWs(), expr);
 
   let n = 0;

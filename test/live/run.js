@@ -51,6 +51,8 @@ const SCRIPTS = [
   { name: 'questions' },
   { name: 'remote-page', electron: true },
   { name: 'browser-safety' },
+  { name: 'browser-tabs' },
+  { name: 'browser-oauth' },
 ];
 
 const words = process.argv.slice(2);

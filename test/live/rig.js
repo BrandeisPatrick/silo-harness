@@ -199,6 +199,7 @@ async function launch(opts = {}) {
   }
 
   const q = (selector) => JSON.stringify(selector);
+  let toolSeq = 0;
   const api = {
     root,
     profile,
@@ -212,6 +213,26 @@ async function launch(opts = {}) {
     cdp,
     evaluate,
     waitFor,
+    /**
+     * The CDP websocket URL of a page in the Browser pane (a tab, a popup) whose URL starts with `prefix`, polled
+     * until it is there. Use it with evalAt / cdpAt to run code inside that page.
+     */
+    async pageTarget(prefix, timeoutMs = 10_000) {
+      const until = Date.now() + timeoutMs;
+      for (;;) {
+        const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json().catch(() => []);
+        const t = list.find((x) => x.type === 'page' && String(x.url).startsWith(prefix));
+        if (t) return t.webSocketDebuggerUrl;
+        if (exited) throw new Error('The app exited while looking for a pane page');
+        if (Date.now() > until) throw new Error(`The Browser pane has no page whose URL starts with ${prefix}`);
+        await sleep(100);
+      }
+    },
+    /** Every page target of the pane whose URL starts with `prefix` (several tabs of one site), as { url, wsUrl }. */
+    async pageTargets(prefix) {
+      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json().catch(() => []);
+      return list.filter((x) => x.type === 'page' && String(x.url).startsWith(prefix)).map((x) => ({ url: x.url, wsUrl: x.webSocketDebuggerUrl }));
+    },
     /** PNG of the window's page (2x, or the launch's `scale`). `clip` is { x, y, width, height } in CSS pixels. */
     async screenshot(file, clip) {
       let r = await cdp('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) });
@@ -284,6 +305,35 @@ async function launch(opts = {}) {
         }
         return out;
       })()`),
+    /**
+     * One user turn in which the mock model calls tool `name` with `args` once (then says "Done."); resolves with the
+     * tool's result as the model got it. Mock model only.
+     */
+    async callTool(name, args, timeoutMs = 60_000) {
+      if (!mock) throw new Error('callTool needs the mock model');
+      const id = `call_${name}_${++toolSeq}`;
+      const marker = `Tool step ${toolSeq}: ${name.replace(/_/g, ' ')}`;
+      mock.state.replies.push({
+        content: '',
+        toolCalls: [{ id, name, args }],
+        when: (payload) => {
+          const m = payload.messages?.[payload.messages.length - 1];
+          return Boolean(m && m.role === 'user' && (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).includes(marker));
+        },
+      });
+      await api.send(marker);
+      let content = null;
+      for (const until = Date.now() + timeoutMs; content === null && Date.now() < until; ) {
+        for (const r of [...mock.state.requests].reverse()) {
+          const m = (r.payload?.messages ?? []).find((x) => x.role === 'tool' && x.tool_call_id === id);
+          if (m) content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        }
+        if (content === null) await sleep(100);
+      }
+      await waitFor(`(async () => (await oc.sessions.list()).every((m) => !m.status?.running))()`, timeoutMs, `${name} to finish`);
+      await sleep(150);
+      return content;
+    },
     /** The last assistant reply's text. */
     lastReply: () => evaluate(`(() => { const all = document.querySelectorAll('.msg.assistant'); const e = all[all.length - 1]; return e ? e.innerText.trim() : ''; })()`),
     /** Answers the open approval card: 'allow' or 'deny'. */
@@ -397,6 +447,47 @@ function looksTiled(png) {
   return varied.size > 8 && same / n > 0.97;
 }
 
+/**
+ * Runs an expression over CDP in another target (the main process's inspector, or a page in the Browser pane) and
+ * returns its JSON value; an exception comes back as { error }.
+ */
+async function evalAt(wsUrl, expression, timeoutMs = 15_000) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((r, j) => {
+    ws.addEventListener('open', r, { once: true });
+    ws.addEventListener('error', j, { once: true });
+  });
+  const res = await new Promise((resolve) => {
+    ws.addEventListener('message', (ev) => {
+      const m = JSON.parse(String(ev.data));
+      if (m.id === 1) resolve(m.result?.exceptionDetails ? { error: m.result.exceptionDetails.exception?.description || m.result.exceptionDetails.text } : m.result?.result?.value);
+    });
+    ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true, userGesture: true } }));
+    setTimeout(() => resolve({ error: 'timed out' }), timeoutMs);
+  });
+  ws.close();
+  return res;
+}
+
+/** Sends one CDP command to another target and returns its result (or { error }). */
+async function cdpAt(wsUrl, method, params = {}, timeoutMs = 15_000) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((r, j) => {
+    ws.addEventListener('open', r, { once: true });
+    ws.addEventListener('error', j, { once: true });
+  });
+  const res = await new Promise((resolve) => {
+    ws.addEventListener('message', (ev) => {
+      const m = JSON.parse(String(ev.data));
+      if (m.id === 1) resolve(m.error ? { error: m.error.message } : m.result);
+    });
+    ws.send(JSON.stringify({ id: 1, method, params }));
+    setTimeout(() => resolve({ error: 'timed out' }), timeoutMs);
+  });
+  ws.close();
+  return res;
+}
+
 /** A small check helper in the style of test/support/check.js, for live scripts. */
 function checker() {
   let failures = 0;
@@ -412,4 +503,4 @@ function checker() {
   };
 }
 
-module.exports = { launch, checker, sleep, LIVE_MODEL };
+module.exports = { launch, checker, sleep, evalAt, cdpAt, LIVE_MODEL };
