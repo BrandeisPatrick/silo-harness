@@ -108,11 +108,10 @@ export function lastUserIndex(messages: Msg[]): number {
  */
 export function cutPoints(messages: Msg[]): boolean[] {
   const ok = new Array<boolean>(messages.length + 1).fill(true);
+  // The call a result answers is the nearest one before it with that id (ids can repeat across runs)
   const callAt = new Map<string, number>();
   messages.forEach((m, i) => {
     if (m.role === 'assistant') for (const tc of m.tool_calls ?? []) callAt.set(tc.id, i);
-  });
-  messages.forEach((m, i) => {
     if (m.role !== 'tool') return;
     const at = callAt.get(m.tool_call_id);
     // A result without its call can only travel with what comes before it.

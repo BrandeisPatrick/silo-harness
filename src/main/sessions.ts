@@ -251,9 +251,35 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   return items;
 }
 
+/** A tool call as the stored assistant messages hold it (the object itself is the key of pairToolResults). */
+export type StoredToolCall = NonNullable<Extract<Msg, { role: 'assistant' }>['tool_calls']>[number];
+
+/**
+ * Each tool result paired with the call it answers, keyed by the call object: the nearest call before it with that
+ * id, in order when one reply holds the same id twice. An id alone is not enough: a model (Ollama's numbering, or
+ * our own fallback ids in sessions saved before 0.11.1) can reuse one across runs, and a map from id to result would
+ * show the last run's result on every call that had it.
+ */
+export function pairToolResults(messages: Msg[]): Map<StoredToolCall, Extract<Msg, { role: 'tool' }>> {
+  const out = new Map<StoredToolCall, Extract<Msg, { role: 'tool' }>>();
+  const open = new Map<string, StoredToolCall[]>();
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const fresh = new Map<string, StoredToolCall[]>();
+      for (const call of m.tool_calls) fresh.set(call.id, [...(fresh.get(call.id) ?? []), call]);
+      for (const [id, calls] of fresh) open.set(id, calls);
+    } else if (m.role === 'tool') {
+      const call = open.get(m.tool_call_id)?.shift();
+      if (call) out.set(call, m);
+    }
+  }
+  return out;
+}
+
 function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], turnByAt?: Map<number, number>, inFlight = false, shown?: Map<string, ImageInfo>): void {
-  const results = new Map<string, string>();
-  for (const m of messages) if (m.role === 'tool') results.set(m.tool_call_id, typeof m.content === 'string' ? m.content : String(m.content));
+  const paired = pairToolResults(messages);
+  const results = new Map<StoredToolCall, string>();
+  for (const [call, m] of paired) results.set(call, typeof m.content === 'string' ? m.content : String(m.content));
   messages.forEach((m, index) => {
     if (m.role === 'user') {
       if (isCompactPreamble(m)) return;
@@ -279,8 +305,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
       if (text) items.push({ role: 'assistant', text });
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
-        if (inFlight && !results.has(call.id)) continue;
-        const result = results.get(call.id) ?? '(no result)';
+        if (inFlight && !results.has(call)) continue;
+        const result = results.get(call) ?? '(no result)';
         const ok = !FAILED_RESULT.test(result);
         if (call.function.name === 'submit_plan') {
           const plan = planForCall(s, call.function.arguments);

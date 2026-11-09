@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1
+
+A fix for models served by Ollama: a tool's result no longer ends up shown with another call.
+
+### Fixes
+
+- **Each tool result stays with its own call.** Ollama numbers a reply's tool calls from the start again every time (and Silo Harness's own fallback ids restarted with every run), so two calls in one session could share an id. The transcript, the Markdown export and the history sent back to Ollama then showed or named the later result for the earlier call, and compaction could cut a call off from its result. Now every new call gets an id no other call in the session has, a streamed reply keeps two calls apart even when they share an id, and results are paired with the call just before them, so sessions saved before this release read correctly too.
+
 ## 0.11.0
 
 Pull requests, documents and artifacts show as cards in the chat, as in Claude Code, and sessions can message each other, each message one quiet line in both conversations.

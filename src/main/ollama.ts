@@ -1,5 +1,5 @@
 import type OpenAI from 'openai';
-import type { Msg } from './sessions';
+import { pairToolResults, type Msg } from './sessions';
 
 export type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
 export type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
@@ -57,10 +57,9 @@ function parseArgs(raw: unknown): Record<string, unknown> {
 
 /** Converts OpenAI-style history (what the app stores) into Ollama's native message shape. */
 export function toOllamaMessages(messages: Msg[]): OllamaMessage[] {
-  const toolNames = new Map<string, string>();
-  for (const m of messages) {
-    if (m.role === 'assistant') for (const tc of m.tool_calls ?? []) if (tc.type === 'function') toolNames.set(tc.id, tc.function.name);
-  }
+  // Each result names the tool of the call it answers (the nearest call before it with that id: ids can repeat)
+  const toolNames = new Map<Msg, string>();
+  for (const [call, result] of pairToolResults(messages)) if (call.type === 'function') toolNames.set(result, call.function.name);
   const out: OllamaMessage[] = [];
   for (const m of messages) {
     if (m.role === 'system' || m.role === 'developer') {
@@ -92,7 +91,7 @@ export function toOllamaMessages(messages: Msg[]): OllamaMessage[] {
         role: 'tool',
         content: typeof m.content === 'string' ? m.content : m.content.map((p) => p.text).join('\n'),
         tool_call_id: m.tool_call_id,
-        tool_name: toolNames.get(m.tool_call_id),
+        tool_name: toolNames.get(m),
       });
     }
   }
