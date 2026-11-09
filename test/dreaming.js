@@ -146,6 +146,8 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   check('3: at most five projects per run', svc.projects().length === 5 && !svc.projects().includes(proj), svc.projects());
   for (const id of extra) app.store.delete(id);
   check('3: deleted sessions are left out', JSON.stringify(svc.projects()) === JSON.stringify([other, proj]));
+  const plist = svc.projectList();
+  check('3: the project list: each folder once, most recent first, with its new sessions and whether the next dream reads it', JSON.stringify(plist.map((x) => x.cwd)) === JSON.stringify([other, proj]) && plist.every((x) => x.next && x.fresh >= 1 && x.lastActivity > 0), plist);
 
   // ---- 4: Approve mode: the dream proposes, nothing is written before Apply ----
   const skillArgs = { name: 'release-chore', description: 'Bump the version, add a CHANGELOG entry and run the tests', body: '1. Bump the version in package.json\n2. Add a CHANGELOG entry\n3. Run pnpm test', scope: 'project', why: 'Asked twice: "Do the release chore" and "Release chore again please"', sessions: [A, B] };
@@ -165,6 +167,8 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   let dream = svc.state().dreams[0];
   const D = dream.sessionId;
   check('4: the dream ended done with three waiting proposals', dream.status === 'done' && dream.proposals.length === 3 && dream.proposals.every((p) => p.state === 'waiting'), dream.proposals.map((p) => [p.kind, p.state, p.error]));
+  check('4: its closing report is kept as its summary', dream.summary === 'Proposed a skill, a memory line and a mod.', dream.summary);
+  check('4: after the dream, the project has nothing new for the next one', svc.projectList().find((x) => x.cwd === proj)?.next === false);
   const sess = rt.get(D);
   check('4: its session: origin dream, the project folder, its own tool set, the dream id', sess.origin === 'dream' && sess.cwd === proj && Array.isArray(sess.tools) && sess.dream.id === dream.id && rt.meta(D).dream.waiting === 3);
   const dreamReqs = state.requests.slice(before).filter((r) => r.url === '/v1/chat/completions' && isDream(r.payload));

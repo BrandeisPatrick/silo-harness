@@ -20,8 +20,7 @@ import { row, segmented, selectControl, switchControl, textControl, type Row } f
 import type { Call, Ctx, Section } from './settings/ctx.js';
 import { contextSection, generalSection, modelSection, permissionsSection } from './settings/config-sections.js';
 import { modsSection } from './settings/mods-section.js';
-import { remoteSection, scheduledSection, skillsSection } from './settings/feature-sections.js';
-import { dreamingSection } from './settings/dreaming-section.js';
+import { pagesSection, remoteSection, skillsSection } from './settings/feature-sections.js';
 import { aboutSection, appearanceSection, filesSection, historySection, mcpSection } from './settings/info-sections.js';
 import { hooksSection } from './settings/hooks-section.js';
 
@@ -39,7 +38,13 @@ export interface SettingsPageDeps {
   currentSessionId(): string;
   /** Brings a session on screen (Settings closes first) */
   openSession(id: string): void;
+  /** Opens the Scheduled tasks page (and its New task form) or the Dreaming page; Settings closes first */
+  openPage(target: 'scheduled' | 'scheduled:new' | 'dreaming'): void;
   sessionTitle(id: string): string | undefined;
+  /** Puts text in the composer (Settings closes first) */
+  fillComposer(text: string): void;
+  /** Live previews of mod backgrounds for Settings → Mods → Background */
+  modPreviews?(): import('./mods-host.js').ModPreviews | null;
   /** Before the page opens (close menus and sheets, hide the browser view); false keeps it closed */
   beforeOpen(): boolean;
   /** After it closed (the browser view may come back) */
@@ -70,6 +75,8 @@ export interface SettingsDebug {
 export interface OpenOptions {
   /** A tab of the section: Mods has mods, backgrounds, chat-bar, conversation and themes */
   tab?: string;
+  /** On a look tab of Mods: the version to show in its preview ("<mod key>/<id>", a theme's mod key) */
+  preview?: string;
 }
 
 export interface SettingsPage {
@@ -313,6 +320,11 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       deps.openSession(id);
     },
     sessionTitle: (id) => deps.sessionTitle(id),
+    askAgent: (text) => {
+      dialog.close();
+      deps.fillComposer(text);
+    },
+    modPreviews: () => deps.modPreviews?.() ?? null,
   };
 
   // ---------- Building ----------
@@ -328,8 +340,6 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       modsSection(ctx),
       mcpSection(ctx, document.getElementById('mcp-section')!),
       skillsSection(ctx),
-      scheduledSection(ctx),
-      dreamingSection(ctx),
       remoteSection(ctx),
       historySection(ctx),
       appearanceSection(ctx),
@@ -337,6 +347,13 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       hooksSection(ctx),
       aboutSection(ctx),
     ];
+    // First in the page, so a search for Scheduled or Dreaming lists the page above rows that only mention it
+    sections.unshift(
+      pagesSection((target) => {
+        dialog.close();
+        deps.openPage(target);
+      }),
+    );
     for (const s of sections) {
       s.el.classList.add('sp-section');
       s.el.id = `sp-sec-${s.id}`;
@@ -362,6 +379,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     navEl.innerHTML = '';
     let group = -1;
     for (const s of SECTIONS) {
+      if (s.searchOnly) continue;
       if (group !== -1 && s.group !== group) navEl.append(h('div', { class: 'sp-nav-sep', role: 'presentation' }));
       group = s.group;
       const btn = h('button', { type: 'button', class: 'sp-nav-item', id: `sp-nav-${s.id}`, role: 'tab', 'aria-controls': `sp-sec-${s.id}`, 'data-section': s.id });
@@ -528,6 +546,14 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   function goTo(r: HTMLElement): void {
     const owner = r.closest<HTMLElement>('.sp-section');
     if (!owner) return;
+    // A row that stands for a page (Scheduled tasks, Dreaming) opens that page
+    const page = r.dataset.page;
+    if (page === 'scheduled' || page === 'scheduled:new' || page === 'dreaming') {
+      clearSearch(false);
+      dialog.close();
+      deps.openPage(page);
+      return;
+    }
     clearSearch(false);
     showSection(owner.dataset.section as SectionId);
     reveal(r);
@@ -630,7 +656,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       clearSearch(false);
       showSection(sec);
       const tab = (opts && typeof opts.tab === 'string' ? opts.tab : null) ?? tabForTarget(t);
-      if (tab) sections.find((s) => s.id === sec)?.showTab?.(tab);
+      if (tab) sections.find((s) => s.id === sec)?.showTab?.(tab, typeof opts?.preview === 'string' ? { preview: opts.preview } : undefined);
       navItems.get(sec)?.focus({ preventScroll: true });
       return;
     }

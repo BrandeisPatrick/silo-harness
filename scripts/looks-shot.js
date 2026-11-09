@@ -60,14 +60,9 @@ async function main() {
     await app.waitFor(`document.querySelector('#status-line').hidden`, 60_000, 'the hero run to end');
     await sleep(1200);
 
-    // The set: both looks and the background from the one mod, with "Use the whole set" on its card in Settings → Mods
+    // The set: a looks-only mod has no switch; using it puts its background and both looks in use at once
     await ev(`window.oc.rpc('mods.setEnabled', 'hyperspace', true)`);
     await sleep(600);
-    await ev(`window.__oc_debug.settings.open('mods', { tab: 'backgrounds' })`);
-    await app.waitFor(`Boolean(document.querySelector('#sp-row-mod-hyperspace .sp-mod-set button'))`, 10_000, "Hyperspace's card");
-    await app.click('#sp-row-mod-hyperspace .sp-mod-set button');
-    await sleep(400);
-    await ev(`document.querySelector('#settings').close()`);
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hyperspace/starfield' && v.hello)`, 20_000, 'the starfield');
 
     // A run that does not end by itself: the stars stretch into streaks about two seconds in

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ModInfo, ModManifest, ModPermission, ModProblem, ModScope, ModsConfig } from '../../shared/mods';
-import { MOD_ID_RE, bundledStartsOff, needsStylesApproval, readManifest, settingValues } from './manifest';
+import { MOD_ID_RE, hasFeatureParts, hasLookParts, inUseKinds, needsStylesApproval, readManifest, settingValues } from './manifest';
 
 export const MOD_SCHEME = 'mod';
 const MAX_RUNTIME_PROBLEMS = 20;
@@ -231,29 +231,50 @@ export class ModRegistry {
   private info(e: Entry, cfg: ModsConfig, overrides: boolean): ModInfo {
     const m = e.manifest;
     const asked: ModPermission[] = m?.permissions ?? [];
-    const styled = needsStylesApproval(m);
+    const features = hasFeatureParts(m);
+    const looks = hasLookParts(m);
+    const covers = (have: unknown) => Array.isArray(have) && asked.every((p) => have.includes(p));
     let state: ModInfo['state'];
     let granted: ModPermission[] = [];
     let wants: ModPermission[] = [];
     let wantsStyles = false;
+    // The looks: a bundled mod's need no approval; a user or project mod's, the one given at their first Use. What its
+    // pages may do is the mod's: permissions granted with its switch count for its looks too.
+    const approval = e.scope === 'bundled' ? null : cfg.approved?.[e.key];
+    const switchGrant = features && e.scope !== 'bundled' ? cfg.enabled?.[e.key] : undefined;
+    const lookPerms = [...(approval?.permissions ?? []), ...(Array.isArray(switchGrant?.permissions) ? switchGrant!.permissions : [])];
+    const approved = !!m && looks && (e.scope === 'bundled' || (!!approval && covers(lookPerms) && !cfg.safeMode));
+    const inUse = m && looks ? inUseKinds(e.key, m, cfg.layout) : [];
     if (!m) state = 'invalid';
-    else if (e.scope === 'bundled') {
-      const off = bundledStartsOff(m) ? !cfg.enabled?.[e.key] : (cfg.disabledBundled ?? []).includes(e.id);
+    else if (!features) {
+      // Only looks: no switch. On while one of them is in use (and may apply), paused while one is in use and it asks
+      // for more than was approved, off otherwise.
+      if (e.scope === 'bundled') granted = [...asked];
+      else {
+        const have = approval?.permissions ?? [];
+        granted = approval ? asked.filter((p) => have.includes(p)) : [];
+        wants = asked.filter((p) => !have.includes(p));
+        wantsStyles = !approval;
+      }
+      state = !inUse.length ? 'off' : approved ? 'on' : approval && !cfg.safeMode ? 'paused' : 'off';
+    } else if (e.scope === 'bundled') {
+      const off = (cfg.disabledBundled ?? []).includes(e.id);
       state = off ? 'off' : 'on';
       granted = off ? [] : [...asked];
     } else {
       const grant = cfg.enabled?.[e.key];
+      wantsStyles = looks && !approval;
       if (!grant) {
         state = 'off';
         wants = [...asked];
-        wantsStyles = styled;
+        if (approved) granted = asked.filter((p) => lookPerms.includes(p));
       } else {
         const have = Array.isArray(grant.permissions) ? grant.permissions : [];
         // Only what the manifest still asks for and the user approved is in effect.
         granted = asked.filter((p) => have.includes(p));
         wants = asked.filter((p) => !have.includes(p));
-        wantsStyles = styled && !grant.styles;
-        state = cfg.safeMode ? 'off' : wants.length || wantsStyles ? 'paused' : 'on';
+        state = cfg.safeMode ? 'off' : wants.length ? 'paused' : 'on';
+        if (state !== 'on' && approved) granted = asked.filter((p) => lookPerms.includes(p));
       }
     }
     const info: ModInfo = {
@@ -271,6 +292,10 @@ export class ModRegistry {
       origin: `${MOD_SCHEME}://${e.label}`,
       settings: settingValues(m, cfg.settings?.[e.key]),
     };
+    if (looks) {
+      info.approved = approved;
+      info.inUse = inUse;
+    }
     if (overrides) info.overrides = true;
     return info;
   }

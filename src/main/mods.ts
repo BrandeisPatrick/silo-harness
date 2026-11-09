@@ -8,12 +8,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, protocol, shell } from 'electron';
 import type { App } from './app';
-import type { ModCaller, ModInfo, ModLayout, ModLookTarget, ModPermission, ModSeat, ModsConfig } from '../shared/mods';
+import type { LookKind, ModCaller, ModInfo, ModLayout, ModLookTarget, ModPermission, ModSeat, ModsConfig } from '../shared/mods';
 import type { AppConfig } from '../shared/types';
 import { configDir, projectConfigDir } from './paths';
 import { loadSkills } from './skills';
 import { ModRegistry } from './mods/registry';
-import { bundledStartsOff, needsStylesApproval, settingFits } from './mods/manifest';
+import { LOOK_KINDS, hasFeatureParts, hasLookParts, inUseKinds, isPartOf, lookPartsOf, needsStylesApproval, settingFits, splitRef } from './mods/manifest';
 import { BACKGROUND_LABEL, MOD_SCHEME, MOD_SCHEME_PRIVILEGES, resolveModUrl, type ServeContext } from './mods/serve';
 import { ModStorage } from './mods/storage';
 import { SkillUsageTracker } from './mods/skill-usage';
@@ -23,7 +23,7 @@ import { ModCommands, modCheckTool, modsPrompt } from './mods/assist';
 import { ManageError, createMod, customiseMod, installMod } from './mods/manage';
 import { installModLockdown } from './mods/lockdown';
 import { MOD_EVENT_PERMISSIONS, MOD_LOOK_TARGETS, MOD_METHOD_PERMISSIONS } from './mods/permissions';
-import { LOOK_ROOTS, cleanCss, modUrlRewriter, scopeCss } from './mods/css';
+import { LOOK_ROOTS, PREVIEW_ROOTS, cleanCss, modUrlRewriter, scopeCss, scopeTheme } from './mods/css';
 import { MOD_HOOK_TIMEOUT_MS, type HookEngine, type ModHookReply, type ModHookSet } from './hooks/engine';
 
 export { MOD_SCHEME, MOD_SCHEME_PRIVILEGES };
@@ -73,10 +73,19 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 /** Every region with the app's own look */
 export const noLooks = (): Record<ModLookTarget, string | null> => ({ conversation: null, composer: null });
 
-/** The mod key and look id in "<mod key>/<look id>" (a project mod's key holds "/" itself, so the last one splits). */
-export function splitRef(ref: string): { key: string; id: string } | null {
-  const i = ref.lastIndexOf('/');
-  return i > 0 && i < ref.length - 1 ? { key: ref.slice(0, i), id: ref.slice(i + 1) } : null;
+export { splitRef };
+
+const KIND_WORDS: Record<LookKind, string> = { background: 'background', composer: 'chat bar look', conversation: 'conversation look', theme: 'theme' };
+
+/** Puts one kind's look in use in a layout (being changed): null is Default, "image" the user's picture for the background. */
+export function applyUse(layout: ModLayout, kind: LookKind, ref: string | null): void {
+  if (kind === 'theme') layout.theme = ref;
+  else if (kind === 'background') {
+    if (ref === null) {
+      layout.background = null;
+      layout.backgroundImage = null;
+    } else layout.background = ref === 'image' ? null : ref;
+  } else layout.looks = { ...noLooks(), ...layout.looks, [kind]: ref };
 }
 
 /** A copy of the mods section to change (never the live one). */
@@ -84,8 +93,9 @@ function cloneMods(m: ModsConfig): ModsConfig {
   return {
     enabled: { ...(m.enabled ?? {}) },
     disabledBundled: [...(m.disabledBundled ?? [])],
+    approved: { ...(m.approved ?? {}) },
     settings: { ...(m.settings ?? {}) },
-    layout: { ...m.layout, collapsed: [...(m.layout?.collapsed ?? [])], looks: { ...noLooks(), ...(m.layout?.looks ?? {}) } },
+    layout: { ...m.layout, collapsed: [...(m.layout?.collapsed ?? [])], closedTabs: [...(m.layout?.closedTabs ?? [])], looks: { ...noLooks(), ...(m.layout?.looks ?? {}) } },
     safeMode: !!m.safeMode,
   };
 }
@@ -126,15 +136,21 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
     skillNames: () => loadSkills(app.config().workingDirectory, app.appRoot).map((s) => s.name),
     onUsed: (name) => emit(undefined, 'skills.used', { name }),
   });
-  const bridge = new ModBridgeHandler({ app, registry, storage, usage, emit: (mod, name, data) => emit(mod, name, data) });
+  const bridge = new ModBridgeHandler({ app, registry, storage, usage, emit: (mod, name, data) => emit(mod, name, data), previewable: (m) => previewable(m) });
   const commands = new ModCommands(
     (cmd) => app.commands.register(cmd),
     (mod, data) => emit(mod, 'command', data),
   );
+  /**
+   * A mod whose looks Settings may preview before they are used: valid, with looks, not waiting for a new approval,
+   * and not a user or project mod in safe mode. Its files are served and its preview frames answered, with only
+   * what it was granted (nothing, before its first Use).
+   */
+  const previewable = (m: ModInfo): boolean => !!m.manifest && hasLookParts(m.manifest) && m.state !== 'invalid' && m.state !== 'paused' && !(app.config().mods.safeMode && m.scope !== 'bundled');
   const serve: ServeContext = {
     lookup: (label) => {
       const m = registry.byLabel(label);
-      return m && m.state === 'on' ? { dir: m.dir, network: m.granted.includes('network') } : null;
+      return m && (m.state === 'on' || m.approved || previewable(m)) ? { dir: m.dir, network: m.granted.includes('network') } : null;
     },
     harnessDir: path.join(app.appRoot, 'modkit'),
     backgroundsDir,
@@ -178,12 +194,21 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       const m = must(key);
       if (on && !m.manifest) throw new Error(`${m.id} has no valid mod.json, so it cannot be turned on. ${m.problems[0]?.message ?? ''}`.trim());
       change((c) => {
-        if (m.scope === 'bundled') {
+        if (m.manifest && !hasFeatureParts(m.manifest) && hasLookParts(m.manifest)) {
+          // Only looks: no switch. On means used (approved, for a mod of yours or a project's), off back to Default.
+          if (on) {
+            if (m.scope !== 'bundled') c.approved![m.key] = { permissions: [...(m.manifest.permissions ?? [])], at: Date.now() };
+            if (!inUseKinds(m.key, m.manifest, c.layout).length) {
+              const parts = lookPartsOf(m.key, m.manifest);
+              for (const k of LOOK_KINDS) if (parts[k]) applyUse(c.layout, k, parts[k]);
+            }
+          } else for (const k of inUseKinds(m.key, m.manifest, c.layout)) applyUse(c.layout, k, null);
+          // What a switch of 0.8.0 left behind means nothing now
+          delete c.enabled[m.key];
+          if (m.scope === 'bundled') c.disabledBundled = c.disabledBundled.filter((id) => id !== m.id);
+        } else if (m.scope === 'bundled') {
           c.disabledBundled = c.disabledBundled.filter((id) => id !== m.id);
-          if (bundledStartsOff(m.manifest)) {
-            if (on) c.enabled[m.key] = { permissions: [...(m.manifest?.permissions ?? [])], styles: true, at: Date.now() };
-            else delete c.enabled[m.key];
-          } else if (!on) c.disabledBundled.push(m.id);
+          if (!on) c.disabledBundled.push(m.id);
         } else if (on) {
           // Turning on grants exactly what the manifest asks for now (which also resumes a paused mod).
           c.enabled[m.key] = { permissions: [...(m.manifest!.permissions ?? [])], styles: needsStylesApproval(m.manifest), at: Date.now() };
@@ -192,6 +217,61 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       registry.recompute();
       registry.markOffered();
       return registry.list();
+    }),
+    h('mods.use', (patch, opts) => {
+      if (!isObj(patch)) throw new Error('mods.use needs the looks to use, e.g. { "conversation": "<mod key>/<look id>" } (null for Default).');
+      const approve = isObj(opts) && opts.approve === true;
+      const cfg = app.config().mods;
+      const next: [LookKind, string | null][] = [];
+      const approving = new Map<string, ModInfo>();
+      for (const [kind, ref] of Object.entries(patch)) {
+        // A kind this app does not know is ignored, like an unknown field.
+        if (!(LOOK_KINDS as readonly string[]).includes(kind)) continue;
+        const k = kind as LookKind;
+        if (ref === null) {
+          next.push([k, null]);
+          continue;
+        }
+        if (typeof ref !== 'string' || !ref) throw new Error(`${kind} must be what to use ("<mod key>/<id>"${k === 'theme' ? ', the mod key for a theme' : ''}) or null for Default.`);
+        if (k === 'background' && ref === 'image') {
+          if (!cfg.layout.backgroundImage) throw new Error('There is no picture of yours to use; choose one first.');
+          next.push([k, ref]);
+          continue;
+        }
+        const owner = k === 'theme' ? ref : splitRef(ref)?.key;
+        const m = owner ? registry.get(owner) : undefined;
+        if (!m || !m.manifest || !isPartOf(k, ref, m.key, m.manifest)) throw new Error(`${ref} is not a ${KIND_WORDS[k]} of an installed mod.`);
+        if (!m.approved) {
+          if (m.scope !== 'bundled' && cfg.safeMode) throw new Error('Safe mode is on: the looks of your mods and of a project stay off until you leave it.');
+          if (!approve) throw new Error(`${m.manifest.name} has not been approved yet: its first Use asks first (pass { approve: true } once the user agreed).`);
+          approving.set(m.key, m);
+        }
+        next.push([k, ref]);
+      }
+      change((c) => {
+        for (const m of approving.values()) c.approved![m.key] = { permissions: [...(m.manifest!.permissions ?? [])], at: Date.now() };
+        for (const [k, ref] of next) applyUse(c.layout, k, ref);
+      });
+      registry.recompute();
+      registry.markOffered();
+      return registry.list();
+    }),
+    h('mods.previewCss', (input) => {
+      if (!isObj(input)) throw new Error('mods.previewCss needs { kind, ref }.');
+      const kind = input.kind;
+      const ref = String(input.ref ?? '');
+      if (kind === 'theme') {
+        const m = registry.get(ref);
+        const files = m?.manifest?.contributes?.styles ?? [];
+        if (!m || !files.length) throw new Error(`${ref} is not a theme of an installed mod.`);
+        return { css: files.map((rel) => scopeTheme(readStyle(m, rel) ?? '', PREVIEW_ROOTS.theme, { url: modUrlRewriter(m.origin, rel), body: PREVIEW_ROOTS.body })).join('\n') };
+      }
+      if (kind !== 'conversation' && kind !== 'composer') throw new Error('kind must be theme, conversation or composer.');
+      const at = splitRef(ref);
+      const m = at ? registry.get(at.key) : undefined;
+      const look = m?.manifest?.contributes?.looks?.find((l) => l.id === at!.id && l.target === kind);
+      if (!m || !look) throw new Error(`${ref} is not a ${KIND_WORDS[kind]} of an installed mod.`);
+      return { css: look.styles.map((rel) => scopeCss(readStyle(m, rel) ?? '', PREVIEW_ROOTS[kind], { url: modUrlRewriter(m.origin, rel), prefix: m.id })).join('\n') };
     }),
     h('mods.setSetting', (key, setting, value) => {
       const m = must(key);
@@ -229,10 +309,12 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       const m = must(key);
       if (m.scope !== 'bundled') throw new Error(`${m.id} is not a bundled mod; edit its folder directly (${m.dir}).`);
       customiseMod(m.dir, userRoot(), m.id);
-      // The copy replaces a panel the user had on, so it starts on with the same grant rather than vanishing.
-      if (m.state === 'on' && m.manifest) {
+      // The copy replaces a panel the user had on, so it starts on with the same grant rather than vanishing; its
+      // looks are the bundled ones as they were, so they stay usable (and in use) without asking.
+      if (m.manifest && ((m.state === 'on' && hasFeatureParts(m.manifest)) || hasLookParts(m.manifest))) {
         change((c) => {
-          c.enabled[m.id] = { permissions: [...(m.manifest!.permissions ?? [])], styles: needsStylesApproval(m.manifest), at: Date.now() };
+          if (m.state === 'on' && hasFeatureParts(m.manifest)) c.enabled[m.id] = { permissions: [...(m.manifest!.permissions ?? [])], styles: needsStylesApproval(m.manifest), at: Date.now() };
+          if (hasLookParts(m.manifest)) c.approved![m.id] = { permissions: [...(m.manifest!.permissions ?? [])], at: Date.now() };
         });
       }
       registry.scan();
@@ -265,7 +347,10 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       await host.trash(m.dir);
       change((c) => {
         delete c.enabled[m.key];
+        delete c.approved![m.key];
         delete c.settings[m.key];
+        // Its looks in use go back to Default (a bundled mod it replaced is not picked in its place)
+        for (const k of inUseKinds(m.key, m.manifest, c.layout)) applyUse(c.layout, k, null);
       });
       registry.scan();
       return registry.list();
@@ -294,24 +379,23 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       registry.report(m.key, { message: stack && !stack.includes(message) ? `${message}\n${stack}` : stack || message, view: typeof caller.view === 'string' ? caller.view : undefined, at: Date.now() });
     }),
     h('mods.styles', () => {
-      const out: { key: string; css: string }[] = [];
-      for (const m of registry.list()) {
-        if (m.state !== 'on') continue;
-        const parts: string[] = [];
-        for (const rel of m.manifest?.contributes?.styles ?? []) {
-          const css = readStyle(m, rel);
-          if (css !== null) parts.push(`/* ${m.id}/${rel} */\n${cleanCss(css, { url: modUrlRewriter(m.origin, rel) })}`);
-        }
-        if (parts.length) out.push({ key: m.key, css: parts.join('\n') });
+      // One theme at a time: the one the layout names, while its mod's looks may apply
+      const key = app.config().mods.layout.theme;
+      const m = key ? registry.get(key) : undefined;
+      if (!m || !m.approved) return [];
+      const parts: string[] = [];
+      for (const rel of m.manifest?.contributes?.styles ?? []) {
+        const css = readStyle(m, rel);
+        if (css !== null) parts.push(`/* ${m.id}/${rel} */\n${cleanCss(css, { url: modUrlRewriter(m.origin, rel) })}`);
       }
-      return out;
+      return parts.length ? [{ key: m.key, css: parts.join('\n') }] : [];
     }),
     h('mods.looks', () => activeLooks()),
   );
 
   // ---------- Styles and looks ----------
 
-  /** A CSS file of an on mod, as text (null when it is not there any more) */
+  /** A CSS file of a mod that is served (on, its looks approved, or previewable), as text (null when it is not there any more) */
   function readStyle(m: ModInfo, rel: string): string | null {
     const r = resolveModUrl(`${m.origin}/${rel.split('/').map(encodeURIComponent).join('/')}`, serve);
     if (!r.file) return null;
@@ -322,7 +406,7 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
     }
   }
 
-  /** The look the layout names for each region, when its mod is on and has that look for that region, scoped to the region. */
+  /** The look the layout names for each region, when its mod's looks may apply and it has that look for that region, scoped to the region. */
   function activeLooks(): { target: ModLookTarget; ref: string; mod: string; css: string }[] {
     const chosen = app.config().mods.layout.looks ?? noLooks();
     const out: { target: ModLookTarget; ref: string; mod: string; css: string }[] = [];
@@ -330,7 +414,7 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       const ref = chosen[target];
       const at = ref ? splitRef(ref) : null;
       const m = at ? registry.get(at.key) : undefined;
-      const look = m?.state === 'on' ? m.manifest?.contributes?.looks?.find((l) => l.id === at!.id && l.target === target) : undefined;
+      const look = m?.approved ? m.manifest?.contributes?.looks?.find((l) => l.id === at!.id && l.target === target) : undefined;
       if (!m || !look || !ref) continue;
       const parts: string[] = [];
       for (const rel of look.styles) {
@@ -383,7 +467,7 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
 
   // ---------- For the agent ----------
 
-  disposers.push(app.tools.register({ ...modCheckTool(registry, () => app.config().mods.layout.looks ?? noLooks()), optional: true }));
+  disposers.push(app.tools.register({ ...modCheckTool(registry, () => app.config().mods.layout), optional: true }));
   disposers.push(app.prompt.add('mods', () => modsPrompt(registry.list()), { optional: true }));
   disposers.push(app.provide('skill-usage', usage));
   disposers.push(app.events.on((sessionId, ev) => usage.handle(sessionId, ev)));
@@ -412,10 +496,52 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
     },
   };
   registry.scan();
+  migrateLooks();
   commands.sync(registry.list());
   registry.watch();
   app.onQuit(() => ctl?.close());
   return ctl;
+
+  /**
+   * A profile from 0.8.0 (no layout.theme yet): looks had switches then. It keeps what it showed: the background and
+   * looks chosen stay in use when their mod was on (a choice whose mod was off showed nothing, so it goes), the last
+   * theme that applied stays (themes are one at a time now), and a look mod of yours that was on counts as approved.
+   */
+  function migrateLooks(): void {
+    const cur = app.config().mods;
+    if (cur.layout.theme !== undefined) return;
+    const list = registry.list();
+    const wasOn = (m: ModInfo): boolean => {
+      const man = m.manifest;
+      if (!man) return false;
+      const restyles = !!man.contributes?.styles?.length || !!man.contributes?.looks?.length;
+      if (m.scope === 'bundled') return restyles ? !!cur.enabled?.[m.key] : !(cur.disabledBundled ?? []).includes(m.id);
+      const g = cur.enabled?.[m.key];
+      return !!g && Array.isArray(g.permissions) && (man.permissions ?? []).every((p) => g.permissions.includes(p)) && (!needsStylesApproval(man) || !!g.styles);
+    };
+    // A choice of a mod this folder does not list (another project's) is kept as it was
+    const showed = (ref: string | null): boolean => {
+      const at = ref ? splitRef(ref) : null;
+      const m = at ? list.find((x) => x.key === at.key) : undefined;
+      return !m || wasOn(m);
+    };
+    change((c) => {
+      for (const m of list) {
+        if (!m.manifest || !hasLookParts(m.manifest)) continue;
+        const g = cur.enabled?.[m.key];
+        if (m.scope !== 'bundled' && g && wasOn(m)) c.approved![m.key] = { permissions: [...g.permissions], at: Number(g.at) || Date.now() };
+        if (!hasFeatureParts(m.manifest)) {
+          delete c.enabled[m.key];
+          if (m.scope === 'bundled') c.disabledBundled = c.disabledBundled.filter((id) => id !== m.id);
+        }
+      }
+      for (const t of MOD_LOOK_TARGETS) if (c.layout.looks[t] && !showed(c.layout.looks[t])) c.layout.looks[t] = null;
+      if (c.layout.background && !showed(c.layout.background)) c.layout.background = null;
+      const themes = list.filter((m) => !!m.manifest?.contributes?.styles?.length && wasOn(m));
+      c.layout.theme = themes.length ? themes[themes.length - 1].key : null;
+    });
+    registry.recompute();
+  }
 }
 
 /** Validates a layout patch from the window (unknown fields are dropped). */
@@ -431,6 +557,10 @@ export function checkLayout(patch: unknown, backgroundsDir: string): Partial<Mod
   if ('collapsed' in patch) {
     if (!Array.isArray(patch.collapsed) || patch.collapsed.some((c) => typeof c !== 'string')) throw new Error('collapsed must be a list of "<mod key>/<view id>".');
     out.collapsed = [...new Set(patch.collapsed as string[])].slice(0, 500);
+  }
+  if ('closedTabs' in patch) {
+    if (!Array.isArray(patch.closedTabs) || patch.closedTabs.some((c) => typeof c !== 'string')) throw new Error('closedTabs must be a list of "<mod key>/<view id>".');
+    out.closedTabs = [...new Set(patch.closedTabs as string[])].slice(0, 500);
   }
   if ('background' in patch) {
     if (patch.background !== null && typeof patch.background !== 'string') throw new Error('background must be "<mod key>/<view id>" or null.');
@@ -453,6 +583,10 @@ export function checkLayout(patch: unknown, backgroundsDir: string): Partial<Mod
       looks[target as ModLookTarget] = ref as string | null;
     }
     out.looks = looks as Record<ModLookTarget, string | null>;
+  }
+  if ('theme' in patch) {
+    if (patch.theme !== null && (typeof patch.theme !== 'string' || !patch.theme)) throw new Error('theme must be the key of a mod with styles, or null.');
+    out.theme = patch.theme as string | null;
   }
   if ('backgroundDim' in patch) {
     const d = Number(patch.backgroundDim);

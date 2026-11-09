@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.9.0
+
+Scheduled tasks and Dreaming have pages of their own, laid out like Claude Code's; looks (background, chat bar, conversation, theme) are previewed and used without switches; and the rail and the mods' tabs open and close like the browser.
+
+### Scheduled tasks and Dreaming, as pages
+
+- **Pages of their own.** Scheduled and Dreaming in the sidebar no longer open Settings: each opens a page in the main column, in place of the session, as Claude Code's Scheduled row does. The row shows selected while it is open; choosing a session in the sidebar brings the chat back, and ⌘[ goes back a page. Settings no longer has the two sections, and a search there still finds them, with rows that open the pages.
+- **Scheduled tasks.** Your tasks as cards: the name, where each run goes (a new session or the same one), the prompt, and whether it is active, paused or done with its rhythm ("Active · Weekdays at 08:30"). Search by name or prompt, filter by Active or Paused, sort by next run, name or last run. A banner says what is true of them: they run only while Silo Harness is open and the Mac awake, and a run missed while it was closed or asleep happens once when it is back, if it was due less than a day before.
+- **Templates.** A nightly dependency audit, a weekly changelog draft, a morning summary, a daily test run and a weekly TODO sweep, each a click away from a filled-in New task form.
+- **The New task form.** Name, instructions, the folder, the schedule (once at a date and time, every hour, every few minutes, hours or days, every day, weekdays, every week on a day, every month, or a custom cron rhythm) with its first run shown as you type, and whether each run starts a new session or continues one you pick. The same form edits a task. The side pane's Scheduled tab opens it for New, and has an Open page button.
+- **A task's page.** Run now and an Active switch to pause and resume it; Edit and Delete in the menu of the breadcrumb at the top; and its History: every run, newest first, with the session it made or continued, when, and whether it is running, waiting for you, done, failed or stopped. A run opens its session in the chat view, where you can keep talking in it. Beside it, what the task does, where, how often and under which permission mode.
+- **The lightning bolt.** A session made by a scheduled run sits in the sidebar with the others, by date, with a lightning bolt in front of its title (in place of the clock at the end of the row). A dream's session, while it is listed, has the moon in front of its title in the same way. The running, waiting and unread marks stay at the end.
+- **Dreaming.** The same layout: a card per project that has dreams or that the next dream reads, with the mode, its last dream's report and what waits ("Daily at 03:00 · 2 suggestions waiting"), and a Suggestions tab with every proposal that waits, to apply or dismiss, as in the dream's session. Run a dream ⌄ dreams about every project with new activity or the one you pick. A project's page has Run a dream now, its dreams newest first, each opening its session, and the settings beside them: the daily dream and its time, the mode, and what to look for. The banner says whether the daily dream is on and that a dream sends parts of your past sessions to the model you configured.
+- **For mods:** `harness.ui.openPage('scheduled' | 'dreaming', { form: 'new' })` opens a page (and the New task form), and `harness.ui.openSettings('scheduled')` or `('dreaming')` opens the page instead of the old section.
+
+### Looks without switches
+
+- **Backgrounds, chat bar looks, conversation looks and themes have no switch any more.** They are looks: each is available as soon as it is installed, and its tab in Settings → Mods (Background, Chat bar, Conversation, Theme) decides which one is in use, one of each kind, with Default first. Using a look puts away the one of its kind that was in use; there is nothing to turn on first.
+- **See it before you use it.** At the top of each look tab is a preview of what is in use: the background, live, behind a miniature window with the Dim slider under it; a sample chat bar; a short sample exchange; or a miniature window in the theme. Click any version in the grid under it and the preview shows that one while the window stays as it is. **Use** applies it; **Back to current** returns to what you have. The look's own settings are right under its name.
+- **New ⌄** on each look tab: *Ask the agent…* closes Settings and starts the request in the composer ("Make a chat bar look that …"), and *From a template…* writes a starter that shows up in the grid, previewed, not applied.
+- **One question, once.** The first Use of a look of yours or of a project's asks what its pages may do and says that it restyles the app; after that it is used without asking. Built-in looks never ask.
+- **Sets.** A mod with several kinds of look, like Hyperspace, has *Use the whole set* next to Use.
+- **The chat card** for a new look the agent wrote offers **Preview** (its tab, with it in the preview) and **Use**, instead of Turn on.
+- **One theme at a time.** Themes no longer stack. If you had several themes on, the last one in the order they applied stays in use.
+- **Nothing changes on screen when you update.** The background and looks you had chosen stay in use, the theme as above, and a look of yours that was turned on but not chosen is simply available.
+- **For mod authors:** a look and a background view may name a `preview` picture for their card. `mod_check` says whether a look is in use and approved. A mod with panels or commands as well as looks keeps its switch for those only.
+- **Settings → Appearance** keeps Light, Dark and System (now called Colour scheme) and its rows that open each look tab.
+
+### Panels from the top bar
+
+- **The rail's toggle** is always the first icon of the top bar, before Terminal, Diff and Browser, drawn as a list in a box like the others. It and ⌘⇧E open and close the rail, and the app remembers the choice.
+- **Mod tabs in the side pane close** with the × on the tab (or Delete when the tab has the focus), and leave the strip. The ⋯ menu shows them again ("Show Side chat"), opening the pane if it was closed. A closed tab stays closed after a restart.
+
 ## 0.8.0
 
 Closer to Claude Code: hooks in Claude Code's own format, from settings.json and from mods; the permission prompt and a new question card drawn as Claude Code draws them; one quiet line per tool call; and the rail, the footer and the status line laid out like Claude Code's.

@@ -133,6 +133,7 @@ async function readyPage(hello = HELLO) {
       ['ui.open(viewId)', () => p.h.ui.open('side'), 'ui.open', { view: 'side' }, null],
       ['ui.copy', () => p.h.ui.copy('x'), 'ui.copy', { text: 'x' }, true, true],
       ['ui.openExternal', () => p.h.ui.openExternal('https://a.b'), 'ui.openExternal', { url: 'https://a.b' }, null],
+      ['ui.openPage', () => p.h.ui.openPage('scheduled', { form: 'new' }), 'ui.openPage', { page: 'scheduled', form: 'new' }, null],
       ['ui.markdown', () => p.h.ui.markdown('# h'), 'ui.markdown', { text: '# h' }, { html: '<h1>h</h1>' }, { html: '<h1>h</h1>' }],
       ['ui.resize(h)', () => p.h.ui.resize(42.2), 'ui.resize', { height: 43 }, null],
       ['storage.get(key, fallback) → fallback when undefined', () => p.h.storage.get('k', 5), 'storage.get', { key: 'k' }, {}, 5],

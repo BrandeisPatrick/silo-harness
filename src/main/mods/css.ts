@@ -251,6 +251,76 @@ export function scopeCss(css: string, root: string, opts: ScopeOptions = {}): st
   return parts.join('\n');
 }
 
+/** A selector list with `:root` and `html` as the scope's root and `body` as `body` (the selector given for it); strings are left alone. */
+function rootSelector(sel: string, body: string): string {
+  let out = '';
+  for (let i = 0; i < sel.length; ) {
+    const c = sel[i];
+    if (c === '"' || c === "'") {
+      const s = readString(sel, i);
+      out += s.text;
+      i = s.end;
+      continue;
+    }
+    if (c === '\\') {
+      out += sel.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    const before = out.length ? out[out.length - 1] : '';
+    const m = /^(:root|html|body)(?![\w-])/i.exec(sel.slice(i));
+    // A type selector (html, body) only where a compound starts; :root anywhere
+    if (m && (m[1].startsWith(':') || before === '' || /[\s,>+~(]/.test(before))) {
+      out += m[1].toLowerCase() === 'body' ? body : ':scope';
+      i += m[1].length;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+function partitionTheme(statements: CssStatement[], depth: number, body: string): { hoisted: string[]; scoped: string[] } {
+  const hoisted: string[] = [];
+  const scoped: string[] = [];
+  for (const s of statements) {
+    if (s.kind === 'at' && DROPPED_AT_RULES.includes(s.name)) continue;
+    // A theme keeps its global registrations (@font-face, @property), as it does in the window
+    if (s.kind === 'at' && HOISTED_AT_RULES.includes(s.name)) {
+      hoisted.push(s.text);
+      continue;
+    }
+    if (s.kind === 'at' && s.prelude && GROUPING_AT_RULES.includes(s.name) && depth < MAX_DEPTH) {
+      const inner = partitionTheme(splitCss(s.body), depth + 1, body);
+      if (inner.hoisted.length) hoisted.push(`${s.prelude} {\n${inner.hoisted.join('\n')}\n}`);
+      if (inner.scoped.length) scoped.push(`${s.prelude} {\n${inner.scoped.join('\n')}\n}`);
+      continue;
+    }
+    if (s.kind === 'rule') {
+      const open = blockStart(s.text);
+      scoped.push(open < 0 ? s.text : `${rootSelector(s.text.slice(0, open), body)}${s.text.slice(open)}`);
+      continue;
+    }
+    scoped.push(s.text);
+  }
+  return { hoisted, scoped };
+}
+
+/**
+ * A theme's CSS for a preview in Settings: inside `@scope (<root>) { … }`, with `:root` and `html` read as the root
+ * and `body` as `opts.body` (the element of the preview that stands for the page's body), so the theme dresses a
+ * miniature window and never the window itself. Its @keyframes, @font-face and @property go in front of the scope;
+ * @import and the other dropped at-rules are removed, and relative url()s point at the mod's files, as in the window.
+ */
+export function scopeTheme(css: string, root: string, opts: CssOptions & { body?: string } = {}): string {
+  const { hoisted, scoped } = partitionTheme(splitCss(css, opts), 0, opts.body ?? ':scope');
+  const parts: string[] = [];
+  if (hoisted.length) parts.push(hoisted.join('\n'));
+  if (scoped.length) parts.push(`@scope (${root}) {\n${scoped.join('\n')}\n}`);
+  return parts.join('\n');
+}
+
 /** A theme's CSS (contributes.styles) for the window: the same splitting, without a scope. @import and the other dropped at-rules are removed. */
 export function cleanCss(css: string, opts: CssOptions = {}): string {
   return splitCss(css, opts)
@@ -279,3 +349,10 @@ export function modUrlRewriter(origin: string, file: string): (address: string) 
 
 /** The element a look for `target` is scoped to. */
 export const LOOK_ROOTS = { conversation: '#messages', composer: '#chatbar' } as const;
+
+/**
+ * The roots of the previews in Settings → Mods: each preview is a miniature window (`.lp-root`, its page `.lp-body`)
+ * with its own transcript and chat bar, drawn in a shadow root of its own. A look or a theme compiled for these
+ * reaches the preview and nothing else (src/renderer/settings/look-preview.ts builds the same structure).
+ */
+export const PREVIEW_ROOTS = { theme: '.lp-root', body: '.lp-body', conversation: '.lp-root #messages', composer: '.lp-root #chatbar' } as const;

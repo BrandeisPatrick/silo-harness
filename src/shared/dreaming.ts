@@ -100,6 +100,19 @@ export interface Dream {
   proposals: DreamProposal[];
   /** Plan mode: the plan on the session that gathers the proposals */
   planId?: string;
+  /** The start of the dream's closing report (its last reply when its review ended) */
+  summary?: string;
+}
+
+/** A project folder as Dreaming sees it: the folders of the sessions, for the Dreaming page and its Run a dream menu. */
+export interface DreamProject {
+  cwd: string;
+  /** Sessions with turns no dream of the project has read yet */
+  fresh: number;
+  /** The newest activity in a session of the project, unix ms */
+  lastActivity: number;
+  /** The next dream (the daily one, or Run a dream for every project) reads it: it has turns no dream has read yet */
+  next: boolean;
 }
 
 export interface DreamingState {
@@ -119,10 +132,12 @@ export interface DreamingState {
 export interface DreamingRpc {
   'dreaming.get': () => DreamingState;
   'dreaming.set': (patch: Partial<DreamingConfig>) => DreamingState;
-  /** Starts a run over the projects with new activity (or `cwd` alone); refused while one runs */
+  /** Starts a run by hand over the projects with new activity (or `cwd` alone); refused while one runs */
   'dreaming.run': (cwd?: string) => DreamingState;
   'dreaming.stop': () => DreamingState;
   'dreaming.list': () => Dream[];
+  /** The project folders of the sessions (not dreams), most recently active first */
+  'dreaming.projects': () => DreamProject[];
   'dreaming.apply': (proposalId: string) => Dream;
   'dreaming.dismiss': (proposalId: string) => Dream;
   /** Applies every proposal of the dream that waits (or is planned) */

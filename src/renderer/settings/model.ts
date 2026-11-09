@@ -3,7 +3,7 @@
 // (test/settings-page.js) loads the compiled file directly.
 
 import type { AppConfig } from '../../shared/types';
-import type { ModInfo, ModLayout, ModLookTarget, ModPermission, ModSeat } from '../../shared/mods';
+import type { LookKind, ModInfo, ModLayout, ModLookTarget, ModManifest, ModPermission, ModSeat } from '../../shared/mods';
 import type { ScheduleWhen } from '../../shared/schedules';
 import type { SettingsFileInfo } from '../../shared/settings-info';
 import type { HookEntryInfo, HookEvent, HookRunInfo } from '../../shared/hooks';
@@ -11,7 +11,7 @@ import type { IconName } from '../icons.js';
 
 // ---------- Sections ----------
 
-export type SectionId = 'general' | 'model' | 'permissions' | 'context' | 'mods' | 'mcp' | 'skills' | 'scheduled' | 'dreaming' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about';
+export type SectionId = 'general' | 'model' | 'permissions' | 'context' | 'mods' | 'mcp' | 'skills' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about' | 'pages';
 
 export interface SectionInfo {
   id: SectionId;
@@ -19,6 +19,8 @@ export interface SectionInfo {
   icon: IconName;
   /** Navigation group; a hairline separates groups */
   group: number;
+  /** Only a search shows it: no entry in the navigation, and openSettings cannot open it */
+  searchOnly?: boolean;
 }
 
 export const SECTIONS: SectionInfo[] = [
@@ -29,18 +31,21 @@ export const SECTIONS: SectionInfo[] = [
   { id: 'mods', title: 'Mods', icon: 'puzzle', group: 1 },
   { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 1 },
   { id: 'skills', title: 'Skills', icon: 'sparkles', group: 1 },
-  { id: 'scheduled', title: 'Scheduled', icon: 'clock', group: 1 },
-  { id: 'dreaming', title: 'Dreaming', icon: 'moon', group: 1 },
   { id: 'remote', title: 'Remote control', icon: 'smartphone', group: 1 },
   { id: 'history', title: 'History', icon: 'archive', group: 2 },
   { id: 'appearance', title: 'Appearance', icon: 'palette', group: 2 },
   { id: 'files', title: 'Configuration files', icon: 'file-text', group: 2 },
   { id: 'hooks', title: 'Hooks', icon: 'zap', group: 2 },
   { id: 'about', title: 'About', icon: 'info', group: 3 },
+  // Scheduled tasks and Dreaming have pages of their own; a search for them finds rows that open those pages
+  { id: 'pages', title: 'Pages', icon: 'list', group: 4, searchOnly: true },
 ];
 
+/** The sections that were in Settings and are pages now: openSettings('scheduled') opens the page */
+export const PAGE_SECTIONS = ['scheduled', 'dreaming'] as const;
+
 export function isSectionId(s: unknown): s is SectionId {
-  return typeof s === 'string' && SECTIONS.some((x) => x.id === s);
+  return typeof s === 'string' && SECTIONS.some((x) => x.id === s && !x.searchOnly);
 }
 
 /** Older callers name an element of the old form; these ids stand for a whole section. */
@@ -241,10 +246,10 @@ export type NewModKind = ModSeat | `look:${ModLookTarget}` | 'theme';
 
 export const MOD_TABS: ModTabInfo[] = [
   { id: 'mods', title: 'Mods', kind: 'general', newKind: 'rail' },
-  { id: 'backgrounds', title: 'Backgrounds', kind: 'background', newKind: 'background' },
+  { id: 'backgrounds', title: 'Background', kind: 'background', newKind: 'background' },
   { id: 'chat-bar', title: 'Chat bar', kind: 'composer', newKind: 'look:composer' },
   { id: 'conversation', title: 'Conversation', kind: 'conversation', newKind: 'look:conversation' },
-  { id: 'themes', title: 'Themes', kind: 'theme', newKind: 'theme' },
+  { id: 'themes', title: 'Theme', kind: 'theme', newKind: 'theme' },
 ];
 
 export function isModTab(s: unknown): s is ModTab {
@@ -281,125 +286,153 @@ export function modsForTab<T extends Pick<ModInfo, 'manifest'>>(mods: readonly T
   return mods.filter((m) => modTabs(m).includes(tab));
 }
 
-/** The theme mods in the order their styles apply (the list order: built-in, yours, the project's, then by id); a later one wins where two overlap. */
+/** The theme mods in list order (built-in, yours, the project's, then by id). */
 export function themeMods<T extends Pick<ModInfo, 'manifest'>>(mods: readonly T[]): T[] {
   return modsForTab(mods, 'themes');
 }
 
-/** The current choice of a kind in words, for Settings → Appearance. */
-export function choiceWords(mods: readonly ModInfo[], layout: Pick<ModLayout, 'looks' | 'background' | 'backgroundImage'> | null, kind: Exclude<ModKind, 'general'>): string {
-  const name = (ref: string, list: { value: string; label: string }[]) => list.find((c) => c.value === ref)?.label ?? `${ref} (off)`;
-  if (kind === 'theme') {
-    const on = themeMods(mods).filter((m) => (m as ModInfo).state === 'on').map((m) => m.manifest?.name ?? (m as ModInfo).id);
-    return on.length ? on.join(', ') : 'None';
-  }
-  if (kind === 'background') {
-    if (layout?.background) return name(layout.background, backgroundChoices(mods));
-    return layout?.backgroundImage ? 'Your picture' : 'None';
-  }
-  const ref = layout?.looks?.[kind] ?? null;
-  return ref ? name(ref, lookChoices(mods, kind)) : 'Default';
+/** A mod that is only looks (backgrounds, looks, a theme): it has no switch, its tabs decide what is in use. */
+export function isLookOnly(manifest: ModManifest | null | undefined): boolean {
+  if (!manifest) return false;
+  const kinds = modKinds(manifest);
+  return !kinds.includes('general');
 }
 
-/** The choices of the Background select: every background view from mods that are on ("<mod>: <view>"), in list order. */
-export function backgroundChoices(mods: readonly ModInfo[]): LookChoice[] {
-  const out: LookChoice[] = [];
-  for (const m of mods) {
-    if (m.state !== 'on') continue;
-    for (const v of m.manifest?.contributes?.views ?? []) if (v.seat === 'background') out.push({ value: `${m.key}/${v.id}`, label: `${m.manifest?.name ?? m.id}: ${v.title}` });
-  }
-  return out;
-}
-
-/** The mod a layout reference ("<mod key>/<id>") belongs to. */
+/** The refs of looks, per region, in "<mod key>/<id>" (a project mod's key holds "/", so the last one splits). */
 export function refMod(ref: string): string {
   return ref.slice(0, Math.max(0, ref.lastIndexOf('/')));
 }
 
-// ---------- Looks (Settings → Mods → Chat bar, Conversation, Backgrounds) ----------
+// ---------- Looks: Settings → Mods → Background, Chat bar, Conversation, Theme ----------
 
-export interface LookChoice {
-  value: string;
-  label: string;
+export interface LookTabInfo {
+  tab: ModTab;
+  kind: LookKind;
+  title: string;
+  /** "chat bar look": what one of them is called in a sentence */
+  noun: string;
+  /** What Ask the agent… puts in the composer */
+  prompt: string;
+  /** The row of the tab's head: #sp-row-<id> (kept from the pickers of 0.8.0, so links to them still land) */
+  row: string;
 }
 
-/** The choices of a region's select: every look for it from mods that are on ("<mod>: <look>"), in list order. */
-export function lookChoices(mods: readonly ModInfo[], target: ModLookTarget): LookChoice[] {
-  const out: LookChoice[] = [];
+export const LOOK_TABS: LookTabInfo[] = [
+  { tab: 'backgrounds', kind: 'background', title: 'Background', noun: 'background', prompt: 'Make a background that ', row: 'background' },
+  { tab: 'chat-bar', kind: 'composer', title: 'Chat bar', noun: 'chat bar look', prompt: 'Make a chat bar look that ', row: 'look-composer' },
+  { tab: 'conversation', kind: 'conversation', title: 'Conversation', noun: 'conversation look', prompt: 'Make a conversation look that ', row: 'look-conversation' },
+  { tab: 'themes', kind: 'theme', title: 'Theme', noun: 'theme', prompt: 'Make a theme that ', row: 'look-theme' },
+];
+
+export function lookTabOfKind(kind: LookKind): LookTabInfo {
+  return LOOK_TABS.find((t) => t.kind === kind)!;
+}
+
+export function lookTabOf(tab: ModTab): LookTabInfo | null {
+  return LOOK_TABS.find((t) => t.tab === tab) ?? null;
+}
+
+export const SOURCE_WORDS: Record<ModInfo['scope'], string> = { bundled: 'Built-in', user: 'Yours', project: 'This project' };
+
+/** One version a look tab offers: Default, your picture (backgrounds), or a part of a mod. */
+export interface LookVersion {
+  /** What the layout holds while it is in use: null for Default, "image" for your picture, else "<mod key>/<id>" or a theme's mod key */
+  ref: string | null;
+  /** The mod it belongs to (null: Default, your picture) */
+  mod: ModInfo | null;
+  /** "Starfield", "Paper theme" */
+  title: string;
+  /** "Hyperspace · Built-in" */
+  source: string;
+  description?: string;
+  /** A picture of it: a path in the mod (from the manifest), shown on its card */
+  preview?: string;
+}
+
+/** The ref of each kind the layout has in use: "image" for your picture behind the window. */
+export function lookInUse(layout: Partial<ModLayout> | null | undefined, kind: LookKind): string | null {
+  if (!layout) return null;
+  if (kind === 'theme') return layout.theme ?? null;
+  if (kind === 'background') return layout.background ?? (layout.backgroundImage ? 'image' : null);
+  return layout.looks?.[kind] ?? null;
+}
+
+/** Every version of a kind: Default first, your picture (when there is one), then each mod's, in list order (built-in, yours, the project's). */
+export function lookVersions(mods: readonly ModInfo[], kind: LookKind, picture?: string | null): LookVersion[] {
+  const out: LookVersion[] = [{ ref: null, mod: null, title: 'Default', source: 'Silo Harness' }];
+  if (kind === 'background' && picture) out.push({ ref: 'image', mod: null, title: 'Your picture', source: picture.split(/[\\/]/).pop()!.replace(/^\d+-/, '') });
   for (const m of mods) {
-    if (m.state !== 'on') continue;
-    for (const l of m.manifest?.contributes?.looks ?? []) if (l.target === target) out.push({ value: `${m.key}/${l.id}`, label: `${m.manifest?.name ?? m.id}: ${l.title}` });
+    const c = m.manifest?.contributes;
+    if (!c || m.state === 'invalid') continue;
+    const name = m.manifest!.name;
+    const source = `${name} · ${SOURCE_WORDS[m.scope]}`;
+    if (kind === 'theme') {
+      if ((c.styles ?? []).length) out.push({ ref: m.key, mod: m, title: name, source: SOURCE_WORDS[m.scope], description: m.manifest!.description });
+      continue;
+    }
+    if (kind === 'background') {
+      for (const v of c.views ?? []) if (v.seat === 'background') out.push({ ref: `${m.key}/${v.id}`, mod: m, title: v.title, source, ...(v.preview ? { preview: v.preview } : {}) });
+      continue;
+    }
+    for (const l of c.looks ?? []) if (l.target === kind) out.push({ ref: `${m.key}/${l.id}`, mod: m, title: l.title, source, ...(l.description ? { description: l.description } : {}), ...(l.preview ? { preview: l.preview } : {}) });
   }
   return out;
 }
 
-/** A mod's matching parts: its first conversation look, chat bar look and background view. */
+/** Whether a look's first Use asks first: a mod of yours or a project's not approved yet (or asking for more since). */
+export function needsApproval(m: Pick<ModInfo, 'scope' | 'approved' | 'state'>): boolean {
+  return m.scope !== 'bundled' && !(m.approved ?? m.state === 'on');
+}
+
+/** The current choice of a kind in words, for Settings → Appearance. */
+export function choiceWords(mods: readonly ModInfo[], layout: Partial<ModLayout> | null, kind: Exclude<ModKind, 'general'>): string {
+  const ref = lookInUse(layout, kind);
+  if (!ref) return 'Default';
+  if (ref === 'image') return 'Your picture';
+  const v = lookVersions(mods, kind).find((x) => x.ref === ref);
+  if (!v) return `${ref} (not installed)`;
+  return kind === 'theme' ? v.title : `${v.mod!.manifest!.name}: ${v.title}`;
+}
+
+/** A mod's matching parts: its first look of each kind. */
 export interface LookSet {
   key: string;
   name: string;
-  conversation: string | null;
-  composer: string | null;
   background: string | null;
+  composer: string | null;
+  conversation: string | null;
+  theme: string | null;
 }
 
-function setOf(m: ModInfo): LookSet {
-  const looks = m.manifest?.contributes?.looks ?? [];
+export function setOf(m: ModInfo): LookSet {
+  const c = m.manifest?.contributes ?? {};
   const look = (t: ModLookTarget) => {
-    const l = looks.find((x) => x.target === t);
+    const l = (c.looks ?? []).find((x) => x.target === t);
     return l ? `${m.key}/${l.id}` : null;
   };
-  const bg = m.manifest?.contributes?.views?.find((v) => v.seat === 'background');
-  return { key: m.key, name: m.manifest?.name ?? m.id, conversation: look('conversation'), composer: look('composer'), background: bg ? `${m.key}/${bg.id}` : null };
+  const bg = (c.views ?? []).find((v) => v.seat === 'background');
+  return { key: m.key, name: m.manifest?.name ?? m.id, background: bg ? `${m.key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation'), theme: (c.styles ?? []).length ? m.key : null };
 }
 
-const parts = (s: LookSet) => [s.conversation, s.composer, s.background].filter(Boolean).length;
+const LOOK_KINDS: LookKind[] = ['background', 'composer', 'conversation', 'theme'];
+const parts = (s: LookSet) => LOOK_KINDS.filter((k) => s[k]).length;
 
-/** The sets a mod's card offers ("Use the whole set"): every mod that is on and contributes at least two of a conversation look, a chat bar look and a background. */
-export function lookSets(mods: readonly ModInfo[]): LookSet[] {
-  return mods.filter((m) => m.state === 'on' && m.manifest).map(setOf).filter((s) => parts(s) >= 2);
+/** The sets ("Use the whole set"): every installed mod with at least `min` (default two) kinds of look. */
+export function lookSets(mods: readonly ModInfo[], min = 2): LookSet[] {
+  return mods.filter((m) => m.manifest && m.state !== 'invalid').map(setOf).filter((s) => parts(s) >= min);
 }
 
-/** What the layout shows in the three places a set covers (a picture of the user's own counts as a background). */
-function shown(layout: Pick<ModLayout, 'looks' | 'background' | 'backgroundImage'>): { conversation: string | null; composer: string | null; background: string | null } {
-  return { conversation: layout.looks?.conversation ?? null, composer: layout.looks?.composer ?? null, background: layout.background ?? (layout.backgroundImage ? 'image' : null) };
+/** Whether every part of a set is in use. */
+export function setInUse(set: LookSet, layout: Partial<ModLayout> | null | undefined): boolean {
+  return LOOK_KINDS.every((k) => !set[k] || lookInUse(layout, k) === set[k]);
 }
 
-/**
- * The Set row's value: "" (None) when all three are the app's own, a set's mod key when the three are exactly that
- * set's parts (a part it lacks is the app's own), "off:<mod key>" when they all come from one mod that is not on
- * (or not installed any more), and "custom" otherwise.
- */
-export function currentLookSet(mods: readonly ModInfo[], layout: Pick<ModLayout, 'looks' | 'background' | 'backgroundImage'>): string {
-  const now = shown(layout);
-  if (!now.conversation && !now.composer && !now.background) return '';
-  for (const s of lookSets(mods)) if (s.conversation === now.conversation && s.composer === now.composer && s.background === now.background) return s.key;
-  const owners = [now.conversation, now.composer, now.background].filter((r): r is string => !!r).map((r) => (r === 'image' ? '' : refMod(r)));
-  const one = owners.every((k) => k && k === owners[0]) ? owners[0] : '';
-  if (one && owners.length >= 2 && !lookSets(mods).some((s) => s.key === one)) {
-    const m = mods.find((x) => x.key === one);
-    if (!m || m.state !== 'on' || !m.manifest) return `off:${one}`;
-  }
-  return 'custom';
-}
-
-/** The layout change that applies a set (null: None, the app's own look everywhere). */
-export function lookSetPatch(set: LookSet | null): Pick<ModLayout, 'looks' | 'background'> & { backgroundImage?: null } {
-  const patch = { looks: { conversation: set?.conversation ?? null, composer: set?.composer ?? null }, background: set?.background ?? null } as Pick<ModLayout, 'looks' | 'background'> & { backgroundImage?: null };
-  // A set without a background (or None) means no background: the user's own picture goes too, as None does in the Background row.
-  if (!set?.background) patch.backgroundImage = null;
+/** The mods.use patch that puts a set's parts in use (or, with `use` false, takes them back to Default); kinds it lacks are left as they are. */
+export function lookSetPatch(set: LookSet | null, use = true): Partial<Record<LookKind, string | null>> {
+  const patch: Partial<Record<LookKind, string | null>> = {};
+  if (!set) return patch;
+  for (const k of LOOK_KINDS) if (set[k]) patch[k] = use ? set[k] : null;
   return patch;
-}
-
-/** Mods that are off and have looks. */
-export function offLookMods(mods: readonly ModInfo[]): string[] {
-  return mods.filter((m) => m.state !== 'on' && m.state !== 'invalid' && m.manifest?.contributes?.looks?.length).map((m) => m.manifest?.name ?? m.id);
-}
-
-/** The mods of a tab that are off (or paused): a special tab says their choices show once they are on. */
-export function offModsOfTab(mods: readonly ModInfo[], tab: ModTab): string[] {
-  return modsForTab(mods, tab)
-    .filter((m) => m.state !== 'on' && m.state !== 'invalid')
-    .map((m) => m.manifest?.name ?? m.id);
 }
 
 export type ChipTone = 'neutral' | 'warn' | 'danger' | 'ok';
@@ -419,17 +452,29 @@ export const MOD_GROUPS: { scope: ModInfo['scope']; title: string }[] = [
   { scope: 'project', title: 'This project' },
 ];
 
-/** What turning a mod on (or resuming it) grants, as lines for the confirmation, and the warnings that go with them. */
+/**
+ * What turning a mod's switch on (or resuming it) grants, as lines for the confirmation, and the warnings that go with
+ * them. Its looks are not part of it: they ask at their first Use (useSheet).
+ */
 export function grantSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'wantsStyles' | 'granted'>): { title: string; lines: string[]; warnings: string[] } {
   const resuming = m.state === 'paused';
   const asked = resuming ? m.wants : (m.manifest?.permissions ?? []);
   const lines = asked.map(permissionWords);
-  const contributesStyles = !!m.manifest?.contributes?.styles?.length || !!m.manifest?.contributes?.looks?.length || !!m.manifest?.contributes?.views?.some((v) => v.seat === 'background');
   const warnings: string[] = [];
-  if (resuming ? m.wantsStyles : contributesStyles) warnings.push('It adds styles, looks or a background, so it can restyle the whole app, approval cards included.');
   if (asked.includes('network')) warnings.push('It can reach the internet, so what it reads can leave this Mac.');
   const name = m.manifest?.name ?? 'This mod';
   return { title: resuming ? `${name} wants more access` : `Turn on ${name}?`, lines, warnings };
+}
+
+/** The confirmation of the first Use of a look of yours or a project's: what its pages may do, and that it restyles the app. */
+export function useSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'approved'>, kind: LookKind): { title: string; lines: string[]; warnings: string[] } {
+  const asked = m.wants.length ? m.wants : (m.manifest?.permissions ?? []);
+  const lines = asked.map(permissionWords);
+  const what = kind === 'background' ? 'It draws behind the whole window, and its stylesheets can restyle the app, approval cards included.' : kind === 'theme' ? 'It restyles the whole app, approval cards included.' : `It restyles the ${kind === 'composer' ? 'chat bar' : 'conversation, approval cards included'}.`;
+  const warnings = [what, 'Use it only if you trust where it came from.'];
+  if (asked.includes('network')) warnings.push('It can reach the internet, so what it reads can leave this Mac.');
+  const name = m.manifest?.name ?? 'This look';
+  return { title: m.state === 'paused' ? `${name} asks for more` : `Use ${name}?`, lines, warnings };
 }
 
 /** A mod id from its name: "Word count!" → "word-count" (lower-case letters, digits and -, 2 to 40, starts with a letter). */
@@ -546,11 +591,3 @@ export function relativeDays(ms: number, now = Date.now()): string {
   return diff >= 0 ? `in ${words}` : `${words} ago`;
 }
 
-export const LAST_STATUS_WORDS: Record<string, string> = {
-  running: 'Running now',
-  ok: 'Last run finished',
-  error: 'Last run failed',
-  stopped: 'Last run was stopped',
-  skipped: 'Skipped: the previous run was still going',
-  missed: 'Missed: the app was closed',
-};

@@ -132,14 +132,21 @@ export type Indicator =
   | { kind: 'family'; count?: number; hot?: boolean }
   | { kind: 'fork' }
   | { kind: 'spawn' }
-  | { kind: 'schedule' }
-  /** A dream's session: the moon, with the attention dot while its proposals wait for the user */
+  /** A dream's session whose proposals (or plan) wait for the user: the attention dot */
   | { kind: 'dream'; waiting: boolean }
   | null;
 
+/** What a row shows in front of its title: a scheduled run's lightning, a dream's moon (null: nothing). */
+export type Lead = 'schedule' | 'dream' | null;
+
+export function leadFor(meta: SessionMeta): Lead {
+  return meta.origin === 'schedule' ? 'schedule' : meta.origin === 'dream' ? 'dream' : null;
+}
+
 /**
  * Priority: running, waiting for the user, unread results (never for the session on screen), then what the session
- * is: a parent (fork glyph, with the count when collapsed), a fork, a sub-session, a scheduled run.
+ * is: a parent (fork glyph, with the count when collapsed), a fork, a sub-session. A scheduled run and a dream say
+ * what they are in front of the title (leadFor), so the right end stays for their state.
  */
 export function indicatorFor(
   meta: SessionMeta,
@@ -148,14 +155,13 @@ export function indicatorFor(
 ): Indicator {
   const st = status ?? meta.status;
   if (st?.running) return { kind: 'running' };
-  if (meta.origin === 'dream') return { kind: 'dream', waiting: Boolean(st?.attention || meta.dream?.waiting) };
+  if (meta.origin === 'dream' && (st?.attention || meta.dream?.waiting)) return { kind: 'dream', waiting: true };
   if (st?.attention) return { kind: 'attention', reason: st.attention };
   if (st?.unread && !opts.current) return { kind: 'unread' };
   if (opts.children) return opts.collapsed ? { kind: 'family', count: opts.children, hot: Boolean(opts.hiddenHot) } : { kind: 'family' };
   // A fork sitting under the session it was forked from needs no mark: its place in the tree already says so.
-  if (meta.origin === 'fork' || (meta.forkedFrom && meta.origin !== 'spawn' && meta.origin !== 'schedule')) return opts.nested ? null : { kind: 'fork' };
+  if (meta.origin === 'fork' || (meta.forkedFrom && meta.origin !== 'spawn' && meta.origin !== 'schedule' && meta.origin !== 'dream')) return opts.nested ? null : { kind: 'fork' };
   if (meta.origin === 'spawn') return { kind: 'spawn' };
-  if (meta.origin === 'schedule') return { kind: 'schedule' };
   return null;
 }
 
@@ -201,7 +207,7 @@ function hot(n: TreeNode, status: (id: string) => SessionStatus | undefined, cur
 
 /**
  * Whether a session has a row in the list. A dream's session shows only while it waits for the user (its proposals,
- * its plan) or is the one on screen, so nightly dreams do not crowd the list; Settings → Dreaming lists them all.
+ * its plan) or is the one on screen, so nightly dreams do not crowd the list; the Dreaming page lists them all.
  */
 export function listed(m: SessionMeta, currentId: string, status?: SessionStatus): boolean {
   if (m.origin !== 'dream' || m.id === currentId) return true;

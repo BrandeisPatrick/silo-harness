@@ -78,6 +78,9 @@ import { setTranscriptSink, transcriptItemRenderer, type ExtraTranscriptItem } f
 import { PROPOSAL_TOOLS, proposalEnded, setupDreamingView } from './dreaming.js';
 import { createModsHost, type ModPaneTabs } from './mods-host.js';
 import { createSettingsPage } from './settings-page.js';
+import { createPages, navOf, type PageRoute, type PagesView } from './pages.js';
+import { createScheduledPage } from './scheduled-page.js';
+import { createDreamingPage } from './dreaming-page.js';
 import { agentApproval, setNameLookup } from './tool-labels.js';
 import { unframe } from './origin.js';
 import { activityWords } from './tool-activity.js';
@@ -337,8 +340,13 @@ function dialogOpen(): boolean {
   return settingsDialog.open || shortcutsDialog.open || confirmDialog.open || lightbox.open;
 }
 
+/** A page (Scheduled tasks, Dreaming) is in the main column in place of the session */
+function pageOpen(): boolean {
+  return shell.classList.contains('page-open');
+}
+
 function browserViewRect(): DOMRect | null {
-  if (shell.classList.contains('browser-hidden') || dialogOpen()) return null;
+  if (shell.classList.contains('browser-hidden') || dialogOpen() || pageOpen()) return null;
   return browserView.getBoundingClientRect();
 }
 
@@ -2575,7 +2583,7 @@ window.addEventListener(
 function escCounts(e: KeyboardEvent): boolean {
   return (
     !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing && !e.defaultPrevented &&
-    !running && compacting === null && !rewinding && !pendingApproval && !pendingQuestion && !titleEditing && !dialogOpen() && !isMenuOpen()
+    !running && compacting === null && !rewinding && !pendingApproval && !pendingQuestion && !titleEditing && !dialogOpen() && !isMenuOpen() && !pageOpen()
   );
 }
 
@@ -2604,7 +2612,8 @@ document.addEventListener('keydown', (e) => {
   // In a terminal, Esc and Ctrl combinations belong to the shell (xterm sends them on); ⌘ shortcuts still work.
   const inTerminal = terminalPane.hasFocus();
   if (inTerminal && (e.key === 'Escape' || (e.ctrlKey && !e.metaKey))) return;
-  if (e.key === 'Escape' && (running || compacting?.standalone) && !pendingApproval && !pendingQuestion && !isMenuOpen() && !dialogOpen()) {
+  // On a page the session is not on screen: Esc does not stop its run
+  if (e.key === 'Escape' && (running || compacting?.standalone) && !pendingApproval && !pendingQuestion && !isMenuOpen() && !dialogOpen() && !pageOpen()) {
     void oc.abort();
   } else if (e.key === 'Escape') {
     if (escCounts(e) && escEsc.counts()) {
@@ -2615,6 +2624,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     void toggleMode();
   } else if (e.key === 'F2' && !meta) {
+    if (pageOpen()) return;
     e.preventDefault();
     startTitleEdit();
   } else if (!meta) {
@@ -3199,6 +3209,8 @@ sessionTitle.addEventListener('keydown', (e) => {
 
 /** The sidebar's list (sidebar.ts); set up under // [feature:sidebar]. */
 let sidebarView: SidebarView | null = null;
+/** The pages in the main column (pages.ts); set up under // [feature:pages]. */
+let pagesView: PagesView | null = null;
 
 function renderSessionList(): void {
   sidebarView?.render();
@@ -3364,7 +3376,10 @@ async function forkSession(id: string): Promise<void> {
 onPush('sessions:changed', (list) => applySessionList(list));
 // A notification was clicked: its session comes on screen.
 onPush('sessions:show', (id) => {
-  if (typeof id === 'string' && id && id !== currentSessionId) void showSession(id);
+  if (typeof id !== 'string' || !id) return;
+  if (id !== currentSessionId) void showSession(id);
+  // The session is the one behind a page (Scheduled tasks, Dreaming): the chat view comes back
+  else pagesView?.close();
 });
 
 // ---------- Slash menu (skills) ----------
@@ -3484,14 +3499,14 @@ function paneTabList(): (readonly [PaneTab, HTMLButtonElement])[] {
 }
 
 function browserShown(): boolean {
-  return paneVisible && paneTab === 'browser';
+  return paneVisible && paneTab === 'browser' && !pageOpen();
 }
 
 /** What was last sent to the native browser view (for the live checks: __oc_debug.mods.browser()) */
 const browserSent = { bounds: null as { x: number; y: number; width: number; height: number } | null, visible: false };
 
 function reportBounds(): void {
-  if (shell.classList.contains('browser-hidden')) return;
+  if (shell.classList.contains('browser-hidden') || pageOpen()) return;
   const r = browserView.getBoundingClientRect();
   browserSent.bounds = { x: r.left, y: r.top, width: r.width, height: r.height };
   oc.browser.setBounds(browserSent.bounds);
@@ -3999,6 +4014,7 @@ const SHORTCUTS: [string, string[], string[]?][] = [
   ['Focus the composer', ['⌘', 'K']],
   ['Clear the terminal (in a terminal)', ['⌘', 'K']],
   ['Search sessions', ['⌘', 'F']],
+  ['Back a page (Scheduled tasks, Dreaming)', ['⌘', '[']],
   ['Rename session', ['F2']],
   ['New line in the composer', ['⇧', '↵']],
   ['Previous or next message you sent', ['⌘', '↑'], ['⌘', '↓']],
@@ -4118,7 +4134,7 @@ window.__oc_debug = {
 
 // [feature:mods]
 // The mod host: the rail, mod tabs, the composer strip, backgrounds, injected styles and the bridge (mods-host.ts).
-paneMods = createModsHost({
+const modsHost = createModsHost({
   currentSessionId: () => currentSessionId,
   sessions: () => sessions,
   config: () => config,
@@ -4126,15 +4142,89 @@ paneMods = createModsHost({
   toast: (text, kind) => flashStatus(text, kind === 'error' ? 'circle-alert' : 'info'),
   insertText: (text) => insertAtCursor(text),
   openSettings: (section, opts) => openSettings(section, opts),
-  switchSession,
+  switchSession: openFromPage,
   newSession,
+  openPage: (page, opts) => (page === 'scheduled' && opts?.form === 'new' ? openTaskForm() : openPage({ page })),
   openLightbox,
   showPane: (tab) => showPaneTab(tab as PaneTab),
   paneTabsChanged,
   paneLayoutChanged,
   syncBrowserView,
   browserDebug: () => ({ ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: (() => { const r = browserView.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })(), tab: paneTab, paneVisible, dialog: dialogOpen() }),
-}).pane;
+});
+paneMods = modsHost.pane;
+
+// [feature:pages]
+// Scheduled tasks and Dreaming: pages in the main column (pages.ts), each a list and a page per task or project.
+const scheduledPage = createScheduledPage({
+  sessions: () => sessions,
+  status: statusOf,
+  openSession: (id) => void openFromPage(id),
+  currentSessionId: () => currentSessionId,
+  config: () => config,
+  confirm: confirmAction,
+  cleanError,
+  showError: showInlineError,
+});
+const dreamingPage = createDreamingPage({
+  sessions: () => sessions,
+  openSession: (id) => void openFromPage(id),
+  cleanError,
+  showError: showInlineError,
+});
+pagesView = createPages({
+  shell,
+  main: document.querySelector<HTMLElement>('.main')!,
+  topbar: document.querySelector<HTMLElement>('.topbar')!,
+  changed: (open) => {
+    closeMenu();
+    if (open) setBrowserVisible(false);
+    else {
+      // The column comes back: the pane, the rail and the native browser view take their places again
+      paneLayoutChanged();
+      syncBrowserView();
+    }
+    renderSessionList();
+  },
+  render: (route, root, host) => (route.page === 'scheduled' || route.page === 'task' ? scheduledPage.render(route, root, host) : dreamingPage.render(route, root, host)),
+});
+
+/** Opens a page in the main column (Scheduled tasks, a task, Dreaming, a project) */
+function openPage(route: PageRoute): void {
+  if (confirmDialog.open) return;
+  if (settingsDialog.open) settingsDialog.close();
+  if (shortcutsDialog.open) shortcutsDialog.close();
+  pagesView?.open(route);
+}
+
+/** The New task form, on the Scheduled tasks page */
+function openTaskForm(opts: { template?: string; edit?: string } = {}): void {
+  const cur = pagesView?.current();
+  if (cur?.page !== 'scheduled' && cur?.page !== 'task') openPage({ page: 'scheduled' });
+  scheduledPage.openForm(opts);
+}
+
+/** A session chosen on a page or in the sidebar: the chat view comes back with it */
+async function openFromPage(id: string): Promise<void> {
+  if (pagesView?.isOpen() && id === currentSessionId) {
+    pagesView.close();
+    inputEl.focus();
+    return;
+  }
+  await switchSession(id);
+}
+
+Object.assign(window.__oc_debug!, {
+  pages: {
+    state: () => pagesView?.debug.state(),
+    open: (route: PageRoute) => openPage(route),
+    close: () => pagesView?.close(),
+    back: () => pagesView?.back(),
+    form: (opts?: { template?: string; edit?: string }) => openTaskForm(opts),
+    scheduled: () => scheduledPage.debug.state(),
+    dreaming: () => dreamingPage.debug.state(),
+  },
+});
 
 // [feature:settings]
 const settingsPage = createSettingsPage({
@@ -4154,8 +4244,11 @@ const settingsPage = createSettingsPage({
   chooseFolder,
   openShortcuts,
   currentSessionId: () => currentSessionId,
-  openSession: (id) => void switchSession(id),
+  openSession: (id) => void openFromPage(id),
+  openPage: (target) => (target === 'scheduled:new' ? openTaskForm() : openPage({ page: target })),
   sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
+  fillComposer: (text) => fillComposer(text),
+  modPreviews: () => modsHost.previews,
   beforeOpen: () => {
     if (confirmDialog.open) return false;
     closeMenu();
@@ -4169,7 +4262,9 @@ const settingsPage = createSettingsPage({
  * Opens Settings at the section last open, or at `section`: a section id ("mods"), a section and a tab ("mods" with
  * { tab: 'backgrounds' }, or "mods:backgrounds"), or the id of a field on the page ("ollama-baseURL", "mcp-section").
  */
-function openSettings(section?: string, opts?: { tab?: string }): void {
+function openSettings(section?: string, opts?: { tab?: string; preview?: string }): void {
+  // Scheduled and Dreaming were sections of Settings; they are pages now
+  if (section === 'scheduled' || section === 'dreaming') return openPage({ page: section });
   settingsPage.open(typeof section === 'string' ? section : undefined, opts && typeof opts === 'object' ? opts : undefined);
 }
 $('settings-btn').onclick = () => openSettings();
@@ -4205,9 +4300,15 @@ void rpc('settings.info')
 sidebarView = createSidebar({
   root: $('sidebar'),
   sessions: () => sessions,
-  currentId: () => currentSessionId,
+  // While a page is open no session is on screen: none shows selected
+  currentId: () => (pagesView?.isOpen() ? '' : currentSessionId),
   status: statusOf,
-  open: switchSession,
+  open: async (id) => openFromPage(id),
+  openPage: (page) => openPage({ page }),
+  page: () => {
+    const r = pagesView?.current();
+    return r ? navOf(r) : null;
+  },
   fork: forkSession,
   remove: deleteSession,
   rename: renameSession,
@@ -4251,9 +4352,9 @@ setNameLookup({
 // [feature:remote]
 
 // [feature:dreaming]
-// Proposal cards in a dream's transcript and in Settings → Dreaming; the sidebar row is in sidebar.ts
+// Proposal cards in a dream's transcript and on the Dreaming page; the sidebar row is in sidebar.ts, the page in dreaming-page.ts
 setupDreamingView({
-  openSession: (id) => void switchSession(id),
+  openSession: (id) => void openFromPage(id),
   sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
   showError: showInlineError,
   cleanError,
@@ -4323,6 +4424,11 @@ document.addEventListener('dragleave', (e) => {
 });
 document.addEventListener('drop', (e) => {
   composerEl.classList.remove('dragging');
+  // The chat bar is not on screen under a page
+  if (pageOpen()) {
+    if (e.dataTransfer?.files?.length) e.preventDefault();
+    return;
+  }
   const files = e.dataTransfer?.files;
   if (!files?.length) return;
   e.preventDefault();
@@ -4352,6 +4458,19 @@ const SUGGESTIONS = [
   'Find the failing tests, fix them, and run the suite again',
   'Open https://example.com in the browser and summarise the page',
 ];
+/** Puts `text` in the composer, replacing what was there, with the caret at its end (Ask the agent… in Settings). */
+function fillComposer(text: string): void {
+  // A page in the main column covers the composer: back to the session
+  pagesView?.close();
+  mentionPicker.close();
+  // A draft stays: the prompt goes on a line of its own after it
+  if (inputEl.value.trim()) text = `${inputEl.value.replace(/\s+$/, '')}\n${text}`;
+  inputEl.value = text;
+  autosize();
+  updateSendButton();
+  inputEl.focus();
+  inputEl.setSelectionRange(text.length, text.length);
+}
 const suggestionsEl = $('empty-suggestions');
 suggestionsEl.innerHTML = SUGGESTIONS.map((s) => `<button type="button" class="suggestion">${escapeHtml(s)}</button>`).join('');
 suggestionsEl.querySelectorAll<HTMLButtonElement>('.suggestion').forEach((b, i) => {

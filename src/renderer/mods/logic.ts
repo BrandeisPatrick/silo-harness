@@ -43,11 +43,26 @@ export function viewsFor(mods: readonly ModInfo[], seat: ModSeat): ViewRef[] {
   return out.sort((a, b) => order(a) - order(b) || String(a.view.title).localeCompare(String(b.view.title)) || a.key.localeCompare(b.key));
 }
 
-/** The background view the layout names, when its mod is on and the view really is a background. */
+/** Whether a mod's looks (its backgrounds, looks and theme) may apply now: bundled, or approved; an older list says it by `state`. */
+export function looksUsable(m: Pick<ModInfo, 'state' | 'approved'>): boolean {
+  return m.approved ?? m.state === 'on';
+}
+
+/** A background view of a mod, by its key ("<mod key>/<view id>"), whatever the mod's state (for a preview). */
+export function backgroundRef(mods: readonly ModInfo[], key: string): ViewRef | null {
+  const i = key.lastIndexOf('/');
+  if (i <= 0) return null;
+  const mod = mods.find((m) => m.key === key.slice(0, i));
+  const view = mod?.manifest?.contributes?.views?.find((v) => v && v.id === key.slice(i + 1) && v.seat === 'background');
+  return mod && view ? { key, mod, view } : null;
+}
+
+/** The background view the layout names, when its mod's looks may apply and the view really is a background. */
 export function activeBackground(mods: readonly ModInfo[], layout: Pick<ModLayout, 'background'> | null | undefined): ViewRef | null {
   const want = layout?.background;
   if (!want) return null;
-  return viewsFor(mods, 'background').find((r) => r.key === want) ?? null;
+  const r = backgroundRef(mods, want);
+  return r && r.mod.state !== 'invalid' && looksUsable(r.mod) ? r : null;
 }
 
 /** The regions a look can restyle, in the order the host applies them */
@@ -61,7 +76,7 @@ export function activeLook(mods: readonly ModInfo[], layout: Pick<ModLayout, 'lo
   if (i <= 0) return null;
   const mod = mods.find((m) => m.key === ref.slice(0, i));
   const id = ref.slice(i + 1);
-  if (!mod || mod.state !== 'on' || !mod.manifest?.contributes?.looks?.some((l) => l.id === id && l.target === target)) return null;
+  if (!mod || mod.state === 'invalid' || !looksUsable(mod) || !mod.manifest?.contributes?.looks?.some((l) => l.id === id && l.target === target)) return null;
   return { key: ref, mod, id };
 }
 
@@ -278,11 +293,15 @@ export function askLines(mod: ModInfo): AskLine[] {
   const hasStyles = !!c?.styles?.length;
   const hasLooks = !!c?.looks?.length;
   const hasBackground = !!c?.views?.some((v) => v.seat === 'background');
-  if ((mod.state !== 'paused' || mod.wantsStyles) && (hasStyles || hasBackground)) {
+  // A look's approval is asked at its first Use: a mod with a switch says nothing of it here, a mod that is only looks does
+  const looksOnly = !(c?.views ?? []).some((v) => v.seat !== 'background') && !(c?.commands ?? []).length;
+  if (!looksOnly && (hasStyles || hasLooks || hasBackground)) {
+    /* its looks ask when they are first used */
+  } else if ((mod.state !== 'paused' || mod.wantsStyles) && (hasStyles || hasBackground)) {
     const what = hasStyles && hasBackground ? 'restyle Silo Harness and draw behind it' : hasStyles ? 'restyle Silo Harness itself' : hasLooks ? 'restyle the conversation or the chat bar and draw behind the window' : 'draw behind the whole window';
-    lines.push({ text: `It can ${what}: its stylesheet applies to the app's own page, approval cards included. Turn it on only if you trust where it came from.`, strong: true });
+    lines.push({ text: `It can ${what}: its stylesheet applies to the app's own page, approval cards included. Use it only if you trust where it came from.`, strong: true });
   } else if ((mod.state !== 'paused' || mod.wantsStyles) && hasLooks) {
-    lines.push({ text: 'It can restyle the conversation or the chat bar once you pick its look: its stylesheet applies to the app\'s own page, approval cards in the conversation included. Turn it on only if you trust where it came from.', strong: true });
+    lines.push({ text: 'It can restyle the conversation or the chat bar: its stylesheet applies to the app\'s own page, approval cards in the conversation included. Use it only if you trust where it came from.', strong: true });
   }
   if (perms.includes('network')) {
     const reads = perms.some((p) => p === 'session:read' || p === 'sessions:read');

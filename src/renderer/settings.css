@@ -246,3 +246,52 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-hook .sp-hook-cmd { font-family: var(--mono); font-size: var(--fs-code); overflow-wrap: anywhere; }
 .sp-hook .sp-row-desc, .sp-hook-run .sp-row-desc { overflow-wrap: anywhere; }
 .sp-hook-run { min-height: 56px; }
+
+/* ---------- Settings → Mods: the look tabs (Background, Chat bar, Conversation, Theme) ---------- */
+/* The preview: a stage that keeps its proportions; what it draws lives in a shadow root (look-preview.ts) */
+.lp-stage { position: relative; width: 100%; overflow: hidden; contain: paint; isolation: isolate; border: 1px solid var(--border-subtle); border-radius: var(--r-card-lg); background: var(--bg-100); }
+.lp-host { position: absolute; inset: 0; }
+/* Background: the background fills the stage undimmed, and the miniature window floats inset in it (on a card, with
+   more of the background around it); through the window's surfaces it shows at the chosen Dim, as in the window */
+.lp-stage-bg { background: var(--bg-200); }
+.lp-stage-bg > .lp-stage-backdrop { position: absolute; inset: 0; background-position: center; background-size: cover; background-repeat: no-repeat; }
+.lp-stage-bg > .lp-host { inset: 7%; }
+.lp-stage-bg.lp-stage-card > .lp-host { inset: 16%; }
+.sp-look-tab[data-kind="background"] .sp-look-pane { padding: 0; background: none; }
+.sp-look-tab[data-kind="background"] .sp-look-pane .lp-stage { max-width: none; box-shadow: none; }
+.sp-look-pane { display: flex; justify-content: center; margin: 16px 0 0; padding: 24px; border-radius: var(--r-card-lg); background: var(--bg-200); }
+.sp-look-pane .lp-stage { max-width: 600px; box-shadow: var(--shadow-pop); }
+.sp-look-tab[data-kind="composer"] .sp-look-pane .lp-stage { max-width: none; }
+.sp-look-current { border-top: none; }
+.sp-look-current .sp-row-title .sp-chip { margin-left: 2px; }
+.sp-look-acts { flex-wrap: wrap; justify-content: flex-end; }
+.sp-look-tab .sp-pick-settings .sp-row:first-child { border-top: 1px solid var(--border-subtle); }
+.sp-look-grid-head { display: flex; align-items: center; gap: 8px; margin: 28px 0 12px; }
+.sp-look-grid-title { font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
+.sp-look-new .icon:last-child { margin-left: -2px; color: var(--text-400); }
+.sp-look-form-slot > .sp-form { margin-top: 0; margin-bottom: 16px; }
+.sp-look-status { margin: -4px 0 12px; }
+.sp-look-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(164px, 1fr)); gap: 18px 14px; }
+.sp-look-card { position: relative; display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding: 0; text-align: left; border-radius: var(--r-card); cursor: pointer; }
+.sp-look-card:focus-visible { outline: none; }
+.sp-look-card:focus-visible .sp-look-thumb { box-shadow: 0 0 0 2px var(--focus-ring); }
+.sp-look-thumb { display: block; margin-bottom: 8px; overflow: hidden; border-radius: var(--r-card); box-shadow: 0 0 0 1px var(--border-subtle); background: var(--bg-100); transition: box-shadow 0.12s; }
+.sp-look-thumb .lp-stage { border: none; border-radius: 0; }
+.sp-look-card:hover .sp-look-thumb { box-shadow: 0 0 0 1px var(--border); }
+.sp-look-card.selected .sp-look-thumb, .sp-look-card.selected:hover .sp-look-thumb { box-shadow: 0 0 0 2px var(--accent); }
+.sp-look-thumb.picture img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+.sp-look-tab[data-kind="composer"] .sp-look-thumb.picture img { aspect-ratio: 520 / 210; }
+.sp-look-tab[data-kind="conversation"] .sp-look-thumb.picture img { aspect-ratio: 560 / 400; }
+.sp-look-name { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-look-asks { display: inline-flex; flex: none; color: var(--text-400); }
+.sp-look-source { min-width: 0; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-look-badge { position: absolute; top: 8px; left: 8px; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--success); background: color-mix(in srgb, var(--bg-000) 88%, transparent); box-shadow: 0 0 0 1px var(--success-line); }
+.sp-look-badge[hidden] { display: none; }
+
+/* A small menu inside the page (New ⌄, ⋯): the window's menus sit under the Settings dialog */
+.sp-menu-wrap { position: relative; display: inline-flex; }
+.sp-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-pop); box-shadow: var(--shadow-pop); }
+.sp-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-control); font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); white-space: nowrap; }
+.sp-menu-item .icon { color: var(--text-200); }
+.sp-menu-item:hover, .sp-menu-item:focus-visible { background: var(--hover); outline: none; }
+.sp-menu-item.danger, .sp-menu-item.danger .icon { color: var(--danger); }

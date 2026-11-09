@@ -287,35 +287,57 @@ const resetHome = () => {
     writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: man('beta').contributes.views, styles: ['theme.css'] } }), { 'theme.css': ':root{--accent:red}' });
     rpc(f, 'mods.reload');
     b = byId('beta');
-    check('newly contributed styles pause it', b.state === 'paused' && b.wantsStyles === true && b.wants.length === 0, b);
-    rpc(f, 'mods.setEnabled', 'beta', true);
-    check('approving styles records them', byId('beta').state === 'on' && f.app.config().mods.enabled.beta.styles === true);
+    check('newly contributed styles do not pause the switch: a look asks at its first Use', b.state === 'on' && b.wantsStyles === true && b.approved === false && b.inUse.length === 0, b);
+    let useErr = '';
+    try {
+      rpc(f, 'mods.use', { theme: 'beta' });
+    } catch (e) {
+      useErr = e.message;
+    }
+    check('mods.use refuses a look of yours that was never approved', /not been approved/.test(useErr) && f.app.config().mods.layout.theme !== 'beta' && !rpc(f, 'mods.styles').length, useErr);
+    rpc(f, 'mods.use', { theme: 'beta' }, { approve: true });
+    b = byId('beta');
+    check('with the approval it records it, puts the theme in use and serves its styles', b.approved === true && b.wantsStyles === false && f.app.config().mods.approved.beta.permissions.join() === 'session:read,model' && f.app.config().mods.layout.theme === 'beta' && b.inUse.join() === 'theme' && rpc(f, 'mods.styles').some((x) => x.key === 'beta' && /--accent:red/.test(x.css)), b);
     writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' }], styles: ['theme.css'] } }));
     rpc(f, 'mods.reload');
-    check('a background is covered by the styles approval', byId('beta').state === 'on');
+    check('a background added later needs no new approval', byId('beta').state === 'on' && byId('beta').approved === true);
     check('rev changed with the edit', byId('beta').rev !== rev0);
 
     rpc(f, 'mods.setSafeMode', true);
-    check('safe mode turns user and project mods off', byId('beta').state === 'off' && byId('alpha').state === 'on');
-    check('safe mode keeps what is stored', !!f.app.config().mods.enabled.beta);
+    check('safe mode turns user and project mods off, their looks too', byId('beta').state === 'off' && byId('beta').approved === false && !rpc(f, 'mods.styles').length && byId('alpha').state === 'on');
+    check('safe mode keeps what is stored', !!f.app.config().mods.enabled.beta && !!f.app.config().mods.approved.beta && f.app.config().mods.layout.theme === 'beta');
     rpc(f, 'mods.setSafeMode', false);
-    check('leaving safe mode restores them', byId('beta').state === 'on');
+    check('leaving safe mode restores them', byId('beta').state === 'on' && rpc(f, 'mods.styles').length === 1);
 
     rpc(f, 'mods.setEnabled', 'alpha', false);
     check('a bundled mod turned off is listed in disabledBundled', byId('alpha').state === 'off' && f.app.config().mods.disabledBundled.includes('alpha'));
     rpc(f, 'mods.setEnabled', 'alpha', true);
     check('and back on', byId('alpha').state === 'on' && !f.app.config().mods.disabledBundled.includes('alpha'));
 
-    // A bundled mod with styles (a theme) restyles the whole app, so it starts off
+    // A bundled theme has no switch: it is available, and in use only once chosen; one theme at a time
     writeMod(f.roots.bundled, 'tinted', man('tinted', { contributes: { styles: ['theme.css'] } }), { 'theme.css': ':root{--accent:blue}' });
     rpc(f, 'mods.reload');
-    check('a bundled styles mod starts off, and its styles are not served', byId('tinted').state === 'off' && !rpc(f, 'mods.styles').some((s) => s.key === 'tinted'));
+    const tinted = byId('tinted');
+    check('a bundled theme is available without approval and not in use (off), so its styles are not served', tinted.state === 'off' && tinted.approved === true && tinted.inUse.length === 0 && !rpc(f, 'mods.styles').some((x) => x.key === 'tinted'), tinted);
+    rpc(f, 'mods.use', { theme: 'tinted' });
+    let styles = rpc(f, 'mods.styles');
+    check('used, it is on and it replaces the theme that was in use (one at a time)', byId('tinted').state === 'on' && byId('beta').inUse.length === 0 && styles.length === 1 && styles[0].key === 'tinted' && /--accent:blue/.test(styles[0].css), styles.map((x) => x.key));
+    rpc(f, 'mods.use', { theme: null });
+    check('Default (null) puts the app\'s own theme back', f.app.config().mods.layout.theme === null && !rpc(f, 'mods.styles').length && byId('tinted').state === 'off');
     rpc(f, 'mods.setEnabled', 'tinted', true);
-    check('turned on, it is on with its styles recorded, and its styles are served', byId('tinted').state === 'on' && f.app.config().mods.enabled.tinted.styles === true && rpc(f, 'mods.styles').some((s) => s.key === 'tinted' && /--accent:blue/.test(s.css)));
+    check('mods.setEnabled(true) on a look means using it', f.app.config().mods.layout.theme === 'tinted' && byId('tinted').state === 'on' && !f.app.config().mods.enabled.tinted);
     rpc(f, 'mods.setEnabled', 'tinted', false);
-    check('turned off again, it is off and forgotten (not in disabledBundled)', byId('tinted').state === 'off' && !f.app.config().mods.enabled.tinted && !f.app.config().mods.disabledBundled.includes('tinted'));
+    check('… and false goes back to Default, with nothing left in enabled or disabledBundled', f.app.config().mods.layout.theme === null && byId('tinted').state === 'off' && !f.app.config().mods.enabled.tinted && !f.app.config().mods.disabledBundled.includes('tinted'));
+    let kindErr = '';
+    try {
+      rpc(f, 'mods.use', { theme: 'alpha' });
+    } catch (e) {
+      kindErr = e.message;
+    }
+    check('mods.use refuses what is not a look of that kind', /is not a theme of an installed mod/.test(kindErr), kindErr);
     fs.rmSync(path.join(f.roots.bundled, 'tinted'), { recursive: true, force: true });
     rpc(f, 'mods.reload');
+    rpc(f, 'mods.use', { theme: 'beta' });
   }
   {
     // Last good manifest
@@ -374,7 +396,7 @@ const resetHome = () => {
     const startup = f.pushes.filter((p) => p.channel === 'mods:offer' && p.payload.id === 'gamma');
     const paused = f.pushes.filter((p) => p.channel === 'mods:offer' && p.payload.id === 'beta');
     check('mods present at startup are not offered', startup.length === 0, startup.length);
-    check('a paused mod was offered once per new wanted set (model, then styles)', paused.length === 2 && paused.every((p) => p.payload.state === 'paused'), paused.map((p) => p.payload.state));
+    check('a paused mod was offered once, for its new permission (new styles ask at their first Use, not on the card)', paused.length === 1 && paused.every((p) => p.payload.state === 'paused'), paused.map((p) => p.payload.state));
 
     // A mod that was on at startup and is turned off: no card straight away.
     const h = fakeApp();
@@ -935,22 +957,27 @@ const resetHome = () => {
     const fileProblem = readManifest(writeMod(tmp(), 'lk', lookMan('lk', [{ ...holo, styles: ['gone.css'] }]), css));
     check('looks: a missing stylesheet is a "file" problem', fileProblem.problems[0].kind === 'file');
 
-    // state, grant and pause
+    // a preview picture: an image in the mod
+    const pic = { ...css, 'shot.png': 'PNG', 'notes.txt': 'x' };
+    r = readManifest(writeMod(tmp(), 'lk', lookMan('lk', [{ ...holo, preview: 'shot.png' }], { contributes: { views: [{ id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background', preview: 'shot.png' }] } }), pic));
+    check('looks: a look and a background may name a preview picture', !!r.manifest && r.manifest.contributes.looks[0].preview === 'shot.png' && r.manifest.contributes.views[0].preview === 'shot.png', r.problems);
+    r = readManifest(writeMod(tmp(), 'lk', lookMan('lk', [{ ...holo, preview: 'notes.txt' }]), pic));
+    check('looks: a preview that is not a picture is refused', !r.manifest && /looks\[0\]\.preview: notes.txt must be a/.test(r.problems[0]?.message ?? ''), r.problems);
+    r = readManifest(writeMod(tmp(), 'lk', lookMan('lk', [{ ...holo, preview: 'gone.png' }]), pic));
+    check('looks: a missing preview is a "file" problem', !r.manifest && r.problems[0]?.kind === 'file' && /gone.png does not exist/.test(r.problems[0].message), r.problems);
+
+    // state: a mod of looks has no switch; it is on while one of its looks is in use
     const g = fakeApp();
     writeMod(g.roots.bundled, 'set', lookMan('set', [holo, bar], { contributes: { views: [{ id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' }], settings: [{ key: 'glow', type: 'select', title: 'Glow', options: ['blue', 'green'], default: 'blue' }] } }), css);
     writeMod(g.roots.user, 'look-user', man('look-user'), css);
     const gctl = createMods(g.app, g.host);
     const st = (key) => rpc(g, 'mods.list').find((m) => m.key === key);
-    check('looks: a bundled mod with looks starts off', st('set').state === 'off');
-    rpc(g, 'mods.setEnabled', 'set', true);
-    check('looks: turning it on records the styles grant', st('set').state === 'on' && g.app.config().mods.enabled.set.styles === true);
+    check('looks: a bundled mod of looks is available without a switch, and off while none of it is in use', st('set').state === 'off' && st('set').approved === true && st('set').inUse.length === 0 && !g.app.config().mods.enabled.set);
     rpc(g, 'mods.setEnabled', 'look-user', true);
-    check('looks: a user mod without looks is on without the styles grant', st('look-user').state === 'on' && g.app.config().mods.enabled['look-user'].styles === false);
+    check('looks: a user mod without looks is on and says nothing of looks', st('look-user').state === 'on' && st('look-user').approved === undefined);
     writeMod(g.roots.user, 'look-user', lookMan('look-user', [holo], { contributes: { views: man('x').contributes.views } }), css);
     rpc(g, 'mods.reload');
-    check('looks: a newly contributed look pauses the mod until approved', st('look-user').state === 'paused' && st('look-user').wantsStyles === true && st('look-user').wants.length === 0, st('look-user'));
-    rpc(g, 'mods.setEnabled', 'look-user', true);
-    check('looks: approving records the styles grant', st('look-user').state === 'on' && g.app.config().mods.enabled['look-user'].styles === true);
+    check('looks: a look added to a mod with a switch does not pause it; the look asks at its first Use', st('look-user').state === 'on' && st('look-user').wantsStyles === true && st('look-user').approved === false, st('look-user'));
 
     // the layout
     check('looks: the layout starts with the app\'s own look everywhere (an older config has no looks)', JSON.stringify(rpc(g, 'mods.setLayout', {}).looks) === JSON.stringify({ conversation: null, composer: null }));
@@ -967,6 +994,8 @@ const resetHome = () => {
     };
     check('looks: setLayout refuses a malformed choice', /looks must be an object/.test(layoutErr({ looks: 'set/holo' })) && /looks.conversation must be/.test(layoutErr({ looks: { conversation: 'noslash' } })) && /looks.composer must be/.test(layoutErr({ looks: { composer: 5 } })));
     check('looks: checkLayout passes a valid choice through', JSON.stringify(checkLayout({ looks: { conversation: null } }, '/x').looks) === '{"conversation":null}');
+    check('checkLayout keeps the closed side-pane tabs once each', JSON.stringify(checkLayout({ closedTabs: ['side-chat/main', 'side-chat/main', 'scheduled/main'] }, '/x').closedTabs) === '["side-chat/main","scheduled/main"]' && /closedTabs must be a list/.test(layoutErr({ closedTabs: 'side-chat/main' })));
+    check('checkLayout takes a theme (a mod key, or null) and refuses anything else', checkLayout({ theme: 'theme-paper' }, '/x').theme === 'theme-paper' && checkLayout({ theme: null }, '/x').theme === null && /theme must be/.test(layoutErr({ theme: 3 })));
 
     // mods.looks
     let looks = rpc(g, 'mods.looks');
@@ -979,14 +1008,34 @@ const resetHome = () => {
     rpc(g, 'mods.setLayout', { looks: { composer: 'look-user/holo' } });
     check('mods.looks: …nor one that does not exist there', rpc(g, 'mods.looks').length === 1);
     rpc(g, 'mods.setLayout', { looks: { conversation: 'look-user/holo', composer: 'set/bar' } });
-    check('mods.looks: a user mod\'s look applies while it is on', rpc(g, 'mods.looks').some((l) => l.ref === 'look-user/holo'));
+    check('mods.looks: a user mod\'s look named in the layout does not apply before its first Use is approved', !rpc(g, 'mods.looks').some((l) => l.ref === 'look-user/holo') && st('set').state === 'on' && st('set').inUse.join() === 'composer');
+    rpc(g, 'mods.use', { conversation: 'look-user/holo' }, { approve: true });
+    check('mods.looks: … and applies once it is', rpc(g, 'mods.looks').some((l) => l.ref === 'look-user/holo') && st('look-user').approved === true && st('look-user').inUse.join() === 'conversation');
     rpc(g, 'mods.setSafeMode', true);
     looks = rpc(g, 'mods.looks');
     check('mods.looks: safe mode leaves the user mod\'s look out, the bundled one stays', looks.length === 1 && looks[0].ref === 'set/bar', looks.map((l) => l.ref));
     rpc(g, 'mods.setSafeMode', false);
     rpc(g, 'mods.setEnabled', 'set', false);
-    check('mods.looks: a mod turned off takes its looks with it (the choice is kept)', !rpc(g, 'mods.looks').some((l) => l.mod === 'set') && g.app.config().mods.layout.looks.composer === 'set/bar');
+    check('mods.setEnabled(false) on a mod of looks: what of it is in use goes back to Default, the rest stays', !rpc(g, 'mods.looks').some((l) => l.mod === 'set') && g.app.config().mods.layout.looks.composer === null && g.app.config().mods.layout.looks.conversation === 'look-user/holo' && st('set').state === 'off');
     rpc(g, 'mods.setEnabled', 'set', true);
+    let L = g.app.config().mods.layout;
+    check('mods.setEnabled(true): its whole set is used (its first look of each kind)', L.background === 'set/bg' && L.looks.composer === 'set/bar' && L.looks.conversation === 'set/holo' && st('set').inUse.join() === 'background,composer,conversation' && st('look-user').inUse.length === 0, L);
+    rpc(g, 'mods.setEnabled', 'set', true);
+    rpc(g, 'mods.use', { conversation: 'look-user/holo' });
+    rpc(g, 'mods.setEnabled', 'set', true);
+    check('… and again with one of its looks in use changes nothing', g.app.config().mods.layout.looks.conversation === 'look-user/holo');
+    rpc(g, 'mods.use', { background: null });
+    L = g.app.config().mods.layout;
+    check('mods.use background null is Default: no background and no picture', L.background === null && L.backgroundImage === null && L.looks.composer === 'set/bar');
+    let picErr = '';
+    try {
+      rpc(g, 'mods.use', { background: 'image' });
+    } catch (e) {
+      picErr = e.message;
+    }
+    check('mods.use refuses your picture when there is none', /no picture of yours/.test(picErr), picErr);
+    const unknownKind = rpc(g, 'mods.use', { sidebar: 'x/y' });
+    check('mods.use ignores a kind it does not know', Array.isArray(unknownKind));
     fs.writeFileSync(path.join(g.roots.bundled, 'set', 'bar.css'), '#send-btn { color: lime }');
     check('mods.looks: reads the file as it is now (an edit shows on the next call)', /#send-btn \{ color: lime \}/.test(rpc(g, 'mods.looks').find((l) => l.target === 'composer').css));
 
@@ -994,7 +1043,7 @@ const resetHome = () => {
     const tool = g.tools.find((t) => t.name === 'mod_check');
     writeMod(g.roots.user, 'look-user', lookMan('look-user', [holo, { ...bar, target: 'status' }], { contributes: { views: man('x').contributes.views } }), css);
     const text = (await tool.run({ id: 'look-user' })).content;
-    check('mod_check lists the looks, the active one, and the warning', /Looks \(scoped/.test(text) && /- holo: "Holo" for the conversation \(@scope #messages\), holo\.css · active/.test(text) && /Warnings in mod.json \(1; the rest of the mod loads\)/.test(text) && /"status" is not a region/.test(text) && /mod.json: valid/.test(text), text);
+    check('mod_check lists the looks, the active one, and the warning', /Looks \(scoped/.test(text) && /- holo: "Holo" for the conversation \(@scope #messages\), holo\.css · active/.test(text) && /Warnings in mod.json \(1; the rest of the mod loads\)/.test(text) && /"status" is not a region/.test(text) && /mod.json: valid/.test(text) && /Looks in use: Conversation · approved for use: yes/.test(text), text);
     writeMod(g.roots.user, 'look-user', lookMan('look-user', [{ ...holo, styles: ['nope.css'] }]), css);
     const missingText = (await tool.run({ id: 'look-user' })).content;
     check('mod_check reports a look\'s missing stylesheet', /looks\[0\]\.styles\[0\]: nope.css does not exist/.test(missingText), missingText);
@@ -1017,8 +1066,84 @@ const resetHome = () => {
       createErr = e.message;
     }
     check('mods.create refuses an unknown region', /region must be one of conversation, composer/.test(createErr), createErr);
+    const starterText = (await tool.run({ id: 'look-starter' })).content;
+    check('mod_check of a new look: no switch, previewed and used from the card or its tab', /only looks, so no switch/.test(starterText) && /approved for use: not yet/.test(starterText) && /previews it and uses it from the card in the chat \(Preview, Use\) or in Settings → Mods → Conversation/.test(starterText), starterText);
+
+    // Previews: a look not in use yet (even one never approved) is compiled for the preview's root and served
+    const pv = rpc(g, 'mods.previewCss', { kind: 'conversation', ref: 'look-starter/main' }).css;
+    check('mods.previewCss: a look is scoped to the preview\'s transcript, never #messages alone', /@scope \(\.lp-root #messages\) \{/.test(pv) && !/@scope \(#messages\)/.test(pv) && /@keyframes look-pulse/.test(pv), pv.slice(0, 300));
+    const pt = rpc(g, 'mods.previewCss', { kind: 'theme', ref: 'theme-starter' }).css;
+    check('mods.previewCss: a theme is scoped to the preview\'s root, with :root read as it', /^@scope \(\.lp-root\) \{/m.test(pt) && /:scope \{/.test(pt) && /:scope\[data-theme="dark"\]/.test(pt) && !/:root/.test(pt), pt);
+    let pvErr = '';
+    try {
+      rpc(g, 'mods.previewCss', { kind: 'composer', ref: 'look-starter/main' });
+    } catch (e) {
+      pvErr = e.message;
+    }
+    check('mods.previewCss refuses a look of the wrong kind', /not a chat bar look/.test(pvErr), pvErr);
+    const served = resolveModUrl('mod://look-starter.user/look.css', gctl.serve);
+    check('a look never approved is served for its preview (its files only)', served.status === 200, served.status);
+    const pcall = await g.handlers['mods.call']({ mod: 'look-starter', view: 'main', preview: true }, 'settings.get', {});
+    const wcall = await g.handlers['mods.call']({ mod: 'look-starter', view: 'main' }, 'settings.get', {});
+    check('its preview frames are answered; the same call from the window is not', !pcall.error && pcall.result && pcall.result.tint === 'accent' && wcall.error && wcall.error.code === 4004, { pcall, wcall });
+    const ppcall = await g.handlers['mods.call']({ mod: 'look-starter', view: 'main', preview: true }, 'session.get', {});
+    check('… with nothing granted before its first Use', ppcall.error && ppcall.error.code === 4003, ppcall);
+    rpc(g, 'mods.setSafeMode', true);
+    check('safe mode: a user look is not served even for a preview', resolveModUrl('mod://look-starter.user/look.css', gctl.serve).status === 404);
+    rpc(g, 'mods.setSafeMode', false);
+
+    // Removing a user look in use takes it back to Default and forgets its approval
+    rpc(g, 'mods.use', { conversation: 'look-starter/main' }, { approve: true });
+    check('used: it is on and approved', st('look-starter').state === 'on' && !!g.app.config().mods.approved['look-starter']);
+    await rpc(g, 'mods.remove', 'look-starter');
+    check('removed: Default again, the approval forgotten', g.app.config().mods.layout.looks.conversation === null && !g.app.config().mods.approved['look-starter']);
     for (const id of ['look-user', 'look-starter', 'bar-starter']) fs.rmSync(path.join(g.roots.user, id), { recursive: true, force: true });
     gctl.close();
+  }
+
+  // ---------- A profile from 0.8.0: looks had switches, themes stacked ----------
+  {
+    const css = { 'a.css': ':root{--accent:red}', 'holo.css': '.msg { color: red }', 'panel.html': page };
+    const mg = fakeApp();
+    const theme = (id) => ({ protocol: 1, id, name: id, version: '0.1.0', contributes: { styles: ['a.css'] } });
+    writeMod(mg.roots.bundled, 'inky', theme('inky'), css);
+    writeMod(mg.roots.bundled, 'paperish', theme('paperish'), css);
+    writeMod(mg.roots.bundled, 'sleepy', theme('sleepy'), css);
+    writeMod(mg.roots.bundled, 'hyper', { protocol: 1, id: 'hyper', name: 'Hyper', version: '0.1.0', contributes: { looks: [{ id: 'holo', title: 'Holo', target: 'conversation', styles: ['holo.css'] }, { id: 'bar', title: 'Bar', target: 'composer', styles: ['holo.css'] }] } }, css);
+    writeMod(mg.roots.bundled, 'walls', { protocol: 1, id: 'walls', name: 'Walls', version: '0.1.0', contributes: { views: [{ id: 'aurora', title: 'Aurora', entry: 'panel.html', seat: 'background' }] } }, css);
+    writeMod(mg.roots.bundled, 'dots', { protocol: 1, id: 'dots', name: 'Dots', version: '0.1.0', contributes: { views: [{ id: 'grid', title: 'Grid', entry: 'panel.html', seat: 'background' }] } }, css);
+    writeMod(mg.roots.user, 'mine', { protocol: 1, id: 'mine', name: 'Mine', version: '0.1.0', permissions: ['session:read'], contributes: { looks: [{ id: 'holo', title: 'Holo', target: 'conversation', styles: ['holo.css'] }] } }, css);
+    writeMod(mg.roots.user, 'yourtheme', { ...theme('yourtheme') }, css);
+    writeMod(mg.roots.user, 'idle', { protocol: 1, id: 'idle', name: 'Idle', version: '0.1.0', contributes: { looks: [{ id: 'x', title: 'X', target: 'composer', styles: ['holo.css'] }] } }, css);
+    const at = 1700000000000;
+    mg.app.updateConfig((c) => {
+      const { theme: _drop, ...layout } = c.mods.layout;
+      return {
+        ...c,
+        mods: {
+          ...c.mods,
+          enabled: { inky: { permissions: [], styles: true, at }, paperish: { permissions: [], styles: true, at }, mine: { permissions: ['session:read'], styles: true, at }, yourtheme: { permissions: [], styles: true, at } },
+          disabledBundled: ['walls'],
+          layout: { ...layout, looks: { conversation: 'mine/holo', composer: 'hyper/bar' }, background: 'walls/aurora' },
+        },
+      };
+    });
+    check('migration: the profile has no theme in its layout (0.8.0)', !('theme' in mg.app.config().mods.layout));
+    const mgc = createMods(mg.app, mg.host);
+    const c = mg.app.config().mods;
+    const ms = (k) => rpc(mg, 'mods.list').find((m) => m.key === k);
+    check('migration: of the themes that were on, the last in apply order stays (built-in, then yours)', c.layout.theme === 'yourtheme' && rpc(mg, 'mods.styles').length === 1 && rpc(mg, 'mods.styles')[0].key === 'yourtheme', c.layout.theme);
+    check('migration: a look that showed stays in use (its mod was on), with its approval', c.layout.looks.conversation === 'mine/holo' && c.approved.mine && c.approved.mine.permissions.join() === 'session:read' && ms('mine').state === 'on' && ms('mine').approved === true);
+    check('migration: a look whose mod was off showed nothing, so it goes', c.layout.looks.composer === null);
+    check('migration: a background from a mod turned off goes too', c.layout.background === null);
+    check('migration: switches of looks are gone (enabled, disabledBundled)', !c.enabled.inky && !c.enabled.paperish && !c.enabled.mine && !c.enabled.yourtheme && !c.disabledBundled.includes('walls'));
+    check('migration: a look mod that was on but not chosen is simply available', ms('inky').state === 'off' && ms('inky').approved === true && ms('yourtheme').approved === true && ms('idle').approved === false);
+    mgc.close();
+    // A second start does not migrate again
+    mg.app.updateConfig((cc) => ({ ...cc, mods: { ...cc.mods, layout: { ...cc.mods.layout, theme: null } } }));
+    const mgc2 = createMods(mg.app, mg.host);
+    check('migration: runs once (a layout with a theme, even null, is left alone)', mg.app.config().mods.layout.theme === null);
+    mgc2.close();
   }
 
   // ---------- Quit ----------

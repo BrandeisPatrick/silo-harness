@@ -122,9 +122,9 @@ export function appearanceSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('Appearance'));
   const theme = ctx.segField({
     id: 'theme',
-    title: 'Theme',
+    title: 'Colour scheme',
     desc: 'System follows the light or dark setting of macOS.',
-    keywords: 'dark light mode colour color appearance',
+    keywords: 'theme dark light mode colour color appearance scheme',
     field: 'theme',
     choices: [
       { value: 'system', label: 'System' },
@@ -136,7 +136,7 @@ export function appearanceSection(ctx: Ctx): Section {
 
   let mods: ModInfo[] = [];
 
-  // What mods dress: one short row per kind, showing the current choice and opening its tab in Settings → Mods.
+  // The looks: one short row per kind, showing the one in use and opening its tab in Settings → Mods.
   const kindRow = (kind: Exclude<ModKind, 'general'>, id: string, title: string, keywords: string) => {
     const tab = tabOfKind(kind);
     const open = button('Change…', () => ctx.show('mods', { tab }), { aria: `Change: ${title}, in Settings → Mods → ${MOD_TABS.find((t) => t.id === tab)!.title}` });
@@ -148,12 +148,12 @@ export function appearanceSection(ctx: Ctx): Section {
     return { kind, row: r };
   };
   const kinds = [
-    kindRow('background', 'appearance-background', 'Background', 'wallpaper image picture mod backgrounds dim'),
+    kindRow('background', 'appearance-background', 'Background', 'wallpaper image picture mod backgrounds dim look'),
     kindRow('composer', 'appearance-composer', 'Chat bar', 'look composer input message box style mod'),
     kindRow('conversation', 'appearance-conversation', 'Conversation', 'look transcript messages chat style mod'),
-    kindRow('theme', 'appearance-themes', 'Themes', 'theme styles colours colors mod'),
+    kindRow('theme', 'appearance-themes', 'Theme', 'theme themes styles colours colors mod look'),
   ];
-  const kindGroup = group('From mods', ...kinds.map((k) => k.row));
+  const kindGroup = group('Looks', ...kinds.map((k) => k.row));
   el.append(group(null, theme), kindGroup);
 
   function renderKinds(): void {

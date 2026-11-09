@@ -394,7 +394,11 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       });
       writeMod(userMods, 'tint', { name: 'Tint', contributes: { styles: ['theme.css'] } }, { 'theme.css': ':root { --accent: #2b6cb0; }' });
       await sleep(1200);
-      for (const id of ['tabby', 'stripy', 'backdrop', 'tint']) await rpc(app, 'mods.setEnabled', id, true);
+      // The background is a look: approved at its first Use, not turned on (used once here, so its chat card is
+      // settled before the window is measured, then back to Default)
+      for (const id of ['tabby', 'stripy', 'tint']) await rpc(app, 'mods.setEnabled', id, true);
+      await rpc(app, 'mods.use', { background: 'backdrop/main' }, { approve: true });
+      await rpc(app, 'mods.use', { background: null });
       await sleep(800);
       // Tab
       const tabBtn = await app.waitFor(`document.querySelector('.mod-pane-tab[data-view="tabby/main"]') ? true : false`, 5000, 'the tab button').catch(() => false);

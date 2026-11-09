@@ -64,7 +64,8 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
   });
   app.rpc.handle('dreaming.run', (cwd) =>
     guard(() => {
-      svc.start(cwd ? 'command' : 'manual', typeof cwd === 'string' && cwd ? cwd : undefined);
+      // From the window, by hand: every project with new activity, or the one chosen on the Dreaming page (/dream is 'command')
+      svc.start('manual', typeof cwd === 'string' && cwd ? cwd : undefined);
       return state();
     }),
   );
@@ -73,6 +74,7 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
     return state();
   });
   app.rpc.handle('dreaming.list', () => state().dreams);
+  app.rpc.handle('dreaming.projects', () => svc.projectList());
   app.rpc.handle('dreaming.apply', (id) => guard(() => svc.apply(String(id))));
   app.rpc.handle('dreaming.dismiss', (id) => guard(() => svc.dismiss(String(id))));
   app.rpc.handle('dreaming.applyAll', (id) => guard(() => svc.applyAll(String(id))));
@@ -101,7 +103,7 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
       try {
         const { projects } = svc.start('command', cwd);
         if (!projects.length) return { notice: `Nothing new to dream about in ${where} since its last dream.` };
-        return { notice: `Dreaming about ${where} in the background (${path.basename(cwd)}). Its suggestions show in Settings → Dreaming and in the dream's session.` };
+        return { notice: `Dreaming about ${where} in the background (${path.basename(cwd)}). Its suggestions show on the Dreaming page and in the dream's session.` };
       } catch (err) {
         return { error: err instanceof Error ? err.message.charAt(0).toUpperCase() + err.message.slice(1) : String(err) };
       }

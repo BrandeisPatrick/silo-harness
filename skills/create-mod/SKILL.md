@@ -53,9 +53,9 @@ A mod is a folder named by its id with a `mod.json` and one or more HTML pages. 
 
 ## mod.json fields
 Required: `protocol` (1), `id`, `name`, `version` ("0.1.0"). Optional: `description`, `author`, `icon`, `permissions`, `contributes` with:
-- `views`: `[{ "id", "title", "entry", "seat", "order"?, "maxHeight"? }]`. `entry` is a relative path to an HTML file in the folder.
-- `styles`: `["theme.css"]`, CSS applied to the app itself (override tokens like `--accent` on `:root`).
-- `looks`: `[{ "id", "title", "target": "conversation"|"composer", "styles": ["look.css"] }]`, CSS for one region only (see Looks).
+- `views`: `[{ "id", "title", "entry", "seat", "order"?, "maxHeight"?, "preview"? }]`. `entry` is a relative path to an HTML file in the folder; `preview` (backgrounds only, optional) a picture in the folder for its card in Settings.
+- `styles`: `["theme.css"]`, a theme: CSS applied to the app itself (override tokens like `--accent` on `:root`). One theme is in use at a time.
+- `looks`: `[{ "id", "title", "target": "conversation"|"composer", "styles": ["look.css"], "preview"? }]`, CSS for one region only (see Looks).
 - `commands`: `[{ "name": "words", "description": "…", "view": "main" }]`; the page gets a `command` event `{ name, args }`.
 - `settings`: `[{ "key", "type": "boolean"|"string"|"number"|"select", "title", "default", "options"? }]`; read with `harness.settings.get()`.
 
@@ -63,10 +63,12 @@ Required: `protocol` (1), `id`, `name`, `version` ("0.1.0"). Optional: `descript
 - `rail`: a section in the right rail, sized to content (up to `maxHeight`, default 360).
 - `tab`: a full tab in the side pane next to Browser, Diff and Terminal.
 - `composer`: one compact row above the composer (up to 120 px).
-- `background`: behind the whole window, takes no clicks. The `pointer` event `{ x, y }` (fractions of the window) lets it follow the pointer.
+- `background`: behind the whole window, takes no clicks. The `pointer` event `{ x, y }` (fractions of the window) lets it follow the pointer. A background is a look (see Looks).
 
 ## Looks
-A look restyles one region, and the user picks it in Settings → Mods → Chat bar or Conversation (one per region). Use a look, not `styles`, when the request is about how the conversation or the chat bar looks.
+A look restyles one region, and the user uses it in Settings → Mods → Chat bar or Conversation (one per region). Use a look, not `styles`, when the request is about how the conversation or the chat bar looks. Backgrounds and themes are looks too (tabs Background and Theme).
+- Looks have no switch. A new one is not applied: the user previews it (the card in the chat has Preview, which opens its tab with it in the preview) and then uses it (Use on the card or the tab; the first Use of a look of theirs asks for their approval once). The preview reloads as you save.
+- The preview draws a sample chat bar or exchange with the same ids and classes as the window, compiled for the preview's region, so a look written against the stable hooks previews exactly as it applies.
 - `conversation`: the app wraps the CSS in `@scope (#messages) { … }`; `composer`: in `@scope (#chatbar) { … }`. Selectors reach only that region; `:scope` is its root. Set tokens on `:scope` to retheme the region: `:scope { --accent: #2b9; }`.
 - State on the root, no script needed: `data-running="true|false"`, `data-scheme="light|dark"`, `data-mode`, and `data-set-<key>` for each of the mod's `settings` (key in lower case). Branch on them: `:scope[data-running="true"] .tool-status.spin { … }`.
 - Rely only on the stable hooks in docs/mods.md (Looks): `.msg.user .bubble`, `.msg.assistant .md`, `.tool`, `.tool-verb`, `.code-block`, `.task-list`, `#composer`, `#input`, `#send-btn`, `#model-btn`, `#mode-btn`, and so on.
@@ -113,12 +115,12 @@ Ask only for the permissions the page uses. A call without its permission reject
 - No `window.open`, `alert`, forms that submit, or navigating away; the page cannot leave its own origin.
 - Handle "nothing to show": no session open, an empty transcript, a call that rejects. Show an `h-empty` line instead of a blank or broken panel.
 - Inline `<script>` and `<style>` are fine. Keep everything in one page unless it grows.
-- Adding a permission, styles, a look or a background to a mod that is on pauses it until the user approves.
-- A look applies only once the user picks it in Settings → Mods → Chat bar or Conversation; tell them so after turning it on.
+- Adding a permission to a mod that is on pauses it until the user approves. Adding a look does not: its first Use asks.
+- A look applies only once the user uses it (Settings → Mods → Background, Chat bar, Conversation or Theme, or Use on the card in the chat); it is previewed first. Tell them so.
 
 ## The loop
 1. Write `mod.json` and the page(s) in the right folder.
 2. Call the `mod_check` tool with the id. Fix every problem it lists and call it again until mod.json is valid.
-   A mod you just wrote shows in the installed list and in `mod_check` as off until the user turns it on; that is expected and does not mean it existed before.
-3. Tell the user the mod is ready and that they turn it on from the card in the chat or in Settings → Mods. Never edit config files to turn it on yourself.
+   A mod you just wrote shows in the installed list and in `mod_check` as off until the user turns it on (a look: until they use it); that is expected and does not mean it existed before.
+3. Tell the user the mod is ready and that they turn it on from the card in the chat or in Settings → Mods. For a look: they preview it (Preview on the card) and use it (Use). Never edit config files to turn it on or apply it yourself.
 4. Once it is on, each save reloads the page. After changes, call `mod_check` again: it also lists errors the page threw.

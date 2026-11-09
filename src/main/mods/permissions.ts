@@ -44,6 +44,7 @@ export const MOD_METHOD_PERMISSIONS: Record<ModMethod, ModPermission | null> = {
   'ui.openExternal': null,
   'ui.markdown': null,
   'ui.openSettings': null,
+  'ui.openPage': null,
   'storage.get': null,
   'storage.set': null,
   'storage.remove': null,

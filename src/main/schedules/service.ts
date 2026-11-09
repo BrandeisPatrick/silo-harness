@@ -4,7 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import type { App, Disposer } from '../app';
 import type { SchedulesService } from '../services';
-import type { Schedule, ScheduleInput, SchedulePatch, ScheduleWhen } from '../../shared/schedules';
+import type { Schedule, ScheduleInput, SchedulePatch, ScheduleRun, ScheduleWhen } from '../../shared/schedules';
 import type { AgentEvent } from '../../shared/types';
 import { ScheduleError } from './errors';
 import { ScheduleStore } from './store';
@@ -16,6 +16,8 @@ export const MAX_PROMPT = 8000;
 /** A run missed by less than this still happens (once); older ones are marked missed */
 export const CATCH_UP_MS = 24 * 60 * 60_000;
 export const TICK_MS = 15_000;
+/** Runs kept on a schedule (its History); older ones drop off, their sessions stay */
+export const MAX_HISTORY = 100;
 
 export interface SchedulerOptions {
   now?: () => number;
@@ -82,9 +84,13 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
   const disposers: Disposer[] = [];
 
   // The app quit (or crashed) during these runs; their outcome is unknown
-  for (const s of list) if (s.lastStatus === 'running') s.lastStatus = 'stopped';
+  for (const s of list) {
+    if (s.lastStatus === 'running') s.lastStatus = 'stopped';
+    for (const r of s.history ?? []) if (r.status === 'running') r.status = 'stopped';
+  }
 
-  const snapshot = () => list.map((s) => ({ ...s, when: { ...s.when } }));
+  const copy = (s: Schedule): Schedule => ({ ...s, when: { ...s.when }, ...(s.history ? { history: s.history.map((r) => ({ ...r })) } : {}) });
+  const snapshot = () => list.map(copy);
   const changed = () => {
     try {
       store.save(list);
@@ -149,10 +155,14 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
     s.lastSessionId = sessionId;
     s.lastStatus = 'running';
     s.runs += 1;
+    const run: ScheduleRun = { at, sessionId, status: 'running', ...(s.target === 'session' ? { continued: true } : {}) };
+    s.history = [...(s.history ?? []), run].slice(-MAX_HISTORY);
     const res = app.runtime.send(sessionId, frameMessage(s), [], { origin: 'schedule', from: s.name });
     if (!res.ok) {
       inflight.delete(s.id);
       s.lastStatus = 'error';
+      run.status = 'error';
+      run.error = res.error ?? 'It could not start.';
       console.warn(`[schedules] "${s.name}" could not start: ${res.error ?? 'unknown error'}`);
     }
   }
@@ -194,6 +204,8 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
       if (!s) continue;
       s.lastStatus = runStatus[ev.reason] ?? 'error';
       s.lastSessionId = sessionId;
+      const run = [...(s.history ?? [])].reverse().find((r) => r.sessionId === sessionId && r.status === 'running');
+      if (run) run.status = s.lastStatus === 'ok' ? 'ok' : s.lastStatus === 'stopped' ? 'stopped' : 'error';
       any = true;
     }
     if (any) changed();
@@ -262,7 +274,7 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
     list: snapshot,
     get: (id) => {
       const s = list.find((x) => x.id === id);
-      return s ? { ...s, when: { ...s.when } } : undefined;
+      return s ? copy(s) : undefined;
     },
     create: (input, by) => svc.createWith(input, by),
     createWith(input, by, createdInSession) {
@@ -278,7 +290,7 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
       for (const k of Object.keys(s) as (keyof Schedule)[]) if (!(k in next)) delete s[k];
       Object.assign(s, next);
       changed();
-      return { ...s, when: { ...s.when } };
+      return copy(s);
     },
     checkCreate: (input, by) => build(input, by),
     checkUpdate: (id, patch) => patched(find(id), patch),
@@ -294,7 +306,7 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
       // Out of rhythm: the next scheduled time stays as it was
       fire(s, now());
       changed();
-      return { ...s, when: { ...s.when } };
+      return copy(s);
     },
     preview(when) {
       const t = now();

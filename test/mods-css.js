@@ -4,7 +4,7 @@
 const path = require('node:path');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { check, done } = require('./support/check.js');
-const { splitCss, scopeCss, cleanCss, modUrlRewriter, LOOK_ROOTS, LOOK_LAYER } = require(path.join(projectDir, 'dist', 'main', 'mods', 'css.js'));
+const { splitCss, scopeCss, scopeTheme, cleanCss, modUrlRewriter, LOOK_ROOTS, LOOK_LAYER, PREVIEW_ROOTS } = require(path.join(projectDir, 'dist', 'main', 'mods', 'css.js'));
 
 const texts = (css, opts) => splitCss(css, opts).map((s) => s.text);
 /** Whether the text before a "(" ends with the identifier url (escapes resolved, as CSS reads it) */
@@ -146,6 +146,19 @@ for (const css of escapes) {
 // --- themes (contributes.styles) ---
 check('a theme keeps its rules unscoped', cleanCss(':root { --accent: red }') === ':root { --accent: red }');
 check('a theme loses its @import', cleanCss('@import url(x.css); :root{a:b}') === ':root{a:b}');
+
+// --- previews in Settings: a look and a theme compiled for the preview's own root ---
+{
+  check('the preview roots: a miniature window with its own transcript and chat bar', PREVIEW_ROOTS.theme === '.lp-root' && PREVIEW_ROOTS.body === '.lp-body' && PREVIEW_ROOTS.conversation === '.lp-root #messages' && PREVIEW_ROOTS.composer === '.lp-root #chatbar');
+  const look = scopeCss('.msg.user .bubble { color: red } :scope { --x: 1 }', PREVIEW_ROOTS.conversation, { prefix: 'teal' });
+  check('a look for a preview is scoped to the preview\'s region, not the window\'s', look.startsWith('@scope (.lp-root #messages) {') && !/@scope \(#messages\)/.test(look), look);
+  const t = scopeTheme(':root { --accent: red } @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: blue } } :root[data-theme="dark"] { --accent: blue } html { background: black } body { background: transparent } :root.mod-bg .main, .sidebar, body > .x { color: red }', PREVIEW_ROOTS.theme, { body: PREVIEW_ROOTS.body });
+  check('a theme for a preview: inside @scope (.lp-root), :root and html as :scope, body as .lp-body', t.startsWith('@scope (.lp-root) {') && /:scope \{ --accent: red \}/.test(t) && /:scope:not\(\[data-theme="light"\]\)/.test(t) && /:scope\[data-theme="dark"\]/.test(t) && /:scope \{ background: black \}/.test(t) && /\.lp-body \{ background: transparent \}/.test(t) && /:scope\.mod-bg \.main, \.sidebar, \.lp-body > \.x/.test(t) && !/:root|(?<![\w.-])html\b|(?<![\w-])body\b/.test(t), t);
+  const kept = scopeTheme('@keyframes glow { to { opacity: 1 } } @font-face { font-family: Brand; src: url(b.woff2) } @import url(x.css); a[title="html body :root"] { b: c } .htmlish, #body { d: e }', '.lp-root', { body: '.lp-body' });
+  check('a theme keeps its @keyframes and @font-face (in front of the scope), loses @import, and leaves strings and names alone', kept.indexOf('@keyframes glow') < kept.indexOf('@scope') && kept.indexOf('@font-face') < kept.indexOf('@scope') && !/@import/.test(kept) && /a\[title="html body :root"\]/.test(kept) && /\.htmlish, #body/.test(kept), kept);
+  const evil = scopeTheme('} } :root { --a: 1 } } .x { y: z }', '.lp-root');
+  check('a stray } cannot close the preview\'s scope early', (evil.match(/\{/g) || []).length === (evil.match(/\}/g) || []).length && evil.trim().endsWith('}') && evil.startsWith('@scope (.lp-root) {'), evil);
+}
 
 // --- url() ---
 {
