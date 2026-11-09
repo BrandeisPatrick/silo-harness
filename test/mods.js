@@ -994,6 +994,8 @@ const resetHome = () => {
     };
     check('looks: setLayout refuses a malformed choice', /looks must be an object/.test(layoutErr({ looks: 'set/holo' })) && /looks.conversation must be/.test(layoutErr({ looks: { conversation: 'noslash' } })) && /looks.composer must be/.test(layoutErr({ looks: { composer: 5 } })));
     check('looks: checkLayout passes a valid choice through', JSON.stringify(checkLayout({ looks: { conversation: null } }, '/x').looks) === '{"conversation":null}');
+    check('checkLayout keeps the closed side-pane tabs once each', JSON.stringify(checkLayout({ closedTabs: ['side-chat/main', 'side-chat/main', 'scheduled/main'] }, '/x').closedTabs) === '["side-chat/main","scheduled/main"]' && /closedTabs must be a list/.test(layoutErr({ closedTabs: 'side-chat/main' })));
+    check('checkLayout takes a theme (a mod key, or null) and refuses anything else', checkLayout({ theme: 'theme-paper' }, '/x').theme === 'theme-paper' && checkLayout({ theme: null }, '/x').theme === null && /theme must be/.test(layoutErr({ theme: 3 })));
 
     // mods.looks
     let looks = rpc(g, 'mods.looks');
