@@ -74,9 +74,14 @@ export function createPages(d: PagesDeps): PagesView {
 
   const same = (a: PageRoute | null, b: PageRoute | null) => JSON.stringify(a) === JSON.stringify(b);
 
+  /** What the breadcrumb shows now: it is drawn again only when that changes (an open ⌄ menu keeps its button) */
+  let crumbsKey = '';
   function drawCrumbs(): void {
-    crumbsEl.innerHTML = '';
     const c = handle?.crumbs;
+    const key = c ? `${JSON.stringify(route)}\n${c.parent.label}\n${c.title}\n${c.menu ? 'menu' : ''}` : '';
+    if (key === crumbsKey && crumbsEl.isConnected && (crumbsEl.childElementCount > 0) === Boolean(c)) return;
+    crumbsKey = key;
+    crumbsEl.innerHTML = '';
     d.shell.classList.toggle('page-detail', Boolean(c));
     crumbsEl.hidden = !c;
     if (!c) return;
@@ -143,6 +148,7 @@ export function createPages(d: PagesDeps): PagesView {
     view.hidden = true;
     crumbsEl.hidden = true;
     crumbsEl.innerHTML = '';
+    crumbsKey = '';
     d.shell.classList.remove('page-open', 'page-detail');
     delete d.shell.dataset.page;
     d.changed(false);

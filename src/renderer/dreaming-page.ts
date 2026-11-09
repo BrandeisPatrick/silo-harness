@@ -173,7 +173,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
 
   // ---------- Running ----------
 
-  async function run(cwd: string | undefined, anchor: HTMLElement): Promise<void> {
+  async function run(cwd?: string): Promise<void> {
     runNote = '';
     try {
       const s = await rpc('dreaming.run', cwd);
@@ -183,7 +183,6 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
       runNote = d.cleanError(err);
     }
     mounted?.update();
-    void anchor;
   }
 
   async function stop(): Promise<void> {
@@ -195,9 +194,10 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
   }
 
   function runMenu(anchor: HTMLElement): void {
-    const fresh = projects.filter((p) => p.fresh > 0);
+    // The next run reads at most five projects: those the service marks `next`
+    const n = projects.filter((p) => p.next).length;
     const sections: MenuSection[] = [
-      { items: [{ label: 'Every project with new activity', icon: 'moon', description: fresh.length ? `${Math.min(fresh.filter((p) => p.next).length || fresh.length, 5)} to read` : 'nothing new anywhere', onSelect: () => void run(undefined, anchor) }] },
+      { items: [{ label: 'Every project with new activity', icon: 'moon', description: n ? `${n} project${n === 1 ? '' : 's'} with something new` : 'nothing new anywhere', onSelect: () => void run() }] },
     ];
     if (projects.length) {
       sections.push({
@@ -207,7 +207,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
           icon: 'folder' as const,
           description: p.fresh ? `${p.fresh} new session${p.fresh === 1 ? '' : 's'}` : 'nothing new',
           disabled: !p.fresh,
-          onSelect: () => void run(p.cwd, anchor),
+          onSelect: () => void run(p.cwd),
         })),
       });
     }
@@ -337,7 +337,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
 
     function emptyState(): HTMLElement {
       const runB = h('button', { type: 'button', class: 'btn primary', id: 'dream-empty-run' }, h('span', { html: icon('moon', 14) }), h('span', {}, 'Run a dream'));
-      runB.addEventListener('click', () => void run(undefined, runB));
+      runB.addEventListener('click', () => void run());
       return h(
         'div',
         { class: 'pg-empty', id: 'dreaming-empty' },
@@ -424,7 +424,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
         {
           items: state()?.running
             ? [{ label: 'Stop the dream', icon: 'square' as const, onSelect: () => void stop() }]
-            : [{ label: 'Run a dream now', icon: 'play' as const, onSelect: () => void run(route.cwd, col) }],
+            : [{ label: 'Run a dream now', icon: 'play' as const, onSelect: () => void run(route.cwd) }],
         },
         { items: [{ label: 'Dreaming settings…', icon: 'settings' as const, onSelect: () => openSettings() }] },
       ],
@@ -444,7 +444,7 @@ export function createDreamingPage(d: DreamingPageDeps): DreamingPage {
           action.addEventListener('click', () => void stop());
         } else {
           action = h('button', { type: 'button', class: 'btn sm', id: 'project-run', 'data-focus': 'project-run' }, h('span', { html: icon('play', 14) }), h('span', {}, 'Run a dream now'));
-          action.addEventListener('click', () => void run(route.cwd, action));
+          action.addEventListener('click', () => void run(route.cwd));
         }
         const sub = runningHere ? 'Dreaming now…' : c?.daily && s?.nextRunAt ? `Next dream: ${formatWhenAt(s.nextRunAt)}${info && !info.fresh ? ', if there is something new by then' : ''}` : 'The daily dream is off';
         col.append(pageHead(name, { chip: MODE_WORDS[c?.mode ?? 'approve'], sub, actions: h('div', { class: 'pg-head-actions' }, action) }));

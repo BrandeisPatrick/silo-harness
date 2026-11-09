@@ -547,7 +547,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
       fillFolders(folderNow);
     });
     const folderWrap = h('span', { class: 'select' }, folder, h('span', { class: 'select-chev', html: icon('chevron-down', 14) }));
-    body.append(field('Folder', 'task-folder', folderWrap, edit ? 'Where its runs work. Changing it applies to the next run.' : 'Where its runs work: their working directory, project instructions and rules.'));
+    body.append(field('Folder', 'task-folder', folderWrap, edit ? 'Where its runs work. A task keeps its folder: for another one, make a new task.' : 'Where its runs work: their working directory, project instructions and rules.'));
     if (edit) folder.disabled = true;
 
     // Rhythm

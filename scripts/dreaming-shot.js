@@ -1,6 +1,6 @@
 // Makes the screenshot of Dreaming: the Dreaming page on Suggestions, with a dream of ~/code/atlas-api's suggestions (a
 // skill for a chore asked for twice, a memory line for a stated preference, a small mod) waiting for Apply or Dismiss,
-// the whole window. In light and in dark.
+// the main column at the website's 1020 × 752. In light and in dark.
 //
 // Like scripts/readme-shots.js, whose project, sessions and PNG helpers it uses: the built app runs hidden on a
 // throwaway profile against the scripted model. A few past sessions of the project are seeded with their history
@@ -200,8 +200,10 @@ async function main() {
       await sleep(700);
       await F.mainEval(inspect, `(async () => { const w = ${WIN}; for (let i = 0; i < 3; i++) { w.webContents.invalidate(); await w.webContents.capturePage(); } return true; })()`);
       await sleep(150);
+      // The main column, 1020 × 752 like the picture it replaces on the website (docs/index.html gives those sizes)
+      const box = await ev(`(() => { const r = document.querySelector('.main').getBoundingClientRect(); const w = Math.min(1020, r.width); return { x: Math.round(r.left + (r.width - w) / 2), y: 0, width: w, height: Math.min(752, r.height) }; })()`);
       const cap = await app.cdp('Page.captureScreenshot', { format: 'png' });
-      const png = Buffer.from(cap.data, 'base64');
+      const png = F.cropPng(Buffer.from(cap.data, 'base64'), box.x * 2, box.y * 2, box.width * 2, box.height * 2);
       const file = path.join(OUT, theme === 'dark' ? 'dreaming-dark.png' : 'dreaming.png');
       fs.writeFileSync(file, png);
       console.log(`wrote ${file} (${Math.round(png.length / 1024)} KB)`);

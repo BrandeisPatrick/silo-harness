@@ -3376,7 +3376,10 @@ async function forkSession(id: string): Promise<void> {
 onPush('sessions:changed', (list) => applySessionList(list));
 // A notification was clicked: its session comes on screen.
 onPush('sessions:show', (id) => {
-  if (typeof id === 'string' && id && id !== currentSessionId) void showSession(id);
+  if (typeof id !== 'string' || !id) return;
+  if (id !== currentSessionId) void showSession(id);
+  // The session is the one behind a page (Scheduled tasks, Dreaming): the chat view comes back
+  else pagesView?.close();
 });
 
 // ---------- Slash menu (skills) ----------
@@ -4139,7 +4142,7 @@ paneMods = createModsHost({
   toast: (text, kind) => flashStatus(text, kind === 'error' ? 'circle-alert' : 'info'),
   insertText: (text) => insertAtCursor(text),
   openSettings: (section, opts) => openSettings(section, opts),
-  switchSession,
+  switchSession: openFromPage,
   newSession,
   openPage: (page, opts) => (page === 'scheduled' && opts?.form === 'new' ? openTaskForm() : openPage({ page })),
   openLightbox,
@@ -4240,7 +4243,7 @@ const settingsPage = createSettingsPage({
   chooseFolder,
   openShortcuts,
   currentSessionId: () => currentSessionId,
-  openSession: (id) => void switchSession(id),
+  openSession: (id) => void openFromPage(id),
   openPage: (target) => (target === 'scheduled:new' ? openTaskForm() : openPage({ page: target })),
   sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
   beforeOpen: () => {
@@ -4348,7 +4351,7 @@ setNameLookup({
 // [feature:dreaming]
 // Proposal cards in a dream's transcript and on the Dreaming page; the sidebar row is in sidebar.ts, the page in dreaming-page.ts
 setupDreamingView({
-  openSession: (id) => void switchSession(id),
+  openSession: (id) => void openFromPage(id),
   sessionTitle: (id) => sessions.find((s) => s.id === id)?.title,
   showError: showInlineError,
   cleanError,
