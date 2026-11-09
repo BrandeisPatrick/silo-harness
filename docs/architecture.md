@@ -60,7 +60,8 @@ answers are RPC methods only the window calls.
 
 Feature setups, in this order, before the window opens: `setupSettings` (settings-service.ts), `setupHistory` (history.ts),
 `setupContext` (context-service.ts), `setupImages`, `setupMods`, `setupSchedules`, `setupSubagents`, `setupRemote`,
-`setupPower`, `setupDreaming`, `setupProviders` (providers-service.ts), `setupBrowser` (browser/feature.ts) (each in its own file).
+`setupPower`, `setupDreaming`, `setupProviders` (providers-service.ts), `setupBrowser` (browser/feature.ts), `setupChatCards`
+(chat-cards.ts) (each in its own file).
 
 ## Providers (src/main/providers.ts, provider-presets.ts)
 
@@ -200,6 +201,10 @@ what the factory returns. Mutable state several modules read stays behind access
 
 ```
 transcript.ts     following new content, user and system bubbles, the streaming reply and the thinking block, the transcript's clicks
+chat-cards.ts     the pull request and document cards under a reply (what a reply names, and what the calls before it made); the
+                  rules and words in chat-cards-model.ts (checked headless by test/chat-cards.js); `gh pr view` through the
+                  RPC `cards.pullRequest` (src/main/chat-cards.ts and chat-cards/, contract src/shared/chat-cards.ts)
+file-card.ts      the compact card of a file (tile, title, "Document · MD"), for documents and artifacts (artifacts.ts)
 tool-groups.ts    tool rows and the runs that fold into one line (settleRun, updateGroup, refoldAll); the rows still running
 approvals.ts      the approval card and the question card, and which one waits
 status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter

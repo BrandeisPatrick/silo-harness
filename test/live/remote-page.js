@@ -1,6 +1,6 @@
 // The remote page, for real: a scripted fake App plays a believable session (history, a streamed reply, a tool
-// call, an approval that waits, a plan in another session), the real remote server serves the page from it, and a
-// hidden Electron window at phone size loads it. Takes screenshots in light and dark, then drives the page (types
+// call, an approval that waits, a plan in another session, the cards of a pull request, a document and an artifact),
+// the real remote server serves the page from it, and a hidden Electron window at phone size loads it. Takes screenshots in light and dark, then drives the page (types
 // and sends a message, taps Allow) and checks the fixture received both. Never starts the app itself.
 //
 // Run (after npm run build):
@@ -85,12 +85,15 @@ function seed(store) {
     [tc('s11', 'show_image', { path: '/Users/someone/shots/before.png' }), 'Error: no such file: /Users/someone/shots/before.png'],
     [tc('s12', 'bash', { command: 'npm run lint' }), 'src/api/users.ts\n  12:5  error  no-unused-vars\n\n1 problem\n[exit code: 1]'],
     [tc('s13', 'bash', { command: 'npm test' }), 'Tests: 24 passed\n[exit code: 0]'],
+    // A pull request opened with gh and a note written: cards under the reply that follows
+    [tc('s14', 'bash', { command: 'gh pr create --fill' }), 'Creating pull request for api-split into main in BrandeisPatrick/api\n\nhttps://github.com/BrandeisPatrick/api/pull/12\n[exit code: 0]'],
+    [tc('s15', 'write_file', { path: 'notes/release-notes.md', content: '# Release notes\n' }), 'Created notes/release-notes.md (1 line)'],
   ];
   c.messages.push(
     { role: 'user', content: 'Split api.ts into one module per resource.' },
     { role: 'assistant', content: '', tool_calls: tools.map(([call]) => call) },
     ...tools.map(([call, result]) => ({ role: 'tool', tool_call_id: call.id, content: result })),
-    { role: 'assistant', content: 'Done: 6 modules under `src/api/`, all imports updated, tests pass.' },
+    { role: 'assistant', content: 'Done: 6 modules under `src/api/`, all imports updated, tests pass. The pull request: https://github.com/BrandeisPatrick/api/pull/12' },
   );
   // Messages that were not typed, in the frames the app really writes around them (the sender's id, which tools to
   // use next): a sub-session's report, a message from another session, a merged summary, a scheduled prompt.
@@ -289,12 +292,22 @@ async function main() {
     'Show image before.png',
     'Bash npm run lint',
     'Bash npm test',
+    'Bash gh pr create --fill',
+    'Write notes/release-notes.md',
   ];
   check('session, schedule and mod tools have readable rows (no raw names or JSON)', JSON.stringify(toolRows.map((r) => r.row)) === JSON.stringify(wanted), toolRows.map((r) => r.row));
   const lint = toolRows.find((r) => r.row === 'Bash npm run lint');
   const passed = toolRows.find((r) => r.row === 'Bash npm test');
   check('a stored command that exited 1 shows as failed with "exit 1"; one that exited 0 as done', lint && lint.err && lint.meta === 'exit 1' && passed && !passed.err && passed.meta === '', { lint, passed });
   check('a failed show_image says failed', toolRows.find((r) => r.row === 'Show image before.png')?.meta === 'failed');
+  // The pull request and the note: one block of cards right under the reply that names the pull request
+  const cardsC = await js(win, `[...document.querySelectorAll('#transcript > .chat-cards')].map((b) => ({ after: b.previousElementSibling?.innerText.slice(0, 20), cards: [...b.querySelectorAll('.chat-card')].map((c) => ({ cls: c.className, title: c.querySelector('.chat-card-title').textContent, meta: c.querySelector('.chat-card-meta').textContent, href: c.getAttribute('href') })) }))`);
+  check('cards: the pull request and the note, in one block under the reply that names it', cardsC.length === 1 && cardsC[0].after === 'Done: 6 modules unde' && JSON.stringify(cardsC[0].cards) === JSON.stringify([
+    { cls: 'chat-card pr', title: 'BrandeisPatrick/api #12', meta: 'Pull request · opens on GitHub', href: 'https://github.com/BrandeisPatrick/api/pull/12' },
+    { cls: 'chat-card file', title: 'Release notes', meta: 'Document · MD · on your Mac', href: null },
+  ]), cardsC);
+  await js(win, `document.querySelector('#transcript > .chat-cards').scrollIntoView({ block: 'center' })`);
+  await shot(win, '4c-cards');
   // Messages from elsewhere: what was said and who said it, not the frame written for the model
   const bubbles = await js(win, `[...document.querySelectorAll('#transcript .msg.user')].map((m) => ({ text: m.querySelector('.bubble').innerText.trim(), from: m.querySelector('.from')?.innerText ?? '', bold: m.querySelector('.bubble strong')?.innerText ?? '' }))`);
   const said = (text) => bubbles.find((x) => x.text === text);
@@ -395,6 +408,10 @@ async function main() {
   f.emit(A, { type: 'queue_delivered', id: 'q-1' });
   f.emit(A, { type: 'user_message', text: 'Also add a test for three attempts', images: 0, origin: 'queue' });
   f.emit(A, { type: 'tasks_updated', tasks: [{ id: '1', title: 'Make backoff configurable', status: 'completed' }, { id: '2', title: 'Fix the login test', status: 'completed' }, { id: '3', title: 'Add a three-attempt test', status: 'in_progress' }] });
+  // A pull request opened and an artifact made during the run: the artifact's card at once, the pull request's under the reply
+  f.emit(A, { type: 'tool_start', id: 'pr-1', name: 'bash', args: { command: 'git push -u origin fix-login && gh pr create --fill' } });
+  f.emit(A, { type: 'tool_end', id: 'pr-1', name: 'bash', result: 'https://github.com/BrandeisPatrick/web/pull/41\n[exit code: 0]', ok: true });
+  f.emit(A, { type: 'artifact', action: 'created', artifact: { id: 'notes', sessionId: A, title: 'Login fix notes', kind: 'html', version: 1, createdAt: 0, updatedAt: 0, bytes: 10, url: 'artifact://view/x/notes', path: '/secret/path' } });
   for (const chunk of ['Added ', '`retries three times`', ' to the suite; ', 'all **4** tests pass.']) f.emit(A, { type: 'text_delta', text: chunk });
   f.emit(A, { type: 'text_done' });
   f.emit(A, { type: 'assistant_message', text: 'Added `retries three times` to the suite; all **4** tests pass.', toolCalls: 0 });
@@ -402,6 +419,8 @@ async function main() {
   f.status.set(A, { running: false });
   f.emit(A, { type: 'run_end', reason: 'done' });
   check('run end: queue cleared, Stop hidden, idle mark', await waitFor(win, `document.getElementById('queue').hidden && document.getElementById('stop').hidden && document.getElementById('mark').classList.contains('idle')`));
+  const cardsA = await js(win, `(() => { const r = [...document.querySelectorAll('#transcript > .msg.assistant')].pop(); const b = r.nextElementSibling; const art = [...document.querySelectorAll('#transcript .chat-card.file')].pop(); return { under: b?.classList.contains('chat-cards') ? [...b.querySelectorAll('.chat-card')].map((c) => c.querySelector('.chat-card-title').textContent) : null, artifact: art && art.querySelector('.chat-card-title').textContent + ' | ' + art.querySelector('.chat-card-meta').textContent, leaked: document.body.innerHTML.includes('/secret/path') }; })()`);
+  check('cards, live: the pull request under the reply, the artifact as a card that says it is on the Mac', JSON.stringify(cardsA.under) === JSON.stringify(['BrandeisPatrick/web #41']) && cardsA.artifact === 'Login fix notes | Artifact · HTML · on your Mac' && !cardsA.leaked, cardsA);
   check('the delivered message appears once', (await js(win, `[...document.querySelectorAll('.msg.user .bubble')].filter(b => b.textContent === 'Also add a test for three attempts').length`)) === 1);
   await shot(win, '6-done');
 

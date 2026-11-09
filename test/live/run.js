@@ -59,6 +59,7 @@ const SCRIPTS = [
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
   { name: 'browser-polish' },
+  { name: 'chat-cards' },
 ];
 
 const words = process.argv.slice(2);
