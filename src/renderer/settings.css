@@ -157,6 +157,8 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-disclosure .icon { color: var(--text-400); transition: transform 0.12s ease; }
 .sp-advanced.open .sp-disclosure .icon { transform: rotate(90deg); }
 .sp-advanced-rows .sp-row { padding-left: 20px; }
+/* A list whose rows a section rebuilds (Settings → Browser): its empty note reads like a row */
+.sp-rows > .sp-note { margin: 0; padding: 14px 0; border-top: 1px solid var(--border-subtle); }
 .sp-content.searching .sp-advanced-rows .sp-row { padding-left: 0; }
 
 /* Search: nothing found */

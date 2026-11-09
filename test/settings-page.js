@@ -18,7 +18,7 @@ const { check, done } = require('./support/check.js');
 
   // --- sections ---------------------------------------------------------------
   const nav = m.SECTIONS.filter((s) => !s.searchOnly);
-  check('thirteen sections in four groups in the navigation', nav.length === 13 && new Set(nav.map((s) => s.group)).size === 4, nav.map((s) => s.id));
+  check('fourteen sections in four groups in the navigation', nav.length === 14 && new Set(nav.map((s) => s.group)).size === 4, nav.map((s) => s.id));
   check('Scheduled and Dreaming are pages now, not sections; a search-only Pages section stands for them', !m.SECTIONS.some((s) => s.id === 'scheduled' || s.id === 'dreaming') && m.SECTIONS.filter((s) => s.searchOnly).map((s) => s.id).join() === 'pages' && !m.isSectionId('pages') && !m.isSectionId('scheduled') && JSON.stringify(m.PAGE_SECTIONS) === JSON.stringify(['scheduled', 'dreaming']));
   check('Hooks sits after Configuration files', m.SECTIONS.findIndex((s) => s.id === 'hooks') === m.SECTIONS.findIndex((s) => s.id === 'files') + 1);
   check('section ids are recognised', m.isSectionId('mods') && !m.isSectionId('nope'));

@@ -228,6 +228,24 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
     fs.rmSync(root, { recursive: true, force: true });
   }
 
+  // The field that adds a site in Settings → Browser (src/renderer/settings/model.ts, an ES module: a .mjs copy loads it)
+  {
+    const { pathToFileURL } = require('node:url');
+    const copy = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-site-pattern-')), 'model.mjs');
+    fs.copyFileSync(path.join(projectDir, 'dist/renderer/settings/model.js'), copy);
+    const { parseSitePattern: site } = await import(pathToFileURL(copy).href);
+    fs.rmSync(path.dirname(copy), { recursive: true, force: true });
+    const ok = (t, o, want) => {
+      const r = site(t, o);
+      return r.ok && r.value === want;
+    };
+    check('4: sites are read as the policy matches them', ok('example.com', {}, 'example.com') && ok('*.Example.com', {}, '*.example.com') && ok('localhost:3000', {}, 'localhost:3000') && ok('[::1]:8080', {}, '[::1]:8080') && ok('https://www.example.com/some/page?q', {}, 'www.example.com'));
+    check('4: an international name is stored as its ASCII form', ok('bücher.example', {}, 'xn--bcher-kva.example'));
+    check('4: nonsense, spaces and an empty field are refused', !site('not a site').ok && !site('').ok && !site('exa mple.com').ok && !site('-bad-.com').ok);
+    check('4: "login." is a prefix only where the list takes prefixes', !site('login.').ok && ok('login.', { prefixes: true }, 'login.'));
+    check('4: a folder only where the list takes folders', !site('/Users/me/site').ok && ok('/Users/me/site/', { folders: true }, '/Users/me/site') && ok('~/site', { folders: true }, '~/site') && ok('file:///Users/me/site', { folders: true }, '/Users/me/site'));
+  }
+
   done();
 })().catch((err) => {
   console.error('CRASH', err);
