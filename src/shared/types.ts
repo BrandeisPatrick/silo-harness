@@ -257,7 +257,7 @@ export interface AppConfig {
   keepAwake: 'off' | 'running' | 'always';
   /** Fraction of the context window at which a run compacts on its own (0.5 to 0.95) */
   compactThreshold: number;
-  /** Before summarising, shorten old tool results the model no longer needs word for word */
+  /** Shorten old tool results the model no longer needs word for word: in what it is sent past 48K tokens, and before summarising */
   pruneToolResults: boolean;
   /**
    * Which tools the model is offered. Every tool's definition is sent with every request, so a small context window

@@ -46,6 +46,8 @@ export interface Session {
   compactions?: StoredCompaction[];
   /** Size of the last request the model saw (prompt + reply), and the message index it covered; drives the context meter */
   lastPrompt?: { tokens: number; at: number };
+  /** Tool results set aside to save context: the model gets only their start and end (agent/context-view.ts); kept whole here */
+  prunedResults?: string[];
   /** One checkpoint per user message of the live conversation, for rewinding (see rewindSession) */
   turns?: Turn[];
   /** The agent's task list (update_tasks) */
@@ -500,6 +502,7 @@ export class SessionStore {
       changes: src.changes ? structuredClone(src.changes) : undefined,
       compactions: src.compactions ? structuredClone(src.compactions) : undefined,
       lastPrompt: src.lastPrompt ? { ...src.lastPrompt } : undefined,
+      prunedResults: src.prunedResults ? [...src.prunedResults] : undefined,
       turns: src.turns ? structuredClone(src.turns) : undefined,
       tasks: src.tasks ? structuredClone(src.tasks) : undefined,
       seedLength: src.messages.length,

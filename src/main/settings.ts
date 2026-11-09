@@ -69,7 +69,7 @@ const SCALARS: Record<string, Check> = {
   autoTitles: describe(bool, 'Name a session from its first exchange.'),
   autoCompact: describe(bool, 'Summarise the conversation on its own when it nears the context window.'),
   compactThreshold: describe(between(0.5, 0.95), 'How full the context window gets before the conversation is summarised.'),
-  pruneToolResults: describe(bool, 'Before summarising, shorten old tool results.'),
+  pruneToolResults: describe(bool, 'Shorten old tool results for the model: past 48K tokens, and before summarising.'),
   notifications: describe(bool, 'Notify when a run finishes or needs approval while the app is in the background.'),
   keepAwake: describe(oneOf('off', 'running', 'always'), 'Keep the Mac awake: never, while a session runs, or whenever the app is open.'),
   toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered.'),

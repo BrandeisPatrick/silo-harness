@@ -52,7 +52,7 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
-import { modelMessages } from './agent/context-view';
+import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
@@ -999,8 +999,10 @@ export class Agent {
     const s = this.session;
     const mark = s.lastPrompt;
     let tokens: number;
-    if (mark && mark.at <= s.messages.length) tokens = mark.tokens + estimateTokens(s.messages.slice(mark.at));
-    else tokens = Math.round((estimateTokens([{ role: 'system', content: this.prompt(cfg, this.getSkills(cfg.workingDirectory)) }, ...s.messages]) + this.specTokens) * this.estimateScale);
+    // What the model is sent (agent/context-view.ts), which can be less than the session keeps
+    const sent = this.modelView();
+    if (mark && mark.at <= s.messages.length) tokens = mark.tokens + estimateTokens(sent.slice(mark.at));
+    else tokens = Math.round((estimateTokens([{ role: 'system', content: this.prompt(cfg, this.getSkills(cfg.workingDirectory)) }, ...sent]) + this.specTokens) * this.estimateScale);
     return { tokens, limit, threshold: compactThreshold(cfg), autoCompact: cfg.autoCompact !== false };
   }
 
@@ -1095,7 +1097,7 @@ export class Agent {
     if (!u || !u.promptTokens) return;
     const s = this.session;
     s.lastPrompt = { tokens: u.promptTokens + u.completionTokens, at: s.messages.length };
-    const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(s.messages);
+    const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(this.modelView());
     if (estimated > 0) this.estimateScale = Math.min(2, Math.max(0.67, s.lastPrompt.tokens / estimated));
     this.emitContext();
   }
@@ -1130,7 +1132,9 @@ export class Agent {
     if (cfg.autoCompact === false || s.messages.length < MIN_COMPACT_MESSAGES) return;
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
-    if (this.contextInfo().tokens >= limit * PRUNE_THRESHOLD && cfg.pruneToolResults !== false) this.prune(PRUNE_NORMAL, true);
+    const tokens = this.contextInfo().tokens;
+    if (tokens >= limit * PRUNE_THRESHOLD && cfg.pruneToolResults !== false) this.prune(PRUNE_NORMAL, true);
+    else if (tokens >= PRUNE_BUDGET && cfg.pruneToolResults !== false) this.pruneForModel();
     if (this.contextInfo().tokens < limit * threshold) return;
     const base = this.baseTokens(cfg);
     if (base >= limit * threshold) {
@@ -1192,7 +1196,27 @@ export class Agent {
 
   /** The stored conversation as the model is sent it (agent/context-view.ts): long output cut, old screenshots left out. */
   private modelView(): Msg[] {
-    return modelMessages(this.session.messages);
+    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []));
+  }
+
+  /**
+   * Past PRUNE_BUDGET tokens, long before a large window would prune, old tool output is set aside in what the model is
+   * sent (only its start and end go with each later request). The session keeps it whole, so the tool rows still show
+   * all of it, and an output once set aside stays so: the requests keep the same prefix until the next time.
+   */
+  private pruneForModel(): void {
+    const s = this.session;
+    const already = new Set(s.prunedResults ?? []);
+    const ids = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
+    if (!ids.length) return;
+    const before = estimateTokens(modelMessages(s.messages, already));
+    s.prunedResults = [...already, ...ids];
+    const after = estimateTokens(modelMessages(s.messages, new Set(s.prunedResults)));
+    // The reported size of the last request covered the output now set aside.
+    const mark = s.lastPrompt;
+    if (mark) mark.tokens = Math.max(0, Math.round(mark.tokens - (before - after) * this.estimateScale));
+    this.store.save(s, false);
+    this.emitContext();
   }
 
   /**

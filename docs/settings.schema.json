@@ -78,7 +78,7 @@
     },
     "pruneToolResults": {
       "type": "boolean",
-      "description": "Before summarising, shorten old tool results."
+      "description": "Shorten old tool results for the model: past 48K tokens, and before summarising."
     },
     "notifications": {
       "type": "boolean",

@@ -42,4 +42,77 @@ check('4: an older one is a line saying it was left out', images(v[3]).length ==
 check("4: the user's own image is always sent", images(v[0])[0]?.endsWith('MINE') && v[0] === userImage);
 check('4: the stored screenshot keeps its image', images(shots[3])[0]?.endsWith('SHOT1'));
 
-done();
+// ---- 5: results set aside to save context: start and end only; which ones are set aside ----
+const { resultsToPrune, PRUNE_BUDGET } = view;
+const long = (n) => `${'h'.repeat(1500)}${String(n).repeat(3000)}${'t'.repeat(600)}`;
+const conv = [{ role: 'user', content: 'first' }];
+for (let i = 1; i <= 9; i++) conv.push(call(`p${i}`, 'read_file', { path: `f${i}` }), result(`p${i}`, i === 5 ? 'short' : long(i)));
+conv.push({ role: 'assistant', content: 'read them' }, { role: 'user', content: 'second' }, call('p10', 'read_file'), result('p10', long(0)));
+const isUser = (m) => m.role === 'user';
+const picked = resultsToPrune(conv, new Set(), isUser);
+check('5: set aside: before the last user message, not among the 6 latest results, not short ones', JSON.stringify(picked.sort()) === JSON.stringify(['p1', 'p2', 'p3', 'p4']), picked);
+check('5: …and not those set aside already', JSON.stringify(resultsToPrune(conv, new Set(['p1', 'p2']), isUser).sort()) === JSON.stringify(['p3', 'p4']));
+const pv = modelMessages(conv, new Set(picked));
+const contentOf = (id) => pv.find((m) => m.role === 'tool' && m.tool_call_id === id).content;
+check('5: a result set aside keeps its start and end with a note', /^h{1200}\n\[… \d+ characters cleared to save context\. Run the tool again if you need them\.\]\nt{500}$/.test(contentOf('p1')), contentOf('p1').length);
+check('5: the others are sent whole', contentOf('p6') === long(6) && contentOf('p10') === long(0));
+check('5: the budget is well below a large window', PRUNE_BUDGET >= 32000 && PRUNE_BUDGET <= 64000, PRUNE_BUDGET);
+
+// ---- 6: an agent with a large window sets old output aside once a request passes the budget ----
+(async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const { Agent } = require(path.join(projectDir, 'dist/main/agent.js'));
+  const { SessionStore } = require(path.join(projectDir, 'dist/main/sessions.js'));
+  const { startMock } = require('./support/mock-model.js');
+  const mock = await startMock();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-view-'));
+  process.env.SILO_HARNESS_CONFIG_DIR = path.join(tmp, 'home-config');
+  const cwd = path.join(tmp, 'project');
+  fs.mkdirSync(cwd);
+  for (let i = 1; i <= 8; i++) fs.writeFileSync(path.join(cwd, `f${i}.txt`), `F${i}-START ${'word '.repeat(1200)}F${i}-END`);
+  let config = {
+    provider: 'portkey',
+    portkey: { baseURL: `http://127.0.0.1:${mock.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 1_000_000 },
+    ollama: { baseURL: 'http://127.0.0.1:1/v1', model: 'x', numCtx: 4096, think: 'auto' },
+    workingDirectory: cwd, permissionMode: 'bypass', autoApprove: true, maxTurns: 10, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
+    mcpServers: {}, mcpTrusted: {}, autoCompact: true, compactThreshold: 0.8, pruneToolResults: true, notifications: false, allowRules: {}, recentDirs: [],
+  };
+  const store = new SessionStore(path.join(tmp, 'sessions'));
+  const events = [];
+  const agent = new Agent(() => config, { navigate: async (u) => u }, store, () => [], (ev) => events.push(ev));
+  const streams = () => mock.state.requests.filter((r) => r.payload?.stream).map((r) => r.payload);
+  const firstTurn = async () => {
+    mock.state.replies.push({ content: '', toolCalls: Array.from({ length: 8 }, (_, i) => ({ id: `rf${i + 1}`, name: 'read_file', args: { path: `f${i + 1}.txt` } })) });
+    // The model's report: past the budget, far below the window
+    mock.state.replies.push({ content: 'Read all eight.', promptTokens: PRUNE_BUDGET + 4000 });
+    await agent.run('Read f1.txt to f8.txt.');
+  };
+  await firstTurn();
+  mock.state.replies.push({ content: 'ok' });
+  await agent.run('And now?');
+  const sent = streams().pop();
+  const tools = sent.messages.filter((m) => m.role === 'tool');
+  const cleared = tools.filter((m) => /characters cleared to save context/.test(m.content)).map((m) => m.tool_call_id);
+  check('6: the next request has the two oldest results set aside, the six latest whole', JSON.stringify(cleared) === JSON.stringify(['rf1', 'rf2']) && tools.length === 8, cleared);
+  const stored = agent.session.messages.filter((m) => m.role === 'tool');
+  check('6: the session keeps every result whole (the tool rows show all of it)', stored.length === 8 && stored.every((m) => /F\d-END/.test(m.content)));
+  check('6: and remembers what it set aside', JSON.stringify([...(agent.session.prunedResults ?? [])].sort()) === JSON.stringify(['rf1', 'rf2']), agent.session.prunedResults);
+  check('6: no notice: nothing the user sees changed', !events.some((e) => e.type === 'error' && /Cleared/.test(e.message ?? '')));
+
+  // Turned off with pruneToolResults: false
+  config = { ...config, pruneToolResults: false };
+  agent.session = store.create({ cwd });
+  await firstTurn();
+  mock.state.replies.push({ content: 'ok' });
+  await agent.run('And now?');
+  const off = streams().pop().messages.filter((m) => m.role === 'tool');
+  check('6: pruneToolResults false: every result is sent whole', off.length === 8 && off.every((m) => /F\d-END/.test(m.content)) && !agent.session.prunedResults);
+
+  mock.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  done();
+})().catch((e) => {
+  console.error('TEST CRASHED', e);
+  process.exit(1);
+});
