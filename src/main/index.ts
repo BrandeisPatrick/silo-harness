@@ -14,6 +14,7 @@ import { TerminalManager } from './terminal';
 import { createApp, type AppHost } from './app';
 import { registerCoreIpc } from './ipc';
 import { setupSettings } from './settings-service';
+import { setupChatCards } from './chat-cards';
 import { setupHooks } from './hooks';
 import { setupHistory } from './history';
 import { setupContext } from './context-service';
@@ -286,6 +287,7 @@ app.whenReady().then(() => {
   setupDreaming(a);
   setupProviders(a);
   setupBrowser(a, () => browser);
+  setupChatCards(a, () => browser);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -16,6 +16,7 @@ import type { DreamingEvents, DreamingRpc } from './dreaming';
 import type { ProvidersRpc } from './providers';
 import type { HooksEvents, HooksRpc } from './hooks';
 import type { BrowserEvents, BrowserRpc } from './browser';
+import type { ChatCardsRpc } from './chat-cards';
 
 export interface CoreRpc {
   'commands.list': () => CommandInfo[];
@@ -32,5 +33,5 @@ export interface CoreEvents {
   'sessions:show': string;
 }
 
-export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc;
+export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc & ChatCardsRpc;
 export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents & BrowserEvents;
