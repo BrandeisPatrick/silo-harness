@@ -64,7 +64,8 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
   });
   app.rpc.handle('dreaming.run', (cwd) =>
     guard(() => {
-      svc.start(cwd ? 'command' : 'manual', typeof cwd === 'string' && cwd ? cwd : undefined);
+      // From the window, by hand: every project with new activity, or the one chosen on the Dreaming page (/dream is 'command')
+      svc.start('manual', typeof cwd === 'string' && cwd ? cwd : undefined);
       return state();
     }),
   );

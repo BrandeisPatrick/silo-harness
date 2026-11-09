@@ -174,12 +174,12 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
             }, { id: 'task-search-btn' }),
           );
         tools.append(
-          toolIcon('sliders', `Filter: ${TASK_FILTERS.find((f) => f.value === filter)!.label}`, (b) => choiceMenu(b, 'Show', TASK_FILTERS, filter, (v) => {
+          toolIcon('filter', `Filter: ${TASK_FILTERS.find((f) => f.value === filter)!.label}`, (b) => choiceMenu(b, 'Show', TASK_FILTERS, filter, (v) => {
             filter = v;
             savePrefs();
             keepFocus(col, draw);
           }), { on: filter !== 'all', menu: true, id: 'task-filter' }),
-          toolIcon('list', `Sort: ${TASK_SORTS.find((s) => s.value === sort)!.label}`, (b) => choiceMenu(b, 'Sort by', TASK_SORTS, sort, (v) => {
+          toolIcon('sort', `Sort: ${TASK_SORTS.find((s) => s.value === sort)!.label}`, (b) => choiceMenu(b, 'Sort by', TASK_SORTS, sort, (v) => {
             sort = v;
             savePrefs();
             keepFocus(col, draw);
@@ -389,8 +389,8 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
           instrSec.append(more);
         }
         side.append(instrSec);
-        side.append(sideSection('Project', h('div', { class: 'pg-folder', title: s.cwd }, h('span', { class: 'pg-folder-icon', html: icon('folder', 14) }), h('span', { class: 'pg-folder-name' }, folderName(s.cwd))), h('p', { class: 'pg-side-note mono' }, tilde(s.cwd))));
-        side.append(sideSection('Runs', h('p', { class: 'pg-side-text', id: 'task-rhythm' }, rhythmWords(s)), h('p', { class: 'pg-side-note' }, s.createdBy === 'agent' ? 'Made by the agent, with your approval.' : `Made ${formatWhenAt(s.createdAt).replace(/^(Today|Yesterday)/, (m) => m.toLowerCase())}.`)));
+        side.append(sideSection('Project', h('div', { class: 'pg-folder', title: s.cwd }, h('span', { class: 'pg-folder-icon', html: icon('folder', 14) }), h('span', { class: 'pg-folder-name' }, folderName(s.cwd))), h('p', { class: 'pg-side-note' }, tilde(s.cwd))));
+        side.append(sideSection('Runs', h('p', { class: 'pg-side-text', id: 'task-rhythm-words' }, rhythmWords(s)), h('p', { class: 'pg-side-note' }, s.createdBy === 'agent' ? 'Made by the agent, with your approval.' : `Made ${formatWhenAt(s.createdAt).replace(/^(Today|Yesterday)/, (m) => m.toLowerCase())}.`)));
         const where = h('div', { class: 'pg-side-text' });
         if (s.target === 'session' && s.sessionId) {
           const t = sessionTitle(s.sessionId);
@@ -400,7 +400,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
             a.addEventListener('click', () => d.openSession(s.sessionId!));
             where.append(a);
           } else where.append('a session that was deleted');
-        } else where.append('Each run starts a new session, listed in the sidebar with ⚡.');
+        } else where.append('Each run starts a new session, listed in the sidebar with ', h('span', { class: 'pg-inline-icon', 'aria-label': 'a lightning bolt', html: icon('zap', 12) }), ' in front of its title.');
         side.append(sideSection('Each run', where));
         const mode = MODES[d.config()?.permissionMode ?? 'ask'] ?? MODES.ask;
         side.append(sideSection('Permissions', h('div', { class: 'pg-mode' }, h('span', { class: 'pg-mode-icon', html: icon(mode.icon, 14) }), h('span', {}, mode.label)), h('p', { class: 'pg-side-note' }, `${mode.desc}. Runs use the permission mode in the chat bar; a run that needs your approval waits for you in its session.`)));

@@ -268,7 +268,8 @@ export class Dreaming {
       .filter(([cwd]) => isDir(cwd))
       .sort((a, b) => b[1].lastActivity - a[1].lastActivity)
       .slice(0, 40)
-      .map(([cwd, e]) => ({ cwd, fresh: e.fresh, lastActivity: e.lastActivity, next: next.has(cwd) }));
+      // A session saved after the dream's last turn is not news: count only those with turns no dream has read
+      .map(([cwd, e]) => ({ cwd, fresh: e.fresh ? this.projectSessions(cwd).length : 0, lastActivity: e.lastActivity, next: next.has(cwd) }));
   }
 
   existing(cwd: string): ExistingThings {

@@ -44,6 +44,7 @@ const SCRIPTS = [
   { name: 'palette' },
   { name: 'glass' },
   { name: 'dreaming' },
+  { name: 'pages' },
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
   { name: 'remote-page', electron: true },

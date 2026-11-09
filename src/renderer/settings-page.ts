@@ -335,11 +335,14 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       filesSection(ctx, (info) => applyOwned(info)),
       hooksSection(ctx),
       aboutSection(ctx),
+    ];
+    // First in the page, so a search for Scheduled or Dreaming lists the page above rows that only mention it
+    sections.unshift(
       pagesSection((target) => {
         dialog.close();
         deps.openPage(target);
       }),
-    ];
+    );
     for (const s of sections) {
       s.el.classList.add('sp-section');
       s.el.id = `sp-sec-${s.id}`;

@@ -107,7 +107,7 @@ export interface Dream {
 /** A project folder as Dreaming sees it: the folders of the sessions, for the Dreaming page and its Run a dream menu. */
 export interface DreamProject {
   cwd: string;
-  /** Sessions with activity since the project's last dream */
+  /** Sessions with turns no dream of the project has read yet */
   fresh: number;
   /** The newest activity in a session of the project, unix ms */
   lastActivity: number;
@@ -132,7 +132,7 @@ export interface DreamingState {
 export interface DreamingRpc {
   'dreaming.get': () => DreamingState;
   'dreaming.set': (patch: Partial<DreamingConfig>) => DreamingState;
-  /** Starts a run over the projects with new activity (or `cwd` alone); refused while one runs */
+  /** Starts a run by hand over the projects with new activity (or `cwd` alone); refused while one runs */
   'dreaming.run': (cwd?: string) => DreamingState;
   'dreaming.stop': () => DreamingState;
   'dreaming.list': () => Dream[];
