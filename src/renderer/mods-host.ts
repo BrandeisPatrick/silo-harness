@@ -211,7 +211,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
 
   // ---------- Layout (config.mods.layout, written with mods.setLayout) ----------
 
-  const fallbackLayout = (): ModLayout => ({ railOpen: true, railWidth: RAIL_DEFAULT, collapsed: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null } });
+  const fallbackLayout = (): ModLayout => ({ railOpen: true, railWidth: RAIL_DEFAULT, collapsed: [], closedTabs: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null } });
   let layout: ModLayout = { ...fallbackLayout(), ...(deps.config()?.mods?.layout ?? {}) };
   let writing = 0;
   let widthTimer: number | undefined;
@@ -231,11 +231,13 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     if (next && !writing) {
       const before = JSON.stringify(layout);
       const looksBefore = JSON.stringify(layout.looks);
-      layout = { ...fallbackLayout(), ...next, collapsed: [...(next.collapsed ?? [])], looks: { ...fallbackLayout().looks, ...(next.looks ?? {}) } };
+      const closedBefore = JSON.stringify(layout.closedTabs ?? []);
+      layout = { ...fallbackLayout(), ...next, collapsed: [...(next.collapsed ?? [])], closedTabs: [...(next.closedTabs ?? [])], looks: { ...fallbackLayout().looks, ...(next.looks ?? {}) } };
       if (JSON.stringify(layout) !== before) {
         applyRail();
         syncBackground();
       }
+      if (ready && JSON.stringify(layout.closedTabs) !== closedBefore) applyMods(mods);
       if (JSON.stringify(layout.looks) !== looksBefore) void syncLooks();
     }
     syncTheme();
@@ -626,7 +628,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         const id = p.view === undefined ? f.slot.ref.view.id : str('view', 100);
         const target = viewKey(mod.key, id);
         if (!mod.manifest?.contributes?.views?.some((v) => v.id === id)) throw bad(`view: ${mod.id} has no view "${id}"`);
-        openView(target);
+        openOrReopen(target);
         return null;
       }
       case 'ui.copy':
@@ -951,20 +953,22 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         badge.hidden = !s.badge;
       }
       s.tabBtn.setAttribute('aria-label', `${s.title}${s.badge ? `, ${s.badge}` : ''}`);
+      s.tabBtn.setAttribute('aria-keyshortcuts', 'Delete');
       s.tabBtn.dataset.tip = s.title;
+      const x = s.tabBtn.querySelector<HTMLElement>('.pane-tab-close');
+      if (x) x.dataset.tip = `Close ${s.title}`;
     }
   }
 
   function applyRail(): void {
     const shown = railShown();
-    const any = viewsFor(mods, 'rail').length > 0;
     if (rail) rail.hidden = !shown;
     shellEl?.style.setProperty('--rail-w', `${clampRailWidth(layout.railWidth)}px`);
     shellEl?.classList.toggle('rail-open', shown);
     if (railToggle) {
-      railToggle.hidden = !any;
-      railToggle.setAttribute('aria-pressed', String(shown));
-      railToggle.classList.toggle('active', shown);
+      // Always in the top bar, first of its icons; pressed is the choice (a rail with no section in it shows nothing)
+      railToggle.setAttribute('aria-pressed', String(layout.railOpen));
+      railToggle.classList.toggle('active', layout.railOpen);
     }
     for (const s of slots.values()) applyCollapsed(s);
     syncVisibility();
@@ -980,7 +984,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   railToggle?.addEventListener('click', () => toggleRail());
   document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'e') return;
-    if (!viewsFor(mods, 'rail').length) return;
+    // Not while a page has the main column (its top bar has no toggle then) or a dialog is open
+    if (shellEl?.classList.contains('page-open') || document.querySelector('dialog[open]')) return;
     e.preventDefault();
     toggleRail();
   });
@@ -1046,17 +1051,50 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     btn.setAttribute('aria-controls', panel.id);
     btn.tabIndex = -1;
     btn.dataset.view = ref.key;
-    btn.innerHTML = `${iconHtml(ref.view.icon, ref.mod, 14)}<span class="mod-tab-title pane-tab-label"></span><span class="count-badge" hidden></span>`;
+    // The × closes the tab (out of the strip until the ⋯ menu shows it again). A button cannot hold a button, so it is a
+    // span the pointer uses; from the keyboard, Delete on the tab does the same.
+    btn.innerHTML = `${iconHtml(ref.view.icon, ref.mod, 14)}<span class="mod-tab-title pane-tab-label"></span><span class="count-badge" hidden></span><span class="pane-tab-close" aria-hidden="true">${icon('x', 12)}</span>`;
     panel.setAttribute('aria-labelledby', btn.id);
-    btn.addEventListener('click', () => deps.showPane(`mod:${ref.key}`));
+    btn.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.pane-tab-close')) {
+        e.preventDefault();
+        closeTab(ref.key);
+        return;
+      }
+      deps.showPane(`mod:${ref.key}`);
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      e.preventDefault();
+      closeTab(ref.key);
+    });
     const s: Slot = { ref, seat: 'tab', el: panel, body: panel, frame: null, next: null, title: ref.view.title, badge: null, height: 0, failedEl: null, queued: [], tabBtn: btn };
     renderSlotHead(s);
     return s;
   }
 
+  const isClosed = (key: string) => (layout.closedTabs ?? []).includes(key);
+
+  /** Takes a mod's tab out of the strip (its page unloads); the ⋯ menu shows it again. */
+  function closeTab(key: string): void {
+    if (isClosed(key)) return;
+    saveLayout({ closedTabs: [...(layout.closedTabs ?? []), key] });
+    applyMods(mods);
+  }
+
+  /** Puts a closed tab back in the strip and in front, opening the pane if it was closed. */
+  function reopenTab(key: string): void {
+    if (isClosed(key)) {
+      saveLayout({ closedTabs: (layout.closedTabs ?? []).filter((k) => k !== key) });
+      applyMods(mods);
+    }
+    deps.showPane(`mod:${key}`);
+  }
+
   const pane: ModPaneTabs = {
     buttons: () =>
       viewsFor(mods, 'tab')
+        .filter((r) => !isClosed(r.key))
         .map((r) => slots.get(r.key))
         .filter((s): s is Slot => !!s?.tabBtn)
         .map((s) => ({ key: s.ref.key, el: s.tabBtn! })),
@@ -1366,7 +1404,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   function applyMods(list: ModInfo[]): void {
     mods = Array.isArray(list) ? list : [];
     const wanted = new Map<string, ViewRef>();
-    for (const seat of ['rail', 'tab', 'composer', 'worker'] as const) for (const r of viewsFor(mods, seat)) wanted.set(r.key, r);
+    for (const seat of ['rail', 'tab', 'composer', 'worker'] as const) for (const r of viewsFor(mods, seat)) if (seat !== 'tab' || !isClosed(r.key)) wanted.set(r.key, r);
     let tabsChanged = false;
     // Gone, off, paused or no longer that seat: removed at once.
     for (const s of [...slots.values()]) {
@@ -1478,6 +1516,12 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     } else if (s.seat === 'tab') deps.showPane(`mod:${key}`);
   }
 
+  /** openView for a key that may be a closed tab: a command or harness.ui.open brings it back. */
+  function openOrReopen(key: string): void {
+    if (!slots.get(key) && isClosed(key) && viewsFor(mods, 'tab').some((r) => r.key === key)) return reopenTab(key);
+    openView(key);
+  }
+
   // ---------- The "⋯" menu: mod tabs and Manage mods ----------
 
   moreBtn?.addEventListener('click', () => {
@@ -1486,14 +1530,17 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     if (tabs.length) {
       sections.push({
         label: 'Tabs',
+        // A tab in the strip comes to the front; a closed one is shown again ("Show Scheduled")
         items: tabs.map((r) => {
           const s = slots.get(r.key);
+          const closed = isClosed(r.key);
+          const title = s?.title || r.view.title;
           return {
-            label: s?.title || r.view.title,
+            label: closed ? `Show ${title}` : title,
             description: r.mod.manifest?.name && r.mod.manifest.name !== r.view.title ? r.mod.manifest.name : undefined,
             icon: (iconSource(r.view.icon, r.mod.origin, isIconName) as { builtin?: IconName } | null)?.builtin ?? (iconSource(r.mod.manifest?.icon, r.mod.origin, isIconName) as { builtin?: IconName } | null)?.builtin ?? 'blocks',
-            checked: paneVisible && paneActive === r.key,
-            onSelect: () => deps.showPane(`mod:${r.key}`),
+            checked: !closed && paneVisible && paneActive === r.key,
+            onSelect: () => (closed ? reopenTab(r.key) : deps.showPane(`mod:${r.key}`)),
           };
         }),
       });
@@ -1604,7 +1651,9 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     const mod = currentMod(modKey);
     const name = isObj(data) && typeof data.name === 'string' ? data.name : '';
     const viewId = mod?.manifest?.contributes?.commands?.find((c) => c.name === name)?.view;
-    const target = viewId ? slots.get(viewKey(modKey, viewId)) : undefined;
+    const wantedKey = viewId ? viewKey(modKey, viewId) : '';
+    if (wantedKey && !slots.get(wantedKey) && isClosed(wantedKey)) reopenTab(wantedKey);
+    const target = viewId ? slots.get(wantedKey) : undefined;
     if (target) openView(target.ref.key);
     for (const s of slots.values()) {
       if (s.ref.mod.key !== modKey || s.preview) continue;
@@ -1838,7 +1887,9 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     looks: () => looks.map((l) => ({ target: l.target, ref: l.ref, mod: l.mod, bytes: l.css.length })),
     lookCss: (target: string) => looks.find((l) => l.target === target)?.css ?? null,
     browser: () => deps.browserDebug(),
-    open: (key: string) => openView(key),
+    open: (key: string) => openOrReopen(key),
+    closeTab: (key: string) => closeTab(key),
+    tabs: () => viewsFor(mods, 'tab').map((r) => ({ key: r.key, closed: isClosed(r.key), inStrip: !!slots.get(r.key)?.tabBtn?.isConnected })),
   };
   const dbgHost = (window as unknown as { __oc_debug?: Record<string, unknown> }).__oc_debug;
   if (dbgHost) dbgHost.mods = debug;

@@ -181,6 +181,8 @@ export interface ModLayout {
   railWidth: number;
   /** "<mod key>/<view id>" of rail sections the user collapsed */
   collapsed: string[];
+  /** "<mod key>/<view id>" of side-pane tabs the user closed: out of the tab strip until shown again from the ⋯ menu */
+  closedTabs?: string[];
   /** "<mod key>/<view id>" of the active background, or null */
   background: string | null;
   /** A picture of the user's own as the background (absolute path), used when `background` is null */

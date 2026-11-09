@@ -8,6 +8,8 @@ const dot = (cx: number, cy: number, r = 1) => `<circle cx="${cx}" cy="${cy}" r=
 
 const ICONS = {
   'panel-left': '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M6.25 2.75v10.5"/>',
+  // The details rail (as Claude Code draws it): a list inside a box
+  'panel-list': '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M5 6.25h6M5 8.75h6M5 11.25h3.5"/>',
   plus: '<path d="M8 3.25v9.5M3.25 8h9.5"/>',
   search: '<circle cx="7.25" cy="7.25" r="4.5"/><path d="M10.6 10.6l2.9 2.9"/>',
   settings: `<path d="${GEAR}"/><circle cx="8" cy="8" r="2"/>`,

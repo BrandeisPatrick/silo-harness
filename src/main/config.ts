@@ -53,7 +53,7 @@ export function defaultConfig(): AppConfig {
       enabled: {},
       disabledBundled: [],
       settings: {},
-      layout: { railOpen: true, railWidth: 300, collapsed: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null }, theme: null },
+      layout: { railOpen: true, railWidth: 300, collapsed: [], closedTabs: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null }, theme: null },
       safeMode: false,
     },
     remote: { enabled: false, bind: 'lan', port: 0 },

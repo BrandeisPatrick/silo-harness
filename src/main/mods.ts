@@ -95,7 +95,7 @@ function cloneMods(m: ModsConfig): ModsConfig {
     disabledBundled: [...(m.disabledBundled ?? [])],
     approved: { ...(m.approved ?? {}) },
     settings: { ...(m.settings ?? {}) },
-    layout: { ...m.layout, collapsed: [...(m.layout?.collapsed ?? [])], looks: { ...noLooks(), ...(m.layout?.looks ?? {}) } },
+    layout: { ...m.layout, collapsed: [...(m.layout?.collapsed ?? [])], closedTabs: [...(m.layout?.closedTabs ?? [])], looks: { ...noLooks(), ...(m.layout?.looks ?? {}) } },
     safeMode: !!m.safeMode,
   };
 }
@@ -557,6 +557,10 @@ export function checkLayout(patch: unknown, backgroundsDir: string): Partial<Mod
   if ('collapsed' in patch) {
     if (!Array.isArray(patch.collapsed) || patch.collapsed.some((c) => typeof c !== 'string')) throw new Error('collapsed must be a list of "<mod key>/<view id>".');
     out.collapsed = [...new Set(patch.collapsed as string[])].slice(0, 500);
+  }
+  if ('closedTabs' in patch) {
+    if (!Array.isArray(patch.closedTabs) || patch.closedTabs.some((c) => typeof c !== 'string')) throw new Error('closedTabs must be a list of "<mod key>/<view id>".');
+    out.closedTabs = [...new Set(patch.closedTabs as string[])].slice(0, 500);
   }
   if ('background' in patch) {
     if (patch.background !== null && typeof patch.background !== 'string') throw new Error('background must be "<mod key>/<view id>" or null.');

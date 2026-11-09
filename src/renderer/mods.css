@@ -69,6 +69,12 @@
 .mod-pane-tab .pane-tab-label { max-width: 160px; }
 .pane-tab.icon-only { padding: 0 8px; }
 .pane-tab.icon-only .pane-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+/* A mod tab's ×: takes it out of the strip (the ⋯ menu shows it again). Quiet until the tab is hovered or in front;
+   an icon-only tab in the back has none, so the row's fitting stays tight. */
+.pane-tab-close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; margin: 0 -4px 0 -2px; border-radius: 4px; color: var(--text-400); opacity: 0; transition: opacity 0.1s, background-color 0.1s, color 0.1s; }
+.mod-pane-tab:hover .pane-tab-close, .mod-pane-tab.active .pane-tab-close, .mod-pane-tab:focus-visible .pane-tab-close { opacity: 1; }
+.pane-tab-close:hover { background: var(--hover); color: var(--text-100); }
+.mod-pane-tab.icon-only:not(.active) .pane-tab-close { display: none; }
 .mod-tab-panel { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .mod-tab-panel > .mod-frame { flex: 1; min-height: 0; height: 100%; }
 .mod-tab-panel > .mod-frame.mod-frame-next { bottom: 0; height: 100%; }
