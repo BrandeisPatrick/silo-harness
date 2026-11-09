@@ -18,6 +18,7 @@ import { setupChatCards } from './chat-cards';
 import { setupHooks } from './hooks';
 import { setupHistory } from './history';
 import { setupContext } from './context-service';
+import { setupAutoBlocks } from './auto-blocks';
 import { setupImages } from './images';
 import { MOD_SCHEME, MOD_SCHEME_PRIVILEGES, setupMods } from './mods';
 import { setupSchedules } from './schedules';
@@ -278,6 +279,7 @@ app.whenReady().then(() => {
   setupHooks(a);
   setupHistory(a);
   setupContext(a);
+  setupAutoBlocks(a);
   setupImages(a);
   setupMods(a);
   setupSchedules(a);

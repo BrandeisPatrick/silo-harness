@@ -6,6 +6,7 @@ import { siteCardLabels, type Site } from '../browser/policy';
 import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from '../guard';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
+import { alwaysAskReason, protectedWrite } from './auto-rules';
 
 /** What the model is told when the user denies a card */
 export const DENIED = 'Not permitted: the user denied this action. Do not retry it; explain what you would have done and continue or stop.';
@@ -14,12 +15,29 @@ const PLAN_CMD_BLOCKED = 'Not permitted in plan mode: only read-only commands (l
 const PLAN_MCP_BLOCKED = 'Not permitted in plan mode: this MCP tool is not marked read-only. Describe this step in your plan instead.';
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 
-/** What the rules decide: run it, refuse it with this message, or show a card (`custom`: a tool's own question, Allow and Deny only). */
-export type ApprovalDecision = { kind: 'allow' } | { kind: 'refuse'; message: string } | { kind: 'ask'; reason: string | null; programs: string[]; custom: boolean };
+/**
+ * What the rules decide: run it, refuse it with this message, show a card (`custom`: a tool's own question, Allow and
+ * Deny only), or, in Auto mode, let the safety check decide (`reason` and `programs`: what a card would say, should
+ * the check be unavailable).
+ */
+export type ApprovalDecision =
+  | { kind: 'allow' }
+  | { kind: 'refuse'; message: string }
+  | { kind: 'ask'; reason: string | null; programs: string[]; custom: boolean }
+  | { kind: 'classify'; reason: string | null; programs: string[] };
+
+/**
+ * How Auto mode decides what its rules do not settle: `check` the safety check (classifier.ts), `paused` an approval
+ * card (the check blocked too often in this session), `guard` the rule guard alone (no model can run the check):
+ * guard reasons ask, the rest runs, as Auto mode did before it had a check.
+ */
+export type AutoLevel = 'check' | 'paused' | 'guard';
 
 /** What the rules are decided against: the session's mode and folder, the project's saved rules, and what the user allowed this session. */
 export interface ApprovalContext {
   mode: PermissionMode;
+  /** Auto mode only (default 'guard') */
+  auto?: AutoLevel;
   cwd: string;
   /** The "Always allow … in this project" rules saved for `cwd` */
   rules: StoredRules | undefined;
@@ -41,7 +59,7 @@ export interface ApprovalContext {
  * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
  * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything. Otherwise a guard
  * reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
- * program in it is allowed.
+ * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') decides as autoDecision says.
  */
 export function decideApproval(name: string, detail: string, target: string | undefined, opts: ApproveOptions, ctx: ApprovalContext): ApprovalDecision {
   const { mode, cwd, rules } = ctx;
@@ -50,6 +68,9 @@ export function decideApproval(name: string, detail: string, target: string | un
   const allow: ApprovalDecision = { kind: 'allow' };
   const refuse = (message: string): ApprovalDecision => ({ kind: 'refuse', message });
   const ask = (reason: string | null, programs: string[], custom = false): ApprovalDecision => ({ kind: 'ask', reason, programs, custom });
+  const checked = mode === 'auto' && (ctx.auto === 'check' || ctx.auto === 'paused');
+  // What the check would decide: an approval card instead while Auto mode is paused
+  const check = (reason: string | null, programs: string[]): ApprovalDecision => (ctx.auto === 'paused' ? ask(reason, programs) : { kind: 'classify', reason, programs });
   // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
   if (opts.browser) return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
   if (opts.custom) {
@@ -64,6 +85,7 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (ref) {
     if (mode === 'plan') return ref.readOnly ? allow : refuse(PLAN_MCP_BLOCKED);
     if (ref.readOnly || ctx.allowed.mcp(ref.server) || rules?.mcp?.includes(ref.server)) return allow;
+    if (checked) return check(ref.destructive ? 'destructive MCP tool' : null, [ref.server]);
     if (mode === 'auto') return ref.destructive ? ask('destructive MCP tool', [ref.server]) : allow;
     return ask(null, [ref.server]);
   }
@@ -75,10 +97,29 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (!isEdit && !isCmd) return allow;
   const reason = isCmd ? guardCommand(detail, cwd) : target ? guardWrite(target, cwd) : null;
   const programs = isCmd ? programsOf(detail) : [];
-  if (reason && !ctx.allowed.reason(reason) && !rules?.reasons?.includes(reason)) return ask(reason, programs);
+  const reasonAllowed = (r: string) => ctx.allowed.reason(r) || !!rules?.reasons?.includes(r);
+  const programsAllowed = programs.length > 0 && programs.every((p) => ctx.allowed.program(p) || rules?.programs?.includes(p));
+  if (checked) {
+    // Auto mode with its check. Commands: sudo and deleting a critical folder ask whatever the check would say; read-only
+    // commands run; then the user's allow rules (programs, guard reasons); the rest goes to the check.
+    if (isCmd) {
+      const always = alwaysAskReason(detail, cwd);
+      if (always) return reasonAllowed(always) ? allow : ask(always, programs);
+      if (!reason && isReadOnlyCommand(detail)) return allow;
+      if ((reason && reasonAllowed(reason)) || programsAllowed) return allow;
+      return check(reason, programs);
+    }
+    // Edits: inside the working directory they run; a protected path goes to the check even when a rule allows it;
+    // elsewhere a saved "writes outside the working directory" rule runs it.
+    const guarded = target ? protectedWrite(target, cwd) : null;
+    if (!reason && !guarded) return allow;
+    if (!guarded && reason && reasonAllowed(reason)) return allow;
+    return check(guarded ?? reason, []);
+  }
+  if (reason && !reasonAllowed(reason)) return ask(reason, programs);
   if (mode === 'auto') return allow;
   if (isEdit && (mode === 'acceptEdits' || rules?.edits)) return allow;
-  if (isCmd && programs.length && programs.every((p) => ctx.allowed.program(p) || rules?.programs?.includes(p))) return allow;
+  if (isCmd && programsAllowed) return allow;
   return ask(null, programs);
 }
 

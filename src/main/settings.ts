@@ -78,7 +78,7 @@ const SCALARS: Record<string, Check> = {
 };
 
 /** Sections a settings file may set field by field. */
-const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser', Record<string, Check>> = {
+const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode', Record<string, Check>> = {
   ollama: {
     baseURL: describe(str, "The Ollama server's OpenAI-compatible endpoint, e.g. http://localhost:11434/v1."),
     model: describe(str, 'The Ollama model tag, e.g. qwen3:8b.'),
@@ -110,6 +110,11 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser', Record<str
     alwaysAllowed: describe(stringList, 'Sites the agent may use without asking (example.com, *.example.com, localhost:3000).'),
     sensitive: describe(stringList, 'Sites that always ask before the agent acts, beside the built-in list.'),
     exempt: describe(stringList, 'Hosts the agent may use freely, like localhost; a folder makes the files in it exempt.'),
+  },
+  autoMode: {
+    environment: describe(str, "What Auto mode's safety check should know about this Mac, e.g. \"aisolutions-dev is a dev AWS account\". Your own settings.json only."),
+    allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
+    model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
   },
 };
 
@@ -350,7 +355,13 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       }
       value = block;
     }
-    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser') {
+    if (key === 'autoMode' && scope === 'project') {
+      // What the safety check allows and which model judges is the user's alone: a cloned repository could otherwise
+      // allow its own actions, or send the conversation to a model of its choosing.
+      bad(key, "a project's settings.json may not set autoMode; set it in your own settings.json");
+      continue;
+    }
+    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser' || key === 'autoMode') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);
         continue;

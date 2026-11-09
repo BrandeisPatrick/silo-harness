@@ -116,6 +116,9 @@ export function toModTranscript(items: TranscriptItem[]): ModTranscriptItem[] {
         return { role: 'image', text: i.image.caption || i.image.name, name: i.image.id };
       case 'compaction':
         return { role: 'compaction', text: cut(i.compaction.summary) };
+      // A call Auto mode's check blocked reads as the call it was, refused
+      case 'auto_blocked':
+        return { role: 'tool', text: `Blocked by Auto mode: ${i.block.reason}`, name: i.block.name, args: cut(i.block.what, 4000), ok: false };
     }
   });
 }
