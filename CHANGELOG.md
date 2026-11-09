@@ -26,6 +26,11 @@
 - **On the phone.** The remote page words the browser's cards as the Mac does, with the reason and the amber note, and allows a site once or for the session. The permission and download bars stay on the Mac.
 - **For mod and hook authors:** a new tool, `browser_tabs` (list, new, select, close), and an optional `reason` argument on `browser_navigate`, `browser_click`, `browser_type`, `browser_press_key`, `browser_eval` and `browser_tabs`, which hooks see in `tool_input`. Every other browser tool acts on the active tab.
 
+### Settings
+
+- **Delete all sessions.** Settings → History has the row: after a confirmation that says how many sessions there are, every one of them goes the way a deleted session goes, into the trash for as long as Keep deleted sessions for says (and away at once when it is Off). Running sessions are stopped first, and the window opens on a fresh session.
+- **Delete all custom mods.** Settings → Mods has the row, under the list: after a confirmation that names them, every mod of yours (the folders in `~/.silo-harness/mods`) moves to the macOS Trash, where it can be recovered. What was granted or set for them is forgotten, a look of theirs in use goes back to Default, and the rail, the tabs and the list follow at once. Built-in mods and a project’s mods stay.
+
 ### Fixes
 
 - **Passwords no longer reach the agent.** Until now, a password typed into a page in the Browser pane, by you or by the agent, could come back in what the agent read: in the page outline (`browser_read_page`), in `browser_find`, in `browser_eval` results and in `browser_type`'s own "Typed …" line. From there it went into the transcript, the history, hooks, exports and the remote page. Now the value of a password field, a one-time code field or a card field (number, security code, expiry) reads `•••` in everything the browser tools report about a page, also after you click "Show password". Usernames, emails and other fields read as before.

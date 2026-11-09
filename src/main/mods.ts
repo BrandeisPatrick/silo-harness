@@ -88,6 +88,21 @@ export function applyUse(layout: ModLayout, kind: LookKind, ref: string | null):
   } else layout.looks = { ...noLooks(), ...layout.looks, [kind]: ref };
 }
 
+/**
+ * Forgets what the config holds for a mod whose folder is gone: its grant, its approval, its settings, and its looks
+ * in use (the theme, the background, a region's look), which go back to Default.
+ */
+export function forgetMod(c: ModsConfig, key: string): void {
+  delete c.enabled[key];
+  delete c.approved![key];
+  delete c.settings[key];
+  const ofMod = (ref: string | null | undefined): boolean => !!ref && splitRef(ref)?.key === key;
+  const l = c.layout;
+  if (l.theme === key) l.theme = null;
+  if (ofMod(l.background)) l.background = null;
+  for (const t of MOD_LOOK_TARGETS) if (ofMod(l.looks?.[t])) applyUse(l, t, null);
+}
+
 /** A copy of the mods section to change (never the live one). */
 function cloneMods(m: ModsConfig): ModsConfig {
   return {
@@ -354,6 +369,37 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
       });
       registry.scan();
       return registry.list();
+    }),
+    h('mods.removeAll', async () => {
+      // Every folder in the user root goes, listed or not (a folder of yours without a usable mod.json is yours too);
+      // dotfolders (an install's staging folder) are skipped as the scanner skips them. Never the bundled or a
+      // project's folders. The user mod key is the folder name.
+      const root = userRoot();
+      let names: string[] = [];
+      try {
+        names = fs.readdirSync(root);
+      } catch {
+        names = [];
+      }
+      const removed: string[] = [];
+      for (const name of names.sort()) {
+        if (name.startsWith('.')) continue;
+        const dir = path.join(root, name);
+        try {
+          if (!fs.statSync(dir).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        await host.trash(dir);
+        removed.push(name);
+      }
+      if (removed.length) {
+        change((c) => {
+          for (const key of removed) forgetMod(c, key);
+        });
+      }
+      registry.scan();
+      return { removed, mods: registry.list() };
     }),
     h('mods.reveal', (key) => host.reveal(must(key).dir)),
     h('mods.chooseBackgroundImage', async () => {

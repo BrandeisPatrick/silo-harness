@@ -28,7 +28,7 @@ export interface CoreRpc {
 export interface CoreEvents {
   'config:changed': AppConfig;
   'sessions:changed': SessionMeta[];
-  /** Bring this session on screen (a notification was clicked) */
+  /** Bring this session on screen (a notification was clicked; every session was deleted and this is the fresh one) */
   'sessions:show': string;
 }
 

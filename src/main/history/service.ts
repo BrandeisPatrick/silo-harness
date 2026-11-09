@@ -6,7 +6,7 @@
 import { app as electronApp, dialog, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent } from '../../shared/types';
+import type { AgentEvent, SessionMeta } from '../../shared/types';
 import type { HistoryRecord, HistoryStats, SearchHit, TrashEntry } from '../../shared/history';
 import type { App, Disposer } from '../app';
 import type { HistoryService } from '../services';
@@ -45,6 +45,8 @@ export interface History extends HistoryService {
   trashList(): TrashEntry[];
   restore(id: string): Session;
   purge(id?: string): TrashEntry[];
+  /** Deletes every session the way one is deleted (runs stopped first) and brings a fresh empty one on screen */
+  deleteAll(): Promise<{ deleted: number; session: SessionMeta }>;
   /** Removes trash entries older than historyTrashDays; returns their ids */
   sweep(): string[];
   stats(): HistoryStats;
@@ -407,6 +409,39 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
     return gone;
   }
 
+  // ---------- Deleting every session ----------
+
+  /** How long a stopped run is given to end before its session is deleted anyway */
+  const STOP_WAIT_MS = 5000;
+
+  /**
+   * Every session goes the way one deleted session goes (Settings → History → Delete all sessions): the runtime
+   * forgets its agent, the store deletes it (which puts it in the trash, or removes it at once with historyTrashDays
+   * 0, through onDelete above) and its artifacts folder goes. Running sessions are stopped first and given a moment
+   * to end, since a run's last act is to save its session. Then a fresh empty session is made, brought on screen in
+   * the window (sessions:show) and returned. Sessions without messages are deleted too; `deleted` counts the others.
+   */
+  async function deleteAll(): Promise<{ deleted: number; session: SessionMeta }> {
+    const runtime = app.runtime;
+    for (const id of runtime.running()) runtime.stop(id);
+    const until = Date.now() + STOP_WAIT_MS;
+    while (runtime.running().length && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+    const host = app as App & { artifacts?: { remove(id: string): void } };
+    let deleted = 0;
+    let forgotten = false;
+    for (const s of store.all()) {
+      if (s.messages.length) deleted++;
+      runtime.forget(s.id);
+      store.delete(s.id);
+      host.artifacts?.remove(s.id);
+      if (recoveredIds.delete(s.id)) forgotten = true;
+    }
+    if (forgotten) saveRecovered();
+    const fresh = runtime.create({ foreground: true, cwd: app.config().workingDirectory, origin: 'user' });
+    app.push('sessions:show', fresh.id);
+    return { deleted, session: fresh };
+  }
+
   // ---------- Search ----------
 
   function search(query: string, o: { limit?: number; includeTrash?: boolean } = {}): SearchHit[] {
@@ -503,6 +538,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
       else index.drop(`trash:${id}`);
       return trash.list(trashDays());
     },
+    deleteAll,
     sweep,
     stats,
     dispose: () => {
@@ -518,6 +554,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
     app.rpc.handle('history.trash', () => service.trashList()),
     app.rpc.handle('history.restore', (id) => app.runtime.meta(restore(String(id)).id)),
     app.rpc.handle('history.purge', (id) => service.purge(id === undefined || id === null ? undefined : String(id))),
+    app.rpc.handle('history.deleteAll', () => deleteAll()),
     app.rpc.handle('history.stats', () => stats()),
     app.rpc.handle('history.reveal', (id) => {
       const file = id ? log.file(String(id)) : '';

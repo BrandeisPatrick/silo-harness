@@ -84,6 +84,12 @@ export interface HistoryRpc {
   'history.restore': (id: string) => SessionMeta;
   /** Removes one trashed session for good, or all of them */
   'history.purge': (id?: string) => TrashEntry[];
+  /**
+   * Deletes every session the way one is deleted: running sessions are stopped first, each goes to the trash (or
+   * away at once when historyTrashDays is 0), and a fresh empty session is made and brought on screen
+   * (sessions:show). `deleted` counts the sessions that had messages.
+   */
+  'history.deleteAll': () => { deleted: number; session: SessionMeta };
   'history.stats': () => HistoryStats;
   /** Shows the history folder (or one session's log) in Finder */
   'history.reveal': (sessionId?: string) => void;

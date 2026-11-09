@@ -514,6 +514,8 @@ export class SessionStore {
 
   /** Writes the session to disk. `touch` bumps updatedAt (the sidebar's sort key); renames pass false. */
   save(s: Session, touch = true): void {
+    // A session deleted while something still held its object (a run that was stopped and is ending) stays deleted.
+    if (!this.sessions.has(s.id)) return;
     if (touch) s.updatedAt = Date.now();
     if (!s.titleLocked && s.title === NEW_TITLE) {
       const first = (s.compactions?.[0]?.folded ?? s.messages).find((m) => m.role === 'user' && !isCompactPreamble(m));

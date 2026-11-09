@@ -182,7 +182,7 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 `app.push(channel, payload)` → one `'rpc:push'` channel → `oc.onPush(channel, cb)`. Features extend
 `RpcMethods = CoreRpc & …` and `RpcEvents = CoreEvents & …` in rpc.ts. Core methods: `commands.list`,
 `commands.run(name, args)`, `sessions.live(id)`, `sessions.transcript(id)`. Core pushes: `config:changed`,
-`sessions:changed` (the list with statuses), `sessions:show` (a notification was clicked).
+`sessions:changed` (the list with statuses), `sessions:show` (a notification was clicked, or every session was deleted and this is the fresh one).
 
 `sessions:switch` takes the transcript and the LiveState at the same instant (after flushing that session's
 pending deltas); the next `sessions.live(id)` returns that snapshot, and every later event reaches the window
