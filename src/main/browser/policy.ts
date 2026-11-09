@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { domainToUnicode } from 'node:url';
 import type { PermissionMode } from '../../shared/types';
-import type { CredentialKind } from '../browser-safety';
+import type { CredentialKind } from './safety';
 
 // ---------- The lists ----------
 
