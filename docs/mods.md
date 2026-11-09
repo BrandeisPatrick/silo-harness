@@ -110,8 +110,8 @@ A view is one HTML page in one seat.
 
 | Seat | Where | Notes |
 | --- | --- | --- |
-| `rail` | a section in the right-hand rail, between the chat and the side pane | sized to its content up to `maxHeight` (default 360); `order` sorts sections, lower first (bundled ones use 10 to 90); the user can collapse a section |
-| `tab` | a tab in the side pane, next to Browser, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections) |
+| `rail` | a section in the right-hand rail, between the chat and the side pane | sized to its content up to `maxHeight` (default 360); `order` sorts sections, lower first (bundled ones use 10 to 90); the user can collapse a section, and opens and closes the rail with the top bar's first icon (⌘⇧E) |
+| `tab` | a tab in the side pane, next to Browser, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections); the user can close the tab with its × (or Delete), which unloads the page until the ⋯ menu shows it again ("Show …"), or a command or `harness.ui.open` brings it back |
 | `composer` | a strip directly above the composer | one row, sized to its content up to 120 px |
 | `worker` | nowhere: a hidden page, loaded whenever the mod is on | for a mod that handles hooks (or listens to events) without a panel; it is never visible, takes no input and does not report a size. *Added in 0.8.0.* |
 | `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); a look: one background is in use, chosen in Settings → Mods → Background (with your own picture and Dim); the app's surfaces turn translucent over it |

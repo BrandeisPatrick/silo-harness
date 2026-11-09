@@ -26,6 +26,11 @@
 - **For mod authors:** a look and a background view may name a `preview` picture for their card. `mod_check` says whether a look is in use and approved. A mod with panels or commands as well as looks keeps its switch for those only.
 - **Settings → Appearance** keeps Light, Dark and System (now called Colour scheme) and its rows that open each look tab.
 
+### Panels from the top bar
+
+- **The rail's toggle** is always the first icon of the top bar, before Terminal, Diff and Browser, drawn as a list in a box like the others. It and ⌘⇧E open and close the rail, and the app remembers the choice.
+- **Mod tabs in the side pane close** with the × on the tab (or Delete when the tab has the focus), and leave the strip. The ⋯ menu shows them again ("Show Side chat"), opening the pane if it was closed. A closed tab stays closed after a restart.
+
 ## 0.8.0
 
 Closer to Claude Code: hooks in Claude Code's own format, from settings.json and from mods; the permission prompt and a new question card drawn as Claude Code draws them; one quiet line per tool call; and the rail, the footer and the status line laid out like Claude Code's.
