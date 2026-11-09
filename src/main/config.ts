@@ -7,6 +7,7 @@ import type { BrowserConfig } from '../shared/browser';
 import { DEFAULT_DREAMING } from './dreaming/names';
 import { applySettings, withoutSettings } from './settings';
 import { isRecord } from './json';
+import { defaultWorkDir } from './paths';
 
 /** Bumped when stored values change meaning: v2 renamed the old "auto" (run everything) to "bypass" and "readonly" to "plan". */
 const SCHEMA_VERSION = 2;
@@ -31,7 +32,7 @@ export function defaultConfig(): AppConfig {
       configId: '',
       contextWindow: 128000,
     },
-    workingDirectory: os.homedir(),
+    workingDirectory: defaultWorkDir(),
     permissionMode: 'ask',
     autoApprove: false,
     maxTurns: 40,
@@ -170,7 +171,29 @@ export function readStoredConfig(file: string): AppConfig {
  * so neither the Settings panel nor a recompute can bake an override into config.json.
  */
 export function loadConfig(): AppConfig {
-  return normalizeConfig(applySettings(storedConfig()));
+  return withWorkDir(normalizeConfig(applySettings(storedConfig())));
+}
+
+/**
+ * The Silo folder (~/Documents/Silo) is made if it is missing, and a session never starts in the bare home folder:
+ * the old default, a folder that is gone, or none becomes the Silo folder. A folder the user chose stays.
+ */
+export function withWorkDir(cfg: AppConfig): AppConfig {
+  const silo = defaultWorkDir();
+  try {
+    fs.mkdirSync(silo, { recursive: true });
+  } catch (err) {
+    console.warn('[config] could not make the Silo folder:', err instanceof Error ? err.message : String(err));
+    return cfg;
+  }
+  const dir = cfg.workingDirectory;
+  let usable = false;
+  try {
+    usable = Boolean(dir) && path.resolve(dir) !== os.homedir() && fs.statSync(dir).isDirectory();
+  } catch {
+    usable = false;
+  }
+  return usable ? cfg : { ...cfg, workingDirectory: silo };
 }
 
 /** "HH:MM" (24-hour) for a time of day: "3:00" and "03:00" are fine, anything else is not. */
