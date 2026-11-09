@@ -28,7 +28,6 @@ import type {
   SendResult,
   SessionMeta,
   SessionStatus,
-  SkillInfo,
   TaskItem,
   TerminalApi,
   TerminalTabInfo,
@@ -44,7 +43,7 @@ import { closeMenu, initTooltips, isMenuOpen, menuAnchoredTo, openMenu, type Men
 import { createQuestionCard } from './questions.js';
 import { MODE_CHIP_CLASSES, MODE_CYCLE, MODES, modeOf, nextMode } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
-import { createChangesPane, mockChangesSource, type ConfirmOptions } from './changes.js';
+import { createChangesPane, mockChangesSource } from './changes.js';
 import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { attachmentLabel, createAttachmentTray, dataUrlToBlob, imageType, type AddResult, type ImageInput } from './attachments.js';
 import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './artifacts.js';
@@ -87,6 +86,8 @@ import { activityWords } from './tool-activity.js';
 import { tilde } from './home.js';
 import { activeProvider, allProviders, usesOllama } from './provider-view.js';
 import { createShortcutsSheet } from './shortcuts.js';
+import { createSlashMenu } from './slash-menu.js';
+import { createConfirmDialog } from './confirm.js';
 
 declare global {
   interface Window {
@@ -3381,90 +3382,14 @@ onPush('sessions:show', (id) => {
 
 // ---------- Slash menu (skills) ----------
 
-const BUILTINS: SkillInfo[] = [
-  { name: 'skills', description: 'List available skills', path: '', source: 'bundled' },
-  { name: 'compact', description: 'Summarise the conversation to free context', path: '', source: 'bundled' },
-  { name: 'mcp', description: 'Show MCP servers and their tools', path: '', source: 'bundled' },
-];
-let slashItems: SkillInfo[] = [];
-let slashIndex = 0;
-
-function hideSlashMenu(): void {
-  slashMenu.hidden = true;
-  slashMenu.innerHTML = '';
-  slashItems = [];
-}
-
-async function updateSlashMenu(): Promise<void> {
-  const value = inputEl.value;
-  const m = /^\/([\w-]*)$/.exec(value);
-  if (!m) return hideSlashMenu();
-  const prefix = m[1].toLowerCase();
-  const [allSkills, registered] = await Promise.all([oc.skills.list(), registeredCommands()]);
-  const skills = allSkills.filter((sk) => sk.name.toLowerCase().startsWith(prefix));
-  if (inputEl.value !== value) return;
-  // The window's own commands first, then the app's registered ones (app.commands), tagged with where they come from.
-  const extra: SkillInfo[] = registered
-    .filter((c) => c.name.toLowerCase().startsWith(prefix) && !BUILTINS.some((b) => b.name === c.name))
-    .map((c) => ({ name: c.name, description: c.argsHint ? `${c.argsHint} · ${c.description}` : c.description, path: '', source: c.source === 'mod' ? 'user' : 'bundled', tag: c.source === 'mod' ? 'mod' : 'command' }) as SkillInfo & { tag: string });
-  const commands = [...BUILTINS.filter((sk) => sk.name.startsWith(prefix)), ...extra];
-  slashItems = [...skills, ...commands];
-  if (!slashItems.length) return hideSlashMenu();
-  slashIndex = 0;
-  slashMenu.innerHTML = '';
-  const scroll = document.createElement('div');
-  scroll.className = 'slash-scroll';
-  const section = (label: string, list: SkillInfo[], offset: number, builtin: boolean) => {
-    if (!list.length) return;
-    scroll.insertAdjacentHTML('beforeend', `<div class="slash-label">${label}</div>`);
-    list.forEach((sk, k) => {
-      const i = offset + k;
-      const row = document.createElement('div');
-      row.className = 'slash-item' + (i === slashIndex ? ' active' : '');
-      row.setAttribute('role', 'option');
-      const tag = (sk as SkillInfo & { tag?: string }).tag;
-      row.innerHTML = `<span class="name">/${escapeHtml(sk.name)}</span><span class="desc">${escapeHtml(sk.description)}</span><span class="src">${tag ? escapeHtml(tag) : builtin ? 'command' : escapeHtml(sk.source)}</span>`;
-      row.onmousedown = (e) => {
-        e.preventDefault();
-        slashIndex = i;
-        acceptSlashSelection();
-      };
-      row.onmousemove = () => {
-        if (slashIndex !== i) {
-          slashIndex = i;
-          highlightSlash();
-        }
-      };
-      scroll.appendChild(row);
-    });
-  };
-  section('Skills', skills, 0, false);
-  section('Commands', commands, skills.length, true);
-  slashMenu.appendChild(scroll);
-  slashMenu.insertAdjacentHTML('beforeend', '<div class="slash-foot"><span><kbd>↵</kbd><kbd>tab</kbd> insert</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>esc</kbd> close</span></div>');
-  mentionPicker.close();
-  slashMenu.hidden = false;
-}
-
-function highlightSlash(): void {
-  slashMenu.querySelectorAll('.slash-item').forEach((el, i) => el.classList.toggle('active', i === slashIndex));
-  slashMenu.querySelectorAll('.slash-item')[slashIndex]?.scrollIntoView({ block: 'nearest' });
-}
-
-function moveSlashSelection(delta: number): void {
-  if (!slashItems.length) return;
-  slashIndex = (slashIndex + delta + slashItems.length) % slashItems.length;
-  highlightSlash();
-}
-
-function acceptSlashSelection(): void {
-  const sk = slashItems[slashIndex];
-  if (!sk) return;
-  inputEl.value = `/${sk.name} `;
-  hideSlashMenu();
-  autosize();
-  inputEl.focus();
-}
+const { hideSlashMenu, updateSlashMenu, moveSlashSelection, acceptSlashSelection } = createSlashMenu({
+  menu: slashMenu,
+  input: inputEl,
+  listSkills: () => oc.skills.list(),
+  registeredCommands,
+  closeMentions: () => mentionPicker.close(),
+  autosize,
+});
 
 // ---------- Side pane: Browser, Diff and Terminal tabs, then the mods' tabs ----------
 
@@ -3651,62 +3576,8 @@ function setChangeCount(n: number): void {
   paneTabDiff.setAttribute('aria-label', count ? `Diff, ${files}` : 'Diff');
 }
 
-/**
- * A small in-app confirmation (the native browser view is hidden while it is open). Danger: the warning badge, a red
- * button and the focus on Cancel; otherwise the accent badge with `icon` and the focus on the button.
- */
-function confirmAction(opts: ConfirmOptions): Promise<boolean> {
-  if (confirmDialog.open) return Promise.resolve(false);
-  closeMenu();
-  $('confirm-title').textContent = opts.title;
-  const badge = confirmDialog.querySelector<HTMLElement>('.confirm-icon');
-  if (badge) {
-    badge.innerHTML = icon(opts.danger ? 'triangle-alert' : (opts.icon ?? 'info'));
-    badge.classList.toggle('tone-accent', !opts.danger);
-  }
-  const quote = opts.quote && opts.quote.text ? opts.quote : null;
-  const quoteEl = $('confirm-quote');
-  const quoteLabel = $('confirm-quote-label');
-  const quoteText = $('confirm-quote-text');
-  quoteEl.hidden = !quote;
-  quoteEl.classList.toggle('mono', Boolean(quote?.mono));
-  quoteLabel.innerHTML = quote?.label ? `${icon('file-text', 14)}<span>${escapeHtml(quote.label)}</span>` : '';
-  quoteLabel.hidden = !quote?.label;
-  quoteText.textContent = quote?.text ?? '';
-  quoteText.scrollTop = 0;
-  const desc = $('confirm-desc');
-  desc.textContent = opts.description ?? '';
-  desc.hidden = !opts.description;
-  const ok = $<HTMLButtonElement>('confirm-ok');
-  const cancel = $<HTMLButtonElement>('confirm-cancel');
-  ok.textContent = opts.confirmLabel;
-  ok.className = `btn ${opts.danger ? 'danger' : 'primary'}`;
-  oc.browser.setVisible(false);
-  confirmDialog.showModal();
-  (opts.danger ? cancel : ok).focus();
-  return new Promise((resolve) => {
-    const finish = (value: boolean) => {
-      ok.onclick = null;
-      cancel.onclick = null;
-      confirmDialog.removeEventListener('close', onClose);
-      if (confirmDialog.open) confirmDialog.close();
-      resolve(value);
-    };
-    // Only a close of this confirmation counts. A dialog's 'close' event arrives with the next painted frame, so the
-    // one from the confirmation before this can still be on its way (always in a hidden or covered window, and when
-    // one confirmation follows another at once): it finds the dialog open again and must not cancel it.
-    const onClose = () => {
-      if (!confirmDialog.open) finish(false);
-    };
-    ok.onclick = () => finish(true);
-    cancel.onclick = () => finish(false);
-    confirmDialog.addEventListener('close', onClose);
-  });
-}
-confirmDialog.addEventListener('close', syncBrowserView);
-confirmDialog.addEventListener('click', (e) => {
-  if (e.target === confirmDialog) confirmDialog.close();
-});
+
+const { confirmAction } = createConfirmDialog({ dialog: confirmDialog, hideBrowser: () => oc.browser.setVisible(false), afterClose: () => syncBrowserView() });
 
 const changesPane = createChangesPane({
   root: diffPane,
