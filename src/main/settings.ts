@@ -23,6 +23,7 @@ import path from 'node:path';
 import type { AppConfig } from '../shared/types';
 import type { SettingsFileInfo, SettingsInfo } from '../shared/settings-info';
 import { ENV_NAME, expandEnvRefs } from './env';
+import { isRecord } from './json';
 import { between, bool, describe, kind, nonNegative, oneOf, positiveInt, str, timeOfDay, type Check } from './checks';
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
 import { configDir, projectConfigDir } from './paths';
@@ -166,7 +167,6 @@ export function settingsSchema(): Record<string, unknown> {
   };
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const rec = (o: object): Record<string, unknown> => o as unknown as Record<string, unknown>;
 const expandHome = (p: string): string => p.replace(/^~(?=$|\/)/, os.homedir());
 const isDir = (p: string): boolean => {

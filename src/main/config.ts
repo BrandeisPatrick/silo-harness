@@ -5,6 +5,7 @@ import type { AppConfig, PermissionMode } from '../shared/types';
 import type { DreamingConfig } from '../shared/dreaming';
 import { DEFAULT_DREAMING } from './dreaming/names';
 import { applySettings, withoutSettings } from './settings';
+import { isRecord } from './json';
 
 /** Bumped when stored values change meaning: v2 renamed the old "auto" (run everything) to "bypass" and "readonly" to "plan". */
 const SCHEMA_VERSION = 2;
@@ -82,10 +83,6 @@ export function withRecentDir(list: string[] | undefined, dir: string, previous?
     }
   }
   return out.slice(0, MAX_RECENT);
-}
-
-function isRecord(v: unknown): v is Record<string, any> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 /** The mods section of a stored config over the defaults: an older file has none of it, a hand-edited one part of it. */
