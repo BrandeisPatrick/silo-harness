@@ -27,7 +27,7 @@ import type {
   TranscriptItem,
 } from '../shared/types';
 import { brandMark, hydrateIcons, icon, type IconName } from './icons.js';
-import { byId, escapeHtml, formatCount, isTextField, writeClipboard } from './dom.js';
+import { byId, escapeHtml, isTextField, writeClipboard } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { setDiffBaseDir } from './diff.js';
 import { asArgs, resetFileCache, setToolCwd, statusVerb } from './tools.js';
@@ -37,7 +37,7 @@ import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
 import { attachmentLabel, createAttachmentTray, dataUrlToBlob, imageType, type AddResult, type ImageInput } from './attachments.js';
 import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './artifacts.js';
 import { createQueueList } from './queue.js';
-import { createContextMeter, normalizeContext } from './context.js';
+import { normalizeContext } from './context.js';
 import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
 import { createMentionPicker, normalizeMention } from './mentions.js';
 import { createRulesPanel, mockRulesSource } from './rules.js';
@@ -69,6 +69,7 @@ import { createToolGroups } from './tool-groups.js';
 import { createApprovals } from './approvals.js';
 import { createTranscript } from './transcript.js';
 import { createSessionsView } from './sessions-view.js';
+import { createStatusLine } from './status-line.js';
 
 declare global {
   interface Window {
@@ -142,10 +143,6 @@ const emptyState = $('empty-state');
 const inputEl = $<HTMLTextAreaElement>('input');
 const sendBtn = $<HTMLButtonElement>('send-btn');
 const stopBtn = $<HTMLButtonElement>('stop-btn');
-const statusLine = $('status-line');
-const statusText = $('status-text');
-const statusTime = $('status-time');
-const statusTokens = $('status-tokens');
 const modeBtn = $<HTMLButtonElement>('mode-btn');
 const modelBtn = $<HTMLButtonElement>('model-btn');
 const cwdBtn = $<HTMLButtonElement>('cwd-btn');
@@ -156,7 +153,6 @@ const settingsDialog = $<HTMLDialogElement>('settings');
 const shortcutsDialog = $<HTMLDialogElement>('shortcuts');
 const browsingPill = $('browsing-pill');
 const confirmDialog = $<HTMLDialogElement>('confirm-dialog');
-const statusHint = $('status-hint');
 const browserView = $('browser-view');
 const attachBtn = $<HTMLButtonElement>('attach-btn');
 const attachInput = $<HTMLInputElement>('attach-input');
@@ -166,17 +162,12 @@ const taskListEl = $('task-list');
 const lightbox = $<HTMLDialogElement>('lightbox');
 const lightboxImg = $<HTMLImageElement>('lightbox-img');
 const lightboxCaption = $('lightbox-caption');
-const contextMeterBtn = $<HTMLButtonElement>('context-meter');
 const setupEl = $('setup-strip');
 const statusFlash = $('status-flash');
 
 $('empty-mark').innerHTML = brandMark(40);
 
 let config: AppConfig;
-let running = false;
-let runStartedAt = 0;
-let timer: number | undefined;
-let runOutputTokens = 0;
 /** From a confirmed Rewind until the transcript is back: sending and other rewinds wait */
 let rewinding = false;
 /** Bumped by every tasks_updated event (and the debug hook), so a session read that started earlier cannot overwrite the list */
@@ -190,7 +181,7 @@ const tray = createAttachmentTray({
   root: $('attachments'),
   onChange: () => {
     updateSendButton();
-    if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+    statusLine.syncPlanHint();
     void refreshVisionNote();
   },
   onPreview: (a) => openLightbox(a.dataUrl, a.name, attachmentLabel(a)),
@@ -307,7 +298,7 @@ const transcript = createTranscript({
 const { scrollToBottom, showJump, addNode, bubbleImage, setTurn, turnOf, addUserMessage, addSystemMessage, addNoticeCard, addCompaction, assistantText, appendAssistantText, endAssistant, appendThinking, finishThinking } = transcript;
 
 // Tool rows, and the runs of them that fold into one line (tool-groups.ts)
-const toolGroups = createToolGroups({ messages: messagesEl, config: () => config, running: () => running, addNode, endAssistant, finishThinking, scrollToBottom });
+const toolGroups = createToolGroups({ messages: messagesEl, config: () => config, running: () => running(), addNode, endAssistant, finishThinking, scrollToBottom });
 const { summaryMode, foldable, settleRun, refoldAll, endLiveRun, addToolCard, finishToolCard } = toolGroups;
 
 // Approval and question cards (approvals.ts)
@@ -317,7 +308,7 @@ const approvals = createApprovals({
   setConfig: (next) => {
     config = next;
   },
-  running: () => running,
+  running: () => running(),
   currentMode,
   lastCard: toolGroups.lastCard,
   addNode,
@@ -325,8 +316,9 @@ const approvals = createApprovals({
   finishThinking,
   scrollToBottom,
   settleRun,
-  setStatusText,
-  baseVerb,
+  // The status line is set up further down; a card reaches it only once it is answered
+  setStatusText: (text) => setStatusText(text),
+  baseVerb: () => baseVerb(),
   applyConfigToUi,
   announceMode,
   // Set up under the Permissions heading below, long before a card is answered
@@ -351,7 +343,7 @@ function setBasePlaceholder(text: string): void {
 }
 
 function syncPlaceholder(): void {
-  inputEl.placeholder = running ? RUNNING_PLACEHOLDER : basePlaceholder;
+  inputEl.placeholder = running() ? RUNNING_PLACEHOLDER : basePlaceholder;
 }
 const planCards = new Map<string, PlanCard>();
 let activePlan: PlanCard | null = null;
@@ -388,7 +380,7 @@ async function respondPlan(card: PlanCard, decision: PlanDecision, btn: HTMLElem
       return false;
     }
   }
-  if (card === activePlan && (statusState === 'plan-ready' || statusState === 'plan-wait')) setStatus('off');
+  if (card === activePlan && (statusState() === 'plan-ready' || statusState() === 'plan-wait')) setStatus('off');
   if (decision === 'keep') {
     setBasePlaceholder(KEEP_PLACEHOLDER);
     if (!dialogOpen()) inputEl.focus();
@@ -466,7 +458,7 @@ document.addEventListener(
   'keydown',
   (e) => {
     if (e.key !== 'Enter' && e.key !== 'Escape') return;
-    if (!activePlan?.pending() || running || approvals.pending()) return;
+    if (!activePlan?.pending() || running() || approvals.pending()) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return;
     if (dialogOpen() || isMenuOpen() || !slashMenu.hidden || titleEditing()) return;
     const t = e.target as HTMLElement;
@@ -496,7 +488,7 @@ function clearMessages(): void {
   // ⌘↑ walks the messages on screen: a walk through the previous session's is over
   composerHistory.reset();
   setBasePlaceholder(DEFAULT_PLACEHOLDER);
-  if (statusState !== 'run') setStatus('off');
+  if (statusState() !== 'run') setStatus('off');
   clearBrowsing();
   resetFileCache();
 }
@@ -605,7 +597,7 @@ function applyTurns(items: TranscriptItem[]): void {
 async function syncTurns(): Promise<void> {
   const my = ++turnSync;
   const id = currentSessionId();
-  if (!id || running) return;
+  if (!id || running()) return;
   let items: TranscriptItem[];
   try {
     // Read without bringing it on screen: the user may switch away while this is in flight.
@@ -613,7 +605,7 @@ async function syncTurns(): Promise<void> {
   } catch {
     return; // a new run started meanwhile; its end syncs again
   }
-  if (my !== turnSync || id !== currentSessionId() || running || rewinding || !Array.isArray(items)) return;
+  if (my !== turnSync || id !== currentSessionId() || running() || rewinding || !Array.isArray(items)) return;
   applyTurns(items);
 }
 
@@ -625,8 +617,8 @@ function clearTurns(): void {
 
 /** Rewind waits for an idle agent: its buttons are hidden during a run, a compaction or another rewind. */
 function syncBusyUi(): void {
-  shell.classList.toggle('rewind-off', running || compacting !== null || rewinding);
-  taskList.setRunning(running);
+  shell.classList.toggle('rewind-off', running() || compacting() !== null || rewinding);
+  taskList.setRunning(running());
 }
 
 function setRewinding(v: boolean): void {
@@ -689,8 +681,8 @@ async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
   const turn = turnOf(msg);
   if (turn === null || rewinding) return;
   const busy = () => {
-    if (!running && !compacting) return false;
-    showInlineError(button.isConnected && button.offsetParent ? button : sendBtn, running ? 'Rewinding has to wait for the run to finish (or stop it with Esc).' : 'Rewinding has to wait for the compaction to finish.');
+    if (!running() && !compacting()) return false;
+    showInlineError(button.isConnected && button.offsetParent ? button : sendBtn, running() ? 'Rewinding has to wait for the run to finish (or stop it with Esc).' : 'Rewinding has to wait for the compaction to finish.');
     return true;
   };
   if (busy()) return;
@@ -726,7 +718,32 @@ async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
   void refreshContext();
 }
 
-// ---------- Run state ----------
+// ---------- Run state: the status line, compaction status and the context meter (status-line.ts) ----------
+
+const statusLine = createStatusLine({
+  boundary: transcriptWrap,
+  api: oc,
+  config: () => config,
+  currentMode,
+  composerHasContent,
+  planPending: () => Boolean(activePlan?.pending()),
+  planIsLast: () => Boolean(activePlan && isLastCard(activePlan.el)),
+  startingOllama: () => connection.startingOllama(),
+  updateSendButton: () => updateSendButton(),
+  syncPlaceholder,
+  syncBusyUi,
+  setRunningStatus: (v) => sessionsView.setRunningStatus(v),
+  updateLastGroup: () => toolGroups.updateLastGroup(),
+  refreshSessions: () => refreshSessions(),
+  openSettings: (section) => openSettings(section),
+  systemMessage: addSystemMessage,
+  cleanError,
+});
+const { setStatus, setStatusText, baseVerb, showPlanReady, syncPlanStatus, syncSpin, setRunning, startCompaction, endCompaction, compactNow, contextMeter, refreshContext } = statusLine;
+/** Whether a run is going on, the compaction in progress and the status line's state: read through these */
+const running = statusLine.running;
+const compacting = statusLine.compacting;
+const statusState = statusLine.state;
 
 /**
  * The chat bar's action: the return glyph, muted with nothing to send and in the text colour once there is; while a
@@ -736,7 +753,7 @@ type SendFace = 'send' | 'queue' | 'stop';
 let sendFace: SendFace | null = null;
 function updateSendButton(): void {
   const content = composerHasContent();
-  const face: SendFace = running ? (content ? 'queue' : 'stop') : 'send';
+  const face: SendFace = running() ? (content ? 'queue' : 'stop') : 'send';
   sendBtn.disabled = face === 'send' && !content;
   sendBtn.classList.toggle('ready', content);
   if (sendFace === face) return;
@@ -749,193 +766,6 @@ function updateSendButton(): void {
   sendBtn.dataset.tipKbd = face === 'stop' ? 'esc' : '↵';
 }
 
-function elapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
-}
-
-// The status line: the run (spinner, verb, elapsed, tokens, esc) or, after a plan, a quiet line with the keys.
-type StatusState = 'off' | 'run' | 'plan-ready' | 'plan-wait';
-let statusState: StatusState = 'off';
-let statusTimer: number | undefined;
-
-function setStatus(state: StatusState, text?: string): void {
-  statusState = state;
-  window.clearTimeout(statusTimer);
-  statusLine.hidden = state === 'off';
-  statusLine.classList.toggle('idle', state !== 'run');
-  statusHint.hidden = state !== 'plan-wait' || composerHasContent();
-  if (text !== undefined) statusText.textContent = text;
-}
-
-function setStatusText(text: string): void {
-  if (statusState === 'run' && statusText.textContent !== text) statusText.textContent = text;
-}
-
-/** "Working…", or "Planning…" in plan mode */
-function baseVerb(): string {
-  return currentMode() === 'plan' ? 'Planning…' : 'Working…';
-}
-
-function showPlanReady(): void {
-  setStatus('plan-ready', 'Plan ready for review');
-  statusTimer = window.setTimeout(() => {
-    if (statusState !== 'plan-ready') return;
-    if (activePlan?.pending() && isLastCard(activePlan.el)) setStatus('plan-wait', 'Waiting for plan approval');
-    else setStatus('off');
-  }, 2500);
-}
-
-/** Ends the plan status line once the plan was decided elsewhere. */
-function syncPlanStatus(): void {
-  if ((statusState === 'plan-ready' || statusState === 'plan-wait') && !activePlan?.pending()) setStatus('off');
-}
-
-/**
- * Spinners rotate through one 8-per-second timer and a CSS variable instead of CSS animations: Chromium ticks a
- * running animation on every frame whether or not it changes, which costs a few percent of CPU for the whole run.
- */
-let spinTimer: number | undefined;
-let spinStep = 0;
-function syncSpin(): void {
-  const want = (running || compacting !== null || connection.startingOllama()) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (want && spinTimer === undefined) {
-    spinTimer = window.setInterval(() => {
-      spinStep = (spinStep + 1) % 12;
-      // Set on each spinner, never on the document: a root-level change recalculates styles for the whole transcript.
-      const deg = `${spinStep * 30}deg`;
-      document.querySelectorAll<HTMLElement>('.spinner, .tool-status.spin, .group-icon.spin').forEach((el) => el.style.setProperty('--spin', deg));
-    }, 125);
-  } else if (!want && spinTimer !== undefined) {
-    window.clearInterval(spinTimer);
-    spinTimer = undefined;
-  }
-}
-
-/** The session on screen started or stopped running; `startedAt` is when a run this window joined late began. */
-function setRunning(v: boolean, startedAt = Date.now()): void {
-  running = v;
-  updateSendButton();
-  syncPlaceholder();
-  syncBusyUi();
-  syncSpin();
-  sessionsView.setRunningStatus(v);
-  // The last run of calls is live while a run goes on (a session brought on screen mid-run, too)
-  toolGroups.updateLastGroup();
-  if (v) {
-    runStartedAt = startedAt;
-    setStatus('run', baseVerb());
-    statusTime.textContent = elapsed(Date.now() - runStartedAt);
-    statusTokens.hidden = true;
-    runOutputTokens = 0;
-    window.clearInterval(timer);
-    timer = window.setInterval(() => {
-      statusTime.textContent = elapsed(Date.now() - runStartedAt);
-    }, 1000);
-  } else {
-    if (statusState === 'run') setStatus('off');
-    if (timer) {
-      window.clearInterval(timer);
-      timer = undefined;
-    }
-  }
-  void refreshSessions();
-}
-
-// ---------- Compaction: the status line while the conversation is summarised, /compact and "Compact now" ----------
-
-const COMPACTING_TEXT = 'Compacting context…';
-/**
- * A compaction in progress. standalone: started outside a run (/compact, "Compact now"), so the status line is
- * shown for it alone (with its own elapsed time and the stop button, since abort cancels it) without counting as
- * a run. Otherwise it is an auto-compaction inside a run, which only swaps the status text until it ends.
- */
-let compacting: { reason: 'auto' | 'manual'; standalone: boolean; prevText: string } | null = null;
-/** Set when a compact_end with an error arrives, so oc.compact()'s own error is not shown a second time */
-let compactErrorShown = false;
-
-function startCompaction(reason: 'auto' | 'manual'): void {
-  if (running) {
-    const prev = statusText.textContent ?? '';
-    compacting = { reason, standalone: false, prevText: prev && prev !== COMPACTING_TEXT ? prev : baseVerb() };
-    setStatusText(COMPACTING_TEXT);
-  } else {
-    compacting = { reason, standalone: true, prevText: '' };
-    runStartedAt = Date.now();
-    setStatus('run', COMPACTING_TEXT);
-    statusTime.textContent = '0s';
-    statusTokens.hidden = true;
-    window.clearInterval(timer);
-    timer = window.setInterval(() => {
-      statusTime.textContent = elapsed(Date.now() - runStartedAt);
-    }, 1000);
-  }
-  statusLine.classList.add('compacting');
-  syncBusyUi();
-  syncSpin();
-}
-
-function endCompaction(): void {
-  const c = compacting;
-  compacting = null;
-  statusLine.classList.remove('compacting');
-  syncBusyUi();
-  syncSpin();
-  if (!c) return;
-  if (running) {
-    // The previous verb comes back (the next event of the run replaces it as usual).
-    if (statusText.textContent === COMPACTING_TEXT) setStatusText(c.prevText || baseVerb());
-    return;
-  }
-  if (statusState === 'run') setStatus('off');
-  if (timer) {
-    window.clearInterval(timer);
-    timer = undefined;
-  }
-}
-
-/** /compact and the context meter's "Compact now": failures show as an error notice in the transcript. */
-async function compactNow(focus?: string): Promise<void> {
-  if (typeof oc.compact !== 'function') {
-    addSystemMessage('Compacting needs the updated app. Restart Silo Harness and try again.', 'error');
-    return;
-  }
-  compactErrorShown = false;
-  let res: { ok: boolean; error?: string };
-  try {
-    const r = await oc.compact(focus || undefined);
-    res = r && typeof r === 'object' ? r : { ok: false, error: 'The app did not answer.' };
-  } catch (err) {
-    res = { ok: false, error: cleanError(err) };
-  }
-  if (!res.ok && !compactErrorShown) addSystemMessage(res.error || "Couldn't compact the conversation.", 'error');
-}
-
-/** The context meter: from 'context' events, oc.context() after a reload or session switch, and the debug hook. */
-const contextMeter = createContextMeter({
-  button: contextMeterBtn,
-  boundary: transcriptWrap,
-  busy: () => running || compacting !== null,
-  compact: () => void compactNow(),
-  openSettings: () => openSettings(config?.provider === 'portkey' ? 'portkey-contextWindow' : config?.provider === 'ollama' ? 'ollama-numCtx' : 'provider'),
-});
-
-async function refreshContext(): Promise<void> {
-  if (typeof oc.context !== 'function') return;
-  try {
-    contextMeter.set(normalizeContext(await oc.context()));
-  } catch {
-    /* no session yet, or an older app: the meter waits for a context event */
-  }
-}
-
-/** The context window the status line's token counter compares against. */
-function contextLimit(): number {
-  const known = contextMeter.get()?.limit;
-  if (known) return known;
-  if (!config) return 0;
-  return Number(activeProvider(config).contextWindow) || 0;
-}
 
 /** True from Enter until the main process has answered, so a double Enter cannot send twice. */
 let sending = false;
@@ -1053,7 +883,7 @@ async function addToInstructions(memory: string): Promise<void> {
   if (inputEl.value === typed) {
     inputEl.value = '';
     autosize();
-    if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+    statusLine.syncPlanHint();
   }
   const left = tray.items().length;
   const imagesLeft = left ? ` · ${left === 1 ? 'the image was' : `${left} images were`} not added and ${left === 1 ? 'stays' : 'stay'} in the composer` : '';
@@ -1075,10 +905,10 @@ async function sendComposer(): Promise<void> {
   mentionPicker.close();
   const compactCmd = images.length ? null : /^\/compact(?:\s+([\s\S]*))?$/.exec(text);
   if (compactCmd) {
-    if (running || compacting) {
+    if (running() || compacting()) {
       // Not sent anywhere: it goes back into the composer for after the run.
       restoreComposerText(text);
-      showInlineError(sendBtn, running ? 'Compacting has to wait for the run to finish (or stop it with Esc).' : 'The conversation is already being compacted.');
+      showInlineError(sendBtn, running() ? 'Compacting has to wait for the run to finish (or stop it with Esc).' : 'The conversation is already being compacted.');
       return;
     }
     endAssistant();
@@ -1113,11 +943,11 @@ async function sendComposer(): Promise<void> {
       return;
     }
   }
-  if (running) return queueMessage(text, images);
+  if (running()) return queueMessage(text, images);
   // Replying instead of approving sends the plan back, with this message as the feedback (as in Claude Code).
   if (activePlan?.pending()) await activePlan.decide('keep');
   setBasePlaceholder(DEFAULT_PLACEHOLDER);
-  if (statusState !== 'run') setStatus('off');
+  if (statusState() !== 'run') setStatus('off');
   const bubble = addUserMessage(text, images.map(bubbleImage));
   endAssistant();
   const res = await sendToAgent(text, images);
@@ -1267,18 +1097,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       setStatusText(baseVerb());
       break;
     }
-    case 'usage': {
-      const prompt = Number(ev.promptTokens) || 0;
-      const completion = Number(ev.completionTokens) || 0;
-      runOutputTokens += completion;
-      const context = prompt + completion;
-      const limit = contextLimit();
-      statusTokens.textContent = `${formatCount(context)} tokens`;
-      statusTokens.dataset.tip = `Context ${formatCount(context)}${limit ? ` of ${formatCount(limit)}` : ''} · Output ${formatCount(runOutputTokens)} this run`;
-      statusTokens.classList.toggle('near-limit', limit > 0 && context / limit >= 0.85);
-      statusTokens.hidden = !running;
+    case 'usage':
+      statusLine.reportUsage(Number(ev.promptTokens) || 0, Number(ev.completionTokens) || 0);
       break;
-    }
     case 'hook_status':
       // A hook's statusMessage while it runs (one line; the status text never wraps)
       setStatusText(typeof ev.text === 'string' && ev.text.trim() ? ev.text.replace(/\s+/g, ' ').trim().slice(0, 120) : baseVerb());
@@ -1303,7 +1124,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       setStatusText('Plan ready for review');
       addPlanCard(ev.plan, { synthetic });
       scrollToBottom(true);
-      if (!running) showPlanReady();
+      if (!running()) showPlanReady();
       break;
     case 'changes_updated':
       changesPane.updated(Number(ev.count));
@@ -1322,7 +1143,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
         clearTurns();
         void syncTurns();
       } else if (ev.error) {
-        compactErrorShown = true;
+        statusLine.compactFailed();
         addSystemMessage(String(ev.error), 'error');
       }
       break;
@@ -1361,10 +1182,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       endAssistant();
       approvals.interrupt();
       // An auto-compaction belongs to the run; its compact_end (if one still comes) only adds the divider or error.
-      if (compacting && !compacting.standalone) {
-        compacting = null;
-        statusLine.classList.remove('compacting');
-      }
+      statusLine.dropRunCompaction();
       setRunning(false);
       endLiveRun();
       toolGroups.interruptAll();
@@ -1439,11 +1257,11 @@ const composerHistory = createComposerHistory({
     hideSlashMenu();
     mentionPicker.close();
     autosize();
-    if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+    statusLine.syncPlanHint();
   },
 });
 
-sendBtn.onclick = () => (running && !composerHasContent() ? void oc.abort() : void send());
+sendBtn.onclick = () => (running() && !composerHasContent() ? void oc.abort() : void send());
 stopBtn.onclick = () => void oc.abort();
 $('composer').addEventListener('mousedown', (e) => {
   const t = e.target as HTMLElement;
@@ -1456,7 +1274,7 @@ inputEl.addEventListener('input', () => {
   autosize();
   mentionPicker.sync();
   void updateSlashMenu();
-  if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+  statusLine.syncPlanHint();
 });
 inputEl.addEventListener('blur', () =>
   setTimeout(() => {
@@ -1655,11 +1473,11 @@ window.addEventListener(
   true,
 );
 
-/** An Esc that can be half of Esc Esc: a plain press, nothing running, no dialog or menu open, no card waiting for an answer. */
+/** An Esc that can be half of Esc Esc: a plain press, nothing running(), no dialog or menu open, no card waiting for an answer. */
 function escCounts(e: KeyboardEvent): boolean {
   return (
     !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing && !e.defaultPrevented &&
-    !running && compacting === null && !rewinding && !approvals.waiting() && !titleEditing() && !dialogOpen() && !isMenuOpen() && !pageOpen()
+    !running() && compacting() === null && !rewinding && !approvals.waiting() && !titleEditing() && !dialogOpen() && !isMenuOpen() && !pageOpen()
   );
 }
 
@@ -1689,7 +1507,7 @@ document.addEventListener('keydown', (e) => {
   const inTerminal = terminalPane.hasFocus();
   if (inTerminal && (e.key === 'Escape' || (e.ctrlKey && !e.metaKey))) return;
   // On a page the session is not on screen: Esc does not stop its run
-  if (e.key === 'Escape' && (running || compacting?.standalone) && !approvals.waiting() && !isMenuOpen() && !dialogOpen() && !pageOpen()) {
+  if (e.key === 'Escape' && (running() || compacting()?.standalone) && !approvals.waiting() && !isMenuOpen() && !dialogOpen() && !pageOpen()) {
     void oc.abort();
   } else if (e.key === 'Escape') {
     if (escCounts(e) && escEsc.counts()) {
@@ -1854,7 +1672,7 @@ modelBtn.onclick = async () => {
     menu.update(sections(list, models.length ? undefined : none));
   } catch {
     if (!menuAnchoredTo(modelBtn)) return;
-    const note = active.type === 'ollama' ? 'Could not reach Ollama. Is it running? Start it with: ollama serve' : active.error ?? (own.length ? undefined : 'This service does not list its models; set one in Settings.');
+    const note = active.type === 'ollama' ? 'Could not reach Ollama. Is it running()? Start it with: ollama serve' : active.error ?? (own.length ? undefined : 'This service does not list its models; set one in Settings.');
     menu.update(sections(own, note));
   }
 };
@@ -1955,18 +1773,13 @@ let pagesView: PagesView | null = null;
 const sessionsView = createSessionsView({
   api: oc.sessions,
   input: inputEl,
-  running: () => running,
+  running: () => running(),
   renderTranscript,
   handleEvent,
   setRunning,
   syncPlanStatus,
   updatePlanCard: (plan) => planCards.get(plan.id)?.update(plan),
-  dropCompaction: () => {
-    if (compacting) {
-      compacting = null;
-      statusLine.classList.remove('compacting');
-    }
-  },
+  dropCompaction: statusLine.dropCompaction,
   queue: queueList,
   tasksEpoch: () => tasksEpoch,
   showSessionTasks,
@@ -2241,7 +2054,7 @@ const modsHost = createModsHost({
   currentSessionId: () => currentSessionId(),
   sessions: () => sessions(),
   config: () => config,
-  running: () => running,
+  running: () => running(),
   toast: (text, kind) => flashStatus(text, kind === 'error' ? 'circle-alert' : 'info'),
   insertText: (text) => insertAtCursor(text),
   openSettings: (section, opts) => openSettings(section, opts),
