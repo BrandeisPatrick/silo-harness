@@ -627,7 +627,7 @@ export function modsSection(ctx: Ctx): Section {
       li.innerHTML = `${icon(granted ? 'check' : wanted ? 'circle-alert' : 'circle', 14)}<span>${escapeHtml(permissionWords(p))}</span>${wanted ? '<span class="sp-chip warn">Not granted yet</span>' : ''}`;
       permList.append(li);
     }
-    if (m.wantsStyles) permList.append(h('li', { class: 'wanted', html: `${icon('circle-alert', 14)}<span>Restyle the app (styles, looks or a background)</span><span class="sp-chip warn">Not granted yet</span>` }));
+    if (m.wantsStyles) permList.append(h('li', { class: '', html: `${icon('circle', 14)}<span>Restyle the app with its looks</span><span class="sp-chip">Asked at their first Use</span>` }));
     d.append(block('Permissions', asked.length || m.wantsStyles ? permList : h('p', { class: 'sp-detail-muted' }, 'None: it only shows its own views and keeps its own storage.')));
 
     // Problems
