@@ -26,6 +26,7 @@ const SCRIPTS = [
   { name: 'regression', needsApi: true },
   { name: 'settings' },
   { name: 'settings-page' },
+  { name: 'settings-delete' },
   { name: 'providers' },
   { name: 'sidebar' },
   { name: 'images' },
