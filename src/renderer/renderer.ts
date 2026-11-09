@@ -34,6 +34,7 @@ import { MODES } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
 import { attachmentLabel, createAttachmentTray, dataUrlToBlob, imageType, type AddResult, type ImageInput } from './attachments.js';
 import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './artifacts.js';
+import { createChatCards } from './chat-cards.js';
 import { createQueueList } from './queue.js';
 import { normalizeContext } from './context.js';
 import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
@@ -291,12 +292,25 @@ const transcript = createTranscript({
   endLiveRun: () => endLiveRun(),
   showError: (anchor, message) => showInlineError(anchor, message),
   cleanError,
+  // The chat cards are set up right after the tool rows
+  replyEnded: (msg, raw) => chatCards.replyEnded(msg, raw),
 });
 const { scrollToBottom, showJump, addNode, bubbleImage, setTurn, turnOf, addUserMessage, addSystemMessage, addNoticeCard, addCompaction, assistantText, appendAssistantText, endAssistant, appendThinking, finishThinking } = transcript;
 
 // Tool rows, and the runs of them that fold into one line (tool-groups.ts)
 const toolGroups = createToolGroups({ messages: messagesEl, config: () => config, running: () => running(), addNode, endAssistant, finishThinking, scrollToBottom });
 const { summaryMode, foldable, settleRun, refoldAll, endLiveRun, addToolCard, finishToolCard } = toolGroups;
+
+// Pull request and document cards under the replies (chat-cards.ts)
+const chatCards = createChatCards({
+  messages: messagesEl,
+  cwd: () => config?.workingDirectory ?? '',
+  addNode,
+  scrollToBottom,
+  showPaneTab: (tab) => showPaneTab(tab),
+  showError: (anchor, message) => showInlineError(anchor, message),
+  cleanError,
+});
 
 // Approval and question cards (approvals.ts)
 const approvals = createApprovals({
@@ -413,7 +427,11 @@ function addArtifactCard(info: ArtifactInfo, opts: { updated?: boolean } = {}): 
   finishThinking();
   const card = createArtifactCard(info, { act: artifactAction, updated: Boolean(opts.updated) || Number(info.version) > 1 });
   artifactCards.set(info.id, card);
-  addNode(card.el);
+  // In a block of cards like the ones under a reply (chat-cards.ts): the card keeps its width at the column's start
+  const block = document.createElement('div');
+  block.className = 'chat-cards';
+  block.appendChild(card.el);
+  addNode(block);
   return card;
 }
 
@@ -446,7 +464,7 @@ async function artifactAction(card: ArtifactCard, action: ArtifactAction, button
 function isLastCard(el: HTMLElement): boolean {
   if (!el.isConnected) return false;
   for (let n = el.nextElementSibling; n; n = n.nextElementSibling) {
-    if (n.matches('.msg.user, .msg.assistant, .tool, .tool-group, .approval, .question-card, .plan-card, .artifact-card, .thinking')) return false;
+    if (n.matches('.msg.user, .msg.assistant, .tool, .tool-group, .approval, .question-card, .plan-card, .artifact-card, .chat-cards, .thinking')) return false;
   }
   return true;
 }
@@ -480,6 +498,8 @@ function clearMessages(): void {
   hiddenTools.clear();
   planCards.clear();
   artifactCards.clear();
+  chatCards.reset();
+  callArgs.clear();
   activePlan = null;
   turnSync++;
   // ⌘↑ walks the messages on screen: a walk through the previous session's is over
@@ -517,6 +537,7 @@ function renderTranscript(items: TranscriptItem[]): void {
       if (item.name === 'submit_plan' && item.ok) return;
       const card = addToolCard(item.name, item.args);
       finishToolCard({ name: item.name, result: item.result, ok: item.ok }, card);
+      chatCards.toolEnded(item.name, item.args, item.result, item.ok);
     } else {
       // A role a feature registered (transcript-items.ts)
       const extra = item as unknown as ExtraTranscriptItem;
@@ -524,6 +545,8 @@ function renderTranscript(items: TranscriptItem[]): void {
       if (el) appendExtraNode(el);
     }
   });
+  // Cards of the last calls when no reply came after them (in a session still running, they wait no longer either)
+  chatCards.flush();
   scrollToBottom(true);
 }
 
@@ -1019,6 +1042,8 @@ function clearBrowsing(): void {
 
 /** Tool calls that do not get a row (the plan and artifacts arrive as cards instead), with their arguments. */
 const hiddenTools = new Map<string, unknown>();
+/** The arguments of the calls in flight, by id: a finished call's pull request or document card reads them */
+const callArgs = new Map<string, unknown>();
 const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', ...PROPOSAL_TOOLS]);
 
 function handleEvent(ev: AgentEvent, synthetic = false): void {
@@ -1053,6 +1078,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       break;
     case 'tool_start': {
       const id = ev.id ?? ev.name;
+      callArgs.set(id, ev.args);
       if (CARD_TOOLS.has(ev.name)) {
         hiddenTools.set(id, ev.args);
         setStatusText(ev.name === 'submit_plan' ? 'Writing the plan…' : statusVerb(ev.name));
@@ -1078,6 +1104,8 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     }
     case 'tool_end': {
       const id = ev.id ?? ev.name;
+      chatCards.toolEnded(ev.name, callArgs.get(id), ev.result, ev.ok);
+      callArgs.delete(id);
       if (hiddenTools.has(id)) {
         const args = hiddenTools.get(id);
         hiddenTools.delete(id);
@@ -1184,6 +1212,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       endLiveRun();
       toolGroups.interruptAll();
       hiddenTools.clear();
+      callArgs.clear();
+      // Cards of calls that no reply came after
+      chatCards.flush();
       clearBrowsing();
       if (ev.reason === 'aborted') addSystemMessage('Interrupted.');
       if (ev.reason === 'max_turns') addSystemMessage('Stopped: reached the max tool turns limit (raise it in Settings).');

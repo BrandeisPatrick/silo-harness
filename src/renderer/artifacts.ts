@@ -1,9 +1,12 @@
-// Artifact card: a deliverable the model made with create_artifact (a page, a document, an image or code),
-// with Open (in the Browser pane), Save as… and Reveal in Finder. Updates to the same artifact refresh the card.
+// Artifact card: a deliverable the model made with create_artifact (a page, a document, an image or code), drawn as
+// the compact file card (file-card.ts): the tile, the title and "Artifact · HTML". A click opens it in the Browser
+// pane; Save as… and Reveal in Finder are the small buttons at its right. Updates to the same artifact refresh the
+// card, with an "Updated" chip.
 
 import type { ArtifactInfo, ArtifactKind } from '../shared/types';
-import { escapeHtml, formatBytes } from './dom.js';
-import { icon, type IconName } from './icons.js';
+import { formatBytes } from './dom.js';
+import { createFileCard, type FileCardParts } from './file-card.js';
+import type { IconName } from './icons.js';
 
 export interface ArtifactCard {
   el: HTMLElement;
@@ -49,7 +52,7 @@ export function artifactKindLabel(info: { kind?: ArtifactKind | string; language
 }
 
 export function artifactIcon(kind: ArtifactKind | string | undefined): IconName {
-  return kind === 'html' ? 'globe' : kind === 'markdown' ? 'file-text' : kind === 'svg' ? 'image' : 'code';
+  return kind === 'html' ? 'globe' : kind === 'markdown' ? 'note' : kind === 'svg' ? 'image' : 'code';
 }
 
 /** "HTML · v2 · 4 KB" */
@@ -61,38 +64,21 @@ export function artifactMeta(info: ArtifactInfo): string {
   return parts.join(' · ');
 }
 
-const BUTTONS: readonly [ArtifactAction, string, string][] = [
-  ['reveal', 'Reveal in Finder', 'btn sm artifact-reveal'],
-  ['saveAs', 'Save as…', 'btn sm artifact-save'],
-  ['open', 'Open', 'btn sm primary artifact-open'],
+/** "Artifact · HTML", "Artifact · MD", "Artifact · Python" */
+export function artifactCardMeta(info: Pick<ArtifactInfo, 'kind' | 'language'>): string {
+  return `Artifact · ${info.kind === 'markdown' ? 'MD' : artifactKindLabel(info)}`;
+}
+
+const ACTIONS: readonly [ArtifactAction, IconName, string][] = [
+  ['reveal', 'folder', 'Reveal in Finder'],
+  ['saveAs', 'download', 'Save as…'],
 ];
 
 export function createArtifactCard(info: ArtifactInfo, opts: ArtifactCardOptions): ArtifactCard {
-  const el = document.createElement('div');
-  el.className = 'artifact-card';
-  el.innerHTML =
-    `<div class="artifact-head"><span class="artifact-icon"></span>` +
-    `<div class="artifact-heading"><div class="artifact-kicker">Artifact</div><div class="artifact-title"></div><div class="artifact-meta"></div></div>` +
-    `<span class="artifact-chip" hidden>Updated</span></div>` +
-    `<div class="artifact-actions">${BUTTONS.map(([action, label, cls]) => `<button type="button" class="${cls}" data-action="${action}"><span>${escapeHtml(label)}</span></button>`).join('')}</div>`;
-  const iconEl = el.querySelector<HTMLElement>('.artifact-icon')!;
-  const titleEl = el.querySelector<HTMLElement>('.artifact-title')!;
-  const metaEl = el.querySelector<HTMLElement>('.artifact-meta')!;
-  const chipEl = el.querySelector<HTMLElement>('.artifact-chip')!;
+  let parts: FileCardParts;
   let flashTimer: number | undefined;
-
-  const render = () => {
-    const a = card.info;
-    el.dataset.artifactId = a.id;
-    el.dataset.kind = a.kind;
-    iconEl.innerHTML = icon(artifactIcon(a.kind));
-    titleEl.textContent = a.title?.trim() || 'Untitled artifact';
-    metaEl.textContent = artifactMeta(a);
-    if (a.path) metaEl.title = a.path;
-  };
-
   const card: ArtifactCard = {
-    el,
+    el: null as unknown as HTMLElement,
     info,
     update(next: ArtifactInfo, updated = false) {
       if (!next || next.id !== card.info.id) return;
@@ -101,7 +87,8 @@ export function createArtifactCard(info: ArtifactInfo, opts: ArtifactCardOptions
       card.info = { ...card.info, ...next };
       render();
       if (updated) {
-        chipEl.hidden = false;
+        parts.setChip('Updated');
+        const el = card.el;
         el.classList.remove('flash');
         void el.offsetWidth; // restart the highlight animation
         el.classList.add('flash');
@@ -110,34 +97,29 @@ export function createArtifactCard(info: ArtifactInfo, opts: ArtifactCardOptions
       }
     },
   };
+  parts = createFileCard({
+    className: 'artifact-card',
+    title: info.title?.trim() || 'Untitled artifact',
+    meta: artifactCardMeta(info),
+    icon: artifactIcon(info.kind),
+    open: (el) => opts.act(card, 'open', el as HTMLButtonElement).then(Boolean),
+    actions: ACTIONS.map(([action, iconName, label]) => ({ id: action, icon: iconName, label, run: (btn: HTMLButtonElement) => opts.act(card, action, btn) })),
+  });
+  card.el = parts.el;
 
-  for (const btn of el.querySelectorAll<HTMLButtonElement>('.artifact-actions button')) {
-    const action = btn.dataset.action as ArtifactAction;
-    const labelEl = btn.querySelector('span')!;
-    const label = labelEl.textContent ?? '';
-    let resetTimer: number | undefined;
-    btn.onclick = async () => {
-      if (btn.disabled) return;
-      btn.disabled = true;
-      let res: string | boolean = false;
-      try {
-        res = await opts.act(card, action, btn);
-      } finally {
-        btn.disabled = false;
-      }
-      if (typeof res === 'string' && res) {
-        window.clearTimeout(resetTimer);
-        btn.classList.add('done');
-        labelEl.textContent = res;
-        resetTimer = window.setTimeout(() => {
-          btn.classList.remove('done');
-          labelEl.textContent = label;
-        }, 1500);
-      }
-    };
+  function render(): void {
+    const a = card.info;
+    const el = card.el;
+    el.dataset.artifactId = a.id;
+    el.dataset.kind = a.kind;
+    parts.setIcon(artifactIcon(a.kind));
+    parts.setTitle(a.title?.trim() || 'Untitled artifact');
+    parts.setMeta(artifactCardMeta(a));
+    // The longer line the card had (the version and the size) and where the file is, on hover
+    el.title = [artifactMeta(a), a.path].filter(Boolean).join('\n');
   }
 
   render();
-  if (opts.updated) chipEl.hidden = false;
+  if (opts.updated) parts.setChip('Updated');
   return card;
 }

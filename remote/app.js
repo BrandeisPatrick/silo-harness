@@ -51,7 +51,7 @@
   /** The live parts of the view, reset with every snapshot */
   let V = freshView();
   function freshView() {
-    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null };
+    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -362,6 +362,114 @@
     const wrap = h('div', 'msg assistant');
     wrap.append(h('div', 'md', markdown(text)));
     return wrap;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Chat cards: the pull requests and documents a reply or a tool result names go under the reply, as on the desktop
+  // (src/renderer/chat-cards-model.ts has the rules; this is a small copy of them). Simpler here: a pull request card
+  // has what its URL gives and opens it on GitHub; a document or an artifact says it is on the Mac.
+  // ---------------------------------------------------------------------------------------------------------------
+
+  const PR_RE = /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})\/pull\/(\d{1,9})(?!\d)/gi;
+  const MAX_PR_CARDS = 3;
+  const GH_PR = /(?:^|[\s;&|(])(?:[\w./~-]*\/)?gh\s+pr\s+(?:create|view|new|ready|merge|reopen|edit|status)\b/;
+  const DOC_LABELS = { md: 'MD', markdown: 'MD', mdx: 'MD', html: 'HTML', htm: 'HTML', pdf: 'PDF', txt: 'TXT', text: 'TXT' };
+  const NOT_DOCS = /^(requirements[\w.-]*|constraints|robots|cmakelists|llms)\.txt$/i;
+  // A project's own files (README.md, CHANGELOG.md, CLAUDE.md, …) get no card: the agent keeps them as part of the work
+  const PROJECT_FILES = new Set(['readme', 'changelog', 'changes', 'history', 'news', 'contributing', 'license', 'licence', 'notice', 'copying', 'authors', 'contributors', 'code_of_conduct', 'security', 'support', 'third_party_notices', 'claude', 'agents', 'gemini', 'copilot-instructions', 'pull_request_template']);
+  // The desktop's own 16px icons (src/renderer/icons.ts): a pull request, a note, a globe, a file
+  const CARD_ICONS = {
+    pr: '<circle cx="4.5" cy="3.75" r="1.5"/><circle cx="4.5" cy="12.25" r="1.5"/><circle cx="11.5" cy="12.25" r="1.5"/><path d="M4.5 5.25v5.5M11.5 10.75V6.25c0-1.1-.9-2-2-2H7.25M8.75 2.5L7 4.25 8.75 6"/>',
+    note: '<path d="M3.75 2.75h8.5c.55 0 1 .45 1 1v5.5l-4 4h-5.5c-.55 0-1-.45-1-1v-8.5c0-.55.45-1 1-1z"/><path d="M13.25 9.25h-3c-.55 0-1 .45-1 1v3"/>',
+    globe: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.6 1.65 2.5 3.8 2.5 6s-.9 4.35-2.5 6c-1.6-1.65-2.5-3.8-2.5-6S6.4 3.65 8 2z"/>',
+    file: '<path d="M9 1.75H4.25c-.83 0-1.5.67-1.5 1.5v9.5c0 .83.67 1.5 1.5 1.5h7.5c.83 0 1.5-.67 1.5-1.5V6L9 1.75z"/><path d="M9 1.75V6h4.25"/>',
+    code: '<path d="M5.25 4.5L1.75 8l3.5 3.5M10.75 4.5l3.5 3.5-3.5 3.5"/>',
+  };
+  const cardIcon = (name) =>
+    `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CARD_ICONS[name]}</svg>`;
+
+  /** Every pull request a text names, once each, in order */
+  function findPrs(text) {
+    const out = [];
+    for (const m of String(text || '').matchAll(PR_RE)) {
+      const [, owner, repo] = m;
+      const number = Number(m[3]);
+      if (repo === '.' || repo === '..' || /\.git$/i.test(repo) || !(number >= 1)) continue;
+      const url = `https://github.com/${owner}/${repo}/pull/${number}`;
+      if (!out.some((r) => r.url.toLowerCase() === url.toLowerCase())) out.push({ owner, repo, number, url });
+    }
+    return out;
+  }
+
+  /** The pull requests a finished call names: gh pr create / view through the shell, or a GitHub tool's */
+  function toolPrs(name, args, result, ok) {
+    if (!ok) return [];
+    const text = String(result || '');
+    if (name === 'bash' || name === 'terminal_run') {
+      const command = String(parseArgs(args).command || '');
+      if (!GH_PR.test(command) || failedExit(name, text)) return [];
+      const found = findPrs(`${command}\n${text}`);
+      return found.length > MAX_PR_CARDS ? [] : found;
+    }
+    if (/pull.?request/i.test(name) && !/^\s*Error\b/.test(text)) return findPrs(text).slice(0, 1);
+    return [];
+  }
+
+  /** The document a write_file made: { name, title, label }, or null */
+  function toolDoc(name, args, result, ok) {
+    if (name !== 'write_file' || !ok || /^\s*Error\b/.test(String(result || ''))) return null;
+    const p = String(parseArgs(args).path || '').trim();
+    const file = p.split(/[\\/]/).pop() || '';
+    const dot = file.lastIndexOf('.');
+    const label = dot > 0 ? DOC_LABELS[file.slice(dot + 1).toLowerCase()] : null;
+    if (!label || NOT_DOCS.test(file) || PROJECT_FILES.has(file.slice(0, file.indexOf('.')).toLowerCase()) || /(^|\/)(node_modules|\.git|\.[^/]+)\//.test(p.slice(0, p.length - file.length))) return null;
+    const stem = file.slice(0, dot);
+    const title = stem !== stem.toLowerCase() ? stem : stem.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    return { path: p, title, label };
+  }
+
+  function fileCardEl(iconName, title, meta) {
+    const c = h('div', 'chat-card file');
+    c.innerHTML = `<span class="chat-card-tile">${cardIcon(iconName)}</span><span class="chat-card-text"><span class="chat-card-title">${esc(title)}</span><span class="chat-card-meta">${esc(meta)}</span></span>`;
+    return c;
+  }
+
+  function prCardEl(ref) {
+    const a = h('a', 'chat-card pr');
+    a.href = ref.url;
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    a.innerHTML = `<span class="chat-card-tile">${cardIcon('pr')}</span><span class="chat-card-text"><span class="chat-card-title">${esc(`${ref.owner}/${ref.repo} #${ref.number}`)}</span><span class="chat-card-meta">Pull request · opens on GitHub</span></span>`;
+    return a;
+  }
+
+  const ARTIFACT_LABEL = { html: 'HTML', markdown: 'MD', svg: 'SVG', code: 'Code' };
+  function artifactCardEl(a) {
+    const block = h('div', 'chat-cards');
+    block.append(fileCardEl(a.kind === 'html' ? 'globe' : a.kind === 'markdown' ? 'note' : a.kind === 'svg' ? 'file' : 'code', a.title || 'Untitled artifact', `Artifact · ${ARTIFACT_LABEL[a.kind] || 'Code'} · on your Mac`));
+    return block;
+  }
+
+  /** A finished call: what it names waits for the next reply */
+  function noteTool(name, args, result, ok) {
+    for (const ref of toolPrs(name, args, result, ok)) if (!V.pendingPrs.some((r) => r.url === ref.url)) V.pendingPrs.push(ref);
+    const doc = toolDoc(name, args, result, ok);
+    if (doc && !V.pendingDocs.some((d) => d.path === doc.path)) V.pendingDocs.push(doc);
+  }
+
+  /** The block of cards for a reply that ended (with its text) or for calls no reply came after (no text), or null */
+  function takeCards(text) {
+    const prs = V.pendingPrs;
+    const docs = V.pendingDocs;
+    V.pendingPrs = [];
+    V.pendingDocs = [];
+    const named = findPrs(text);
+    if (named.length <= MAX_PR_CARDS) for (const ref of named) if (!prs.some((r) => r.url === ref.url)) prs.push(ref);
+    if (!prs.length && !docs.length) return null;
+    const block = h('div', 'chat-cards');
+    for (const ref of prs) block.append(prCardEl(ref));
+    for (const d of docs) block.append(fileCardEl(d.label === 'HTML' ? 'globe' : d.label === 'PDF' ? 'file' : 'note', d.title, `Document · ${d.label} · on your Mac`));
+    return block;
   }
 
   function note(text, cls = '') {
@@ -719,7 +827,7 @@
         if (item.plan.id) V.plans.set(item.plan.id, card);
         return card;
       }
-      case 'artifact': return note(`Artifact: ${item.artifact.title} (open it on your Mac)`);
+      case 'artifact': return artifactCardEl(item.artifact);
       case 'image': return note(`Image: ${item.image.caption || item.image.name} (on your Mac)`);
       case 'compaction': return h('div', 'divider', 'Earlier messages summarised');
       default: return null;
@@ -739,7 +847,15 @@
     for (const item of data.items) {
       const n = itemEl(item);
       if (n) t.append(n);
+      if (item.role === 'tool') noteTool(item.name, item.args, item.result, item.ok);
+      else if (item.role === 'assistant') {
+        const cards = takeCards(item.text);
+        if (cards) t.append(cards);
+      }
     }
+    // Calls no reply came after
+    const left = takeCards('');
+    if (left) t.append(left);
     if (live.thinking) {
       V.thinking = thinkingEl(live.running);
       V.thinkingText = live.thinking;
@@ -890,6 +1006,11 @@
           endStreaming();
         } else if (ev.text) append(assistantEl(ev.text));
         V.assistant = null;
+        // The cards it names, and those the calls before it were waiting with, go under it
+        if (ev.text) {
+          const cards = takeCards(ev.text);
+          if (cards) append(cards);
+        }
         break;
       case 'tool_start': {
         endStreaming();
@@ -906,6 +1027,7 @@
           setToolState(row, ev.result, ev.ok);
           V.tools.delete(ev.id);
         }
+        noteTool(ev.name, row ? row._tool.args : null, ev.result, ev.ok);
         break;
       }
       case 'approval_request': {
@@ -973,7 +1095,7 @@
         append(ev.compaction ? h('div', 'divider', 'Earlier messages summarised') : note(ev.error || 'Could not summarise.', 'error'));
         break;
       case 'artifact':
-        append(note(`Artifact ${ev.action}: ${ev.artifact.title} (open it on your Mac)`));
+        append(artifactCardEl(ev.artifact));
         break;
       case 'image':
         append(note(`Image: ${ev.image.caption || ev.image.name} (on your Mac)`));
@@ -989,6 +1111,11 @@
         // Rows that never got a result were cut off with the run.
         for (const row of V.tools.values()) setToolState(row, 'Interrupted', false);
         V.tools.clear();
+        {
+          // Cards of calls that no reply came after
+          const cards = takeCards('');
+          if (cards) append(cards);
+        }
         if (ev.reason === 'aborted') append(note('Stopped'));
         else if (ev.reason === 'max_turns') append(note('Stopped after the maximum number of steps'));
         setRunning(false);

@@ -1,6 +1,7 @@
 // The transcript's own rendering: following new content, user and system bubbles, the streaming reply (rendered
 // as Markdown a few times a second) and the thinking block, and what a click in the transcript does. The cards
-// (tool rows, approvals, plans, artifacts) are drawn by their own modules and appended through addNode.
+// (tool rows, approvals, plans, artifacts) are drawn by their own modules and appended through addNode; a finished
+// reply tells replyEnded, which puts the pull request and document cards it names under it (chat-cards.ts).
 
 import type { ChangesApi, CompactionInfo, ImageAttachment } from '../shared/types';
 import { attachmentLabel } from './attachments.js';
@@ -28,9 +29,11 @@ export interface TranscriptDeps {
   endLiveRun(): void;
   showError(anchor: HTMLElement, message: string): void;
   cleanError(err: unknown): string;
+  /** A reply was finished, with its Markdown source: the cards it names go under it (chat-cards.ts) */
+  replyEnded?(msg: HTMLElement, raw: string): void;
 }
 
-export function createTranscript({ messages: messagesEl, emptyState, workingDirectory, pickedPaths, changesApi, openLightbox, rewindTo, foldable, endLiveRun, showError, cleanError }: TranscriptDeps) {
+export function createTranscript({ messages: messagesEl, emptyState, workingDirectory, pickedPaths, changesApi, openLightbox, rewindTo, foldable, endLiveRun, showError, cleanError, replyEnded }: TranscriptDeps) {
   /** Whether the view follows new content (the user is at the bottom) */
   let stick = true;
   const jumpBtn = byId<HTMLButtonElement>('jump-latest');
@@ -268,11 +271,12 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
   }
 
   function endAssistant(): void {
-    if (currentAssistant) {
-      currentAssistant.md.innerHTML = renderMarkdown(currentAssistant.raw);
-      scrollToBottom();
-    }
+    const ended = currentAssistant;
     currentAssistant = null;
+    if (!ended) return;
+    ended.md.innerHTML = renderMarkdown(ended.raw);
+    scrollToBottom();
+    replyEnded?.(ended.el, ended.raw);
   }
 
   /** A path in a tool row or an approval card (.path-link): opens it with the system's editor, as the Diff pane does. */
