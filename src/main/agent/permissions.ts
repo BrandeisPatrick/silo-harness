@@ -13,6 +13,8 @@ export const DENIED = 'Not permitted: the user denied this action. Do not retry 
 const PLAN_EDIT_BLOCKED = 'Not permitted in plan mode: describe this step in your plan instead.';
 const PLAN_CMD_BLOCKED = 'Not permitted in plan mode: only read-only commands (ls, cat, grep, git status/log/diff …) run while planning. Describe this step in your plan instead.';
 const PLAN_MCP_BLOCKED = 'Not permitted in plan mode: this MCP tool is not marked read-only. Describe this step in your plan instead.';
+/** Programs that run whatever they are given: an allow rule for one of them does not skip Auto mode's check. */
+const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'python', 'python3', 'node', 'deno', 'bun', 'bunx', 'npx', 'uvx', 'perl', 'ruby', 'php', 'osascript', 'eval', 'xargs']);
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 
 /**
@@ -59,7 +61,8 @@ export interface ApprovalContext {
  * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
  * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything. Otherwise a guard
  * reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
- * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') decides as autoDecision says.
+ * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') sends what its rules (the
+ * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
  */
 export function decideApproval(name: string, detail: string, target: string | undefined, opts: ApproveOptions, ctx: ApprovalContext): ApprovalDecision {
   const { mode, cwd, rules } = ctx;
@@ -101,12 +104,15 @@ export function decideApproval(name: string, detail: string, target: string | un
   const programsAllowed = programs.length > 0 && programs.every((p) => ctx.allowed.program(p) || rules?.programs?.includes(p));
   if (checked) {
     // Auto mode with its check. Commands: sudo and deleting a critical folder ask whatever the check would say; read-only
-    // commands run; then the user's allow rules (programs, guard reasons); the rest goes to the check.
+    // commands run; then the user's allow rules: a guard reason they allowed, or programs they allowed for a command
+    // the guard does not flag (a program rule never covers a force push), and never an interpreter, which runs anything
+    // (as Claude Code drops such broad rules in Auto mode). The rest goes to the check.
     if (isCmd) {
       const always = alwaysAskReason(detail, cwd);
       if (always) return reasonAllowed(always) ? allow : ask(always, programs);
       if (!reason && isReadOnlyCommand(detail)) return allow;
-      if ((reason && reasonAllowed(reason)) || programsAllowed) return allow;
+      if (reason && reasonAllowed(reason)) return allow;
+      if (!reason && programsAllowed && !programs.some((p) => INTERPRETERS.has(p))) return allow;
       return check(reason, programs);
     }
     // Edits: inside the working directory they run; a protected path goes to the check even when a rule allows it;

@@ -53,6 +53,8 @@ console.warn = (...a) => {
   check('order: an edit outside goes to the check', d('write_file', '/tmp/x', path.join(home, 'Desktop', 'x.txt')).kind === 'classify');
   check('order: a program rule runs without the check', d('bash', 'npm test', undefined, base({ rules: { programs: ['npm'] } })).kind === 'allow');
   check('order: a session allow runs without the check', d('bash', 'make build', undefined, base({ allowed: { mcp: () => false, reason: () => false, program: (p) => p === 'make', custom: () => false } })).kind === 'allow');
+  check('order: a program rule does not cover a command the guard flags', d('bash', 'git push --force origin main', undefined, base({ rules: { programs: ['git'] } })).kind === 'classify');
+  check('order: a program rule for an interpreter does not skip the check', d('bash', 'python3 deploy.py', undefined, base({ rules: { programs: ['python3'] } })).kind === 'classify');
   check('order: a saved guard reason runs without the check', d('bash', 'git push origin feature', undefined, base({ rules: { reasons: ['pushes to a remote'] } })).kind === 'allow');
   const gitCfg = path.join(cwd, '.git', 'config');
   const prot = d('edit_file', gitCfg, gitCfg, base({ rules: { edits: true, reasons: ['modifies the .git directory'] } }));
