@@ -105,7 +105,7 @@ function encode(src: Decoded, width: number, height: number, mime: 'image/png' |
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return Promise.reject(new AttachError('Could not process the image (no canvas).'));
+  if (!ctx) return Promise.reject(new AttachError('Could not process the image.'));
   // JPEG has no alpha: transparent areas become white instead of black.
   if (mime === 'image/jpeg') {
     ctx.fillStyle = '#ffffff';
@@ -141,7 +141,7 @@ export async function processImage(blob: Blob, name: string, limits: ImageLimits
     let out = await encode(decoded, width, height, lossless ? 'image/png' : 'image/jpeg', 0.9);
     if (out.size > limits.maxBytes) out = await encode(decoded, width, height, 'image/jpeg', 0.8);
     if (out.size > limits.maxBytes) {
-      throw new AttachError(`${label} is too large to attach: ${formatBytes(out.size)} after compressing (the limit is ${formatBytes(limits.maxBytes)}).`);
+      throw new AttachError(`${label} is too large: ${formatBytes(out.size)} after compressing, the limit is ${formatBytes(limits.maxBytes)}.`);
     }
     const mime = out.type || (lossless ? 'image/png' : 'image/jpeg');
     return { id: newId(), name: label, mime, dataUrl: await blobToDataUrl(out), width, height, size: out.size };
@@ -257,8 +257,8 @@ export function createAttachmentTray(opts: AttachmentTrayOptions): AttachmentTra
         const extra = inputs.length - room;
         result.errors.push(
           room === 0
-            ? `You can attach up to ${MAX_ATTACHMENTS} images to a message.`
-            : `You can attach up to ${MAX_ATTACHMENTS} images to a message; ${extra} ${extra === 1 ? 'was' : 'were'} left out.`,
+            ? `A message can have up to ${MAX_ATTACHMENTS} images.`
+            : `A message can have up to ${MAX_ATTACHMENTS} images, ${extra} left out.`,
         );
       }
       if (!accepted.length) return result;

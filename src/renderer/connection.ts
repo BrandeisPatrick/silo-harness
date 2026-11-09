@@ -74,10 +74,10 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     const m = activeProvider(config()).model;
     if (models) {
       ollamaHealth = { reachable: true, models };
-      connProblem = m && models.length && !hasModel(models, m) ? `Ollama is running, but ${m} is not downloaded. Run: ollama pull ${m}` : null;
+      connProblem = m && models.length && !hasModel(models, m) ? `${m} isn't downloaded. Run: ollama pull ${m}` : null;
     } else {
       ollamaHealth = { reachable: false, models: [] };
-      connProblem = `Can't reach Ollama at ${activeProvider(config()).baseURL.replace(/\/v1\/?$/, '')}. Start it with "ollama serve", then retry.`;
+      connProblem = `Can't reach Ollama at ${activeProvider(config()).baseURL.replace(/\/v1\/?$/, '')}. Run "ollama serve", then retry.`;
     }
     syncConnection();
   }
@@ -115,15 +115,15 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     const title = ollamaStartFailed ? "Ollama isn't answering yet" : "Ollama isn't running";
     const detail = ollamaStartFailed ? 'see the Terminal tab' : address;
     // Without the app's terminal the line shows the command to run instead.
-    if (!terminalSource()) return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', command, commandNote: 'Run it in a terminal; this line goes away once Ollama answers.' };
-    return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', actionTip: `Runs ${command} in a new terminal tab` };
+    if (!terminalSource()) return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', command, commandNote: 'Run it in a terminal.' };
+    return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', actionTip: `Runs ${command}` };
   }
 
   function modelLine(): SetupLine {
     const model = activeProvider(config()).model.trim();
     const models = ollamaHealth?.reachable ? ollamaHealth.models : [];
     if (!model && models.length) {
-      return { id: 'model', icon: 'download', title: 'No model selected', detail: `${models.length} downloaded`, action: 'Choose model', actionTip: 'Pick one of your downloaded models' };
+      return { id: 'model', icon: 'download', title: 'No model selected', detail: `${models.length} downloaded`, action: 'Choose model' };
     }
     return {
       id: 'model',
@@ -131,7 +131,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
       title: model ? `${model} isn't downloaded` : 'No model downloaded yet',
       action: 'Pull a model',
       command: pullCommand(model),
-      commandNote: 'Run it in a terminal; this line goes away once the download is done.',
+      commandNote: 'Run it in a terminal.',
     };
   }
 
@@ -218,7 +218,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
     showPaneTab('terminal');
     const id = await terminalPane().newTab();
     if (!id) {
-      showError(button, `Couldn't open a terminal. Run ${command} yourself, then come back.`);
+      showError(button, `Couldn't open a terminal. Run ${command} yourself.`);
       return;
     }
     try {

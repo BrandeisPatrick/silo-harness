@@ -110,7 +110,7 @@ async function runMode(mode, shots) {
     check(tag('session_spawn: the brief shows in the body'), /Load-test the new rate limiter/.test(s.row.body), s.row.body.slice(0, 200));
     record('session_spawn', s.row, s.card);
     if (asks) {
-      check(tag('session_spawn card: title'), s.card.title === `Allow Silo Harness to start the sub-session “${TITLE}”?`, s.card.title);
+      check(tag('session_spawn card: title'), s.card.title === `Start the sub-session “${TITLE}”?`, s.card.title);
       check(tag('session_spawn card: the row already reads Sub-session'), s.card.row.verb === 'Sub-session' && s.card.row.arg === TITLE, s.card.row);
       check(tag('session_spawn card: the answer is in the row'), s.card.decided === 'Allowed once', s.card.decided);
     }
@@ -148,7 +148,7 @@ async function runMode(mode, shots) {
     const words = asks ? 'every day at 03:00' : 'every 2 hours';
     s = await step('schedule_create', { name: NAME, prompt: 'Run npm audit and report anything high.', ...rhythm }, { answer: 'allow', shot: `${mode}-2-schedule-card` });
     expectRow('schedule_create', s.row, 'Schedule', `${NAME} · ${words}`, 'created', 'Created a schedule');
-    check(tag('schedule_create card: title'), s.card.title === `Allow Silo Harness to schedule “${NAME}”?`, s.card.title);
+    check(tag('schedule_create card: title'), s.card.title === `Schedule “${NAME}”?`, s.card.title);
     check(tag('schedule_create card: the row has the rhythm in words while it waits'), s.card.row.arg === `${NAME} · ${words}`, s.card.row.arg);
     check(tag('schedule_create card: the answer is in the row'), s.card.decided === 'Allowed once', s.card.decided);
     record('schedule_create', s.row, s.card);
@@ -169,7 +169,7 @@ async function runMode(mode, shots) {
 
     s = await step('schedule_update', { id: sid, every_minutes: 240 }, { answer: 'allow' });
     expectRow('schedule_update', s.row, 'Update schedule', NAME, 'updated');
-    check(tag('schedule_update card: title'), s.card.title === `Allow Silo Harness to change the schedule “${NAME}”?`, s.card.title);
+    check(tag('schedule_update card: title'), s.card.title === `Change the schedule “${NAME}”?`, s.card.title);
     check(tag('schedule_update card: the answer is in the row'), s.card.decided === 'Allowed once', s.card.decided);
     record('schedule_update', s.row, s.card);
 
@@ -214,7 +214,7 @@ async function runMode(mode, shots) {
     check(tag('session_send (unrelated): its own line "Messaged …", linked'), s.row && s.row.summary === `Messaged ${aTitle}` && s.row.to === A && s.row.top && s.row.state === 'sent', s.row);
     record('session_send (unrelated)', s.row, s.card);
     if (asks) {
-      check(tag('session_send card: title'), s.card.title === `Allow Silo Harness to send a message to “${aTitle}”?`, s.card.title);
+      check(tag('session_send card: title'), s.card.title === `Send a message to “${aTitle}”?`, s.card.title);
       check(tag('session_send card: while it waits the line reads "Messaging …"'), s.card.row && s.card.row.state === 'running' && s.card.row.summary === `Messaging ${aTitle}…`, s.card.row);
       check(tag('session_send card: the answer is in the line'), s.card.decided === 'Allowed once', s.card.decided);
     } else check(tag('session_send to an unrelated session: no card in bypass'), !s.card && (await app.count('.approval')) === 0);

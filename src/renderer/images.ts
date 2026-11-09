@@ -112,7 +112,7 @@ async function act(img: ImageInfo, what: string, button: HTMLButtonElement, el: 
   try {
     if (what === 'copy') {
       const ok = (await rpc('images.copy', img.id, img.sessionId)) || (await copyThroughCanvas(el));
-      if (!ok) throw new Error('this image cannot go on the clipboard; use Save as… instead');
+      if (!ok) throw new Error("this image can't be copied, use Save as… instead");
       flash(button);
     } else if (what === 'save') {
       if (await rpc('images.saveAs', img.id, img.sessionId)) flash(button);
@@ -154,7 +154,7 @@ function flash(button: HTMLButtonElement): void {
 
 function cleanError(err: unknown): string {
   const msg = (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+':\s*/, '').replace(/^(?:Error:\s*)+/, '');
-  return /No handler registered/.test(msg) ? 'this needs the updated app. Restart Silo Harness and try again.' : msg;
+  return /No handler registered/.test(msg) ? 'this needs the updated app. Restart Silo Harness.' : msg;
 }
 
 // ---------- Clicks: thumbnails and Markdown images open the lightbox ----------

@@ -192,7 +192,7 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
   /** /compact and the context meter's "Compact now": failures show as an error notice in the transcript. */
   async function compactNow(focus?: string): Promise<void> {
     if (typeof api.compact !== 'function') {
-      systemMessage('Compacting needs the updated app. Restart Silo Harness and try again.', 'error');
+      systemMessage('Compacting needs the updated app. Restart Silo Harness.', 'error');
       return;
     }
     compactErrorShown = false;

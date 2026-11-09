@@ -820,7 +820,7 @@
       }
       body.append(block);
     });
-    if (!single) body.append(h('div', 'q-elsewhere', 'Answer in the app: this question takes more than one tap.'));
+    if (!single) body.append(h('div', 'q-elsewhere', 'Answer this one on your Mac.'));
     card.append(body);
     if (!single) return card;
     card.addEventListener('click', async (e) => {
@@ -1154,7 +1154,7 @@
         renderQueue();
         if (ev.type === 'queue_dropped' && q) {
           if (!el.input.value.trim()) setInput(q.text);
-          toast('The run ended before your queued message was sent. It is back in the box.');
+          toast('Your queued message was not sent. It is back in the box.');
         }
         break;
       }
@@ -1194,7 +1194,7 @@
           if (cards) append(cards);
         }
         if (ev.reason === 'aborted') append(note('Stopped'));
-        else if (ev.reason === 'max_turns') append(note('Stopped after the maximum number of steps'));
+        else if (ev.reason === 'max_turns') append(note('Stopped at the step limit'));
         setRunning(false);
         break;
     }
@@ -1467,7 +1467,7 @@
     clearTimeout(retryTimer);
     showConn(false);
     el.transcript.textContent = '';
-    el.transcript.append(h('div', 'empty', '<strong>This link no longer works</strong>Open the current link from Silo Harness on your Mac.'));
+    el.transcript.append(h('div', 'empty', '<strong>This link no longer works</strong>Open the new link from your Mac.'));
     el.title.textContent = 'Silo Harness';
     el.mark.hidden = true;
     el.model.hidden = true;

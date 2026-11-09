@@ -365,7 +365,7 @@ async function main() {
   f.emit(A, { type: 'tool_end', id: 't5', name: 'ask_user', result: 'The user answered your question:\n- Library: D3', ok: true });
   const FEAT = { question: 'Which features first?', header: 'Features', options: [{ label: 'Export', description: '' }, { label: 'Filters', description: '' }], multiSelect: true };
   f.emit(A, { type: 'question_request', id: 'qq-2', questions: [FEAT] });
-  check('a question with several answers says to answer in the app, with no buttons', await waitFor(win, `[...document.querySelectorAll('.card.question')].pop()?.querySelector('.q-elsewhere')?.textContent.startsWith('Answer in the app')`) && (await js(win, `[...document.querySelectorAll('.card.question')].pop().querySelectorAll('button').length`)) === 0);
+  check('a question with several answers says to answer in the app, with no buttons', await waitFor(win, `[...document.querySelectorAll('.card.question')].pop()?.querySelector('.q-elsewhere')?.textContent.startsWith('Answer this one on your Mac')`) && (await js(win, `[...document.querySelectorAll('.card.question')].pop().querySelectorAll('button').length`)) === 0);
   f.emit(A, { type: 'question_resolved', id: 'qq-2', answers: [{ selected: ['Export', 'Filters'] }] });
   check('answered on the Mac, the card says what was picked', await waitFor(win, `[...document.querySelectorAll('.card.question')].pop()?.querySelector('.decision')?.textContent === 'Export, Filters'`));
 

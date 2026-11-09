@@ -208,7 +208,7 @@ const afterTool = (p) => p.messages?.[p.messages.length - 1]?.role === 'tool';
         text100: (() => { const p = document.createElement('span'); p.style.color = 'var(--text-100)'; document.body.append(p); const v = getComputedStyle(p).color; p.remove(); return v; })(),
       };
     })()`);
-    check('approval: the title in the band, the call\'s own description in muted text, the command', ap.title === 'Allow Silo Harness to run this command?' && ap.texts.join('|') === 'Create an empty file named a.txt' && ap.cmd === '$touch a.txt', ap);
+    check('approval: the title in the band, the call\'s own description in muted text, the command', ap.title === 'Run this command?' && ap.texts.join('|') === 'Create an empty file named a.txt' && ap.cmd === '$touch a.txt', ap);
     check('…Deny, then "Allow once ⌘↵" with ⌄ for more; no icon tile', ap.names.join('|') === 'Deny|Allow once|More ways to allow' && ap.keycaps === '⌘↵' && !ap.icon, ap);
     check('…the keys are named for screen readers, and the card by its title', ap.shortcuts.join('|') === 'Escape|Meta+Enter|' && ap.labelled === ap.title, ap.shortcuts);
     check('…Allow once is inverted (the text colour as its fill)', ap.allowBg === ap.text100 && ap.denyBg !== ap.allowBg, [ap.allowBg, ap.text100, ap.denyBg]);

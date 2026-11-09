@@ -707,9 +707,9 @@ function terminalBody(name: string, body: HTMLElement, r: string): void {
     if (output.trim()) body.appendChild(outBlock(clip(output)));
     else if (p.shellExit === null) note(p.runningAfter ? 'No output yet' : 'No output');
     const tab = p.tab || 'its tab';
-    if (p.runningAfter) note(`Still running in ${tab} after ${p.runningAfter}; the Terminal pane shows what it prints next.`);
+    if (p.runningAfter) note(`Still running in ${tab} after ${p.runningAfter}`);
     else if (p.shellExit !== null) note(`The shell in ${tab} exited with code ${p.shellExit}.`);
-    else if (p.noIntegration) note('Exit code unknown: this shell has no shell integration, so the output was taken once it went quiet.');
+    else if (p.noIntegration) note('Exit code unknown: this shell has no shell integration.');
   } else if (name === 'terminal_read') {
     const p = terminalReadParts(r);
     if (p.empty) note('The screen is empty');
@@ -1028,15 +1028,15 @@ export function approvalTitle(name: string, detail: string, args?: Args, browser
   // A browser card: "Let the agent use example.com?", "Run JavaScript on example.com?", "Make a purchase?" …
   if (browser && typeof browser === 'object') return browserApproval(browser).title;
   const target = (args && str(args, 'path')) || detail.split('\n')[0] || '';
-  if (name === 'bash') return 'Allow Silo Harness to run this command?';
-  if (name === 'terminal_run') return 'Allow Silo Harness to run this command in the terminal?';
-  if (name === 'edit_file') return `Allow Silo Harness to edit ${basename(target) || 'this file'}?`;
-  if (name === 'write_file') return `Allow Silo Harness to write ${basename(target) || 'this file'}?`;
+  if (name === 'bash') return 'Run this command?';
+  if (name === 'terminal_run') return 'Run this command in the terminal?';
+  if (name === 'edit_file') return `Edit ${basename(target) || 'this file'}?`;
+  if (name === 'write_file') return `Write ${basename(target) || 'this file'}?`;
   const mcp = mcpParts(name);
-  if (mcp) return `Allow Silo Harness to call ${mcp.tool} on ${mcp.server}?`;
+  if (mcp) return `Call ${mcp.tool} on ${mcp.server}?`;
   const agent = agentApproval(name, detail);
   if (agent) return agent.title;
-  return `Allow Silo Harness to use ${name}?`;
+  return `Use ${name}?`;
 }
 
 /** Line number where an edit's old text starts, from known file contents. */

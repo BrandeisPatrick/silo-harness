@@ -61,7 +61,7 @@ const REPLY_B = 'README.md has 7 lines.';
     await app.waitFor(`Boolean([...document.querySelectorAll('.approval')].find((c) => !c.classList.contains('done') && c.querySelector('.btn.primary')))`, 30_000, 'the approval card');
     await sleep(200);
     const card = await app.evaluate(`(() => { const c = [...document.querySelectorAll('.approval')].pop(); return { title: c.querySelector('.title').innerText.trim(), body: c.querySelector('.approval-body').innerText.trim(), buttons: [...c.querySelectorAll('.btn')].map((b) => b.getAttribute('aria-label') || b.innerText.trim()) }; })()`);
-    check('the card asks to message "stars" and shows the message', card.title === 'Allow Silo Harness to send a message to “stars”?' && card.body.includes(MESSAGE), card);
+    check('the card asks to message "stars" and shows the message', card.title === 'Send a message to “stars”?' && card.body.includes(MESSAGE), card);
     check('the card has Deny, Allow once and the menu of wider answers', JSON.stringify(card.buttons) === JSON.stringify(['Deny', 'Allow once', 'More ways to allow']), card.buttons);
     check('while it waits, the line reads "Messaging stars…"', (await app.evaluate(`document.querySelector('#messages > .session-msg.sent > summary')?.innerText.trim()`)) === 'Messaging stars…');
     await app.click('.approval .split-btn .more');

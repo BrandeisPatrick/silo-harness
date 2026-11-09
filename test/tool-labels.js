@@ -123,13 +123,13 @@ const { check, done } = require('./support/check.js');
 
   // ---------- Approval cards ----------
   const spawn = agentApproval('session_spawn', 'Start sub-session "Load-test the limiter"\n\nLoad-test the new rate limiter');
-  check('session_spawn card', spawn.title === 'Allow Silo Harness to start the sub-session “Load-test the limiter”?' && spawn.subject === 'start sub-session “Load-test the limiter”', spawn);
+  check('session_spawn card', spawn.title === 'Start the sub-session “Load-test the limiter”?' && spawn.subject === 'start sub-session “Load-test the limiter”', spawn);
   const send = agentApproval('session_send', `Send to session "Fix the tests" (${SUB}):\n\nhello`);
-  check('session_send card', send.title === 'Allow Silo Harness to send a message to “Fix the tests”?' && send.subject === 'message “Fix the tests”', send);
+  check('session_send card', send.title === 'Send a message to “Fix the tests”?' && send.subject === 'message “Fix the tests”', send);
   const create = agentApproval('schedule_create', createDetail);
-  check('schedule_create card', create.title === 'Allow Silo Harness to schedule “Nightly audit”?' && create.subject === 'schedule “Nightly audit”', create);
+  check('schedule_create card', create.title === 'Schedule “Nightly audit”?' && create.subject === 'schedule “Nightly audit”', create);
   const update = agentApproval('schedule_update', 'Change schedule "Nightly audit" (sch_1)\nWhen: every 4 hours (was every day at 03:00)');
-  check('schedule_update card', update.title === 'Allow Silo Harness to change the schedule “Nightly audit”?' && update.subject === 'change schedule “Nightly audit”', update);
+  check('schedule_update card', update.title === 'Change the schedule “Nightly audit”?' && update.subject === 'change schedule “Nightly audit”', update);
   for (const [n, c] of [['session_spawn', spawn], ['session_send', send], ['schedule_create', create], ['schedule_update', update]]) check(`${n}: no tool name in the card`, !/_/.test(c.title + c.subject), c);
   check('other tools keep their own cards', agentApproval('bash', 'ls') === null && agentApproval('mcp__a__b', '{}') === null);
 

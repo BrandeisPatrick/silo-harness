@@ -193,7 +193,7 @@ const queueList = createQueueList({
     try {
       if (typeof oc.unqueue !== 'function') throw new Error('No handler registered');
       if (await oc.unqueue(msg.id)) return true;
-      showInlineError(button, 'Already handed to the agent, so it can no longer be removed.');
+      showInlineError(button, 'Already sent to the agent.');
     } catch (err) {
       showInlineError(button, `Couldn't remove the message: ${cleanError(err)}`);
     }
@@ -232,7 +232,7 @@ function composerEmpty(): boolean {
 function cleanError(err: unknown): string {
   let msg = err instanceof Error ? err.message : String(err);
   msg = msg.replace(/^Error invoking remote method '[^']+':\s*/, '').replace(/^(?:Error:\s*)+/, '');
-  if (/No handler registered/.test(msg)) return 'this needs the updated app. Restart Silo Harness and try again.';
+  if (/No handler registered/.test(msg)) return 'this needs the updated app. Restart Silo Harness.';
   return msg;
 }
 
@@ -346,9 +346,9 @@ const approvals = createApprovals({
 const { addApprovalCard, addQuestionCard } = approvals;
 
 // Plan cards: the newest proposed plan has the buttons; Enter builds and Esc keeps planning while it is the last card.
-const KEEP_PLACEHOLDER = 'Tell Silo Harness what to change in the plan…';
+const KEEP_PLACEHOLDER = 'What should change in the plan?';
 const DEFAULT_PLACEHOLDER = inputEl.placeholder;
-const RUNNING_PLACEHOLDER = '↵ queues a message for the agent’s next step, esc stops the run';
+const RUNNING_PLACEHOLDER = 'Queue a message…';
 /** The placeholder while no run is going (the default, or the "keep planning" prompt) */
 let basePlaceholder = DEFAULT_PLACEHOLDER;
 
@@ -410,7 +410,7 @@ async function respondPlan(card: PlanCard, decision: PlanDecision, btn: HTMLElem
     }
     if (currentMode() === 'plan' && before === 'plan') {
       // An older main process does not switch modes itself.
-      showInlineError(modeBtn, 'Still in Plan mode: switch the mode to let Silo Harness make changes.');
+      showInlineError(modeBtn, 'Still in Plan mode. Switch modes to make changes.');
     }
   }
   return true;
@@ -581,7 +581,7 @@ function originLabel(origin: MessageOrigin, from?: string, note?: string): strin
   if (origin === 'mod') return from ? `from mod ${from}` : 'from a mod';
   if (origin === 'schedule') return from ? `scheduled: ${from}` : 'scheduled';
   if (origin === 'remote') return 'from remote control';
-  if (origin === 'dream') return 'dreaming · what the dream read';
+  if (origin === 'dream') return 'from dreaming';
   // A slash command put this into the conversation; with a session behind it, it is that session's merged summary.
   if (origin === 'command') {
     const title = from ? sessions().find((m) => m.id === from)?.title : undefined;
@@ -592,8 +592,7 @@ function originLabel(origin: MessageOrigin, from?: string, note?: string): strin
 
 // ---------- Rewind: user bubbles carry their checkpoint (turn); Rewind goes back to it ----------
 
-const REWIND_DESCRIPTION =
-  'Files the agent wrote or edited after it go back to how they were, the later messages are removed, and the message returns to the composer. Changes made by commands are not undone.';
+const REWIND_DESCRIPTION = "Removes later messages and undoes the agent's file edits since then, but not changes made by commands.";
 
 const sameText = (a: string, b: string): boolean => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
 
@@ -708,12 +707,12 @@ async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
   if (turn === null || rewinding) return;
   const busy = () => {
     if (!running() && !compacting()) return false;
-    showInlineError(button.isConnected && button.offsetParent ? button : sendBtn, running() ? 'Rewinding has to wait for the run to finish (or stop it with Esc).' : 'Rewinding has to wait for the compaction to finish.');
+    showInlineError(button.isConnected && button.offsetParent ? button : sendBtn, running() ? 'Rewind after the run ends, or stop it with Esc.' : 'Rewind after compacting ends.');
     return true;
   };
   if (busy()) return;
   if (typeof oc.sessions?.rewind !== 'function') {
-    addSystemMessage('Rewinding needs the updated app. Restart Silo Harness and try again.', 'error');
+    addSystemMessage('Rewind needs the updated app. Restart Silo Harness.', 'error');
     return;
   }
   const ok = await confirmAction({ title: 'Rewind to this message?', quote: rewindQuote(msg), description: REWIND_DESCRIPTION, confirmLabel: 'Rewind', danger: true });
@@ -786,7 +785,7 @@ function updateSendButton(): void {
   sendFace = face;
   sendBtn.innerHTML = icon(face === 'stop' ? 'stop' : 'corner-down-left');
   sendBtn.classList.toggle('stop', face === 'stop');
-  const label = face === 'stop' ? 'Stop' : face === 'queue' ? 'Queue for the next step' : 'Send';
+  const label = face === 'stop' ? 'Stop' : face === 'queue' ? 'Queue message' : 'Send';
   sendBtn.setAttribute('aria-label', label);
   sendBtn.dataset.tip = label;
   sendBtn.dataset.tipKbd = face === 'stop' ? 'esc' : '↵';
@@ -875,20 +874,17 @@ async function addToInstructions(memory: string): Promise<void> {
   mentionPicker.close();
   const api = oc.instructions;
   if (!api || typeof api.append !== 'function') {
-    addSystemMessage("Adding to the project's instructions needs the updated app. Restart Silo Harness and try again.", 'error');
+    addSystemMessage('Adding instructions needs the updated app. Restart Silo Harness.', 'error');
     return;
   }
   const typed = inputEl.value;
   const cwd = config.workingDirectory;
   const file = instructionFiles.get(cwd);
   const images = tray.items().length;
-  const imageNote = images
-    ? ` ${images === 1 ? 'The attached image is' : `The ${images} attached images are`} not added; ${images === 1 ? 'it stays' : 'they stay'} in the composer.`
-    : '';
   const ok = await confirmAction({
     title: "Add to the project's instructions?",
     quote: { label: file, text: `- ${oneLine(memory)}`, mono: true },
-    description: `Silo Harness reads ${file} at the start of every run in this project.${imageNote}`,
+    description: images ? `${images === 1 ? 'The attached image stays' : 'Attached images stay'} in the composer.` : undefined,
     confirmLabel: 'Add',
     icon: 'file-plus',
   });
@@ -912,7 +908,7 @@ async function addToInstructions(memory: string): Promise<void> {
     statusLine.syncPlanHint();
   }
   const left = tray.items().length;
-  const imagesLeft = left ? ` · ${left === 1 ? 'the image was' : `${left} images were`} not added and ${left === 1 ? 'stays' : 'stay'} in the composer` : '';
+  const imagesLeft = left ? ` · ${left === 1 ? 'the image stays' : 'images stay'} in the composer` : '';
   const note = addSystemMessage(`Added to ${label}${imagesLeft}`, 'notice');
   if (res && typeof res.path === 'string' && res.path) note.querySelector('span')?.setAttribute('data-tip', res.path);
   if (!dialogOpen()) inputEl.focus();
@@ -934,7 +930,7 @@ async function sendComposer(): Promise<void> {
     if (running() || compacting()) {
       // Not sent anywhere: it goes back into the composer for after the run.
       restoreComposerText(text);
-      showInlineError(sendBtn, running() ? 'Compacting has to wait for the run to finish (or stop it with Esc).' : 'The conversation is already being compacted.');
+      showInlineError(sendBtn, running() ? 'Compact after the run ends, or stop it with Esc.' : 'Already compacting.');
       return;
     }
     endAssistant();
@@ -955,7 +951,7 @@ async function sendComposer(): Promise<void> {
     addNoticeCard(
       list.length
         ? `**Skills**\n\n${list.map((sk) => `- \`/${sk.name}\` ${sk.description || 'No description'} *(${sk.source})*`).join('\n')}`
-        : 'No skills found. Add a folder with a `SKILL.md` under `.silo-harness/skills` in your project or `~/.silo-harness/skills`.',
+        : 'No skills yet. Add one under `.silo-harness/skills`.',
     );
     return;
   }
@@ -1229,7 +1225,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       chatCards.flush();
       clearBrowsing();
       if (ev.reason === 'aborted') addSystemMessage('Interrupted.');
-      if (ev.reason === 'max_turns') addSystemMessage('Stopped: reached the max tool turns limit (raise it in Settings).');
+      if (ev.reason === 'max_turns') addSystemMessage('Stopped at the tool turn limit. Raise it in Settings.');
       if (ev.reason === 'plan') showPlanReady();
       {
         // Queued messages normally come back through queue_dropped before this; anything still listed goes back too.
@@ -1452,7 +1448,7 @@ async function refreshVisionNote(): Promise<void> {
   }
   const model = caps.model || currentModel() || 'This model';
   attachNote.innerHTML =
-    `${icon('triangle-alert', 14)}<span>${escapeHtml(model)} can't see images. Switch to a vision model such as llava, qwen2.5vl or gemma3 in ` +
+    `${icon('triangle-alert', 14)}<span>${escapeHtml(model)} can't see images. Choose a vision model in ` +
     `<button type="button" class="link-btn">Settings</button>.</span>`;
   attachNote.querySelector<HTMLButtonElement>('.link-btn')!.onclick = () => openSettings();
   attachNote.hidden = false;
@@ -1841,7 +1837,7 @@ async function addMcpCard(): Promise<void> {
   const api = mcpSource();
   let servers: McpServerInfo[] = mcpPanel.servers();
   let note: string | undefined;
-  if (!api) note = 'MCP servers need the updated app. Restart Silo Harness and try again.';
+  if (!api) note = 'MCP servers need the updated app. Restart Silo Harness.';
   else {
     try {
       servers = await api.list();
@@ -2134,8 +2130,8 @@ function noticeProjectSettings(info: SettingsInfo | null | undefined): void {
   const sets = [plain.slice(0, 4).join(', ') + (plain.length > 4 ? ` and ${plain.length - 4} more` : ''), hooks, env ? `${env} environment variable${env === 1 ? '' : 's'}` : ''].filter(Boolean).join(', plus ');
   addSystemMessage(
     f.changed
-      ? `This project's settings.json changed since you approved it (it sets ${sets}), so it is no longer applied. Review it in Settings → Configuration files.`
-      : `This project has a settings.json that sets ${sets}. It is not applied until you approve it: Settings → Configuration files.`,
+      ? `This project's settings.json changed and is off until you approve it in Settings → Configuration files.`
+      : `This project's settings.json sets ${sets}. It is off until you approve it in Settings → Configuration files.`,
     'notice',
   );
 }
@@ -2294,13 +2290,8 @@ document.addEventListener('drop', (e) => {
   if (paths.length) insertAtCursor(paths.join(' ') + ' ');
 });
 
-// ---------- Empty-state suggestions ----------
+// ---------- Filling the composer ----------
 
-const SUGGESTIONS = [
-  'Explain what this project does and how it is organised',
-  'Find the failing tests, fix them, and run the suite again',
-  'Open https://example.com in the browser and summarise the page',
-];
 /** Puts `text` in the composer, replacing what was there, with the caret at its end (Ask the agent… in Settings). */
 function fillComposer(text: string): void {
   // A page in the main column covers the composer: back to the session
@@ -2314,16 +2305,5 @@ function fillComposer(text: string): void {
   inputEl.focus();
   inputEl.setSelectionRange(text.length, text.length);
 }
-const suggestionsEl = $('empty-suggestions');
-suggestionsEl.innerHTML = SUGGESTIONS.map((s) => `<button type="button" class="suggestion">${escapeHtml(s)}</button>`).join('');
-suggestionsEl.querySelectorAll<HTMLButtonElement>('.suggestion').forEach((b, i) => {
-  b.onclick = () => {
-    mentionPicker.close();
-    inputEl.value = SUGGESTIONS[i];
-    autosize();
-    updateSendButton();
-    inputEl.focus();
-  };
-});
 
 export {};
