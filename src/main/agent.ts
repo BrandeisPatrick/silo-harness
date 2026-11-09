@@ -166,6 +166,8 @@ export class Agent {
   private sessionStarted = false;
   /** A hook said continue: false; the run stops after the current step */
   private hookStop: string | null = null;
+  /** Calls whose arguments hold a secret, by call id: the arguments as stored and shown (see Tool.shownArgs) */
+  private shownArgs = new Map<string, Record<string, unknown>>();
 
   constructor(
     private readonly getConfig: () => AppConfig,
@@ -689,7 +691,7 @@ export class Agent {
           }
         }
         const assistant: Msg = { role: 'assistant', content: text };
-        if (toolCalls.length) assistant.tool_calls = toolCalls;
+        if (toolCalls.length) assistant.tool_calls = await this.storedCalls(toolCalls, tools, ctx);
         this.store.append(this.session, assistant);
         if (text.trim()) lastText = text;
         this.markPrompt();
@@ -740,6 +742,7 @@ export class Agent {
       }
     } finally {
       this.currentTurn = null;
+      this.shownArgs.clear();
       this.repairTail();
       this.store.save(this.session);
       this.running = false;
@@ -1298,6 +1301,32 @@ export class Agent {
     this.emit({ type: 'session_changed', session: toMeta(session) });
   }
 
+  /**
+   * The tool calls as the transcript keeps them. A tool may hide an argument that holds a secret (browser_type's text
+   * for a password field): the stored call, the tool row and hooks get that version, the call runs on the real one.
+   */
+  private async storedCalls(calls: ToolCall[], tools: Tool[], ctx: ToolContext): Promise<ToolCall[]> {
+    const out: ToolCall[] = [];
+    for (const call of calls) {
+      const tool = tools.find((t) => t.name === call.function.name);
+      let shown: Record<string, unknown> | null = null;
+      if (tool?.shownArgs) {
+        try {
+          shown = await tool.shownArgs(JSON.parse(call.function.arguments || '{}'), ctx);
+        } catch {
+          shown = null;
+        }
+      }
+      if (!shown) {
+        out.push(call);
+        continue;
+      }
+      this.shownArgs.set(call.id, shown);
+      out.push({ ...call, function: { ...call.function, arguments: JSON.stringify(shown) } });
+    }
+    return out;
+  }
+
   private async execTool(call: ToolCall, tools: Tool[], ctx: ToolContext): Promise<ToolResult> {
     const name = call.function.name;
     let args: unknown = {};
@@ -1309,14 +1338,25 @@ export class Agent {
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
       return { content };
     }
+    // Arguments that hold a secret (Tool.shownArgs) reach the tool row and hooks hidden; the tool gets the real ones.
+    let shown = this.shownArgs.get(call.id);
+    this.shownArgs.delete(call.id);
+    const hiddenKeys = (): string[] => (shown ? Object.keys(shown).filter((k) => JSON.stringify(shown![k]) !== JSON.stringify((args as Record<string, unknown>)?.[k])) : []);
+    let hidden = hiddenKeys();
+    const visible = (a: unknown): unknown => {
+      if (!hidden.length || !a || typeof a !== 'object') return a;
+      const o = { ...(a as Record<string, unknown>) };
+      for (const k of hidden) if (k in o) o[k] = shown![k];
+      return o;
+    };
     if (name.startsWith('browser_') && !this.isForeground()) {
-      this.emit({ type: 'tool_start', id: call.id, name, args });
+      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
       this.emit({ type: 'tool_end', id: call.id, name, result: BROWSER_BACKGROUND, ok: false, durationMs: 0 });
       return { content: BROWSER_BACKGROUND };
     }
     const tool = tools.find((t) => t.name === name);
     if (!tool) {
-      this.emit({ type: 'tool_start', id: call.id, name, args });
+      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
       const content = `Error: unknown tool "${name}". Available tools: ${tools.map((t) => t.name).join(', ')}`;
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
       return { content };
@@ -1326,11 +1366,20 @@ export class Agent {
     // updatedInput replaces the arguments.
     const claudeName = claudeToolName(name);
     const names = toolMatchNames(name);
-    const toolInput = () => claudeToolInput(name, args, ctx.cwd);
-    const hookFields = () => ({ tool_name: claudeName, tool_input: toolInput(), tool_use_id: call.id, silo_tool_name: name, silo_tool_input: args });
+    const toolInput = () => claudeToolInput(name, visible(args), ctx.cwd);
+    const hookFields = () => ({ tool_name: claudeName, tool_input: toolInput(), tool_use_id: call.id, silo_tool_name: name, silo_tool_input: visible(args) });
     const pre = await this.fireHook('PreToolUse', hookFields(), { match: names, tool: { names, input: toolInput() }, signal: ctx.signal });
-    if (pre?.updatedInput && !pre.block && pre.permission !== 'deny') args = nativeToolInput(name, pre.updatedInput);
-    this.emit({ type: 'tool_start', id: call.id, name, args });
+    if (pre?.updatedInput && !pre.block && pre.permission !== 'deny') {
+      const real = args as Record<string, unknown>;
+      args = nativeToolInput(name, pre.updatedInput);
+      // A hook that hands the hidden value back as it saw it (•••) keeps the real one
+      if (hidden.length && args && typeof args === 'object') {
+        const o = args as Record<string, unknown>;
+        for (const k of hidden) if (JSON.stringify(o[k]) === JSON.stringify(shown![k])) o[k] = real?.[k];
+      }
+      hidden = hiddenKeys();
+    }
+    this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
     if (pre?.block || pre?.permission === 'deny') {
       const content = pre.block ?? `PreToolUse:${claudeName} hook denied this tool call${pre.permissionReason ? `: ${pre.permissionReason}` : '.'}`;
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
@@ -1376,6 +1425,13 @@ export class Agent {
     const durationMs = elapsed();
     // The same rule the saved transcript applies when it is shown again (sessions.ts).
     const ok = !FAILED_RESULT.test(result.content);
+    if (result.hiddenArgs && !hidden.length) {
+      // The call found a secret the look before it missed (the field turned into a password field meanwhile): hide it
+      // in the stored call too, which is this same object, and from the PostToolUse hooks.
+      shown = result.hiddenArgs;
+      hidden = hiddenKeys();
+      call.function.arguments = JSON.stringify(visible(args));
+    }
 
     // PostToolUse / PostToolUseFailure: what they say reaches the model with the result.
     const extra: string[] = hookContext.length ? [`${HOOK_NOTE_PREFIX}context: PreToolUse]\n${hookContext.join('\n\n')}`] : [];

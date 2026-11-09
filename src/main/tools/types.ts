@@ -57,6 +57,11 @@ export interface ToolResult {
   content: string;
   /** Optional data: URL of an image (PNG) produced by the tool, e.g. a screenshot */
   image?: string;
+  /**
+   * The call turned out to hold a secret in its arguments (browser_type into a password field): the arguments as the
+   * transcript and the PostToolUse hooks get them instead, with the secret hidden.
+   */
+  hiddenArgs?: Record<string, unknown>;
 }
 
 export interface Tool {
@@ -72,6 +77,12 @@ export interface Tool {
   scoped?: boolean;
   /** Set for tools an MCP server provides: which server, its own tool name and the annotations the approval rules use */
   mcp?: { server: string; scope: 'user' | 'project'; tool: string; readOnly: boolean; destructive: boolean };
+  /**
+   * Called before the call is stored or shown: the arguments as the transcript, the tool row and hooks get them when
+   * one holds a secret (browser_type's text for a password field), else null. The call itself runs on the real ones.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  shownArgs?(args: any, ctx: ToolContext): Promise<Record<string, unknown> | null>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   run(args: any, ctx: ToolContext): Promise<ToolResult>;
 }

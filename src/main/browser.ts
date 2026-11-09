@@ -2,6 +2,7 @@ import { app, BrowserWindow, WebContentsView } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState } from '../shared/types';
+import { fieldPhrase, frameCheckScript, inSafetyWorld, maskedState, SAFETY_WORLD, typedSecretMessage } from './browser-safety';
 
 const REF_ATTR = 'data-oc-ref';
 const REF_RE = /^ref_\d+$/;
@@ -30,9 +31,12 @@ const KEY_MAP: Record<string, string> = {
   end: 'End',
 };
 
-/** Runs inside the page: labels visible interactive elements with ref ids and returns a compact outline. */
+/**
+ * Runs inside the page (in the safety world, see browser-safety.ts): labels visible interactive elements with ref ids
+ * and returns a compact outline. A credential field's value is never in it: its line ends = "•••" or (empty).
+ */
 function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
-  return `(() => {
+  return inSafetyWorld(`
     const REF = ${JSON.stringify(REF_ATTR)};
     const MODE = ${JSON.stringify(mode)};
     const MAX = ${maxChars};
@@ -45,9 +49,9 @@ function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
       return s.visibility !== 'hidden' && s.display !== 'none';
     };
     const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-    const label = (el) => clean(
+    const label = (el, secret) => clean(
       el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
-      ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.value : '') || el.innerText || el.textContent
+      (secret ? '' : ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.value : '') || el.innerText || el.textContent)
     ).slice(0, 120);
     document.querySelectorAll('[' + REF + ']').forEach((e) => e.removeAttribute(REF));
     const lines = []; let n = 0; let size = 0;
@@ -72,10 +76,12 @@ function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
           el.setAttribute(REF, ref);
           const tag = el.tagName.toLowerCase();
           const type = el.getAttribute('type');
-          let desc = '[' + ref + '] ' + tag + (type ? '[type=' + type + ']' : '') + ' "' + label(el) + '"';
+          const secret = S.check(el);
+          let desc = '[' + ref + '] ' + tag + (type ? '[type=' + type + ']' : '') + ' "' + label(el, secret) + '"';
           if (tag === 'a') { const href = el.getAttribute('href') || ''; if (href && !href.startsWith('javascript:')) desc += ' -> ' + href.slice(0, 100); }
           if (tag === 'input' && (type === 'checkbox' || type === 'radio')) desc += el.checked ? ' (checked)' : ' (unchecked)';
-          if (tag === 'select') desc += ' = "' + clean(el.options[el.selectedIndex] && el.options[el.selectedIndex].text) + '"';
+          if (secret) desc += el.value ? ${JSON.stringify(maskedState('x'))} : ${JSON.stringify(maskedState(''))};
+          else if (tag === 'select') desc += ' = "' + clean(el.options[el.selectedIndex] && el.options[el.selectedIndex].text) + '"';
           push(desc);
         } else if (MODE === 'all' && /^H[1-6]$/.test(el.tagName)) {
           push(el.tagName.toLowerCase() + ': ' + clean(el.innerText).slice(0, 200));
@@ -89,7 +95,7 @@ function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
       }
     }
     return { text: lines.join('\\n'), count: n, truncated: size > MAX, title: document.title, url: location.href };
-  })()`;
+  `);
 }
 
 function rectScript(ref: string): string {
@@ -102,18 +108,59 @@ function rectScript(ref: string): string {
   })()`;
 }
 
-/** Runs inside the page: a human-readable description of a ref'd element. */
+/** Runs inside the page (in the safety world): a human-readable description of a ref'd element. */
 function describeScript(ref: string): string {
-  return `(() => {
+  return inSafetyWorld(`
     const el = document.querySelector('[${REF_ATTR}="${ref}"]');
     if (!el) return null;
     const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
     const tag = el.tagName.toLowerCase();
     const type = (el.getAttribute('type') || '').toLowerCase();
     const role = el.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'button' || type === 'submit' || type === 'button' ? 'button' : tag === 'select' ? 'combobox' : type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'input' || tag === 'textarea' || el.isContentEditable ? 'textbox' : tag);
-    const name = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || el.innerText || el.textContent || el.value).slice(0, 80);
+    const secret = S.check(el);
+    const name = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || (secret ? '' : el.innerText || el.textContent || el.value)).slice(0, 80);
     return { role, name };
-  })()`;
+  `);
+}
+
+/**
+ * Runs inside the page (in the safety world): the kind of credential the field about to be typed into holds, or
+ * null. It looks at the element with `ref` (and the field it leads to: a label's control, or the field inside a
+ * wrapper) and, with `active`, also at the focused one (through shadow roots and frames of the same site); a
+ * credential field found is remembered as one from now on. crossOrigin: the focus is in a frame from another site,
+ * which only that frame can answer for.
+ */
+function targetScript(ref: string | undefined, active: boolean): string {
+  return inSafetyWorld(`
+    const el = ${ref ? `document.querySelector('[${REF_ATTR}="${ref}"]')` : 'null'};
+    const FIELDS = 'input, textarea, select';
+    const inner = el && !el.matches(FIELDS) ? el.control || el.querySelector(FIELDS) || (el.shadowRoot && el.shadowRoot.querySelector(FIELDS)) || null : null;
+    const act = ${active ? 'S.deepActive()' : '{ el: null, crossOrigin: false }'};
+    const kind = (el && S.check(el)) || (inner && S.check(inner)) || (act.el && S.check(act.el)) || null;
+    for (const f of [el, inner, act.el]) if (f) S.mark(f);
+    return { kind, crossOrigin: !kind && act.crossOrigin };
+  `);
+}
+
+/**
+ * Runs inside the page (in the safety world), changing nothing: the kind of the visible credential field whose label
+ * or placeholder contains `field`, or null. browser_type asks before the call is stored, when earlier calls of the
+ * same reply have not run yet, so it must not renumber the refs as browser_read_page does.
+ */
+function fieldKindScript(field: string): string {
+  return inSafetyWorld(`
+    const q = ${JSON.stringify(field.trim().toLowerCase())};
+    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    for (const el of document.querySelectorAll('input, textarea, select')) {
+      const kind = S.check(el);
+      if (!kind) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const label = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt'));
+      if (q && label.includes(q)) return kind;
+    }
+    return null;
+  `);
 }
 
 /** Runs inside the page: briefly outlines the element the agent is about to act on, so the user can follow along. */
@@ -167,7 +214,54 @@ export class BrowserController {
       return { action: 'deny' };
     });
     wc.setUserAgent(wc.getUserAgent().replace(/ Electron\/[\d.]+/, '').replace(/ (?:silo|open)-harness\/[\d.]+/i, ''));
+    // Start watching each page's credential fields as soon as it is there (see pagePrelude in browser-safety.ts)
+    wc.on('dom-ready', () => void this.safety('return true;').catch(() => undefined));
     void wc.loadURL('about:blank');
+  }
+
+  /** Runs `body` in the page's safety world, which the page and browser_eval cannot see or change. */
+  private safety<T>(body: string): Promise<T> {
+    return this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: inSafetyWorld(body) }]) as Promise<T>;
+  }
+
+  /**
+   * The values of every filled credential field on the page (password, one-time code, card), for the browser tools
+   * to hide from what they return. Empty when the page cannot be asked.
+   */
+  async secretValues(): Promise<string[]> {
+    try {
+      const r = await this.safety<unknown>('return S.secrets();');
+      return Array.isArray(r) ? r.filter((v): v is string => typeof v === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The kind of credential the field typed into holds (see targetScript), or null. 'embedded': the focus is in a frame
+   * from another site that could not be asked, which counts as a credential field.
+   */
+  private async targetKind(ref: string | undefined, active: boolean): Promise<string | null> {
+    const r = await this.wc
+      .executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: targetScript(ref, active) }])
+      .catch(() => null) as { kind: string | null; crossOrigin: boolean } | null;
+    if (!r) return null;
+    if (r.kind || !r.crossOrigin) return r.kind;
+    const frame = this.wc.focusedFrame;
+    if (!frame || frame.frameTreeNodeId === this.wc.mainFrame.frameTreeNodeId) return 'embedded';
+    const inner = (await frame.executeJavaScript(frameCheckScript()).catch(() => undefined)) as { activeKind: string | null } | undefined;
+    return inner ? inner.activeKind : 'embedded';
+  }
+
+  /**
+   * Before the agent's text is typed (and stored), without changing the page: whether the field it names is a
+   * credential field (`ref`; else `field`, a credential field whose label or placeholder contains it; else the focused
+   * element). browser_type then keeps the text out of the transcript.
+   */
+  async credentialTarget(ref?: string, field?: string): Promise<string | null> {
+    if (ref && REF_RE.test(ref)) return this.targetKind(ref, false);
+    if (field) return ((await this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: fieldKindScript(field) }]).catch(() => null)) as string | null) ?? null;
+    return this.targetKind(undefined, true);
   }
 
   private get wc() {
@@ -390,7 +484,8 @@ export class BrowserController {
     return `Clicked ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}).${suffix}`;
   }
 
-  async type(ref: string | undefined, text: string, submit = false, clear = true): Promise<string> {
+  /** Types `text` into the field; `secret`: it was a credential field, so the result leaves the text out. */
+  async type(ref: string | undefined, text: string, submit = false, clear = true): Promise<{ content: string; secret: boolean }> {
     const before = this.state();
     let what = { role: 'the focused element', name: '' };
     if (ref) {
@@ -407,14 +502,18 @@ export class BrowserController {
         );
       }
     }
+    // A credential field's text is never echoed: the result says how much was typed, not what.
+    const secret = await this.targetKind(ref, true);
     await this.wc.insertText(text);
     if (submit) {
       await sleep(100);
       await this.pressKey('Enter');
     }
     const suffix = await this.settle(before);
-    return `Typed ${JSON.stringify(text)} into ${what.role}${what.name ? ` '${what.name}'` : ''}${ref ? ` (${ref})` : ''}${submit ? ' and pressed Enter' : ''}.${suffix}`;
+    if (secret) return { content: typedSecretMessage(secret, [...text].length, what.name, ref, submit) + suffix, secret: true };
+    return { content: `Typed ${JSON.stringify(text)} into ${what.role}${what.name ? ` '${what.name}'` : ''}${ref ? ` (${ref})` : ''}${submit ? ' and pressed Enter' : ''}.${suffix}`, secret: false };
   }
+
 
   async pressKey(combo: string): Promise<string> {
     const parts = combo.split('+').map((p) => p.trim()).filter(Boolean);
@@ -442,7 +541,36 @@ export class BrowserController {
     return `Scrolled ${direction}. Now at y=${Math.round(pos.y)} of ${pos.h} (viewport ${pos.vh}).`;
   }
 
+  /**
+   * A filled credential field a screenshot would show, described for the refusal: focused, or drawn in clear text
+   * (a one-time code, a card number, a password after "Show password") inside the viewport. Frames from other sites
+   * (a card form from a payment provider) are asked in their own world. null: nothing to hide.
+   */
+  private async exposedCredential(): Promise<{ kind: string; label: string; focused: boolean } | null> {
+    type Exposed = { kind: string; label: string; focused: boolean };
+    const own = ((await this.safety<Exposed[]>('return S.exposed();').catch(() => null)) ?? []) as Exposed[];
+    if (own.length) return own.find((e) => e.focused) ?? own[0];
+    const main = this.wc.mainFrame;
+    for (const frame of main.framesInSubtree) {
+      if (frame.frameTreeNodeId === main.frameTreeNodeId) continue;
+      const r = (await frame.executeJavaScript(frameCheckScript()).catch(() => null)) as { exposed: Exposed[] } | null;
+      if (r?.exposed?.length) return r.exposed.find((e) => e.focused) ?? r.exposed[0];
+    }
+    return null;
+  }
+
   async screenshot(): Promise<{ path: string; dataUrl: string; width: number; height: number }> {
+    // Refused rather than blanked: hiding the field in the capture would need the page repainted first, which a
+    // hidden or busy window does not promise. The image would go to the user, the transcript and maybe the model.
+    const exposed = await this.exposedCredential();
+    if (exposed) {
+      const what = `${fieldPhrase(exposed.kind)}${exposed.label ? ` ('${exposed.label}')` : ''}`;
+      throw new Error(
+        exposed.focused
+          ? `Screenshot refused: the focus is in ${what} that is filled in. Click somewhere else on the page (or press Tab) and take it again.`
+          : `Screenshot refused: ${what} on screen shows a filled-in credential in clear text. Scroll it out of view, or ask the user to look, instead.`,
+      );
+    }
     const image = await this.wc.capturePage();
     const png = image.toPNG();
     const dir = path.join(app.getPath('temp'), 'silo-harness-screenshots');
