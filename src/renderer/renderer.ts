@@ -65,6 +65,7 @@ import { createConnection } from './connection.js';
 import { createToolGroups } from './tool-groups.js';
 import { createApprovals } from './approvals.js';
 import { createTranscript } from './transcript.js';
+import { createSessionMessages } from './session-messages.js';
 import { createSessionsView } from './sessions-view.js';
 import { createStatusLine } from './status-line.js';
 import { createHeader } from './header.js';
@@ -294,8 +295,11 @@ const transcript = createTranscript({
 });
 const { scrollToBottom, showJump, addNode, bubbleImage, setTurn, turnOf, addUserMessage, addSystemMessage, addNoticeCard, addCompaction, assistantText, appendAssistantText, endAssistant, appendThinking, finishThinking } = transcript;
 
+// Messages between sessions: "Received message from …" and "Messaged …" lines (session-messages.ts)
+const sessionMessages = createSessionMessages({ messages: messagesEl, sessions: () => sessions(), openSession: (id) => void openFromPage(id), addUserRow: transcript.addUserRow });
+
 // Tool rows, and the runs of them that fold into one line (tool-groups.ts)
-const toolGroups = createToolGroups({ messages: messagesEl, config: () => config, running: () => running(), addNode, endAssistant, finishThinking, scrollToBottom });
+const toolGroups = createToolGroups({ messages: messagesEl, config: () => config, running: () => running(), addNode, endAssistant, finishThinking, scrollToBottom, ownRow: sessionMessages.ownRow });
 const { summaryMode, foldable, settleRun, refoldAll, endLiveRun, addToolCard, finishToolCard } = toolGroups;
 
 // Approval and question cards (approvals.ts)
@@ -446,7 +450,7 @@ async function artifactAction(card: ArtifactCard, action: ArtifactAction, button
 function isLastCard(el: HTMLElement): boolean {
   if (!el.isConnected) return false;
   for (let n = el.nextElementSibling; n; n = n.nextElementSibling) {
-    if (n.matches('.msg.user, .msg.assistant, .tool, .tool-group, .approval, .question-card, .plan-card, .artifact-card, .thinking')) return false;
+    if (n.matches('.msg.user, .msg.assistant, .tool, .tool-group, .session-msg, .approval, .question-card, .plan-card, .artifact-card, .thinking')) return false;
   }
   return true;
 }
@@ -500,7 +504,8 @@ function renderTranscript(items: TranscriptItem[]): void {
     else if (item.role === 'user') lastUser = i;
   });
   items.forEach((item, i) => {
-    if (item.role === 'user') {
+    if (item.role === 'user' && item.origin === 'session') sessionMessages.addReceived(item.text ?? '', item.from, item.turn);
+    else if (item.role === 'user') {
       const images = Array.isArray(item.images) ? item.images.filter((src): src is string => typeof src === 'string' && Boolean(src)) : [];
       const shown = unframe(item.origin, item.text ?? '');
       addUserMessage(shown.text, images.map((src) => ({ src })), Array.isArray(item.mentions) ? item.mentions : null, { turn: item.turn, originLabel: item.origin ? originLabel(item.origin, item.from, shown.note) : undefined, markdown: writtenByModel(item.origin), folded: item.origin === 'dream' });
@@ -580,7 +585,8 @@ function applyTurns(items: TranscriptItem[]): void {
   const turns = new Map<HTMLElement, number | undefined>();
   let end = bubbles.length - 1;
   for (let i = users.length - 1; i >= 0 && end >= 0; i--) {
-    const text = typeof users[i].text === 'string' ? users[i].text : '';
+    // A message from elsewhere is on screen without its frame
+    const text = unframe(users[i].origin, typeof users[i].text === 'string' ? users[i].text : '').text;
     let j = end;
     while (j >= 0 && !sameText(transcript.userText(bubbles[j]) ?? '', text)) j--;
     if (j < 0) continue;
@@ -1027,6 +1033,12 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       setRunning(true);
       break;
     case 'user_message': {
+      if (ev.origin === 'session') {
+        finishThinking();
+        endAssistant();
+        sessionMessages.addReceived(String(ev.text ?? ''), ev.from, ev.turn);
+        break;
+      }
       // A message typed here (or queued from here) already has its bubble; one from elsewhere gets one now, labelled.
       const shown = unframe(ev.origin, String(ev.text ?? ''));
       const label = originLabel(ev.origin, ev.from, shown.note);
@@ -1249,7 +1261,7 @@ function autosize(): void {
 /** ⌘↑ / ⌘↓: the messages sent in this session (the user bubbles on screen), newest first, then back to the draft */
 const composerHistory = createComposerHistory({
   input: inputEl,
-  entries: () => [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.user')].map((el) => transcript.userText(el) ?? ''),
+  entries: () => [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.user:not(.session-msg)')].map((el) => transcript.userText(el) ?? ''),
   onRecall: () => {
     hideSlashMenu();
     mentionPicker.close();

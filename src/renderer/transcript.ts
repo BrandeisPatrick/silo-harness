@@ -188,6 +188,20 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     return el;
   }
 
+  /**
+   * A user message a feature draws in a shape of its own (a message from another session is one quiet line): a user
+   * message all the same, so Copy, Rewind and the matching to transcript items work as for a bubble. `el` holds its
+   * own .msg-actions row (Copy; Rewind is added with the checkpoint).
+   */
+  function addUserRow(el: HTMLElement, text: string, turn?: number): HTMLElement {
+    el.classList.add('msg', 'user');
+    userTextByMessage.set(el, text);
+    setTurn(el, turn);
+    addNode(el);
+    scrollToBottom(true);
+    return el;
+  }
+
   function addSystemMessage(text: string, kind: 'info' | 'error' | 'notice' = 'info'): HTMLElement {
     const el = document.createElement('div');
     el.className = `msg system${kind === 'info' ? '' : ` ${kind}`}`;
@@ -395,6 +409,7 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     setTurn,
     turnOf,
     addUserMessage,
+    addUserRow,
     addSystemMessage,
     addNoticeCard,
     addCompaction,

@@ -1,0 +1,48 @@
+/* Messages between sessions (session-messages.ts): one quiet line each, measured like a folded tool line
+   (.tool-group > summary in styles.css: 24px, the body size, muted, the chevron after the words, turned when open).
+   The other session's name is a link: the reading colour, underlined. 16px between two of them and from what is
+   around them, as between any two blocks. */
+
+/* A received message is a user message (.msg.user, for Copy and Rewind) laid out as a line, not a bubble */
+.transcript > .msg.user.session-msg { display: block; margin-top: 0; margin-bottom: 16px; padding: 0; }
+.transcript > .session-msg.sent { margin-bottom: 16px; }
+
+.session-msg-line > summary, .session-msg.sent > summary {
+  list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0;
+  height: 24px; padding: 0 4px; border-radius: var(--r-control);
+  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); cursor: pointer; user-select: none;
+  transition: color 0.1s;
+}
+.session-msg-line > summary::-webkit-details-marker, .session-msg.sent > summary::-webkit-details-marker { display: none; }
+.session-msg-line > summary:hover, .session-msg.sent > summary:hover { color: var(--text-200); }
+.session-msg-line > summary:active, .session-msg.sent > summary:active { background: var(--pressed); }
+.session-msg-line > summary:focus-visible, .session-msg.sent > summary:focus-visible { outline-offset: 0; }
+.session-msg-line[open] > summary .tool-chevron, .session-msg.sent[open] > summary .tool-chevron { transform: rotate(90deg); }
+
+.session-msg-words { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The other session: a link while the window knows it, plain words once it is gone */
+.session-msg-link {
+  padding: 0 1px; border-radius: 3px; color: var(--text-100); cursor: pointer;
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  transition: text-decoration-color 0.1s;
+}
+.session-msg-link:hover { text-decoration-color: currentColor; }
+.session-msg-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.session-msg-name { color: var(--text-200); }
+
+/* Opened: the message as Markdown under a rule, like a thought; a sent one ends with how it was delivered */
+.session-msg-body {
+  margin: 8px 0 8px 4px; padding: 0 0 0 12px; border-left: 2px solid var(--border);
+  font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); overflow-wrap: anywhere;
+}
+.session-msg-body .md p, .session-msg-body .md ul, .session-msg-body .md ol, .session-msg-body .md blockquote, .session-msg-body .md .code-block, .session-msg-body .md .table-wrap { margin-bottom: 8px; }
+.session-msg-body .md h1, .session-msg-body .md h2, .session-msg-body .md h3 { margin: 12px 0 4px; font-size: var(--fs-ui); line-height: var(--lh-ui); }
+.session-msg-body .md > :first-child { margin-top: 0; }
+.session-msg-body .md > :last-child { margin-bottom: 0; }
+.session-msg-body > .tool-decision { margin-bottom: 8px; }
+.session-msg-note { margin-top: 8px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+
+/* Copy and Rewind on hover, at the right end of the line rather than above it */
+.msg.user.session-msg > .msg-actions { top: -3px; right: 0; }
