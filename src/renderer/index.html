@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="dreaming.css">
   <link rel="stylesheet" href="pages.css">
   <link rel="stylesheet" href="session-messages.css">
+  <link rel="stylesheet" href="auto-blocked.css">
 </head>
 <body>
   <div id="mod-background" class="mod-background" aria-hidden="true" hidden></div>
@@ -66,10 +67,8 @@
             <div class="empty" id="empty-state">
               <div class="empty-mark" id="empty-mark"></div>
               <h1 class="empty-title">What should we build?</h1>
-              <p class="empty-text">Silo Harness reads and edits code, runs commands and browses the web. Side effects ask first unless you change the mode. Type <kbd>@</kbd> to mention a file, <kbd>/</kbd> for skills.</p>
               <div id="setup-strip" class="setup-strip" role="list" aria-label="Finish setting up" hidden></div>
-              <div id="recent-dirs" class="recent-dirs" role="group" aria-labelledby="recent-dirs-label" hidden></div>
-              <div class="empty-suggestions" id="empty-suggestions"></div>
+              <div id="folder-row" class="folder-row" role="group" aria-label="Working folder" hidden></div>
             </div>
             <div id="task-list" class="task-list" role="region" aria-label="Task list" hidden></div>
           </div>
@@ -155,7 +154,7 @@
               <div class="browser-progress" id="browser-progress"></div>
             </div>
             <div id="browser-note" class="browser-note" role="status" hidden>
-              <span>The browser now keeps a profile of its own. Your sign-ins came along; a few sites may ask again.</span>
+              <span>The browser has its own profile now; some sites may ask you to sign in again.</span>
               <button type="button" id="browser-note-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
             </div>
             <!-- Find in page (browser-find.ts) and the blocked-popup strip (browser-pane.ts): pane chrome, above the page's slot -->
@@ -179,7 +178,7 @@
             <div id="browser-view" class="browser-view">
               <div class="browser-placeholder">
                 <span class="placeholder-icon" data-icon="globe" data-icon-size="20"></span>
-                <span>The built-in browser renders here. Ask the agent to open a page, or type a URL above.</span>
+                <span>Type a URL or ask the agent to open a page.</span>
               </div>
               <div id="browser-interstitial" class="browser-interstitial" role="alert" hidden></div>
             </div>
@@ -251,7 +250,7 @@
                 <label class="field"><span class="field-label">Scope</span><span class="select"><select id="mcp-scope"><option value="user">This Mac (settings)</option><option value="project">This project (.mcp.json)</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span></label>
               </div>
               <label class="field"><span class="field-label">Config</span><textarea id="mcp-spec" class="mono" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents&#10;https://mcp.example.com/mcp&#10;{&quot;command&quot;: &quot;npx&quot;, &quot;args&quot;: [&quot;-y&quot;, &quot;@scope/server&quot;]}"></textarea></label>
-              <p class="hint">A command line, a URL, or the JSON snippet from a server's README. A whole <code>{"mcpServers": …}</code> block adds every server in it, and then the name is optional.</p>
+              <p class="hint">A command, a URL or a JSON snippet. An <code>mcpServers</code> block adds every server in it.</p>
               <label class="field"><span class="field-label">Environment <span class="field-opt">· KEY=value per line, for command-line servers</span></span><textarea id="mcp-env" class="mono" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="GITHUB_TOKEN=ghp_…&#10;ONE_PER_LINE=value"></textarea></label>
               <div class="mcp-add-foot">
                 <div id="mcp-add-error" class="mcp-add-error" role="alert" hidden></div>

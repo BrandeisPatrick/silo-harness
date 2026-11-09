@@ -11,6 +11,7 @@ import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, pa
 import { actions, button, group, iconButton, row, sectionTitle, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
+import { recentlyBlocked } from '../auto-blocked.js';
 
 export function generalSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('General'));
@@ -21,12 +22,12 @@ export function generalSection(ctx: Ctx): Section {
   const awake = ctx.segField({
     id: 'keepAwake',
     title: 'Keep awake',
-    desc: 'Stop this Mac from sleeping while the agent works, or whenever Silo Harness is open.',
+    desc: 'Stop this Mac from sleeping.',
     keywords: 'sleep caffeinate power battery lid',
     field: 'keepAwake',
     choices: KEEP_AWAKE,
   });
-  const awakeBase = 'Stop this Mac from sleeping while the agent works, or whenever Silo Harness is open.';
+  const awakeBase = 'Stop this Mac from sleeping.';
   const showPower = (p: PowerStatus | null) => awake.setDesc(p?.active ? `${awakeBase} Keeping it awake now.` : awakeBase);
   onPush('power:changed', (p) => showPower(p));
 
@@ -43,14 +44,14 @@ export function generalSection(ctx: Ctx): Section {
     cli.el.hidden = false;
     const where = st.installed ? `silo → ${tildePath(st.command)}` : tildePath(st.command);
     const extra = !st.available
-      ? ' (not in this copy of the app)'
+      ? '. Not in this copy of the app.'
       : st.conflict
         ? `. ${st.conflict}`
         : st.installed && !st.onPath
-          ? `. Linked in ${tildePath(st.link.replace(/\/silo$/, ''))}, which is not on your PATH: add it to your shell profile, or run the command by its full path.`
+          ? `. ${tildePath(st.link.replace(/\/silo$/, ''))} is not on your PATH; add it in your shell profile.`
           : st.installed
             ? `. Linked as ${tildePath(st.link)}.`
-            : `. Install puts a link in ${tildePath(st.link.replace(/\/silo$/, ''))} (no administrator password).`;
+            : `. Install links it in ${tildePath(st.link.replace(/\/silo$/, ''))}.`;
     cli.setDesc(where + extra);
     cli.descEl.title = st.command;
     cliInstall.hidden = st.installed;
@@ -78,20 +79,20 @@ export function generalSection(ctx: Ctx): Section {
       ctx.segField({
         id: 'toolActivity',
         title: 'Tool activity',
-        desc: 'Fold each run of tool calls into one line that says what it did, or show every call as its own row.',
+        desc: 'How tool calls show in the conversation.',
         keywords: 'tools calls rows fold collapse group summary quiet verbose',
         field: 'toolActivity',
         choices: TOOL_ACTIVITY,
       }),
       cli,
-      ctx.switchField({ id: 'notifications', title: 'Notifications', desc: 'Notify when a run finishes or needs your approval while Silo Harness is in the background.', keywords: 'alert notify banner sound', field: 'notifications' }),
+      ctx.switchField({ id: 'notifications', title: 'Notifications', desc: 'Notify when a run finishes or needs approval.', keywords: 'alert notify banner sound', field: 'notifications' }),
       ctx.switchField({ id: 'autoTitles', title: 'Generated titles', desc: 'Name a session from its first exchange.', keywords: 'session name rename title', field: 'autoTitles' }),
-      ctx.textField({ id: 'maxTurns', inputId: 'maxTurns', title: 'Max tool turns', desc: 'How many tool calls one request may make before it stops and asks you to continue.', keywords: 'limit steps iterations', field: 'maxTurns', type: 'number', width: 96, parse: (t) => parseInteger(t, 1, 500) }),
+      ctx.textField({ id: 'maxTurns', inputId: 'maxTurns', title: 'Max tool turns', desc: 'Tool calls per request before it stops to ask.', keywords: 'limit steps iterations', field: 'maxTurns', type: 'number', width: 96, parse: (t) => parseInteger(t, 1, 500) }),
       ctx.textField({
         id: 'systemPromptExtra',
         inputId: 'systemPromptExtra',
         title: 'Extra system prompt',
-        desc: 'Added to every request: house rules, coding style, project context. Saved when you leave the field or press ⌘↵.',
+        desc: 'Added to every request.',
         keywords: 'instructions rules prompt',
         field: 'systemPromptExtra',
         multiline: true,
@@ -164,7 +165,7 @@ export function modelSection(ctx: Ctx): Section {
     id: 'provider',
     inputId: 'provider',
     title: 'Provider',
-    desc: 'Where Silo Harness sends model requests: Ollama on this Mac, a gateway such as Portkey, or any provider named in settings.json (OpenRouter, OpenAI, Anthropic, LM Studio, …).',
+    desc: 'Where model requests go.',
     keywords: 'ollama portkey gateway local cloud openrouter openai anthropic groq deepseek together lm studio service',
     field: 'provider',
     width: 300,
@@ -225,7 +226,7 @@ export function modelSection(ctx: Ctx): Section {
     },
   });
   namedModel.input.setAttribute('list', 'provider-models');
-  const namedRefresh = iconButton('refresh', 'Ask the service for its models', () => void refreshNamedModels());
+  const namedRefresh = iconButton('refresh', 'Refresh models', () => void refreshNamedModels());
   const modelRow = tag(row({ id: 'provider-model', title: 'Model', desc: '', keywords: 'llm model id' }, namedModel), 'named');
   modelRow.control.append(namedModels, namedRefresh);
   async function refreshNamedModels(): Promise<void> {
@@ -236,11 +237,11 @@ export function modelSection(ctx: Ctx): Section {
       const models = await ctx.call('providers.models', p.name);
       if (named().name !== p.name) return;
       namedModels.replaceChildren(...models.map((m) => h('option', { value: m })));
-      modelRow.setDesc(models.length ? `${models.length} model${models.length === 1 ? '' : 's'} offered${p.models.length ? ' (the entry\'s list first)' : ''}.` : 'The service listed no models; type the model id.');
+      modelRow.setDesc(models.length ? `${models.length} model${models.length === 1 ? '' : 's'} offered.` : 'The service listed no models. Type the model id.');
     } catch (err) {
       if (named().name !== p.name) return;
       namedModels.replaceChildren(...p.models.map((m) => h('option', { value: m })));
-      modelRow.setDesc(`Type the model id; the service could not be asked for its list (${ctx.cleanError(err)}).`);
+      modelRow.setDesc(`Couldn't list the models: ${ctx.cleanError(err)}. Type the model id.`);
     } finally {
       namedRefresh.classList.remove('spinning');
     }
@@ -248,7 +249,7 @@ export function modelSection(ctx: Ctx): Section {
   const windowRow = tag(row({ id: 'provider-contextWindow', title: 'Context window', desc: '', keywords: 'tokens size memory' }, null), 'named');
 
   const files = row(
-    { id: 'provider-files', title: 'More providers', desc: 'Add OpenRouter, OpenAI, Anthropic, Groq, DeepSeek, Together, LM Studio or any OpenAI-compatible service in settings.json, or from the command line: silo provider add <name> --type <type>. A coding agent can do it for you; see docs/configure.md.', keywords: 'add provider new openrouter openai anthropic groq deepseek together lmstudio cli command settings.json configure' },
+    { id: 'provider-files', title: 'More providers', desc: 'Add OpenAI-compatible services in settings.json.', keywords: 'add provider new openrouter openai anthropic groq deepseek together lmstudio cli command settings.json configure' },
     button('Open settings.json', () => void ctx.call('settings.open', 'user').catch((err) => files.problem(ctx.cleanError(err))), { icon: 'file' }),
   );
 
@@ -258,12 +259,12 @@ export function modelSection(ctx: Ctx): Section {
     if (p.builtIn) return;
     service.setDesc(serviceText(p));
     service.problem(p.error && p.key !== 'missing' ? p.error : null);
-    keyRow.setDesc(p.key === 'none' ? 'Not needed for this service.' : p.key === 'set' ? `Set (${p.keySource}). Keys are never shown here.` : `Not set. ${p.error ?? ''}`);
+    keyRow.setDesc(p.key === 'none' ? 'Not needed for this service.' : p.key === 'set' ? `Set from ${p.keySource}.` : `Not set. ${p.error ?? ''}`);
     keyRow.el.classList.toggle('invalid', p.key === 'missing');
     if (document.activeElement !== namedModel.input) namedModel.set(p.model);
     const owner = p.owner;
-    modelRow.setDesc(owner ? `Defined in ${owner === 'project' ? "the project's" : 'your'} settings.json; a model chosen here lasts until the file is read again.` : 'The model to run, as the service names it.');
-    windowRow.setDesc(`${p.contextWindow.toLocaleString('en-US')} tokens${p.maxOutput ? `, replies up to ${p.maxOutput.toLocaleString('en-US')}` : ''}. Set contextWindow in the entry when the model's is different.`);
+    modelRow.setDesc(owner ? `Set in ${owner === 'project' ? "the project's" : 'your'} settings.json. A choice here lasts until the file reloads.` : '');
+    windowRow.setDesc(`${p.contextWindow.toLocaleString('en-US')} tokens${p.maxOutput ? `, replies up to ${p.maxOutput.toLocaleString('en-US')}` : ''}.`);
     if (p.name !== lastNamed) {
       lastNamed = p.name;
       namedModels.replaceChildren(...p.models.map((m) => h('option', { value: m })));
@@ -274,12 +275,12 @@ export function modelSection(ctx: Ctx): Section {
   // Ollama
   const modelList = h('datalist', { id: 'ollama-models' });
   const ollamaModel = tag(
-    ctx.textField({ id: 'ollama-model', inputId: 'ollama-model', title: 'Model', desc: 'A model that supports tool calling, such as qwen3:8b.', keywords: 'tag llm', pill: 'Ollama', field: 'ollama.model', placeholder: 'qwen3:8b', parse: parseText }),
+    ctx.textField({ id: 'ollama-model', inputId: 'ollama-model', title: 'Model', desc: 'A model with tool calling.', keywords: 'tag llm', pill: 'Ollama', field: 'ollama.model', placeholder: 'qwen3:8b', parse: parseText }),
     'ollama',
   );
   const modelInput = ollamaModel.control.querySelector('input')!;
   modelInput.setAttribute('list', 'ollama-models');
-  const refreshBtn = iconButton('refresh', 'Refresh the local models', () => void refreshModels());
+  const refreshBtn = iconButton('refresh', 'Refresh models', () => void refreshModels());
   ollamaModel.control.append(modelList, refreshBtn);
 
   async function refreshModels(): Promise<void> {
@@ -288,9 +289,9 @@ export function modelSection(ctx: Ctx): Section {
     try {
       const models = await window.oc.listOllamaModels();
       modelList.innerHTML = models.map((m) => `<option value="${escapeHtml(m)}">`).join('');
-      ollamaModel.setDesc(models.length ? `${models.length} local model${models.length === 1 ? '' : 's'}: ${models.slice(0, 6).join(', ')}${models.length > 6 ? ', …' : ''}` : 'Ollama is running but has no models. Try: ollama pull qwen3:8b');
+      ollamaModel.setDesc(models.length ? `${models.length} local model${models.length === 1 ? '' : 's'}: ${models.slice(0, 6).join(', ')}${models.length > 6 ? ', …' : ''}` : 'Ollama has no models. Run ollama pull qwen3:8b.');
     } catch (err) {
-      ollamaModel.setDesc(`Could not reach Ollama (${ctx.cleanError(err)}). Start it with: ollama serve`);
+      ollamaModel.setDesc(`Couldn't reach Ollama: ${ctx.cleanError(err)}. Run ollama serve.`);
     } finally {
       refreshBtn.classList.remove('spinning');
     }
@@ -298,14 +299,14 @@ export function modelSection(ctx: Ctx): Section {
 
   const ollama = group(
     null,
-    tag(ctx.textField({ id: 'ollama-baseURL', inputId: 'ollama-baseURL', title: 'Base URL', desc: 'The OpenAI-compatible endpoint of your Ollama server.', keywords: 'endpoint address server host', pill: 'Ollama', field: 'ollama.baseURL', placeholder: 'http://localhost:11434/v1', mono: true, width: 260, parse: parseUrl }), 'ollama'),
+    tag(ctx.textField({ id: 'ollama-baseURL', inputId: 'ollama-baseURL', title: 'Base URL', keywords: 'endpoint address server host', pill: 'Ollama', field: 'ollama.baseURL', placeholder: 'http://localhost:11434/v1', mono: true, width: 260, parse: parseUrl }), 'ollama'),
     ollamaModel,
     tag(
       ctx.textField({
         id: 'ollama-numCtx',
         inputId: 'ollama-numCtx',
         title: 'Context size',
-        desc: "Tokens of context Ollama is asked for. Its own default, 4096, is too small for agent work.",
+        desc: 'Tokens of context to ask Ollama for.',
         keywords: 'num_ctx tokens window memory',
         pill: 'Ollama',
         field: 'ollama.numCtx',
@@ -321,7 +322,7 @@ export function modelSection(ctx: Ctx): Section {
         id: 'ollama-think',
         inputId: 'ollama-think',
         title: 'Thinking',
-        desc: 'For models that can reason before they answer (qwen3, deepseek-r1, gpt-oss).',
+        desc: 'For models that reason before answering.',
         keywords: 'reasoning think',
         pill: 'Ollama',
         field: 'ollama.think',
@@ -340,14 +341,14 @@ export function modelSection(ctx: Ctx): Section {
   const pk = (o: Parameters<Ctx['textField']>[0]) => tag(ctx.textField({ pill: 'Gateway', mono: true, width: 260, ...o }), 'portkey');
   const gateway = group(
     null,
-    pk({ id: 'portkey-baseURL', inputId: 'portkey-baseURL', title: 'Base URL', desc: 'The gateway endpoint: Portkey, or a gateway you host.', keywords: 'endpoint address server host', field: 'portkey.baseURL', placeholder: 'https://api.portkey.ai/v1', parse: parseUrl }),
-    pk({ id: 'portkey-apiKey', inputId: 'portkey-apiKey', title: 'API key', desc: 'Your gateway key. Without one, Silo Harness uses PORTKEY_API_KEY from the environment.', keywords: 'token secret password credential', field: 'portkey.apiKey', type: 'password', placeholder: 'pk-…', parse: parseText }),
-    pk({ id: 'portkey-model', inputId: 'portkey-model', title: 'Model', desc: 'A model-catalog id like @openai/gpt-4o-mini, or a plain id with a virtual key or provider below.', keywords: 'llm', field: 'portkey.model', placeholder: '@openai/gpt-4o-mini', parse: parseText }),
+    pk({ id: 'portkey-baseURL', inputId: 'portkey-baseURL', title: 'Base URL', keywords: 'endpoint address server host gateway portkey', field: 'portkey.baseURL', placeholder: 'https://api.portkey.ai/v1', parse: parseUrl }),
+    pk({ id: 'portkey-apiKey', inputId: 'portkey-apiKey', title: 'API key', desc: 'Empty uses PORTKEY_API_KEY from the environment.', keywords: 'token secret password credential', field: 'portkey.apiKey', type: 'password', placeholder: 'pk-…', parse: parseText }),
+    pk({ id: 'portkey-model', inputId: 'portkey-model', title: 'Model', desc: 'A catalog id, or a plain id with routing below.', keywords: 'llm', field: 'portkey.model', placeholder: '@openai/gpt-4o-mini', parse: parseText }),
     pk({
       id: 'portkey-contextWindow',
       inputId: 'portkey-contextWindow',
       title: 'Context window',
-      desc: "The model's window in tokens. The gateway does not report it; the context meter and auto-compaction go by it.",
+      desc: "The model's window, in tokens.",
       keywords: 'tokens size memory',
       field: 'portkey.contextWindow',
       type: 'number',
@@ -363,9 +364,9 @@ export function modelSection(ctx: Ctx): Section {
     'div',
     { class: 'sp-advanced-rows' },
     pk({ id: 'portkey-virtualKey', inputId: 'portkey-virtualKey', title: 'Virtual key', desc: 'Sent as x-portkey-virtual-key.', keywords: 'advanced routing', field: 'portkey.virtualKey', placeholder: 'Optional', parse: parseText }).el,
-    pk({ id: 'portkey-provider', inputId: 'portkey-provider', title: 'Provider slug', desc: 'Sent as x-portkey-provider, e.g. openai, anthropic, groq.', keywords: 'advanced routing', field: 'portkey.provider', placeholder: 'Optional', parse: parseText }).el,
+    pk({ id: 'portkey-provider', inputId: 'portkey-provider', title: 'Provider slug', desc: 'Sent as x-portkey-provider.', keywords: 'advanced routing', field: 'portkey.provider', placeholder: 'Optional', parse: parseText }).el,
     pk({ id: 'portkey-providerApiKey', inputId: 'portkey-providerApiKey', title: 'Provider API key', desc: "That provider's own key, sent as Authorization: Bearer.", keywords: 'advanced routing token secret', field: 'portkey.providerApiKey', type: 'password', placeholder: 'Optional', parse: parseText }).el,
-    pk({ id: 'portkey-configId', inputId: 'portkey-configId', title: 'Config ID', desc: 'A Portkey config for routing, fallbacks and caching (x-portkey-config).', keywords: 'advanced routing fallback cache', field: 'portkey.configId', placeholder: 'pc-…', parse: parseText }).el,
+    pk({ id: 'portkey-configId', inputId: 'portkey-configId', title: 'Config ID', desc: 'A Portkey config, sent as x-portkey-config.', keywords: 'advanced routing fallback cache', field: 'portkey.configId', placeholder: 'pc-…', parse: parseText }).el,
   );
   const advanced = h('div', { class: 'sp-advanced' }, h('div', { class: 'sp-disclosure-row' }, advancedToggle), advancedRows);
   advancedToggle.addEventListener('click', () => {
@@ -410,22 +411,23 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
     id: 'permissionMode',
     inputId: 'permissionMode',
     title: 'Default mode',
-    desc: '',
+    desc: 'The mode each session starts in.',
     keywords: 'ask accept edits auto plan bypass approval approve',
     field: 'permissionMode',
     width: 340,
     choices: order.map((m) => ({ value: m, label: `${SHORT[m]} · ${MODES[m].desc}` })),
     read: (v) => (order.includes(v as PermissionMode) ? (v as PermissionMode) : 'ask'),
   });
-  const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Answers you gave with "Always allow … in this project". Matching actions run without an approval card.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
+  const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Actions you always allow in this project.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
   rulesEl.classList.add('sp-embedded');
-  el.append(group(null, mode), group('This project', rules));
+  const blocked = recentlyBlocked(ctx);
+  el.append(group(null, mode), group('This project', rules), group('Recently blocked', blocked.el));
   return {
     id: 'permissions',
     el,
-    sync(cfg) {
-      const m = order.includes(cfg.permissionMode) ? cfg.permissionMode : 'ask';
-      mode.setDesc(`${MODES[m].hint}. The mode chip in the composer changes it for now; this is where it starts.`);
+    async load() {
+      await blocked.refresh();
+      return 'ok';
     },
   };
 }
@@ -435,12 +437,12 @@ export function contextSection(ctx: Ctx): Section {
   el.append(
     group(
       null,
-      ctx.switchField({ id: 'autoCompact', title: 'Auto-compact', desc: 'Summarise the conversation on its own when it nears the context window.', keywords: 'compaction summary summarise', field: 'autoCompact' }),
+      ctx.switchField({ id: 'autoCompact', title: 'Auto-compact', desc: 'Summarise the conversation when the context fills up.', keywords: 'compaction summary summarise', field: 'autoCompact' }),
       ctx.selectField({
         id: 'compactThreshold',
         inputId: 'compactThreshold',
         title: 'Compact at',
-        desc: 'How full the context window gets before the conversation is summarised.',
+        desc: 'How full the context gets before summarising.',
         keywords: 'threshold percent compaction',
         field: 'compactThreshold',
         width: 120,
@@ -450,13 +452,13 @@ export function contextSection(ctx: Ctx): Section {
       ctx.segField({
         id: 'toolSet',
         title: 'Tools offered to the model',
-        desc: 'Every tool is described to the model in every request. Essential keeps files, shell, browser, terminal, tasks, artifacts and images; All adds scheduled tasks, sub-sessions and mod authoring. Automatic offers all of them when the context window is at least 32k tokens.',
-        keywords: 'tools schedule sub-session subagent mods small window local model overhead',
+        desc: 'Each tool costs tokens; Essential suits small context windows.',
+        keywords: 'tools schedule sub-session subagent mods small window local model overhead essential all automatic',
         field: 'toolSet',
         choices: TOOL_SET,
       }),
-      ctx.switchField({ id: 'pruneToolResults', title: 'Trim old tool output', desc: 'Before summarising, shorten old tool results the model no longer needs word for word.', keywords: 'prune shorten compaction', field: 'pruneToolResults' }),
-      ctx.switchField({ id: 'sendScreenshotsToModel', title: 'Send browser screenshots to the model', desc: 'Attach browser screenshots to the conversation as images. Needs a vision-capable model.', keywords: 'vision images browser', field: 'sendScreenshotsToModel' }),
+      ctx.switchField({ id: 'pruneToolResults', title: 'Trim old tool output', desc: 'Shorten old tool results before summarising.', keywords: 'prune shorten compaction', field: 'pruneToolResults' }),
+      ctx.switchField({ id: 'sendScreenshotsToModel', title: 'Send browser screenshots to the model', desc: 'Needs a model with vision.', keywords: 'vision images browser', field: 'sendScreenshotsToModel' }),
     ),
   );
   return { id: 'context', el };

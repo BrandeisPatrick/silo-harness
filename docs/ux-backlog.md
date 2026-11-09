@@ -18,6 +18,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.10.0 | The Browser pane as a browser: its own profile with sign-ins carried over, tabs, sign-in popups as cards, per-site approval for the agent, sensitive sites, credentials and CAPTCHAs refused, purchases and accounts asking, a permission bar, certificate warnings, downloads, find, zoom, a context menu, Settings → Browser; Delete all sessions and Delete all custom mods | released 2026-11-09 |
 | 0.11.0 | Cards in the chat for pull requests (from gh), documents and artifacts, as in Claude Code; messages between sessions as one quiet line in each conversation, with no user authority; the README opens with a demo | released 2026-11-09 |
 | 0.11.1 | Fix: tool-call ids unique within a session, results paired with their own call (Ollama reused ids across runs) | released 2026-11-09 |
+| 0.12.0 | Auto mode with a safety-check model (blocks as a quiet line with Allow, pause after repeated blocks, fail closed), much less text across the app, the ~/Documents/Silo default folder and a folder menu on the welcome screen | released 2026-11-09 |
 
 ## Done in earlier rounds
 

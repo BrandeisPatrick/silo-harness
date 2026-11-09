@@ -11,7 +11,7 @@ const { McpManager } = require(path.join(projectDir, 'dist/main/mcp.js'));
 const compact = require(path.join(projectDir, 'dist/main/compact.js'));
 const { loadInstructions, instructionsPrompt } = require(path.join(projectDir, 'dist/main/instructions.js'));
 const { titlePrompt } = require(path.join(projectDir, 'dist/main/titles.js'));
-const { startMock } = require('./support/mock-model.js');
+const { startMock, classifierReply } = require('./support/mock-model.js');
 const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
 
 let failures = 0;
@@ -97,17 +97,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('C: plan mode: echo offered, add not', names.includes('mcp__test__echo') && !names.includes('mcp__test__add') && !names.includes('mcp__test__remove_item'));
   check('C: plan mode: read-only MCP tool ran', toolEnds()[0].result === 'echo: plan' && approvals().length === 0);
 
-  // ---- D: auto mode: destructive asks with a reason, others run ----
+  // ---- D: auto mode: MCP calls that are not read-only go to the safety check; no card ----
   reset();
   config = { ...config, permissionMode: 'auto' };
   agent.session = store.create(); // fresh session: no "allow test" from B
   approvalPolicy = () => [false, false];
   state.replies.push({ toolCalls: [call('mcp__test__add', { a: 1, b: 1 }), call('mcp__test__remove_item', { id: 'x1' })] });
+  state.replies.push(classifierReply('allow', '[Local Work] adds two numbers'));
+  state.replies.push(classifierReply('block', '[Destructive] removes an item'));
   state.replies.push({ content: 'ok' });
   await agent.run('auto');
   ends = toolEnds();
-  check('D: auto mode runs a non-destructive MCP tool without asking', ends[0].result === '2');
-  check('D: destructive MCP tool asks with reason, denied → not permitted', approvals().length === 1 && approvals()[0].reason === 'destructive MCP tool' && approvals()[0].alwaysLabel === 'Allow test for this session' && /^Not permitted/.test(ends[1].result) && !ends[1].ok);
+  check('D: auto mode runs an MCP tool the check allows, without a card', ends[0].result === '2');
+  check('D: a destructive MCP tool the check blocks: the reason, no card', approvals().length === 0 && ends[1].result.startsWith('Blocked by Auto mode: [Destructive] removes an item.') && !ends[1].ok, ends[1]);
 
   // ---- E: image and error results, bypass mode ----
   reset();
@@ -200,7 +202,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.replies.push({ content: 'end' });
   await agent.run('go');
   // Changed on purpose: over the limit, a failed summary falls back (here: nothing worth dropping) and says so in a notice.
-  check('H: failed auto compaction tried once per run', state.requests.filter((q) => q.url === '/api/chat' && q.payload.stream === false).length === 1 && events.filter((e) => e.type === 'compact_end').length === 1 && events.filter((e) => e.type === 'error' && e.kind === 'notice' && /summary could not be produced/.test(e.message)).length === 1 && events.find((e) => e.type === 'run_end').reason === 'done', events.filter((e) => e.type === 'error'));
+  check('H: failed auto compaction tried once per run', state.requests.filter((q) => q.url === '/api/chat' && q.payload.stream === false).length === 1 && events.filter((e) => e.type === 'compact_end').length === 1 && events.filter((e) => e.type === 'error' && e.kind === 'notice' && /Couldn't summarise/.test(e.message)).length === 1 && events.find((e) => e.type === 'run_end').reason === 'done', events.filter((e) => e.type === 'error'));
   state.summaryFails = false;
   // auto-compact off
   reset();

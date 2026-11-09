@@ -3,7 +3,7 @@
   "id": "skills",
   "name": "Skills",
   "version": "1.0.0",
-  "description": "The installed skills and how often each was used, in this session or all time.",
+  "description": "Installed skills and how often each was used.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "sparkles",

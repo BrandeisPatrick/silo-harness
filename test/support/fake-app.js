@@ -58,6 +58,10 @@ function fakeApp(projectDir, opts = {}) {
       calls.push(['respondApproval', id, ok, always, scope]);
       return opts.onApproval ? opts.onApproval(id, ok, always, scope) : id !== 'gone';
     },
+    allowBlocked: (sessionId, id) => {
+      calls.push(['allowBlocked', sessionId, id]);
+      return id === 'gone' ? { ok: false, error: 'This block is from before the app started; ask the agent to try again.' } : { ok: true };
+    },
     respondQuestion: (id, answers) => {
       calls.push(['respondQuestion', id, answers]);
       return id !== 'gone';

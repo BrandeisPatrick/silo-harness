@@ -17,6 +17,7 @@ import type { ProvidersRpc } from './providers';
 import type { HooksEvents, HooksRpc } from './hooks';
 import type { BrowserEvents, BrowserRpc } from './browser';
 import type { ChatCardsRpc } from './chat-cards';
+import type { AutoModeRpc } from './auto-mode';
 
 export interface CoreRpc {
   'commands.list': () => CommandInfo[];
@@ -24,6 +25,8 @@ export interface CoreRpc {
   'sessions.live': (id: string) => LiveState;
   /** A session's transcript without bringing it on screen (sessions.switch does both) */
   'sessions.transcript': (id: string) => TranscriptItem[];
+  /** The folder a session works in when none was chosen (~/Documents/Silo), made again if it is missing */
+  'config.defaultWorkDir': () => string;
 }
 
 export interface CoreEvents {
@@ -33,5 +36,5 @@ export interface CoreEvents {
   'sessions:show': string;
 }
 
-export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc & ChatCardsRpc;
+export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc & ChatCardsRpc & AutoModeRpc;
 export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents & BrowserEvents;

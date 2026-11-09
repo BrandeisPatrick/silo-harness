@@ -167,7 +167,7 @@ export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; 
       }
       if (chunk.done_reason === 'length') o.onWarning?.('The model hit its output limit; the reply may be cut off.');
       if (chunk.prompt_eval_count && chunk.prompt_eval_count >= o.numCtx - 64) {
-        o.onWarning?.(`The prompt filled the ${o.numCtx}-token context window; older messages were likely dropped. Start a new chat or raise the Ollama context size in Settings.`);
+        o.onWarning?.(`The prompt filled the ${o.numCtx}-token context, so older messages were likely lost. Raise it in Settings.`);
       }
     }
   };

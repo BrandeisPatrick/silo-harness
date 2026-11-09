@@ -104,7 +104,7 @@
   <div class="wrap">
     <span class="h-muted summary" id="summary"></span>
     <span class="actions">
-      <button class="h-btn ghost sm" id="page" type="button" title="Open the Scheduled tasks page, with each task's runs">Open page</button>
+      <button class="h-btn ghost sm" id="page" type="button" title="Open the Scheduled page">Open page</button>
       <button class="h-btn primary sm" id="new" type="button"></button>
     </span>
   </div>
@@ -141,10 +141,10 @@
   const LAST = {
     running: { label: 'Running', cls: 'accent', icon: '<span class="h-spin"></span>', tip: 'Running now' },
     ok: { label: 'Ran', cls: 'success', icon: ICON.check, tip: 'The last run finished' },
-    error: { label: 'Failed', cls: 'danger', icon: ICON.x, tip: 'The last run ended with an error' },
+    error: { label: 'Failed', cls: 'danger', icon: ICON.x, tip: 'The last run failed' },
     stopped: { label: 'Stopped', cls: '', icon: ICON.x, tip: 'The last run was stopped' },
-    skipped: { label: 'Skipped', cls: '', icon: ICON.skip, tip: 'Skipped: the previous run was still going' },
-    missed: { label: 'Missed', cls: 'warn', icon: ICON.moon, tip: 'Missed: the app was closed at the time' },
+    skipped: { label: 'Skipped', cls: '', icon: ICON.skip, tip: 'The previous run was going' },
+    missed: { label: 'Missed', cls: 'warn', icon: ICON.moon, tip: 'The app was closed' },
   };
   const DAY = 86400000;
 
@@ -218,7 +218,7 @@
 
   function nextText(s) {
     if (finished(s)) return { text: s.lastRunAt ? `ran once, ${rel(s.lastRunAt)}` : 'done', title: s.lastRunAt ? exact(s.lastRunAt) : '' };
-    if (!s.enabled) return { text: 'paused', title: 'Turned off: it will not run until you turn it on' };
+    if (!s.enabled) return { text: 'paused', title: '' };
     if (s.lastStatus === 'running' && !s.nextRunAt) return { text: 'running now', title: '' };
     if (!s.nextRunAt) return { text: 'will not run again', title: '' };
     return { text: `next run ${rel(s.nextRunAt)}`, title: exact(s.nextRunAt) };
@@ -231,7 +231,7 @@
     const main = el('div', 'main');
     const name = el('div', 'name');
     name.appendChild(el('span', '', s.name || 'Untitled'));
-    if (s.createdBy === 'agent') { const c = el('span', 'h-chip', 'By the agent'); c.title = 'The agent created this; you approved it'; name.appendChild(c); }
+    if (s.createdBy === 'agent') name.appendChild(el('span', 'h-chip', 'By the agent'));
     main.appendChild(name);
 
     const meta = el('div', 'meta');
@@ -244,7 +244,7 @@
     if (s.target === 'session' && s.sessionId) {
       const b = el('button', '', 'into a session');
       b.type = 'button';
-      b.title = 'Each run arrives in that session as a follow-up. Click to open it.';
+      b.title = 'Open the session';
       b.onclick = () => openSession(s.sessionId);
       add(b);
     } else add(el('span', '', 'new session each run'));
@@ -259,7 +259,7 @@
       sw.checked = !!s.enabled;
       sw.disabled = busy.has(s.id);
       sw.setAttribute('aria-label', `${s.name}: ${s.enabled ? 'on' : 'off'}`);
-      sw.title = s.enabled ? 'On: runs on its schedule' : 'Off: will not run';
+      sw.title = s.enabled ? 'On' : 'Off';
       sw.onchange = () => toggle(s, sw.checked);
       top.appendChild(sw);
     }
@@ -285,7 +285,7 @@
     run.innerHTML = ICON.play;
     run.appendChild(document.createTextNode('Run now'));
     run.disabled = busy.has(s.id) || s.lastStatus === 'running';
-    run.title = s.lastStatus === 'running' ? 'It is running' : 'Run it once now, whatever its schedule';
+    run.title = s.lastStatus === 'running' ? 'Running now' : 'Run once now';
     run.onclick = () => runNow(s);
     bottom.appendChild(run);
     bottom.appendChild(iconButton(ICON.pencil, `Edit ${s.name}`, () => openForm(s)));
@@ -296,7 +296,7 @@
       const c = el('div', 'confirm');
       c.setAttribute('role', 'alertdialog');
       c.setAttribute('aria-label', 'Delete this scheduled task');
-      c.appendChild(el('span', '', `Delete “${s.name}”? It will not run again.`));
+      c.appendChild(el('span', '', `Delete “${s.name}”? This cannot be undone.`));
       const btns = el('div', 'btns');
       const cancel = el('button', 'h-btn sm cancel', 'Cancel');
       cancel.type = 'button';
@@ -329,10 +329,8 @@
     const box = $('intro');
     box.innerHTML = `<div class="mark">${ICON.clock}</div>`;
     const body = el('div');
-    body.appendChild(el('h2', '', 'Scheduled tasks'));
-    body.appendChild(el('p', '', 'A scheduled task sends a prompt later or on a rhythm: once at a time you pick, every so many minutes, hours or days, or on a cron schedule. Each run starts a new session, or arrives in this one as a follow-up.'));
-    body.appendChild(el('p', '', 'They run only while Silo Harness is open and your Mac is awake. A run missed while it was closed or asleep happens once when it is back, if it was due less than a day before; an older one is marked missed.'));
-    body.appendChild(el('p', '', 'The agent can schedule tasks too; each one it creates is shown to you for approval first.'));
+    body.appendChild(el('h2', '', 'No scheduled tasks'));
+    body.appendChild(el('p', '', 'Run a prompt on a schedule.'));
     const b = el('button', 'h-btn primary sm');
     b.type = 'button';
     b.innerHTML = ICON.plus;
@@ -380,7 +378,7 @@
       schedules = (r && Array.isArray(r.schedules)) ? r.schedules : [];
       loadError = null;
     } catch (e) {
-      loadError = e.code === 'permission' ? 'Scheduled is not allowed to read scheduled tasks. Turn on its “schedules” permission in Settings → Mods.' : `Could not load the scheduled tasks: ${e.message}`;
+      loadError = e.code === 'permission' ? 'Not allowed to read tasks. Turn on “schedules” in Settings → Mods.' : `Couldn't load tasks: ${e.message}`;
     }
     render();
   }
@@ -499,7 +497,7 @@
     if (w.error || !w.when) return '';
     if (w.when.kind === 'at') { const t = Date.parse(w.when.at); return t > Date.now() ? `Runs once, ${rel(t)} (${exact(t)}).` : ''; }
     if (w.when.kind === 'every') { const t = Date.now() + w.when.minutes * 60000; return `First run ${rel(t)}, then every ${describeEvery(w.when.minutes)}.`; }
-    return 'In local time. The app checks the expression when you save.';
+    return 'In local time.';
   }
   function describeEvery(m) {
     if (m % 1440 === 0) return m === 1440 ? 'day' : `${m / 1440} days`;
@@ -527,7 +525,7 @@
     ni.value = form.name;
     ni.oninput = () => { form.name = ni.value; clearError('name'); };
     name.wrap.appendChild(ni);
-    name.wrap.appendChild(el('span', 'h-muted', 'Leave it empty to use the start of the prompt.'));
+    name.wrap.appendChild(el('span', 'h-muted', 'Optional'));
     name.wrap.appendChild(errorSlot('name'));
     f.appendChild(name.wrap);
 
@@ -570,7 +568,7 @@
     where.setAttribute('aria-label', 'Where it runs');
     where.appendChild(el('span', 'label', 'Where'));
     const choices = el('div', 'choices');
-    [['new', 'A new session each time', 'Every run gets a session of its own.'], ['session', 'This session', 'Every run arrives in the session on screen now, as a follow-up message.']].forEach(([k, title, sub]) => {
+    [['new', 'A new session each time', ''], ['session', 'This session', 'Runs arrive here as follow-ups.']].forEach(([k, title, sub]) => {
       const l = el('label', 'choice');
       const r = el('input');
       r.type = 'radio';
@@ -580,7 +578,7 @@
       r.onchange = () => { form.target = k; };
       const t = el('span');
       t.appendChild(el('b', '', title));
-      t.appendChild(el('span', 'h-muted', sub));
+      if (sub) t.appendChild(el('span', 'h-muted', sub));
       l.append(r, t);
       choices.appendChild(l);
     });
@@ -709,7 +707,7 @@
       closeForm();
     } catch (e) {
       saving = false;
-      appError = e.code === 'permission' ? 'Scheduled is not allowed to change scheduled tasks (the “schedules” permission).' : e.message || 'The app refused it.';
+      appError = e.code === 'permission' ? 'Not allowed to change tasks. Turn on “schedules” in Settings → Mods.' : e.message || 'The app refused it.';
       showErrors();
     }
   }

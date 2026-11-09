@@ -3,7 +3,7 @@
   "id": "side-chat",
   "name": "Side chat",
   "version": "1.0.0",
-  "description": "A quick question to the model beside the session, kept out of its context. Uses the model, so it spends tokens.",
+  "description": "Quick questions to the model, kept out of the session. Uses tokens.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "message",

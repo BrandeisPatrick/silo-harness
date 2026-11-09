@@ -62,7 +62,7 @@ export function createPlanCard(plan: PlanInfo, opts: PlanCardOptions): PlanCard 
   const renderFoot = () => {
     const status = card.plan.status;
     if (decided) {
-      if (decided === 'keep') statusLine(false, dream ? 'Sent back: answer below to change it' : 'Sent back for changes');
+      if (decided === 'keep') statusLine(false, dream ? 'Sent back: answer below' : 'Sent back for changes');
       else statusLine(true, dream ? 'Approved · applied' : `Approved · building with ${opts.modeLabel(decided)}`);
       return;
     }
@@ -72,7 +72,6 @@ export function createPlanCard(plan: PlanInfo, opts: PlanCardOptions): PlanCard 
     footEl.className = 'plan-foot plan-actions';
     if (dream) {
       footEl.innerHTML =
-        `<span class="plan-hint">Apply all of it, or keep planning to change it.</span>` +
         button('plan-keep', 'Keep planning', 'btn', 'esc') +
         button('plan-build', 'Apply all', 'btn primary', '↵');
       footEl.querySelector<HTMLButtonElement>('#plan-keep')!.onclick = () => void card.decide('keep');
@@ -80,7 +79,6 @@ export function createPlanCard(plan: PlanInfo, opts: PlanCardOptions): PlanCard 
       return;
     }
     footEl.innerHTML =
-      `<span class="plan-hint">Build it, or keep planning to change it.</span>` +
       button('plan-keep', 'Keep planning', 'btn', 'esc') +
       button('plan-build-accept', 'Build, accept edits', 'btn') +
       button('plan-build', 'Build it', 'btn primary', '↵');

@@ -326,7 +326,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   reply('[S1]', { content: 'spawned by command' });
   c = await cmd('spawn', 'Look into the flaky login test and report [S1]');
   const S1 = svc.children(S)[0];
-  check('8: /spawn: a sub-session of the session on screen, titled from the first words', S1 && S1.title === 'Look into the flaky login test' && S1.parentId === S && c.notice === `Started sub-session "${S1.title}". It runs in the background and reports here when it finishes a turn.`, { c, title: S1?.title });
+  check('8: /spawn: a sub-session of the session on screen, titled from the first words', S1 && S1.title === 'Look into the flaky login test' && S1.parentId === S && c.notice === `Started sub-session "${S1.title}". It reports back here.`, { c, title: S1?.title });
   check('8: titleFromTask', titleFromTask('Fix it.') === 'Fix it' && titleFromTask('   ') === 'Sub-session');
   await allIdle();
   c = await cmd('sessions');
@@ -367,7 +367,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   await allIdle();
   const lone = rt.create({ cwd: dir, foreground: true }).id;
   c = await cmd('sessions');
-  check('8: /sessions with none', /no parent, sub-sessions or forks/.test(c.notice), c);
+  check('8: /sessions with none', /^No related sessions\./.test(c.notice), c);
   rt.setForeground(S);
 
   // ---- 9: RPC and service ----

@@ -51,6 +51,7 @@ const SCRIPTS = [
   { name: 'pages' },
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
+  { name: 'auto-mode' },
   { name: 'remote-page', electron: true },
   { name: 'browser-safety' },
   { name: 'browser-permissions' },

@@ -3,13 +3,16 @@
 
 import type { AgentEvent, ArtifactInfo, LiveState, MessageOrigin, TranscriptItem } from '../../shared/types';
 import type { ImageInfo } from '../../shared/images';
+import type { AutoBlock } from '../../shared/auto-mode';
 
 export const MAX_RESULT = 20_000;
 
 /** A transcript item as the remote page receives it: a user item has an image count instead of data URLs. */
 export type RemoteItem =
   | { role: 'user'; text: string; images?: number; turn?: number; origin?: MessageOrigin; from?: string }
-  | Exclude<TranscriptItem, { role: 'user' } | { role: 'artifact' } | { role: 'image' }>
+  | Exclude<TranscriptItem, { role: 'user' } | { role: 'artifact' } | { role: 'image' } | { role: 'auto_blocked' }>
+  /** `allowable`: the block is one of this app session's, so Allow works (api.ts sets it) */
+  | { role: 'auto_blocked'; block: AutoBlock; allowable?: boolean }
   | { role: 'artifact'; artifact: RemoteArtifact }
   | { role: 'image'; image: RemoteImage };
 

@@ -195,10 +195,10 @@
     const btn = $('compact');
     btn.disabled = running || compacting || !compactable();
     btn.textContent = compacting ? 'Compacting…' : 'Compact session';
-    btn.title = running ? 'Wait for the run to end' : !compactable() ? 'Nothing to compact yet' : 'Summarise the conversation so far to free up room';
+    btn.title = running ? 'Wait for the run' : !compactable() ? 'Nothing to compact yet' : 'Summarise to free up room';
     const left = Math.round(limit * threshold) - used;
     $('auto').textContent = ctx.autoCompact === false ? 'Auto-compact off' : left > 0 ? `${fmtRound(left)} until auto-compact` : 'Auto-compacts on the next turn';
-    $('auto').title = ctx.autoCompact === false ? 'Turn it on in Settings → Context' : `Compacts on its own at ${Math.round(threshold * 100)}% of the window`;
+    $('auto').title = ctx.autoCompact === false ? 'Turn it on in Settings → Context' : `Compacts at ${Math.round(threshold * 100)}% full`;
     $('error').hidden = !error;
     $('error').textContent = error;
     renderFoot();
@@ -207,8 +207,7 @@
   function renderFoot() {
     if (!ctx) return;
     const when = ctx.updatedAt ? `Last updated ${ago(ctx.updatedAt)}` : 'Not measured yet';
-    const basis = ctx.basis === 'estimated' ? ' (estimated)' : '';
-    $('foot').textContent = `${when}${basis}. Refreshes when ${running ? 'this' : 'a'} turn ends.`;
+    $('foot').textContent = `${when}${ctx.basis === 'estimated' ? ' · estimated' : ''}`;
   }
 
   async function loadContext() {

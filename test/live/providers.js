@@ -124,7 +124,7 @@ const KEY = 'mock-live-key-0123456789';
     const visible = (id) => app.evaluate(`(() => { const e = document.querySelector('#sp-row-${id}'); return Boolean(e && e.offsetParent); })()`);
     check('the named provider’s rows show; the gateway’s and Ollama’s do not', (await visible('provider-service')) && (await visible('provider-model')) && !(await visible('portkey-apiKey')) && !(await visible('ollama-model')));
     const keyDesc = await app.text('#sp-row-provider-key .sp-row-desc');
-    check('the key row says Set (MOCK_PROVIDER_KEY)', /^Set \(MOCK_PROVIDER_KEY\)/.test(keyDesc || ''), keyDesc);
+    check('the key row says Set from MOCK_PROVIDER_KEY', /^Set from MOCK_PROVIDER_KEY/.test(keyDesc || ''), keyDesc);
     check('the model field holds the model', (await app.evaluate(`document.querySelector('#provider-model').value`)) === 'anthropic/claude-sonnet-4.5');
     await app.click('#sp-row-provider-service button');
     const tested = await until(async () => /answered with/.test((await app.text('#sp-row-provider-service .sp-row-desc')) || ''), 15_000);

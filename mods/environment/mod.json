@@ -3,7 +3,7 @@
   "id": "environment",
   "name": "Environment",
   "version": "1.0.0",
-  "description": "The project folder, its repository and branch, the model, and a remote control switch.",
+  "description": "The project folder, branch, model and remote control.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "folder",

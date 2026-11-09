@@ -25,9 +25,9 @@ export interface SlashMenu {
 }
 
 const BUILTINS: SkillInfo[] = [
-  { name: 'skills', description: 'List available skills', path: '', source: 'bundled' },
-  { name: 'compact', description: 'Summarise the conversation to free context', path: '', source: 'bundled' },
-  { name: 'mcp', description: 'Show MCP servers and their tools', path: '', source: 'bundled' },
+  { name: 'skills', description: 'List skills', path: '', source: 'bundled' },
+  { name: 'compact', description: 'Summarise the conversation', path: '', source: 'bundled' },
+  { name: 'mcp', description: 'Show MCP servers', path: '', source: 'bundled' },
 ];
 export function createSlashMenu({ menu: slashMenu, input: inputEl, listSkills, registeredCommands, closeMentions, autosize }: SlashMenuDeps): SlashMenu {
   let slashItems: SkillInfo[] = [];

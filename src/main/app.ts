@@ -10,6 +10,7 @@ import type { RpcEvents, RpcMethods } from '../shared/rpc';
 import type { ArtifactStore } from './artifacts';
 import type { BrowserController } from './browser';
 import { normalizeConfig, withRecentDir } from './config';
+import { defaultWorkDir } from './paths';
 import { windowConfig } from './providers';
 import { settingsLayer } from './settings';
 import type { McpManager } from './mcp';
@@ -269,6 +270,15 @@ export class AppHost implements App {
       const s = this.store.get(String(id));
       if (!s) throw new Error(`No conversation ${id}`);
       return toTranscript(s, { running: this.runtime.isRunning(s.id) });
+    });
+    this.rpc.handle('config.defaultWorkDir', () => {
+      const dir = defaultWorkDir();
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {
+        /* switching to it says it is gone */
+      }
+      return dir;
     });
   }
 

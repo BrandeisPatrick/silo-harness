@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.12.0 — 2026-11-09
+
+Auto mode now works like Claude Code's, the app says much less, and sessions work in a Silo folder in Documents by default.
+
+### Highlights
+
+- **Auto mode with a safety check.** A second model decides what the rules do not, so read-only commands like `aws sts get-caller-identity` run without a card.
+- **Less text everywhere.** Settings, pages, cards and notices keep a label and at most one short line.
+
+### New
+
+- **A Silo folder.** Sessions work in `~/Documents/Silo` by default; the app makes it if it is missing.
+- **Choose a folder.** The welcome screen shows the folder's path and a menu of the Silo folder, recent folders and any other.
+- **Allow a blocked action.** "Allow" on the line, on the phone or in "Recently blocked" in Settings → Permissions runs it once when the agent tries again.
+
+### Improved
+
+- **Blocks the agent reads.** A blocked action is one quiet line, "Auto mode blocked … · Allow", and the agent gets the reason and carries on.
+- **Pauses after repeated blocks.** After 3 blocks in a row or 20 in a session, Auto mode pauses and actions ask again.
+- **A quieter welcome screen.** The paragraph and the suggested prompts are gone.
+
+### Fixed
+
+- **Typing a question mark.** `?` in an empty chat box types instead of opening the shortcuts, which stay on ⌘/.
+
+### Security
+
+- **Fails closed.** An error, a timeout or an unclear answer from the check blocks the action; with no model to run it, risky actions ask.
+- **Always asks.** `sudo`, and deleting the home folder, `/`, the working directory or a system folder, ask even in Auto mode.
+- **Your rules only.** A project's settings.json may not set `autoMode`, so a repository cannot widen what the check allows.
+
+### For developers
+
+- **Auto mode settings.** `autoMode.environment`, `autoMode.allow` and `autoMode.model` describe your setup to the check, add allow rules and choose its model ([configure.md](docs/configure.md#auto-mode)).
+- **Block events.** The agent emits `auto_blocked` and `auto_allowed`, and a blocked call is an `auto_blocked` transcript item.
+
 ## 0.11.1 — 2026-11-09
 
 Fixes tool results being shown with the wrong tool call when using Ollama models.

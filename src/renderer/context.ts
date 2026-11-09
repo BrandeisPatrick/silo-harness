@@ -83,7 +83,7 @@ export function breakdownList(b: ContextBreakdown | null): string {
       return `<div class="ctx-slice${muted}"${tip}><span class="ctx-slice-dot" data-key="${escapeHtml(String(sl.key))}"></span><span class="ctx-slice-label">${escapeHtml(sl.label)}</span><span class="ctx-slice-tokens">${escapeHtml(formatCount(Math.round(sl.tokens)))}</span></div>`;
     })
     .join('');
-  const basis = b.basis === 'reported' ? 'Scaled to the last request’s reported size' : 'Estimated, about four characters per token';
+  const basis = b.basis === 'reported' ? 'Based on the last request' : 'Estimated';
   return `<div class="ctx-slices" role="list">${rows}</div><div class="ctx-basis">${escapeHtml(basis)}</div>`;
 }
 
@@ -233,10 +233,10 @@ export function createCompactionDivider(c: CompactionInfo): HTMLDetailsElement {
   if (c?.id) el.dataset.compactionId = String(c.id);
   if (c?.stage) el.dataset.stage = String(c.stage);
   const label = compactionLabel(c);
-  const meta: string[] = [c?.reason === 'auto' ? 'Compacted automatically near the context limit' : 'Compacted with /compact'];
-  if (c?.stage === 'dropped') meta.push('no summary could be produced, so the oldest messages were dropped');
+  const meta: string[] = [c?.reason === 'auto' ? 'Compacted automatically' : 'Compacted with /compact'];
+  if (c?.stage === 'dropped') meta.push('no summary, so the oldest messages were dropped');
   const pruned = Math.round(Number(c?.pruned) || 0);
-  if (pruned > 0) meta.push(`${formatCount(pruned)} tokens of old tool output cleared first`);
+  if (pruned > 0) meta.push(`${formatCount(pruned)} tokens of old tool output cleared`);
   const at = Number(c?.createdAt);
   if (at > 0) meta.push(new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
   el.innerHTML =

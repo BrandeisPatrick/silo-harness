@@ -2,7 +2,6 @@
 // mods and memory lines; its mode decides when a proposal is applied, and the app applies it. Wires the service into
 // the app: service, RPC, the dream's tools and prompt section, /dream, the daily timer.
 
-import path from 'node:path';
 import type { App } from './app';
 import type { DreamMode } from '../shared/dreaming';
 import { Dreaming, DreamError, type DreamingOptions } from './dreaming/service';
@@ -95,7 +94,7 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
 
   app.commands.register({
     name: 'dream',
-    description: "Dream now about this session's project: review its recent sessions and suggest skills, mods and memory",
+    description: 'Review recent sessions and suggest skills, mods and memory',
     source: 'app',
     run: (_args, ctx) => {
       const cwd = app.store.get(ctx.sessionId)?.cwd || app.config().workingDirectory;
@@ -103,7 +102,7 @@ export function setupDreaming(app: App, opts: DreamingOptions = {}): Dreaming {
       try {
         const { projects } = svc.start('command', cwd);
         if (!projects.length) return { notice: `Nothing new to dream about in ${where} since its last dream.` };
-        return { notice: `Dreaming about ${where} in the background (${path.basename(cwd)}). Its suggestions show on the Dreaming page and in the dream's session.` };
+        return { notice: `Dreaming about ${where}. Suggestions show on the Dreaming page.` };
       } catch (err) {
         return { error: err instanceof Error ? err.message.charAt(0).toUpperCase() + err.message.slice(1) : String(err) };
       }

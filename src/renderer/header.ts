@@ -54,7 +54,7 @@ export function createHeader({ modeBtn, modelBtn, cwdBtn, boundary: transcriptWr
     const now = currentMode();
     if (now === before) return;
     if (now !== 'plan') leavePlanPlaceholder();
-    notice(`Permission mode: ${MODES[now].label}. ${MODES[now].hint}.`, 'notice');
+    notice(`Permission mode: ${MODES[now].label}. ${MODES[now].desc}.`, 'notice');
   }
 
   async function setMode(mode: PermissionMode): Promise<void> {
@@ -66,7 +66,7 @@ export function createHeader({ modeBtn, modelBtn, cwdBtn, boundary: transcriptWr
       return;
     }
     applyConfigToUi();
-    if (currentMode() !== mode) showError(modeBtn, `${MODES[mode].label} needs the updated app. Restart Silo Harness and try again.`);
+    if (currentMode() !== mode) showError(modeBtn, `${MODES[mode].label} needs the updated app. Restart Silo Harness.`);
     if (currentMode() === 'bypass') allowPendingApproval();
     announceMode(before);
   }
@@ -153,7 +153,7 @@ export function createHeader({ modeBtn, modelBtn, cwdBtn, boundary: transcriptWr
       menu.update(sections(list, models.length ? undefined : none));
     } catch {
       if (!menuAnchoredTo(modelBtn)) return;
-      const note = active.type === 'ollama' ? 'Could not reach Ollama. Is it running()? Start it with: ollama serve' : active.error ?? (own.length ? undefined : 'This service does not list its models; set one in Settings.');
+      const note = active.type === 'ollama' ? 'Could not reach Ollama. Start it with: ollama serve' : active.error ?? (own.length ? undefined : 'This service lists no models. Set one in Settings.');
       menu.update(sections(own, note));
     }
   };

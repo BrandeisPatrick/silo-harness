@@ -3,7 +3,7 @@
   "id": "context",
   "name": "Context",
   "version": "1.0.0",
-  "description": "What fills the context window, slice by slice, and a way to compact it.",
+  "description": "What fills the context window, and how to compact it.",
   "author": "Silo Harness",
   "license": "MIT",
   "icon": "gauge",

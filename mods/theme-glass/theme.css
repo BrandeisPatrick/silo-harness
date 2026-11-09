@@ -199,7 +199,7 @@ dialog::backdrop { background: var(--backdrop); -webkit-backdrop-filter: blur(8p
 
 /* ---------- Fields, buttons and chips ---------- */
 .search-field, .field input, .field textarea, .select select, .sp-search, .url-pill { background: var(--glass-field); }
-.btn, .btn.danger, .suggestion { background: var(--glass-btn); box-shadow: inset 0 1px 0 var(--glass-edge); }
-.btn:hover, .suggestion:hover { background: var(--glass-btn-hover); }
-.btn:active, .suggestion:active { background: var(--pressed); }
+.btn, .btn.danger { background: var(--glass-btn); box-shadow: inset 0 1px 0 var(--glass-edge); }
+.btn:hover { background: var(--glass-btn-hover); }
+.btn:active { background: var(--pressed); }
 .segmented { background: var(--glass-track); }

@@ -13,7 +13,6 @@ import type { Ctx, Section } from './ctx.js';
 
 export function mcpSection(_ctx: Ctx, panel: HTMLElement): Section {
   const el = h('section', {}, sectionTitle('MCP servers'));
-  el.append(note('Tools from Model Context Protocol servers. Servers of this Mac are stored in your settings; project servers come from the project’s .mcp.json and start only once you enable them.', 'sp-intro'));
   const r = row({ id: 'mcp', title: 'Servers', keywords: 'mcp model context protocol server tools add remove connect', full: true }, panel);
   r.el.classList.add('sp-panel-row');
   panel.classList.add('sp-embedded');
@@ -29,7 +28,7 @@ export function historySection(ctx: Ctx): Section {
   const keep = ctx.segField({
     id: 'historyTrashDays',
     title: 'Keep deleted sessions for',
-    desc: 'A deleted session waits in the trash this long before it is removed for good. Off removes it at once.',
+    desc: 'Off deletes sessions for good right away.',
     keywords: 'trash retention purge delete days',
     field: 'historyTrashDays',
     choices: TRASH_DAYS,
@@ -37,7 +36,7 @@ export function historySection(ctx: Ctx): Section {
   });
   const trashGroup = group('Trash');
   const emptyBtn = button('Empty trash', async (b) => {
-    const ok = await ctx.confirm({ title: 'Empty the trash?', description: `${trash.length} deleted session${trash.length === 1 ? ' is' : 's are'} removed for good, with their history. This cannot be undone.`, confirmLabel: 'Empty trash', danger: true });
+    const ok = await ctx.confirm({ title: 'Empty the trash?', description: `${trash.length} deleted session${trash.length === 1 ? ' is' : 's are'} removed for good; this cannot be undone.`, confirmLabel: 'Empty trash', danger: true });
     if (!ok) return;
     b.disabled = true;
     try {
@@ -60,11 +59,11 @@ export function historySection(ctx: Ctx): Section {
     const kept = !Number.isFinite(days) || days > 0;
     const one = n === 1;
     const where = kept
-      ? `${one ? 'goes' : 'go'} to the trash, where ${one ? 'it is' : 'they are'} kept for ${Number.isFinite(days) ? days : 30} days and can be restored.`
-      : `${one ? 'is' : 'are'} removed for good at once. This cannot be undone.`;
+      ? `${one ? 'goes' : 'go'} to the trash, restorable for ${Number.isFinite(days) ? days : 30} days`
+      : `${one ? 'is' : 'are'} removed for good, which cannot be undone`;
     const ok = await ctx.confirm({
       title: 'Delete all sessions?',
-      description: `${n} session${one ? '' : 's'} with ${one ? 'its' : 'their'} history ${where} A running session is stopped first, and the window opens on a fresh session.`,
+      description: `${n} session${one ? '' : 's'} ${where}; a running session is stopped first.`,
       confirmLabel: 'Delete all sessions',
       danger: true,
     });
@@ -84,7 +83,7 @@ export function historySection(ctx: Ctx): Section {
   }, { icon: 'trash', danger: true });
   deleteAllBtn.disabled = true;
   const deleteRow = row(
-    { id: 'history-delete-all', title: 'Delete all sessions', desc: 'Every session goes to the trash for the period above (or away at once when it is Off), a running session is stopped first, and the window opens on a fresh session.', keywords: 'remove everything clear wipe reset erase all sessions conversations' },
+    { id: 'history-delete-all', title: 'Delete all sessions', desc: 'Moves every session to the trash.', keywords: 'remove everything clear wipe reset erase all sessions conversations' },
     deleteAllBtn,
   );
   el.append(group(null, stored, keep, deleteRow), trashGroup);
@@ -116,7 +115,7 @@ export function historySection(ctx: Ctx): Section {
         }
       }, { icon: 'undo' });
       const purge = button('Delete now', async (b) => {
-        const ok = await ctx.confirm({ title: `Delete “${t.title || 'Untitled session'}” for good?`, description: 'The session and its history are removed. This cannot be undone.', confirmLabel: 'Delete', danger: true });
+        const ok = await ctx.confirm({ title: `Delete “${t.title || 'Untitled session'}” for good?`, description: 'This cannot be undone.', confirmLabel: 'Delete', danger: true });
         if (!ok) return;
         b.disabled = true;
         try {
@@ -160,7 +159,6 @@ export function appearanceSection(ctx: Ctx): Section {
   const theme = ctx.segField({
     id: 'theme',
     title: 'Colour scheme',
-    desc: 'System follows the light or dark setting of macOS.',
     keywords: 'theme dark light mode colour color appearance scheme',
     field: 'theme',
     choices: [
@@ -225,7 +223,7 @@ export function appearanceSection(ctx: Ctx): Section {
 
 export function filesSection(ctx: Ctx, onInfo: (info: SettingsInfo | null) => void): Section {
   const el = h('section', {}, sectionTitle('Configuration files'));
-  el.append(note('Silo Harness also reads settings from settings.json files: yours, then the project’s, which needs your approval first. A field a file sets is read-only on this page; change it in the file.', 'sp-intro'));
+  el.append(note('Fields a settings.json file sets are read-only here.', 'sp-intro'));
   const filesEl = h('div', {});
   const reloadRow = row(
     { id: 'files-reload', title: 'Read the files again', desc: 'After you edit a file outside Silo Harness.', keywords: 'reload refresh settings.json' },
@@ -274,9 +272,9 @@ export function filesSection(ctx: Ctx, onInfo: (info: SettingsInfo | null) => vo
 
     const keys = f.keys.filter((k) => !k.startsWith('env.')).map((k) => (k.startsWith('hooks.') ? `${k} (runs commands)` : k));
     const commands = f.hookCommands ?? [];
-    const runsWhat = commands.length ? `It defines hooks that run commands on your Mac: ${commands.slice(0, 3).join('; ')}${commands.length > 3 ? ` and ${commands.length - 3} more` : ''}.` : '';
+    const runsWhat = commands.length ? `Its hooks run commands on your Mac: ${commands.slice(0, 3).join('; ')}${commands.length > 3 ? ` and ${commands.length - 3} more` : ''}.` : '';
     const envs = f.keys.filter((k) => k.startsWith('env.')).map((k) => k.slice(4));
-    const setsRow = row({ id: `file-${f.scope}-keys`, title: 'What it sets', desc: !f.exists ? 'Nothing: the file does not exist.' : [keys.length ? keys.join(', ') : '', envs.length ? `environment: ${envs.join(', ')}` : ''].filter(Boolean).join(' · ') || 'Nothing.', keywords: 'fields' });
+    const setsRow = row({ id: `file-${f.scope}-keys`, title: 'What it sets', desc: !f.exists ? 'Nothing.' :[keys.length ? keys.join(', ') : '', envs.length ? `environment: ${envs.join(', ')}` : ''].filter(Boolean).join(' · ') || 'Nothing.', keywords: 'fields' });
     setsRow.descEl.classList.add('sp-mono-list');
     const g = group(project ? 'This project' : 'Yours', fileRow, setsRow);
     if (f.invalid.length) {
@@ -291,12 +289,12 @@ export function filesSection(ctx: Ctx, onInfo: (info: SettingsInfo | null) => vo
         {
           id: 'file-project-trust',
           title: trusted ? 'Applied to this project' : f.changed ? 'Changed since you approved it' : 'Apply this file',
-          desc: trusted ? `Its values are in effect while this project is open.${commands.length ? ' Its hooks run commands.' : ''}` : `A project file can change the model, the permission mode and more.${runsWhat ? ` ${runsWhat}` : ''} Read it, then apply it as it is right now.`,
+          desc: trusted ? `In effect while this project is open.${commands.length ? ' Its hooks run commands.' : ''}` : `It can change the model, the permission mode and more.${runsWhat ? ` ${runsWhat}` : ''}`,
           keywords: 'trust approve apply project',
         },
         button(trusted ? 'Stop applying' : 'Trust and apply', async (b) => {
           if (!trusted) {
-            const ok = await ctx.confirm({ title: 'Apply the project’s settings.json?', description: `Its values take effect now and every time this project opens, until the file changes. ${keys.length ? `It sets ${keys.join(', ')}.` : ''}${runsWhat ? ` ${runsWhat}` : ''}`, confirmLabel: 'Trust and apply', icon: 'shield-check' });
+            const ok = await ctx.confirm({ title: 'Apply the project’s settings.json?', description: `${keys.length ? `It sets ${keys.join(', ')} until the file changes.` : 'It applies until the file changes.'}${runsWhat ? ` ${runsWhat}` : ''}`, confirmLabel: 'Trust and apply', icon: 'shield-check' });
             if (!ok) return;
           }
           b.disabled = true;
@@ -361,7 +359,7 @@ export function aboutSection(ctx: Ctx): Section {
   const conf: Row = row({ id: 'about-config', title: 'Config folder', desc: '', keywords: 'settings.json skills mods' }, reveal('configDir', () => conf));
   data.descEl.classList.add('sp-path');
   conf.descEl.classList.add('sp-path');
-  const keys = row({ id: 'about-shortcuts', title: 'Keyboard shortcuts', desc: 'Every shortcut in one sheet (⌘/).', keywords: 'keys hotkeys' }, button('Show', () => ctx.openShortcuts(), { icon: 'keyboard' }));
+  const keys = row({ id: 'about-shortcuts', title: 'Keyboard shortcuts', keywords: 'keys hotkeys sheet' }, button('Show', () => ctx.openShortcuts(), { icon: 'keyboard' }));
   el.append(group(null, app, versions, data, conf, keys));
 
   return {

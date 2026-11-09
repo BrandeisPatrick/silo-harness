@@ -648,10 +648,10 @@ process.stdin.on('data', (d) => {
   return file;
 }
 
+/** The approval card, in Ask mode (Auto mode now lets a push to a feature branch through without a card). */
 function scriptApproval(mock) {
   const main = (r) => mock.state.replies.push({ ...r, when: isMain });
-  main({ promptTokens: 15020, toolCalls: [call('bash', { command: 'git add -A && git commit -m "Rate-limit the public routes"' })] });
-  main({ promptTokens: 15400, toolCalls: [call('bash', { command: 'git push -u origin feat/rate-limit' })] });
+  main({ promptTokens: 15400, toolCalls: [call('bash', { command: 'git push -u origin feat/rate-limit', description: 'Push the branch to GitHub' })] });
 }
 
 /** The mod from the README ("A mod in two files"), installed the way a user would: a folder in ~/.silo-harness/mods. */
@@ -726,6 +726,8 @@ async function main() {
   const grafana = writeGrafanaServer(path.join(HOME, '.grafana-mcp'), panelPng(fs.readFileSync(path.join(PROJECT, 'reports', 'traffic-2026-11-05.ndjson'), 'utf8')));
   const ids = seedSessions(profile);
   const mock = await startMock();
+  // Auto mode's safety check passes everything the scenes do
+  mock.state.classifierDefault = { decision: 'allow', reason: '[Local Work] part of the task' };
   mock.state.ollamaPromptTokens = 8000;
   mock.state.ollamaModels = ['qwen3:8b', 'qwen3:14b', 'gemma3:12b'];
   let app = null;
@@ -952,7 +954,8 @@ async function main() {
     });
     await Promise.race([ready, phoneDone]);
     scriptApproval(mock);
-    await app.send('Looks good. Commit it and push the branch.');
+    await ev(`(async () => { const c = await window.oc.getConfig(); await window.oc.setConfig({ ...c, permissionMode: 'ask' }); return true; })()`);
+    await app.send('Looks good. Push the branch.');
     await app.waitFor(`Boolean(document.querySelector('.approval:not(.decided) .btn'))`, 30_000, 'the approval card');
     await sleep(800);
     await settle();

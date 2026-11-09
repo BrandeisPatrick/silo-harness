@@ -25,6 +25,18 @@ export function configDirOverride(env: NodeJS.ProcessEnv = process.env): string 
 }
 
 /**
+ * The folder a session works in when none was chosen: ~/Documents/Silo, made at launch so it is always there.
+ * SILO_HARNESS_WORK_DIR overrides it; with a config-dir override (the tests) it sits inside that folder, so a test
+ * never writes to the real Documents.
+ */
+export function defaultWorkDir(home: string = os.homedir(), env: NodeJS.ProcessEnv = process.env): string {
+  const own = env.SILO_HARNESS_WORK_DIR?.trim();
+  if (own) return path.resolve(own);
+  const override = configDirOverride(env);
+  return override ? path.join(override, 'Silo') : path.join(home, 'Documents', 'Silo');
+}
+
+/**
  * The user-level config folder: the override when one is set, else ~/.silo-harness, else ~/.open-harness when only
  * that one is there (the move at launch failed, or the app has not started since the rename), else ~/.silo-harness
  * for a new one. Read on every call, so a test can set the variable late.

@@ -62,7 +62,7 @@ export interface ScheduledPage {
   debug: { state(): unknown };
 }
 
-const BANNER = 'Scheduled tasks run only while Silo Harness is open and your Mac is awake. A run missed while it was closed or asleep happens once when it is back, if it was due less than a day before.';
+const BANNER = 'Tasks run only while Silo Harness is open and your Mac is awake.';
 const PREFS_KEY = 'pages.scheduled';
 
 /** A schedule error from the main process without its code ("bad_time: …" → "…") */
@@ -225,7 +225,6 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
       keepFocus(body, () => {
         body.innerHTML = '';
         if (tab === 'templates') {
-          body.append(h('p', { class: 'pg-lead' }, 'Starting points: open one, change what you like, and create it.'));
           const grid = h('ul', { class: 'pg-grid', 'aria-label': 'Templates' });
           for (const t of TEMPLATES) grid.append(h('li', {}, templateCard(t)));
           body.append(grid);
@@ -272,7 +271,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
         { class: 'pg-empty', id: 'scheduled-empty' },
         h('span', { class: 'pg-empty-icon', html: icon('clock', 20) }),
         h('h2', { class: 'pg-empty-title' }, 'No scheduled tasks yet'),
-        h('p', { class: 'pg-empty-text' }, 'A task sends a prompt on a rhythm, every morning, every Friday or once next week, and each run is a session you can open and keep talking in. You can also ask the agent in any session: “every weekday at 9, summarise the open pull requests”.'),
+        h('p', { class: 'pg-empty-text' }, 'Run a prompt on a schedule.'),
         h('div', { class: 'pg-empty-actions' }, create, browse),
       );
     }
@@ -343,7 +342,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
           const back = h('button', { type: 'button', class: 'link-btn' }, 'Back to Scheduled tasks');
           back.addEventListener('click', () => host.open({ page: 'scheduled' }, { replace: true }));
           col.append(pageHead(tasks === null ? 'Loading…' : 'This task is gone'));
-          if (tasks !== null) col.append(h('p', { class: 'pg-lead' }, 'It was deleted. The sessions its runs made are still in the sidebar.'), back);
+          if (tasks !== null) col.append(h('p', { class: 'pg-lead' }, 'Its sessions are still in the sidebar.'), back);
           host.syncCrumbs();
           return;
         }
@@ -357,7 +356,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
         const dead = s.when.kind === 'at' && !(Date.parse(s.when.at) > Date.now());
         if (dead && !s.enabled) {
           sw.disabled = true;
-          sw.title = 'Its time has passed: edit it to give it a new one';
+          sw.title = 'Its time has passed';
         }
         sw.addEventListener('change', () => void setActive(s, sw));
         const actions = h('div', { class: 'pg-head-actions' }, run, h('label', { class: 'pg-switch', for: 'task-active' }, h('span', { class: 'pg-switch-label' }, 'Active'), sw));
@@ -390,7 +389,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
         }
         side.append(instrSec);
         side.append(sideSection('Project', h('div', { class: 'pg-folder', title: s.cwd }, h('span', { class: 'pg-folder-icon', html: icon('folder', 14) }), h('span', { class: 'pg-folder-name' }, folderName(s.cwd))), h('p', { class: 'pg-side-note' }, tilde(s.cwd))));
-        side.append(sideSection('Runs', h('p', { class: 'pg-side-text', id: 'task-rhythm-words' }, rhythmWords(s)), h('p', { class: 'pg-side-note' }, s.createdBy === 'agent' ? 'Made by the agent, with your approval.' : `Made ${formatWhenAt(s.createdAt).replace(/^(Today|Yesterday)/, (m) => m.toLowerCase())}.`)));
+        side.append(sideSection('Runs', h('p', { class: 'pg-side-text', id: 'task-rhythm-words' }, rhythmWords(s)), h('p', { class: 'pg-side-note' }, s.createdBy === 'agent' ? 'Made by the agent.' : `Made ${formatWhenAt(s.createdAt).replace(/^(Today|Yesterday)/, (m) => m.toLowerCase())}.`)));
         const where = h('div', { class: 'pg-side-text' });
         if (s.target === 'session' && s.sessionId) {
           const t = sessionTitle(s.sessionId);
@@ -400,10 +399,10 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
             a.addEventListener('click', () => d.openSession(s.sessionId!));
             where.append(a);
           } else where.append('a session that was deleted');
-        } else where.append('Each run starts a new session, listed in the sidebar with ', h('span', { class: 'pg-inline-icon', 'aria-label': 'a lightning bolt', html: icon('zap', 12) }), ' in front of its title.');
+        } else where.append('Starts a new session');
         side.append(sideSection('Each run', where));
         const mode = MODES[d.config()?.permissionMode ?? 'ask'] ?? MODES.ask;
-        side.append(sideSection('Permissions', h('div', { class: 'pg-mode' }, h('span', { class: 'pg-mode-icon', html: icon(mode.icon, 14) }), h('span', {}, mode.label)), h('p', { class: 'pg-side-note' }, `${mode.desc}. Runs use the permission mode in the chat bar; a run that needs your approval waits for you in its session.`)));
+        side.append(sideSection('Permissions', h('div', { class: 'pg-mode' }, h('span', { class: 'pg-mode-icon', html: icon(mode.icon, 14) }), h('span', {}, mode.label)), h('p', { class: 'pg-side-note' }, 'A run that needs approval waits in its session.')));
         col.append(h('div', { class: 'pg-detail' }, main, side));
       });
       host.syncCrumbs();
@@ -471,7 +470,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
   }
 
   async function remove(s: Schedule, host: PageHost): Promise<void> {
-    const ok = await d.confirm({ title: `Delete “${s.name}”?`, description: 'It will not run again. The sessions its runs made stay in the sidebar.', confirmLabel: 'Delete', danger: true });
+    const ok = await d.confirm({ title: `Delete “${s.name}”?`, description: 'Its sessions stay in the sidebar. This cannot be undone.', confirmLabel: 'Delete', danger: true });
     if (!ok) return;
     try {
       adopt(await rpc('schedules.remove', s.id));
@@ -520,7 +519,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
     name.value = edit?.name ?? tpl?.name ?? '';
     const prompt = h('textarea', { id: 'task-prompt', rows: '5', placeholder: 'Summarise what changed in the repo since yesterday…', maxlength: '8000' }) as HTMLTextAreaElement;
     prompt.value = edit?.prompt ?? tpl?.prompt ?? '';
-    body.append(field('Name', 'task-name', name), field('Instructions', 'task-prompt', prompt, 'What each run is asked to do, as you would type it in a session.'));
+    body.append(field('Name', 'task-name', name), field('Instructions', 'task-prompt', prompt));
 
     // Folder
     const folder = h('select', { id: 'task-folder' }) as HTMLSelectElement;
@@ -547,7 +546,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
       fillFolders(folderNow);
     });
     const folderWrap = h('span', { class: 'select' }, folder, h('span', { class: 'select-chev', html: icon('chevron-down', 14) }));
-    body.append(field('Folder', 'task-folder', folderWrap, edit ? 'Where its runs work. A task keeps its folder: for another one, make a new task.' : 'Where its runs work: their working directory, project instructions and rules.'));
+    body.append(field('Folder', 'task-folder', folderWrap, edit ? "A task's folder can't be changed." : undefined));
     if (edit) folder.disabled = true;
 
     // Rhythm
@@ -662,12 +661,12 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
     }
     for (const m of candidates) sessionSel.append(h('option', { value: m.id }, `${m.title}${m.cwd ? ` — ${folderName(m.cwd)}` : ''}`));
     if (want && candidates.some((m) => m.id === want)) sessionSel.value = want;
-    const sessionField = h('div', { class: 'task-session' }, h('span', { class: 'select' }, sessionSel, h('span', { class: 'select-chev', html: icon('chevron-down', 14) })), h('p', { class: 'hint' }, 'Each run arrives there as a follow-up, after whatever is running in it.'));
+    const sessionField = h('div', { class: 'task-session' }, h('span', { class: 'select' }, sessionSel, h('span', { class: 'select-chev', html: icon('chevron-down', 14) })));
     sessionField.hidden = target !== 'session';
     body.append(h('div', { class: 'field task-field' }, h('span', { class: 'field-label', id: 'task-target-label' }, 'Each run'), seg, sessionField));
 
     const mode = MODES[d.config()?.permissionMode ?? 'ask'] ?? MODES.ask;
-    body.append(h('p', { class: 'hint task-mode' }, h('span', { class: 'task-mode-icon', html: icon(mode.icon, 14) }), h('span', {}, `Runs use the permission mode in the chat bar, now ${mode.label}: ${mode.desc.charAt(0).toLowerCase()}${mode.desc.slice(1)}.`)));
+    body.append(h('p', { class: 'hint task-mode' }, h('span', { class: 'task-mode-icon', html: icon(mode.icon, 14) }), h('span', {}, `Runs use the chat bar's permission mode, now ${mode.label}.`)));
 
     const problem = h('div', { class: 'task-problem', id: 'task-problem', role: 'alert', hidden: true });
     const setProblem = (m: string | null) => {
@@ -702,7 +701,7 @@ export function createScheduledPage(d: ScheduledDeps): ScheduledPage {
         return;
       }
       if (target === 'session' && !sessionSel.value) {
-        setProblem('Pick the session it continues, or let each run start a new one.');
+        setProblem('Pick a session to continue.');
         return;
       }
       save.disabled = true;

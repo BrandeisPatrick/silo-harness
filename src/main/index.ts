@@ -18,6 +18,7 @@ import { setupChatCards } from './chat-cards';
 import { setupHooks } from './hooks';
 import { setupHistory } from './history';
 import { setupContext } from './context-service';
+import { setupAutoBlocks } from './auto-blocks';
 import { setupImages } from './images';
 import { MOD_SCHEME, MOD_SCHEME_PRIVILEGES, setupMods } from './mods';
 import { setupSchedules } from './schedules';
@@ -126,7 +127,7 @@ function createWindow(): void {
     if (!fresh.length || w.webContents.isLoading()) return;
     for (const s of fresh) notifiedBlocked.add(`${cwd}:${s.name}`);
     const names = fresh.map((s) => s.name).join(', ');
-    const ev: AgentEvent = { type: 'error', kind: 'notice', message: `${PROJECT_FILE} in this project defines ${fresh.length === 1 ? 'an MCP server' : `${fresh.length} MCP servers`} (${names}) that ${fresh.length === 1 ? 'is' : 'are'} not enabled yet. Review and enable ${fresh.length === 1 ? 'it' : 'them'} in Settings → MCP servers.` };
+    const ev: AgentEvent = { type: 'error', kind: 'notice', message: `This project's ${PROJECT_FILE} adds ${fresh.length === 1 ? 'an MCP server' : 'MCP servers'}, off until you enable ${fresh.length === 1 ? 'it' : 'them'} in Settings → MCP servers: ${names}.` };
     w.webContents.send('agent:event', ev, a.runtime.foregroundId());
   };
   servers?.on('servers', onServers);
@@ -278,6 +279,7 @@ app.whenReady().then(() => {
   setupHooks(a);
   setupHistory(a);
   setupContext(a);
+  setupAutoBlocks(a);
   setupImages(a);
   setupMods(a);
   setupSchedules(a);

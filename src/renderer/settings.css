@@ -67,7 +67,7 @@ dialog.dialog.settings-dialog {
 
 /* ---------- A row: title and description on the left (24px apart), one control at the right; a hairline between rows ---------- */
 .sp-row { position: relative; display: flex; align-items: center; gap: 24px; min-height: 68px; padding: 12px 0; border-top: 1px solid var(--border-subtle); }
-.sp-title + .sp-group > .sp-row:first-child, .sp-title + .sp-intro + .sp-group > .sp-row:first-child { border-top: none; }
+.sp-title + .sp-group > .sp-row:first-child { border-top: none; }
 .sp-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .sp-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); }
 .sp-row-name { min-width: 0; overflow-wrap: anywhere; }

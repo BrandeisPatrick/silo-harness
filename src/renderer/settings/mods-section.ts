@@ -31,7 +31,7 @@ import {
   type NewModKind,
 } from './model.js';
 import { lookTab, type LookTab } from './look-tab.js';
-import { actions, button, chip, group, note, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
+import { actions, button, chip, group, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
 const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look', theme: 'New theme' };
@@ -39,7 +39,6 @@ const safeKey = (key: string) => key.replace(/[^a-z0-9-]+/gi, '_');
 
 export function modsSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('Mods'));
-  el.append(note('Mods add panels, tabs and commands to Silo Harness, and looks: a background, a chat bar, a conversation, a theme. Built-in mods are on; mods of yours and of a project stay off until you turn them on. Looks have no switch: each has a tab where you preview a version and use it, one at a time.', 'sp-intro'));
 
   let mods: ModInfo[] = [];
   const expanded = new Set<string>();
@@ -63,7 +62,7 @@ export function modsSection(ctx: Ctx): Section {
     try {
       mods = await ctx.call('mods.reload');
       renderAll();
-      showStatus('Read every mod folder again.');
+      showStatus('Mods reloaded.');
     } catch (err) {
       showStatus(`Couldn't reload: ${ctx.cleanError(err)}`, true);
     } finally {
@@ -74,11 +73,11 @@ export function modsSection(ctx: Ctx): Section {
 
   // Install: a folder or a Git URL
   const installInput = textControl({ value: '', placeholder: '~/Downloads/my-mod or https://github.com/you/mod.git', width: 420, mono: true, onCommit: () => {} });
-  installInput.input.setAttribute('aria-label', 'Folder or Git URL of the mod to install');
+  installInput.input.setAttribute('aria-label', 'Folder or Git URL');
   const installProblem = h('div', { class: 'sp-problem', role: 'alert', hidden: true });
   const doInstall = async (b: HTMLButtonElement) => {
     const source = installInput.input.value.trim();
-    if (!source) return formProblem(installProblem, 'Enter the path of a folder with a mod.json, or a Git URL.');
+    if (!source) return formProblem(installProblem, 'Enter a mod folder or a Git URL.');
     b.disabled = true;
     try {
       const made = await ctx.call('mods.install', source);
@@ -95,8 +94,8 @@ export function modsSection(ctx: Ctx): Section {
           const set = lookSets([made], 1)[0];
           showTab(t.tab, { preview: set?.[t.kind] ?? undefined });
         }
-        lookStatus(`Installed ${made.manifest?.name ?? made.id}. It is previewed above; Use applies it.`);
-      } else showStatus(`Installed ${made.manifest?.name ?? made.id}. It stays off until you turn it on.`);
+        lookStatus(`Installed ${made.manifest?.name ?? made.id}.`);
+      } else showStatus(`Installed ${made.manifest?.name ?? made.id}. Turn it on to use it.`);
     } catch (err) {
       formProblem(installProblem, ctx.cleanError(err));
     } finally {
@@ -111,7 +110,6 @@ export function modsSection(ctx: Ctx): Section {
     'div',
     { class: 'sp-form sp-only-browse', hidden: true, role: 'group', 'aria-label': 'Install a mod' },
     h('div', { class: 'sp-form-title' }, 'Install a mod'),
-    h('p', { class: 'sp-form-hint' }, 'A folder is copied into your mods folder; a Git URL is cloned there. It stays off until you turn it on.'),
     h('div', { class: 'sp-form-line' }, installInput, installGo, button('Cancel', () => closeForms())),
     installProblem,
   );
@@ -121,7 +119,7 @@ export function modsSection(ctx: Ctx): Section {
   const nameInput = textControl({ value: '', placeholder: 'Word count', width: 220, onCommit: () => {} });
   nameInput.input.setAttribute('aria-label', 'Name of the new mod');
   const idInput = textControl({ value: '', placeholder: 'word-count', width: 180, mono: true, onCommit: () => {} });
-  idInput.input.setAttribute('aria-label', 'Id of the new mod (its folder name)');
+  idInput.input.setAttribute('aria-label', 'Id of the new mod');
   nameInput.input.addEventListener('input', () => {
     if (!idEdited) idInput.input.value = deriveModId(nameInput.input.value);
   });
@@ -142,7 +140,7 @@ export function modsSection(ctx: Ctx): Section {
     (v) => (seat = v),
     180,
   );
-  seatSel.select.setAttribute('aria-label', 'What it adds: a view and where it sits, a look, or a theme');
+  seatSel.select.setAttribute('aria-label', 'What it adds');
   let scope: 'user' | 'project' = 'user';
   const scopeSeg = segmented<'user' | 'project'>(
     [
@@ -160,7 +158,7 @@ export function modsSection(ctx: Ctx): Section {
     const name = nameInput.input.value.trim();
     const id = idInput.input.value.trim() || deriveModId(name);
     if (!name) return formProblem(createProblem, 'Give the mod a name.');
-    if (!validModId(id)) return formProblem(createProblem, 'The id needs lower-case letters, digits and -, 2 to 40 characters, starting with a letter.');
+    if (!validModId(id)) return formProblem(createProblem, 'Use 2 to 40 lower-case letters, digits or -, starting with a letter.');
     b.disabled = true;
     try {
       const made = await ctx.call('mods.create', seat === 'theme' ? { id, name, theme: true, scope } : seat.startsWith('look:') ? { id, name, look: seat.slice(5) as ModLookTarget, scope } : { id, name, seat: seat as Exclude<NewModKind, 'theme' | `look:${string}`>, scope });
@@ -176,13 +174,13 @@ export function modsSection(ctx: Ctx): Section {
       if (here && isLookOnly(fresh.manifest)) {
         renderAll();
         here(fresh);
-        lookStatus(`Created ${name} in ${tildePath(made.dir)}. It is previewed above; Use applies it. Ask the agent to build it out.`);
+        lookStatus(`Created ${name} in ${tildePath(made.dir)}.`);
         return;
       }
       const madeTabs = modTabs(made);
       if (!madeTabs.includes(tab)) showTab(madeTabs[0]);
       renderAll();
-      showStatus(isLookOnly(fresh.manifest) ? `Created ${name} in ${tildePath(made.dir)}. Preview it and use it on its tab.` : `Created ${name} in ${tildePath(made.dir)}. Edit its files, then turn it on.`);
+      showStatus(isLookOnly(fresh.manifest) ? `Created ${name} in ${tildePath(made.dir)}.` : `Created ${name} in ${tildePath(made.dir)}. Turn it on to use it.`);
       void ctx.call('mods.reveal', made.key).catch(() => {});
     } catch (err) {
       formProblem(createProblem, ctx.cleanError(err));
@@ -196,7 +194,7 @@ export function modsSection(ctx: Ctx): Section {
     'div',
     { class: 'sp-form sp-only-browse', hidden: true, role: 'group', 'aria-label': 'Create a mod' },
     createTitle,
-    h('p', { class: 'sp-form-hint' }, 'Writes a starter mod (mod.json and one page, or one stylesheet for a look or a theme) and shows its folder. Ask the agent to build it out.'),
+    h('p', { class: 'sp-form-hint' }, 'Writes a starter mod and opens its folder.'),
     h('div', { class: 'sp-form-grid' }, field('Name', nameInput), field('Id', idInput), field('Adds', seatSel), h('div', { class: 'sp-form-field' }, h('span', { class: 'sp-form-label' }, 'Where'), scopeSeg)),
     h('div', { class: 'sp-form-line end' }, button('Cancel', () => closeForms()), createGo),
     createProblem,
@@ -258,7 +256,7 @@ export function modsSection(ctx: Ctx): Section {
       safe.problem(`Couldn't change safe mode: ${ctx.cleanError(err)}`);
     }
   });
-  const safe = row({ id: 'mods-safe', title: 'Safe mode', desc: 'Turns every mod of yours and of a project off at once, without forgetting which were on. Built-in mods keep running.', keywords: 'disable all off trouble' }, safeInput);
+  const safe = row({ id: 'mods-safe', title: 'Safe mode', desc: 'Turn off every mod that is not built in.', keywords: 'disable all off trouble' }, safeInput);
   safe.el.classList.add('clickable');
 
   const listEl = h('div', { class: 'sp-mod-list' });
@@ -274,7 +272,7 @@ export function modsSection(ctx: Ctx): Section {
     const inUse = mine.some((m) => m.inUse?.length);
     const ok = await ctx.confirm({
       title: 'Delete all custom mods?',
-      description: `${one ? 'Your mod' : `Your ${mine.length} mods`} (${listed}) move${one ? 's' : ''} to the Trash, where ${one ? 'it' : 'they'} can be recovered. What ${one ? 'it was' : 'they were'} granted or set is forgotten${inUse ? `, and what of ${one ? 'it' : 'them'} is in use goes back to Default` : ''}. Built-in mods and this project’s mods stay.`,
+      description: `${one ? listed : `Your ${mine.length} mods, ${listed},`} move${one ? 's' : ''} to the Trash and ${one ? 'its' : 'their'} settings and permissions are forgotten${inUse ? `; looks in use go back to Default` : ''}.`,
       confirmLabel: 'Move to Trash',
       danger: true,
     });
@@ -286,7 +284,7 @@ export function modsSection(ctx: Ctx): Section {
       for (const key of r.removed) expanded.delete(key);
       removeAllRow.problem(null);
       renderAll();
-      showStatus(r.removed.length ? `Moved ${r.removed.length === 1 ? 'one mod' : `${r.removed.length} mods`} to the Trash.` : 'There were no mods of yours to delete.');
+      showStatus(r.removed.length ? `Moved ${r.removed.length === 1 ? 'one mod' : `${r.removed.length} mods`} to the Trash.` : 'No mods to delete.');
     } catch (err) {
       removeAllRow.problem(`Couldn't delete them: ${ctx.cleanError(err)}`);
       b.disabled = false;
@@ -299,8 +297,7 @@ export function modsSection(ctx: Ctx): Section {
   /** The row follows the list: how many mods of yours there are and where their folders live */
   function renderRemoveAll(): void {
     const mine = mods.filter((m) => m.scope === 'user');
-    const folder = mine.length ? tildePath(dirname(mine[0].dir).replace(/\/$/, '')) : 'your mods folder';
-    removeAllRow.setDesc(`Moves ${mine.length ? `your ${mine.length === 1 ? 'mod' : `${mine.length} mods`}` : 'every mod of yours'} (the folders in ${folder}) to the Trash, where they can be recovered. Built-in mods and this project’s mods stay; a look of yours in use goes back to Default.`);
+    removeAllRow.setDesc(mine.length ? `Moves your ${mine.length === 1 ? 'mod' : `${mine.length} mods`} in ${tildePath(dirname(mine[0].dir).replace(/\/$/, ''))} to the Trash.` : 'Moves your mods to the Trash.');
     removeAllBtn.disabled = !mine.length;
   }
 
@@ -455,7 +452,7 @@ export function modsSection(ctx: Ctx): Section {
       const emptyNote = grp.querySelector<HTMLElement>('.sp-empty-group');
       if (emptyNote) {
         emptyNote.hidden = shown > 0;
-        emptyNote.textContent = 'None yet. Install one, make one with New mod…, or ask the agent to build one.';
+        emptyNote.textContent = 'None yet.';
       }
     }
   }
@@ -525,14 +522,14 @@ export function modsSection(ctx: Ctx): Section {
       const copy = mods.find((x) => x.id === m.id && x.scope === 'user');
       if (copy) expanded.add(copy.key);
       renderAll();
-      say(`Copied ${m.manifest?.name ?? m.id} to your mods folder. Your copy replaces the built-in one.`);
+      say(`Your copy of ${m.manifest?.name ?? m.id} replaces the built-in one.`);
     } catch (err) {
       say(`Couldn't customise: ${ctx.cleanError(err)}`, true);
     }
   }
 
   async function removeMod(m: ModInfo, say: (text: string, error?: boolean) => void): Promise<boolean> {
-    const ok = await ctx.confirm({ title: `Remove ${m.manifest?.name ?? m.id}?`, description: `Its folder moves to the Trash${m.overrides ? ' and the built-in mod comes back' : ''}.${m.inUse?.length ? ' What of it is in use goes back to Default.' : ''}`, confirmLabel: 'Move to Trash', danger: true });
+    const ok = await ctx.confirm({ title: `Remove ${m.manifest?.name ?? m.id}?`, description: `Its folder moves to the Trash${m.overrides ? ' and the built-in one comes back' : ''}${m.inUse?.length ? '; its looks go back to Default' : ''}.`, confirmLabel: 'Move to Trash', danger: true });
     if (!ok) return false;
     try {
       mods = await ctx.call('mods.remove', m.key);
@@ -608,8 +605,8 @@ export function modsSection(ctx: Ctx): Section {
       const ok = await ctx.confirm({
         title: sheet.title,
         icon: 'puzzle',
-        quote: { label: sheet.lines.length ? 'It will be able to' : 'It asks for nothing', text: sheet.lines.length ? sheet.lines.map((l) => `•  ${l}`).join('\n') : 'It only shows its own views and keeps its own storage.' },
-        description: [...sheet.warnings, m.manifest && modTabs(m).some((t) => t !== 'mods') ? 'Its looks are not part of this: they ask when you first use them, on their tabs.' : '', 'You can turn it off here at any time.'].filter(Boolean).join(' '),
+        quote: { label: sheet.lines.length ? 'It will be able to' : 'It asks for nothing', text: sheet.lines.length ? sheet.lines.map((l) => `•  ${l}`).join('\n') : 'It only shows its own views.' },
+        description: sheet.warnings.join(' '),
         confirmLabel: m.state === 'paused' ? 'Allow and resume' : 'Turn on',
       });
       if (!ok) {
@@ -653,13 +650,13 @@ export function modsSection(ctx: Ctx): Section {
 
     // What it adds
     const adds: string[] = [];
-    for (const v of m.manifest?.contributes?.views ?? []) adds.push(`${v.title}: ${SEAT_WORDS[v.seat] ?? v.seat}${v.seat === 'background' ? ' (use it on the Background tab)' : ''}`);
-    for (const l of m.manifest?.contributes?.looks ?? []) adds.push(`${l.title}: ${LOOK_WORDS[l.target] ?? l.target} (use it on the ${l.target === 'composer' ? 'Chat bar' : 'Conversation'} tab)`);
+    for (const v of m.manifest?.contributes?.views ?? []) adds.push(`${v.title}: ${SEAT_WORDS[v.seat] ?? v.seat}`);
+    for (const l of m.manifest?.contributes?.looks ?? []) adds.push(`${l.title}: ${LOOK_WORDS[l.target] ?? l.target}`);
     for (const c of m.manifest?.contributes?.commands ?? []) adds.push(`/${c.name}: ${c.description}`);
     const hooks = m.manifest?.contributes?.hooks ?? [];
-    if (hooks.length) adds.push(`Hooks: ${hooks.map((x) => x.event).join(', ')} (listed in Settings → Hooks)`);
+    if (hooks.length) adds.push(`Hooks: ${hooks.map((x) => x.event).join(', ')}`);
     const styles = m.manifest?.contributes?.styles ?? [];
-    if (styles.length) adds.push(`A theme: ${styles.join(', ')} (use it on the Theme tab)`);
+    if (styles.length) adds.push(`A theme: ${styles.join(', ')}`);
     d.append(block('What it adds', adds.length ? h('ul', { class: 'sp-detail-list' }, ...adds.map((a) => h('li', {}, a))) : h('p', { class: 'sp-detail-muted' }, 'Nothing yet.')));
 
     // Permissions
@@ -672,8 +669,8 @@ export function modsSection(ctx: Ctx): Section {
       li.innerHTML = `${icon(granted ? 'check' : wanted ? 'circle-alert' : 'circle', 14)}<span>${escapeHtml(permissionWords(p))}</span>${wanted ? '<span class="sp-chip warn">Not granted yet</span>' : ''}`;
       permList.append(li);
     }
-    if (m.wantsStyles) permList.append(h('li', { class: '', html: `${icon('circle', 14)}<span>Restyle the app with its looks</span><span class="sp-chip">Asked at their first Use</span>` }));
-    d.append(block('Permissions', asked.length || m.wantsStyles ? permList : h('p', { class: 'sp-detail-muted' }, 'None: it only shows its own views and keeps its own storage.')));
+    if (m.wantsStyles) permList.append(h('li', { class: '', html: `${icon('circle', 14)}<span>Restyle the app with its looks</span><span class="sp-chip">Asked at first use</span>` }));
+    d.append(block('Permissions', asked.length || m.wantsStyles ? permList : h('p', { class: 'sp-detail-muted' }, 'None.')));
 
     // Problems
     if (m.problems.length) {

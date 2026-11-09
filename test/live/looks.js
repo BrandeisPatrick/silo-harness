@@ -1,5 +1,5 @@
 // Live checks of looks in the real window: the bundled Hyperspace set, available without a switch, used on its tabs
-// of Settings → Mods (Conversation, Chat bar, and "Use the whole set" on Background); each look measured with computed styles (the conversation look changes the
+// of Settings → Mods (Conversation, Chat bar, and "Use the set" on Background); each look measured with computed styles (the conversation look changes the
 // transcript and not the sidebar or the chat bar, and the other way round); a hostile look that tries to leave its
 // scope; the state attributes following a run, the theme and a setting; the background hearing `pointer`; and
 // Default putting everything back.
@@ -84,14 +84,14 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     if (await app.exists(`.sp-look-tab[data-subtab="${tab}"] .sp-look-use`)) await app.click(`.sp-look-tab[data-subtab="${tab}"] .sp-look-use`);
     await sleep(900);
   };
-  /** "Use the whole set": Hyperspace's Starfield previewed on the Background tab, then the button beside Use */
+  /** "Use the set": Hyperspace's Starfield previewed on the Background tab, then the button beside Use */
   const useSet = async () => {
     await ev(`window.__oc_debug.settings.open('mods', { tab: 'backgrounds', preview: 'hyperspace/starfield' })`);
     await sleep(500);
-    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the whole set"]');
+    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the set"]');
     await sleep(900);
   };
-  const setOffered = () => app.exists('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the whole set"]');
+  const setOffered = () => app.exists('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the set"]');
   const lookStyles = () => ev(`[...document.querySelectorAll('style[data-look]')].map((s) => s.dataset.look + '=' + s.dataset.ref)`);
 
   try {
@@ -153,7 +153,7 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     await useSet();
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hyperspace/starfield' && v.hello)`, 15_000, 'the Hyperspace background');
     const cfg = await ev('window.oc.getConfig()');
-    check('"Use the whole set" applies the conversation look, the chat bar look and the background', cfg.mods.layout.looks.conversation === 'hyperspace/holo' && cfg.mods.layout.looks.composer === 'hyperspace/cockpit' && cfg.mods.layout.background === 'hyperspace/starfield', cfg.mods.layout);
+    check('"Use the set" applies the conversation look, the chat bar look and the background', cfg.mods.layout.looks.conversation === 'hyperspace/holo' && cfg.mods.layout.looks.composer === 'hyperspace/cockpit' && cfg.mods.layout.background === 'hyperspace/starfield', cfg.mods.layout);
     check('… and the tabs show them in use, with the set no longer offered', (await ev(`['conversation', 'chat-bar', 'backgrounds'].map((t) => window.__oc_debug.looks.state(t).current).join()`)) === 'hyperspace/holo,hyperspace/cockpit,hyperspace/starfield' && !(await setOffered()));
     await closeSettings();
     const set = await probe();

@@ -140,6 +140,8 @@ async function main() {
   const ids = F.seedSessions(profile);
   const past = seedHistory(profile);
   const mock = await startMock();
+  // Auto mode's safety check passes everything the scenes do
+  mock.state.classifierDefault = { decision: 'allow', reason: '[Local Work] part of the task' };
   mock.state.ollamaPromptTokens = 8000;
   mock.state.ollamaModels = ['qwen3:8b', 'qwen3:14b'];
   const inspect = await F.freePort(0);

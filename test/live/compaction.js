@@ -38,7 +38,7 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
     const items = await app.transcript();
     const dividers = items.filter((i) => /\bcompaction\b/.test(i.cls));
     const prunes = items.filter((i) => /notice/.test(i.cls) && /Cleared .* tokens of old tool output/.test(i.text));
-    const fallbacks = items.filter((i) => /notice/.test(i.cls) && /summary could not be produced|dropped/.test(i.text));
+    const fallbacks = items.filter((i) => /notice/.test(i.cls) && /Couldn't summarise|Dropped/.test(i.text));
     check('a prune notice or a compaction divider appeared', dividers.length + prunes.length >= 1, { dividers: dividers.map((d) => d.text.split('\n')[0]), prunes: prunes.map((p) => p.text), fallbacks: fallbacks.map((f) => f.text) });
     console.log('notices:', JSON.stringify(items.filter((i) => /notice/.test(i.cls)).map((i) => i.text)));
     const errors = items.filter((i) => /\berror\b/.test(i.cls));

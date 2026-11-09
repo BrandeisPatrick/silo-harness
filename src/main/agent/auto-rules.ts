@@ -1,0 +1,166 @@
+// Auto mode's fixed rules and words: what always asks even in Auto mode (sudo, deleting a critical folder), which
+// paths are protected (an allow rule does not skip the safety check for them), what the agent reads when the check
+// blocks an action, and how a blocked action is named on one line. Pure; the check itself is in classifier.ts.
+
+import os from 'node:os';
+import path from 'node:path';
+import { splitCommands, words } from '../guard';
+import { configDir } from '../paths';
+
+/** Blocks in a row, and in all, after which Auto mode pauses for the session (the approval cards come back). */
+export const PAUSE_IN_A_ROW = 3;
+export const PAUSE_TOTAL = 20;
+
+/** How a blocked call's result starts (what the agent reads, and how a stored transcript finds the call again). */
+export const BLOCKED_PREFIX = 'Blocked by Auto mode: ';
+/** The reason when the check could not run (an error, a timeout, an answer that was not one): fail closed. */
+export const UNAVAILABLE_REASON = '[Unavailable] the safety check could not run';
+/** A user-role note to the agent about Auto mode (an allowed block): sent to the model, not shown as a turn. */
+export const AUTO_NOTE_PREFIX = '[Auto mode] ';
+
+/** What the agent reads in place of the blocked call's result. */
+export function blockedResult(reason: string): string {
+  const r = reason.trim().replace(/[.\s]+$/, '');
+  return `${BLOCKED_PREFIX}${r}. Do not try to get around it; continue with other work, or ask the user.`;
+}
+
+/** The check's reason in a blocked call's result, or null when the result is not a block. */
+export function blockedReason(result: string): string | null {
+  if (!result.startsWith(BLOCKED_PREFIX)) return null;
+  const rest = result.slice(BLOCKED_PREFIX.length);
+  const end = rest.indexOf('. Do not try to get around it');
+  return (end >= 0 ? rest.slice(0, end) : rest.split('\n')[0]).trim();
+}
+
+/** The note the agent gets when the user allows a blocked action. */
+export function allowedNote(what: string): string {
+  return `${AUTO_NOTE_PREFIX}The user allowed an action Auto mode blocked: ${what}. You may try it again now; it runs once without the check.`;
+}
+
+const home = (): string => os.homedir();
+
+function expandHome(p: string): string {
+  return p.replace(/^~(?=$|\/)/, home()).replace(/^\$\{?HOME\}?(?=$|\/)/, home());
+}
+
+/** The tilde form of a path under the home folder. */
+function tilde(p: string): string {
+  const h = home();
+  return p === h ? '~' : p.startsWith(h + path.sep) ? `~${p.slice(h.length)}` : p;
+}
+
+/** a is b or a folder that holds b */
+function holds(a: string, b: string): boolean {
+  return a === b || b.startsWith(a.endsWith(path.sep) ? a : a + path.sep);
+}
+
+const SYSTEM_DIRS = ['/System', '/Library', '/Applications', '/Users', '/Volumes', '/usr', '/bin', '/sbin', '/etc', '/var', '/private', '/opt', '/dev', '/cores', '/private/etc', '/private/var', '/usr/local'];
+
+/**
+ * True when deleting `target` (as an rm or rmdir argument, from `cwd`) takes a critical folder or everything in one:
+ * the root, the home folder, the working directory itself or a folder above it or the home folder, or a system folder.
+ */
+export function criticalTarget(target: string, cwd: string): boolean {
+  let t = expandHome(target.trim());
+  if (!t) return false;
+  // "dir/*" deletes everything in dir; "*" everything in the working directory
+  t = t.replace(/\/\*+$/, '') || '/';
+  if (t === '*' || t === '.*') t = '.';
+  if (t.length > 1) t = t.replace(/\/+$/, '');
+  const abs = path.resolve(cwd, t);
+  if (abs === '/') return true;
+  const root = path.resolve(cwd);
+  if (holds(abs, root) || holds(abs, home())) return true;
+  return SYSTEM_DIRS.includes(abs);
+}
+
+const WRAPPERS = new Set(['env', 'nohup', 'time', 'nice', 'exec', 'command', 'builtin', 'caffeinate']);
+
+/**
+ * Why a command asks the user even in Auto mode, whatever the safety check would say: it uses sudo, or it deletes a
+ * critical folder (rm or rmdir of the home folder, /, the working directory itself, a system folder). Null otherwise.
+ */
+export function alwaysAskReason(command: string, cwd: string): string | null {
+  for (const simple of splitCommands(command.trim())) {
+    const w = words(simple);
+    let i = 0;
+    while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
+    while (i < w.length && WRAPPERS.has(w[i])) {
+      i++;
+      while (i < w.length && w[i].startsWith('-')) i++;
+    }
+    const prog = path.basename(w[i] ?? '');
+    if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
+    if (prog === 'rm' || prog === 'rmdir') {
+      const args = w.slice(i + 1);
+      const dash = args.indexOf('--');
+      const targets = dash >= 0 ? [...args.slice(0, dash).filter((a) => !a.startsWith('-')), ...args.slice(dash + 1)] : args.filter((a) => !a.startsWith('-'));
+      if (targets.some((t) => criticalTarget(t, cwd))) return 'deletes a critical folder';
+    }
+  }
+  return null;
+}
+
+/** Folders inside the working directory that configure git, editors, the app or another agent */
+const PROTECTED_IN_PROJECT = new Set(['.git', '.silo-harness', '.open-harness', '.claude', '.vscode', '.idea']);
+const PROTECTED_FILES_IN_PROJECT = new Set(['.mcp.json']);
+/** Under the home folder: shell start-up files, keys and credentials, launch agents */
+const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.profile', '.gitconfig', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
+/** The app's own data: sessions, config.json, settings */
+const APP_DATA = ['Library/Application Support/Silo Harness', 'Library/Application Support/Open Harness'];
+
+/**
+ * Why a write to `abs` is protected (an allow rule does not skip the safety check for it), or null. Inside the
+ * working directory: .git, the app's and other tools' project folders, .mcp.json. Anywhere: shell start-up files,
+ * keys and credentials, launch agents, and the app's own data and settings.
+ */
+export function protectedWrite(abs: string, cwd: string): string | null {
+  const file = path.resolve(expandHome(abs));
+  const root = path.resolve(cwd);
+  if (holds(root, file) && file !== root) {
+    const rel = path.relative(root, file);
+    const first = rel.split(path.sep)[0];
+    if (first === '.git') return 'modifies the .git directory';
+    if (PROTECTED_IN_PROJECT.has(first) || PROTECTED_FILES_IN_PROJECT.has(rel)) return 'writes a protected file';
+  }
+  const h = home();
+  for (const p of [...PROTECTED_IN_HOME, ...APP_DATA]) if (holds(path.join(h, p), file)) return 'writes a protected file';
+  if (holds(configDir(), file)) return 'writes a protected file';
+  return null;
+}
+
+/** The key a once-allowed action is found by when the agent tries it again: the tool and what its approval showed. */
+export function actionKey(name: string, detail: string): string {
+  return `${name}\u0000${detail}`;
+}
+
+const oneLine = (s: string, max = 200): string => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/**
+ * A blocked action on one line, for the quiet line, Settings and the agent's note: the command, the file (with ~),
+ * "tool on server" for an MCP call. `args` are the call's arguments (an object or its JSON); `detail` what its
+ * approval showed, used when the arguments do not say.
+ */
+export function actionLine(name: string, args: unknown, detail = ''): string {
+  let a: Record<string, unknown> = {};
+  if (typeof args === 'string') {
+    try {
+      const v = JSON.parse(args) as unknown;
+      if (v && typeof v === 'object') a = v as Record<string, unknown>;
+    } catch {
+      /* not JSON */
+    }
+  } else if (args && typeof args === 'object') a = args as Record<string, unknown>;
+  const s = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : '');
+  if (name === 'bash' || name === 'terminal_run') return oneLine(s('command') || detail);
+  if (name === 'write_file' || name === 'edit_file') {
+    const p = s('path') || detail.split('\n')[0];
+    return oneLine(`${name === 'write_file' ? 'write' : 'edit'} ${tilde(expandHome(p))}`);
+  }
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) return oneLine(`${mcp[2]} on ${mcp[1]}`);
+  return oneLine(detail.split('\n')[0] || name);
+}

@@ -183,7 +183,7 @@ export function createChatCards(deps: ChatCardsDeps) {
         {
           id: 'external',
           icon: 'external-link',
-          label: 'Open with the default app',
+          label: 'Open in default app',
           run: async (btn) => {
             try {
               await rpc('cards.openDocument', doc.path, { external: true });

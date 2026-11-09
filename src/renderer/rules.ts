@@ -120,7 +120,7 @@ export function createRulesPanel(opts: RulesPanelOptions): RulesPanel {
     if (busy.has(key) || !current) return;
     const api = opts.source();
     if (!api || typeof api.remove !== 'function') {
-      showStatus(`Couldn't remove ${WHAT[kind]}: this needs the updated app. Restart Silo Harness and try again.`);
+      showStatus(`Couldn't remove ${WHAT[kind]}. Restart Silo Harness and try again.`);
       return;
     }
     const focusAt = document.activeElement === btn ? removeButtons().indexOf(btn) : -1;
@@ -171,8 +171,8 @@ export function createRulesPanel(opts: RulesPanelOptions): RulesPanel {
       els.list.hidden = none;
       els.empty.hidden = !none;
       els.empty.innerHTML = unavailable
-        ? `${icon('shield-check', 16)}<p>Saved rules need the updated app. Restart Silo Harness and try again.</p>`
-        : `${icon('shield-check', 16)}<p>No rules saved for this project yet. Choose <strong>'Always allow … in this project'</strong> on an approval card and the command, MCP server or edits you allowed show up here.</p>`;
+        ? `${icon('shield-check', 16)}<p>Restart Silo Harness to see saved rules.</p>`
+        : `${icon('shield-check', 16)}<p>No saved rules for this project.</p>`;
     },
     async refresh() {
       const api = opts.source();

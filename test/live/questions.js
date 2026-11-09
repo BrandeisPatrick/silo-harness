@@ -208,7 +208,7 @@ const afterTool = (p) => p.messages?.[p.messages.length - 1]?.role === 'tool';
         text100: (() => { const p = document.createElement('span'); p.style.color = 'var(--text-100)'; document.body.append(p); const v = getComputedStyle(p).color; p.remove(); return v; })(),
       };
     })()`);
-    check('approval: the title in the band, the call\'s own description in muted text, the command', ap.title === 'Allow Silo Harness to run this command?' && ap.texts.join('|') === 'Create an empty file named a.txt' && ap.cmd === '$touch a.txt', ap);
+    check('approval: the title in the band, the call\'s own description in muted text, the command', ap.title === 'Run this command?' && ap.texts.join('|') === 'Create an empty file named a.txt' && ap.cmd === '$touch a.txt', ap);
     check('…Deny, then "Allow once ⌘↵" with ⌄ for more; no icon tile', ap.names.join('|') === 'Deny|Allow once|More ways to allow' && ap.keycaps === '⌘↵' && !ap.icon, ap);
     check('…the keys are named for screen readers, and the card by its title', ap.shortcuts.join('|') === 'Escape|Meta+Enter|' && ap.labelled === ap.title, ap.shortcuts);
     check('…Allow once is inverted (the text colour as its fill)', ap.allowBg === ap.text100 && ap.denyBg !== ap.allowBg, [ap.allowBg, ap.text100, ap.denyBg]);
@@ -249,15 +249,15 @@ const afterTool = (p) => p.messages?.[p.messages.length - 1]?.role === 'tool';
     line = await lastLine();
     check('A allowed touch for the session: the second touch ran without a card', fs.existsSync(path.join(project, 'c.txt')) && fs.existsSync(path.join(project, 'd.txt')) && line.words === 'Ran 2 commands' && line.decision === 'Allowed touch for this session' && (await app.evaluate(`document.getElementById('input').value`)) === '', line);
 
-    // ---------- 7. Auto mode: why it stopped, as a muted note ----------
+    // ---------- 7. Auto mode: why it stopped, as a muted note (sudo asks even in Auto mode) ----------
     await setConfig({ permissionMode: 'auto' });
     await app.waitFor(`document.querySelector('#mode-btn').dataset.mode === 'auto'`, 5000, 'auto mode');
-    replies.push({ content: '', toolCalls: [{ id: 'b5', name: 'bash', args: { command: 'git push origin main', description: 'Push the commits to the remote' } }] });
-    replies.push({ content: 'Left the push to you.', when: afterTool });
-    await app.send('Push it.');
+    replies.push({ content: '', toolCalls: [{ id: 'b5', name: 'bash', args: { command: 'sudo -n true', description: 'Check for sudo access' } }] });
+    replies.push({ content: 'Left it to you.', when: afterTool });
+    await app.send('Check sudo.');
     await app.waitFor(`Boolean(document.querySelector('.approval.prompt-card .btn.primary'))`, 20_000, 'the paused card');
     const auto = await app.evaluate(`(() => { const c = document.querySelector('.approval.prompt-card'); return { texts: [...c.querySelectorAll('.prompt-text')].map((e) => e.textContent), color: getComputedStyle(c.querySelector('.prompt-note')).color, muted: (() => { const p = document.createElement('span'); p.style.color = 'var(--text-400)'; document.body.append(p); const v = getComputedStyle(p).color; p.remove(); return v; })(), svg: c.querySelectorAll('.prompt-body svg').length }; })()`);
-    check('Auto mode: the card says why it stopped, muted, with no warning icon', auto.texts.join('|') === 'Push the commits to the remote|Auto mode stopped to ask: it pushes to a remote.' && auto.color === auto.muted && auto.svg === 0, auto);
+    check('Auto mode: the card says why it stopped, muted, with no warning icon', auto.texts.join('|') === 'Check for sudo access|Auto mode stopped to ask: it uses sudo.' && auto.color === auto.muted && auto.svg === 0, auto);
     await both('approval-auto-paused', '.approval.prompt-card');
     await app.approve('deny');
     await app.waitIdle(30_000);

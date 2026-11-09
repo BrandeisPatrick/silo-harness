@@ -823,9 +823,9 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
 
   function render(): void {
     const unavailable = !api
-      ? 'The terminal needs the updated app. Restart Silo Harness to turn it on.'
+      ? 'Restart Silo Harness to turn on the terminal.'
       : !xtermLib()
-        ? 'The terminal could not load xterm.js. Rebuild Silo Harness (npm run build) and restart it.'
+        ? "Couldn't load xterm.js. Run npm run build, then restart."
         : null;
     const failed = !unavailable && failure && !order.length ? failure : null;
     const none = !unavailable && !failed && loaded && !order.length && creating === 0;
@@ -846,7 +846,7 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
         `<button type="button" class="btn sm" data-action="retry">${icon('refresh', 14)}<span>Retry</span></button>`;
     } else if (none) {
       o.empty.innerHTML =
-        `<span class="term-empty-icon">${icon('terminal', 20)}</span><p>No terminals are open.</p>` +
+        `<span class="term-empty-icon">${icon('terminal', 20)}</span><p>No terminals open</p>` +
         `<button type="button" class="btn sm" data-action="new">${icon('plus', 14)}<span>New terminal</span><kbd>⌘</kbd><kbd>T</kbd></button>`;
     } else o.empty.innerHTML = '';
   }

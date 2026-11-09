@@ -193,12 +193,12 @@ export class SessionRuntime {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
-    if (agent.compacting) return { ok: false, error: 'The context is being compacted; send the message again in a moment.' };
+    if (agent.compacting) return { ok: false, error: 'Compacting the context. Send again in a moment.' };
     if (agent.running) {
       const queued = agent.enqueue(text, attachments, { ...opts, origin: opts.origin ?? 'queue' });
       return { ok: true, queued: true, id: queued.id };
     }
-    if (this.running().length >= MAX_RUNNING) return { ok: false, error: `${MAX_RUNNING} sessions are already running. Wait for one to finish, or stop one, then send again.` };
+    if (this.running().length >= MAX_RUNNING) return { ok: false, error: `${MAX_RUNNING} sessions are already running. Stop or wait for one, then send again.` };
     agent.run(text, attachments, opts).catch((err: unknown) => console.error('[agent] run failed', err));
     return { ok: true };
   }
@@ -320,6 +320,16 @@ export class SessionRuntime {
       });
     }
     return true;
+  }
+
+  /**
+   * Allows an action Auto mode blocked in a session (Agent.allowBlocked): it runs once when the agent tries it again.
+   * Not ok when the session or the block is not known in this app session.
+   */
+  allowBlocked(sessionId: string, id: string): { ok: boolean; error?: string } {
+    const agent = this.agents.get(sessionId);
+    if (!agent) return { ok: false, error: 'This block is from before the app started; ask the agent to try again.' };
+    return agent.allowBlocked(id);
   }
 
   /** A feature that decides plans of its own (see PlanClaim). */

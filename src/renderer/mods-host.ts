@@ -1814,7 +1814,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       const tabs = modTabs(o.info);
       tab = tabs.find((t) => t !== 'mods' && t !== 'themes') ?? tabs[0];
       const picks = tab !== 'mods' && tab !== 'themes';
-      text = how === 'later' ? `${name} stays off. Turn it on any time in` : how === 'on' ? (picks ? `${name} is on. Use its looks in` : `${name} is on`) : `${name} was turned on in Settings`;
+      text = how === 'later' ? `${name} stays off. Turn it on in` : how === 'on' ? (picks ? `${name} is on. Use its looks in` : `${name} is on`) : `${name} was turned on in Settings`;
       if (!(how === 'later' || (how === 'on' && picks))) tab = '';
     }
     const where = tab ? `Settings → Mods${tab === 'mods' ? '' : ` → ${MOD_TABS.find((t) => t.id === tab)!.title}`}` : '';
