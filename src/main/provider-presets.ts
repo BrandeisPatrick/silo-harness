@@ -5,6 +5,7 @@
 
 import type { NamedProviderConfig, ProviderType } from '../shared/types';
 import { describe, envName, headerMap, httpUrl, kind, nonEmpty, oneOf, positiveInt, stringList, type Check, type JsonSchema } from './checks';
+import { isRecord } from './json';
 
 export interface Preset {
   /** What the window calls it */
@@ -90,7 +91,6 @@ export interface EntryOptions {
   expand?: (v: string) => string;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * Checks one entry. A bad field is dropped and reported; an entry without a usable type (or an openai-compatible one

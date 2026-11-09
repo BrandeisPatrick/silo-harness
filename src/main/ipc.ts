@@ -14,7 +14,7 @@ import { searchFiles } from './files';
 import { appendInstruction } from './instructions';
 import { acceptFromWindow, activeModel, listOllamaModels, modelCapabilities, ollamaOf, resolveProvider, windowConfig } from './providers';
 import { settingsLayer } from './settings';
-import { contextLimit } from './agent';
+import { contextLimit } from './context-window';
 import { rewindSession, toMeta, toTranscript } from './sessions';
 import { loadSkills, toInfo } from './skills';
 import type { HistoryService } from './services';

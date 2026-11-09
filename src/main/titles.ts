@@ -1,11 +1,8 @@
-import type OpenAI from 'openai';
 import type { AppConfig } from '../shared/types';
-import { clip, displayText, type Session } from './sessions';
+import { clip, displayText, type Msg, type Session } from './sessions';
 import { contextSize, ollamaComplete } from './ollama';
 import { isOllama, makeClient, ollamaOf } from './providers';
 import { isCompactPreamble } from './compact';
-
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 const SYSTEM = 'You name chat sessions. Reply with only a title of at most six words. No quotes, no trailing period.';
 const MAX_INPUT = 1200;

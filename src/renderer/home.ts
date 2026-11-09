@@ -25,3 +25,11 @@ export function tilde(p: string): string {
   if (s === home) return '~';
   return s.startsWith(home + '/') ? '~' + s.slice(home.length) : s;
 }
+
+/** "~/Documents/silo-harness"; long paths keep the root and the last two folders: "~/…/audit/playground". */
+export function shortPath(p: string): string {
+  const short = tilde(p);
+  if (short.length <= 40) return short;
+  const parts = short.split('/');
+  return parts.length > 4 ? `${parts[0]}/…/${parts.slice(-2).join('/')}` : short;
+}

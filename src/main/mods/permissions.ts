@@ -3,8 +3,6 @@
 
 import type { ModLookTarget, ModMethod, ModPermission, ModSeat } from '../../shared/mods';
 
-export const MOD_PROTOCOL = 1;
-
 export const MOD_PERMISSIONS: readonly ModPermission[] = [
   'session:read',
   'session:send',

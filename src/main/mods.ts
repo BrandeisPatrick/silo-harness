@@ -14,7 +14,7 @@ import { configDir, projectConfigDir } from './paths';
 import { loadSkills } from './skills';
 import { ModRegistry } from './mods/registry';
 import { LOOK_KINDS, hasFeatureParts, hasLookParts, inUseKinds, isPartOf, lookPartsOf, needsStylesApproval, settingFits, splitRef } from './mods/manifest';
-import { BACKGROUND_LABEL, MOD_SCHEME, MOD_SCHEME_PRIVILEGES, resolveModUrl, type ServeContext } from './mods/serve';
+import { MOD_SCHEME, MOD_SCHEME_PRIVILEGES, resolveModUrl, type ServeContext } from './mods/serve';
 import { ModStorage } from './mods/storage';
 import { SkillUsageTracker } from './mods/skill-usage';
 import { ModBridgeHandler, holds } from './mods/bridge';
@@ -594,11 +594,6 @@ export function checkLayout(patch: unknown, backgroundsDir: string): Partial<Mod
     out.backgroundDim = Math.min(1, Math.max(0, d));
   }
   return out;
-}
-
-/** The URL of the user's own background picture for the window */
-export function backgroundUrl(file: string): string {
-  return `${MOD_SCHEME}://${BACKGROUND_LABEL}/${encodeURIComponent(path.basename(file))}`;
 }
 
 /** Serves mod:// from `ctx` (registered with protocol.handle). Exported for the live test. */

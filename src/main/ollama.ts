@@ -1,7 +1,7 @@
 import type OpenAI from 'openai';
+import type { Msg } from './sessions';
 
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
+export type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
 export type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
 interface OllamaMessage {

@@ -2,15 +2,13 @@
 // permission. Both providers work the way agent.ts calls them: Ollama through its native /api/chat (so num_ctx is
 // honoured), Portkey (and any OpenAI-compatible gateway) through the OpenAI client.
 
-import type OpenAI from 'openai';
 import type { AppConfig } from '../../shared/types';
 import type { ModelRequest } from '../../shared/mods';
-import { contextLimit } from '../agent';
+import { contextLimit } from '../context-window';
 import { estimateTokens, renderForSummary } from '../compact';
 import { contextSize, ollamaChat } from '../ollama';
 import { isOllama, makeClient, ollamaOf } from '../providers';
-
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+import type { Msg } from '../sessions';
 
 export const MODEL_MAX_TOKENS = 4000;
 export const MODEL_DEFAULT_TOKENS = 1000;

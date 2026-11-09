@@ -3,10 +3,8 @@
 // /compact and auto-compact) so a session can go on past the model's context size.
 // Everything here is pure: the agent decides when to run it and writes the result through the session store.
 
-import type OpenAI from 'openai';
 import type { AppConfig, PlanInfo, TaskItem } from '../shared/types';
-
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+import type { Msg } from './sessions';
 
 /** First line of the user message that stands in for the folded conversation; the transcript hides it. */
 export const COMPACT_MARK = '[Context compacted]';

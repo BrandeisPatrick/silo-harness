@@ -5,7 +5,7 @@
 
 import type { AgentEvent, AppConfig, ApprovalScope, ImageAttachment, LiveState, PlanInfo, SendResult, SessionMeta, SessionOrigin, SessionStatus, StoredRules } from '../shared/types';
 import { Agent, PLAN_APPROVED_TEXT, type SendOptions } from './agent';
-import type { App } from './app';
+import type { App, Disposer } from './app';
 import type { ArtifactStore } from './artifacts';
 import type { BrowserController } from './browser';
 import type { McpManager } from './mcp';
@@ -16,8 +16,6 @@ import type { Tool } from './tools';
 
 /** How many sessions may run at once. */
 export const MAX_RUNNING = 6;
-
-type Disposer = () => void;
 
 export interface RuntimeOptions {
   store: SessionStore;

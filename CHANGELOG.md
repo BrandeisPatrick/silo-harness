@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1
+
+Fixes in the Browser pane: what you or the agent type into a password, one-time code or card field never reaches the agent, and sites ask before using your camera, microphone, location or notifications. Under the hood, the window's and the agent's code is split into smaller modules, with no change in behaviour.
+
+### Fixes
+
+- **Passwords no longer reach the agent.** Until now, a password typed into a page in the Browser pane, by you or by the agent, could come back in what the agent read: in the page outline (`browser_read_page`), in `browser_find`, in `browser_eval` results and in `browser_type`'s own "Typed …" line. From there it went into the transcript, the history, hooks, exports and the remote page. Now the value of a password field, a one-time code field or a card field (number, security code, expiry) reads `•••` in everything the browser tools report about a page, also after you click "Show password". Usernames, emails and other fields read as before.
+- **The agent still fills these fields, without repeating them.** When `browser_type` types into one, its result says how many characters went in, and the transcript, the tool row and hooks show `•••` for the text.
+- **No screenshots of a filled password.** `browser_screenshot` is refused while a filled password, code or card field has the focus or shows its value on screen, and tells the agent to move the focus or scroll the field away.
+- **Sites ask before using your camera, microphone, location or notifications.** Until now, any page in the Browser pane got these, and every other permission a page can ask for, without a word. Now Silo Harness asks you first, for example "example.com wants to use your camera and microphone", with Allow and Don't allow, and remembers your answer for that site until it quits. Only you can answer: the agent cannot. Pages that open a link in another app (an email link, a meeting link) ask too, and so do artifacts. Full screen and copying to the clipboard still work without asking, and the app's own window is unchanged.
+
 ## 0.9.0
 
 Scheduled tasks and Dreaming have pages of their own, laid out like Claude Code's; looks (background, chat bar, conversation, theme) are previewed and used without switches; and the rail and the mods' tabs open and close like the browser.

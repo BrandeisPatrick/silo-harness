@@ -534,14 +534,18 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** "/Users/me/src" → "~/src" for a path in the home folder (by prefix), as the agent's terminal tools show paths */
+export function tilde(p: string, home = os.homedir()): string {
+  return p.startsWith(home) ? '~' + p.slice(home.length) : p;
+}
+
 /** Formats the tab list for the agent. */
 export function describeTabs(tabs: TerminalTabInfo[], home = os.homedir()): string {
   if (!tabs.length) return 'No terminal tabs are open.';
-  const tilde = (p: string) => (p.startsWith(home) ? '~' + p.slice(home.length) : p);
   return tabs
     .map((t) => {
       const state = t.exitCode !== undefined ? `exited (${t.exitCode})` : t.running ? 'running' : 'idle';
-      return `${t.id}  ${t.title}  ${state}  ${tilde(t.cwd)}${t.running ? `  (${t.running})` : ''}${t.agent ? '  [opened by the agent]' : ''}`;
+      return `${t.id}  ${t.title}  ${state}  ${tilde(t.cwd, home)}${t.running ? `  (${t.running})` : ''}${t.agent ? '  [opened by the agent]' : ''}`;
     })
     .join('\n');
 }

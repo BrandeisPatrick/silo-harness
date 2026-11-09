@@ -97,6 +97,8 @@ Where this app's tool is the same thing as one of Claude Code's, a hook sees Cla
 
 `terminal_run` (a command in the Terminal pane) also answers to a `Bash` matcher and to `Bash(…)` rules, with its `command` in `tool_input`, so a Bash policy hook covers it too.
 
+Credentials never reach a hook. When `browser_type` types into a password, one-time code or card field, its `text` reads `•••` in `tool_input` (as it does in the transcript); an `updatedInput` that hands `•••` back keeps the real text. In `tool_response`, the value of such a field reads `•••` in every browser tool's result.
+
 ## Output
 
 | Stdout | Exit 0 | Exit 2 | Another code |

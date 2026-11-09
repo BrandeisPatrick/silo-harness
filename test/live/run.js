@@ -50,6 +50,7 @@ const SCRIPTS = [
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
   { name: 'remote-page', electron: true },
+  { name: 'browser-safety' },
 ];
 
 const words = process.argv.slice(2);

@@ -4,7 +4,7 @@
 import os from 'node:os';
 import type { AppConfig } from '../../shared/types';
 import type { ModInfo, PublicConfig, PublicConfigPatch } from '../../shared/mods';
-import { contextLimit } from '../agent';
+import { contextLimit } from '../context-window';
 import { activeModel } from '../providers';
 
 const THEMES = ['system', 'light', 'dark'] as const;

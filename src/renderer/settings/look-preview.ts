@@ -146,11 +146,6 @@ function sheetFor(css: string): CSSStyleSheet | null {
   return s;
 }
 
-/** Called when the window's own stylesheets could have changed (never at run time today; kept for the checks). */
-export function resetPreviewSheets(): void {
-  appSheet = null;
-}
-
 // ---------- The samples ----------
 
 const ring = (fraction: number) =>

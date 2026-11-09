@@ -3,8 +3,9 @@ import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
-import { isOllama, makeClient, modelCapabilities, ollamaOf, plainError, resolveProvider, scrubSecrets } from './providers';
-import { contextSize, ollamaChat, ollamaComplete, type Usage } from './ollama';
+import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
+import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
+import { contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
 import {
   PRUNE_HARD,
@@ -33,15 +34,13 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { instructionsPrompt, loadInstructions } from './instructions';
 import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
-import { clip, latestPlan, toMeta, turnSnapshot, type Session, type SessionStore, type Turn } from './sessions';
+import { clip, latestPlan, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
 import { generateTitle, titlePrompt } from './titles';
-import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from './guard';
 import { TerminalManager } from './terminal';
 import { ArtifactStore, type ArtifactInput } from './artifacts';
 import os from 'node:os';
@@ -52,19 +51,17 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
+import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage } from './agent/prompt';
+import { errorMessage, providerErrorMessage } from './agent/errors';
+import { complete, noToolsNotice, type CompletionHost } from './agent/complete';
+import { approvalLabels, decideApproval, DENIED } from './agent/permissions';
 
-type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
-type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
+// The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
+export { contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW } from './context-window';
 
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
 
-const DENIED = 'Not permitted: the user denied this action. Do not retry it; explain what you would have done and continue or stop.';
-const PLAN_EDIT_BLOCKED = 'Not permitted in plan mode: describe this step in your plan instead.';
-const PLAN_CMD_BLOCKED = 'Not permitted in plan mode: only read-only commands (ls, cat, grep, git status/log/diff …) run while planning. Describe this step in your plan instead.';
-const PLAN_MCP_BLOCKED = 'Not permitted in plan mode: this MCP tool is not marked read-only. Describe this step in your plan instead.';
-const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 /** What a browser_* call from a session that is not on screen gets back (the pane belongs to the session on screen). */
 export const BROWSER_BACKGROUND = 'Error: the built-in browser is only available while this session is on screen, and the user is looking at another session. Continue without the browser (use bash with curl for plain pages), or say that the user should open this session to let you browse.';
 const SUMMARY_TIMEOUT_MS = 240_000;
@@ -73,146 +70,6 @@ const MAX_STOP_CONTINUES = 8;
 const MIN_COMPACT_MESSAGES = 2;
 
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'bash', 'terminal_run']);
-
-/** Below this window the optional tool families are left out unless the user asks for all tools. */
-export const FULL_TOOLS_WINDOW = 32_000;
-
-/**
- * Whether only the essential tools are offered. Every tool definition is sent with every request: with a 16k window
- * the optional families (scheduled tasks, sub-sessions, mod authoring) would take a fifth of it before a word is said.
- */
-export function essentialToolsOnly(cfg: AppConfig): boolean {
-  if (cfg.toolSet === 'essential') return true;
-  if (cfg.toolSet === 'all') return false;
-  return contextLimit(cfg) < FULL_TOOLS_WINDOW;
-}
-
-/** Tells the model what is missing, so it can say so instead of improvising. */
-const ESSENTIAL_NOTE =
-  'To save context for this model\'s small window, the tools for scheduled tasks, sub-sessions and writing mods are turned off. If the user asks for one of those, say that all tools can be turned on in Settings → Context ("Tools offered to the model").';
-
-/** The context window the configured model has, in tokens. */
-export function contextLimit(cfg: AppConfig): number {
-  const r = resolveProvider(cfg);
-  if (r.type === 'ollama') return contextSize(ollamaOf(cfg).numCtx);
-  return Math.max(4096, Number(r.contextWindow) || 128000);
-}
-
-/** The system prompt in the pieces the context breakdown counts separately; joined in this order they are the prompt. */
-interface PromptParts {
-  base: string;
-  skills: string;
-  mcp: string;
-  mode: string;
-  userExtra: string;
-  /** One chunk per instructions file */
-  instructions: { label: string; text: string }[];
-  sections: string;
-}
-
-/**
- * `cfg.workingDirectory` is the session's folder here (see Agent.sessionConfig). `extra` is the app's registered
- * sections. `own`: the session has a tool set of its own (Session.tools), named here instead of the usual ones.
- */
-function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra = '', own?: string[]): string {
-  const p = systemPromptParts(cfg, skills, mcp, extra, own);
-  return p.base + p.skills + p.mcp + p.mode + p.userExtra + p.instructions.map((i) => i.text).join('') + p.sections;
-}
-
-/**
- * A session with a tool set of its own (a dream) is told what it has and nothing about the shell, the browser, the
- * permission mode, MCP servers or skills it cannot use; its sections (`extra`) say what it is for. The instructions
- * files are left out too: what such a session needs of them, its first message carries.
- */
-function ownToolsPromptParts(cfg: AppConfig, extra: string, own: string[]): PromptParts {
-  const base = `You are Silo Harness, running on the user's Mac.
-Working directory: ${cfg.workingDirectory}
-Today: ${new Date().toISOString().slice(0, 10)}
-
-In this session you have only these tools: ${own.join(', ')}. You cannot run commands, change files, browse or start other sessions; do not say that you did.`;
-  const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
-  const sections = extra.trim() ? `\n\n${extra.trim()}` : '';
-  return { base, skills: '', mcp: '', mode: '', userExtra, instructions: [], sections };
-}
-
-function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra = '', own?: string[]): PromptParts {
-  if (own) return ownToolsPromptParts(cfg, extra, own);
-  const base = `You are Silo Harness, an autonomous coding agent running on the user's Mac.
-Working directory: ${cfg.workingDirectory}
-Today: ${new Date().toISOString().slice(0, 10)}
-
-You have tools for the filesystem (read_file, write_file, edit_file, list_directory, glob, grep), a shell (bash), a built-in browser pane that the user can see next to the chat (browser_* tools), the Terminal pane next to the chat (terminal_* tools), and create_artifact for deliverables shown in the browser pane.
-
-How to work:
-- Act with tools instead of guessing. Explore with glob/grep/read_file before editing. Read a file before you edit it, and prefer edit_file for targeted changes.
-- Use bash for builds, tests and git. Commands must be non-interactive.
-- Terminal pane: terminal_run types a command into a shell tab the user can see and keeps it running (dev servers, watchers, anything they should watch or take over); terminal_read shows what a tab prints later or what the user ran there; terminal_list and terminal_stop manage the tabs. Prefer bash for one-off commands.
-- Artifacts: when the result is something to look at or hand over rather than a project file (a web page or small app, an SVG diagram, a report or document in Markdown, a standalone code sample), call create_artifact with the complete content; it opens in the Browser pane. Update it by calling create_artifact again with its id and the full new content. Images the user attaches to a message are visible to you if the model supports vision; describe or use them as asked. Never append "/think", "/no_think" or similar switches to commands, file contents or tool arguments.
-- Browser: browser_navigate to a URL, then act by visible text: browser_click with text ("Sign in") and browser_type with field (the field's label or placeholder). When text is ambiguous, browser_read_page lists elements with refs (ref_N) you can pass instead; refs change after navigation, so read the page again after it changes. Use browser_get_text to read article-style pages, browser_wait_for when a page needs a moment to update, and browser_screenshot when layout matters.
-- Keep going until the task is complete, then finish with a short summary of what you did and what you found. Do not ask questions you can answer with a tool.
-- If a tool reports that an action was not permitted, do not retry it; explain what you would have done and continue with what you can do.
-- Skills: a <skill> block in a user message holds instructions for that request; follow them. Only load a skill with the skill tool when the user invoked it with /name or the task clearly matches its description, never as a substitute for finishing the task.
-- Mentions: when the user writes @path, that file's contents (or a folder's listing) follow their message in a <file> block; treat it as the current contents of that file and do not read it again unless the block says it was cut short.
-- Tasks: for work with several steps, keep a short task list with update_tasks (the whole list each time, one item in_progress) so the user can follow along; skip it for quick answers.`;
-  const skillList = skills.length
-    ? `\n\nAvailable skills:\n${skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}`).join('\n')}`
-    : '';
-  let modeText = '';
-  if (cfg.permissionMode === 'plan') {
-    modeText = `\n\nPLAN MODE: you are planning, not building. Explore with read_file, glob, grep, list_directory, read-only shell commands (ls, cat, git status/log/diff …) and the browser. Do not change files and do not run commands that change anything; write_file and edit_file are unavailable. When you understand the task, call submit_plan exactly once with a concise Markdown plan: the goal, numbered steps naming the files to touch, how to verify, and open questions. Then stop; the user decides whether to build it.`;
-  } else if (cfg.permissionMode === 'auto') {
-    modeText = `\n\nYou run with automatic approval. A few risky actions (sudo, destructive git, writes outside the working directory, publishing, …) are paused for the user to review.`;
-  }
-  const servers = mcp?.describe() ?? '';
-  const mcpText = servers
-    ? `\n\nMCP servers provide extra tools named mcp__<server>__<tool> (their descriptions say what they do). Use them when they fit the task; the user approves calls that can change something.\n${servers}`
-    : '';
-  const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
-  const instructions = loadInstructions(cfg.workingDirectory).map((f) => ({ label: f.label, text: instructionsPrompt([f]) }));
-  const sections = extra.trim() ? `\n\n${extra.trim()}` : '';
-  return { base, skills: skillList, mcp: mcpText, mode: modeText, userExtra, instructions, sections };
-}
-
-/** A user message: plain text, or text plus image parts when images are attached. */
-function userMessage(text: string, attachments: ImageAttachment[]): Msg {
-  if (!attachments.length) return { role: 'user', content: text };
-  const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
-  if (text.trim()) parts.push({ type: 'text', text });
-  for (const a of attachments) parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
-  return { role: 'user', content: parts };
-}
-
-function noToolsNotice(model: string): string {
-  return `${model} does not support tools, so this run is a plain chat: it can see your message and images but cannot read files, run commands or browse.`;
-}
-
-/**
- * What a run's error says: a service's refusal or an unreachable address in plain words, naming the provider and
- * what to check (plainError); anything else as it is. Never with a key.
- */
-function providerErrorMessage(err: unknown, cfg: AppConfig): string {
-  const e = err as { status?: unknown; name?: unknown };
-  const fromService = typeof e?.status === 'number' || e?.name === 'APIConnectionError' || e?.name === 'APIConnectionTimeoutError';
-  if (!fromService || isContextLengthError(err)) return errorMessage(err);
-  try {
-    return plainError(err, resolveProvider(cfg));
-  } catch {
-    return errorMessage(err);
-  }
-}
-
-/** An error's message, with any key the providers resolved taken out (a service's error may quote it). */
-function errorMessage(err: unknown): string {
-  return scrubSecrets(err instanceof Error ? err.message : String(err));
-}
-
-/** Folds one chunk's usage into the running counts (gateways may repeat or split the counts across chunks). */
-function mergeUsage(prev: Usage | null, u: { prompt_tokens?: number; completion_tokens?: number }): Usage {
-  return {
-    promptTokens: Math.max(prev?.promptTokens ?? 0, Number(u.prompt_tokens) || 0),
-    completionTokens: Math.max(prev?.completionTokens ?? 0, Number(u.completion_tokens) || 0),
-  };
-}
 
 /** What answering an approval card changes besides the pending call: a mode switch, or a rule to save for the project. */
 export interface ApprovalOutcome {
@@ -309,6 +166,8 @@ export class Agent {
   private sessionStarted = false;
   /** A hook said continue: false; the run stops after the current step */
   private hookStop: string | null = null;
+  /** Calls whose arguments hold a secret, by call id: the arguments as stored and shown (see Tool.shownArgs) */
+  private shownArgs = new Map<string, Record<string, unknown>>();
 
   constructor(
     private readonly getConfig: () => AppConfig,
@@ -505,46 +364,28 @@ export class Agent {
   }
 
   /**
-   * Decides, per permission mode, whether an action runs, asks, or is refused. `hookAllowed`: a PreToolUse hook allowed
-   * the call, so no card is shown (what the mode refuses outright, plan mode's edits, stays refused).
+   * Decides, per permission mode, whether an action runs, asks, or is refused (the rules are in agent/permissions.ts).
+   * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown (what the mode refuses outright, plan
+   * mode's edits, stays refused).
    */
   private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
     const mode = cfg.permissionMode;
     const cwd = cfg.workingDirectory;
-    const isEdit = name === 'write_file' || name === 'edit_file';
-    const isCmd = name === 'bash' || name === 'terminal_run';
-    const allow = Promise.resolve<ApprovalResult>({ ok: true });
-    const refuse = (message: string) => Promise.resolve<ApprovalResult>({ ok: false, message });
-    const ask = (...a: Parameters<Agent['ask']>) => (hookAllowed ? allow : this.ask(...a));
-    if (opts.custom) {
-      if (mode === 'plan') return refuse(PLAN_CUSTOM_BLOCKED);
-      if (mode === 'bypass' && !opts.alwaysAsk) return allow;
-      return ask(name, detail, mode, null, [], true);
-    }
-    if (mode === 'bypass') return allow;
-    const rules = cfg.allowRules?.[cwd];
-    const ref = this.mcp?.lookup(name);
-    if (ref) {
-      // MCP tools: read-only ones run everywhere; the rest ask once per server (auto mode asks only for destructive ones).
-      if (mode === 'plan') return ref.readOnly ? allow : refuse(PLAN_MCP_BLOCKED);
-      if (ref.readOnly || this.sessionSet(this.mcpAllowed).has(ref.server) || rules?.mcp?.includes(ref.server)) return allow;
-      if (mode === 'auto') return ref.destructive ? ask(name, detail, mode, 'destructive MCP tool', [ref.server]) : allow;
-      return ask(name, detail, mode, null, [ref.server]);
-    }
-    if (mode === 'plan') {
-      if (isEdit) return refuse(PLAN_EDIT_BLOCKED);
-      if (isCmd) return isReadOnlyCommand(detail) ? allow : refuse(PLAN_CMD_BLOCKED);
-      return allow;
-    }
-    if (!isEdit && !isCmd) return allow;
-    const reason = isCmd ? guardCommand(detail, cwd) : target ? guardWrite(target, cwd) : null;
-    const programs = isCmd ? programsOf(detail) : [];
-    if (reason && !this.sessionSet(this.allowedReasons).has(reason) && !rules?.reasons?.includes(reason)) return ask(name, detail, mode, reason, programs);
-    if (mode === 'auto') return allow;
-    if (isEdit && (mode === 'acceptEdits' || rules?.edits)) return allow;
-    if (isCmd && programs.length && programs.every((p) => this.sessionSet(this.allowedPrograms).has(p) || rules?.programs?.includes(p))) return allow;
-    return ask(name, detail, mode, null, programs);
+    const decision = decideApproval(name, detail, target, opts, {
+      mode,
+      cwd,
+      rules: cfg.allowRules?.[cwd],
+      mcp: () => this.mcp?.lookup(name),
+      allowed: {
+        mcp: (server) => this.sessionSet(this.mcpAllowed).has(server),
+        reason: (reason) => this.sessionSet(this.allowedReasons).has(reason),
+        program: (program) => this.sessionSet(this.allowedPrograms).has(program),
+      },
+    });
+    if (decision.kind === 'refuse') return Promise.resolve({ ok: false, message: decision.message });
+    if (decision.kind === 'allow' || hookAllowed) return Promise.resolve({ ok: true });
+    return this.ask(name, detail, mode, decision.reason, decision.programs, decision.custom);
   }
 
   private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false): Promise<ApprovalResult> {
@@ -557,15 +398,7 @@ export class Agent {
         this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: '', projectLabel: '' });
       });
     }
-    const what = name.startsWith('mcp__')
-      ? programs[0] ?? 'this server'
-      : reason
-      ? 'this kind of action'
-      : name === 'bash' || name === 'terminal_run'
-        ? programs.join(', ') || 'this command'
-        : 'edits';
-    const alwaysLabel = `Allow ${what} for this session`;
-    const projectLabel = `Always allow ${what} in this project`;
+    const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs);
     return new Promise((resolve) => {
       this.pendingApprovals.set(id, { resolve, name, programs, reason });
       this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel });
@@ -834,7 +667,7 @@ export class Agent {
         this.lastUsage = null;
         let reply: { text: string; toolCalls: ToolCall[] };
         try {
-          reply = await this.complete(cfg, client, model, history, activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn);
         } catch (err) {
           // The provider says the request does not fit: compact and try this call once more instead of ending the run.
           if (signal.aborted || cfg.autoCompact === false || !isContextLengthError(err)) throw err;
@@ -844,7 +677,7 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
-          reply = await this.complete(cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages], activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages], activeSpecs, signal, turn);
         }
         const { text, toolCalls } = reply;
         this.emit({ type: 'thinking_done' });
@@ -858,7 +691,7 @@ export class Agent {
           }
         }
         const assistant: Msg = { role: 'assistant', content: text };
-        if (toolCalls.length) assistant.tool_calls = toolCalls;
+        if (toolCalls.length) assistant.tool_calls = await this.storedCalls(toolCalls, tools, ctx);
         this.store.append(this.session, assistant);
         if (text.trim()) lastText = text;
         this.markPrompt();
@@ -909,6 +742,7 @@ export class Agent {
       }
     } finally {
       this.currentTurn = null;
+      this.shownArgs.clear();
       this.repairTail();
       this.store.save(this.session);
       this.running = false;
@@ -1037,6 +871,17 @@ export class Agent {
   private reportUsage(usage: Usage): void {
     this.lastUsage = usage;
     this.emit({ type: 'usage', ...usage });
+  }
+
+  /** What a model call (agent/complete.ts) may use of this agent. */
+  private completionHost(): CompletionHost {
+    return {
+      emit: (ev) => this.emit(ev),
+      reportUsage: (usage) => this.reportUsage(usage),
+      noStreamUsage: this.noStreamUsage,
+      toolSupport: this.toolSupport,
+      maxOutput: () => this.maxOutput,
+    };
   }
 
   /** What every request costs before any conversation: the system prompt and the tool definitions. */
@@ -1456,151 +1301,30 @@ export class Agent {
     this.emit({ type: 'session_changed', session: toMeta(session) });
   }
 
-  private async complete(
-    cfg: AppConfig,
-    client: OpenAI | null,
-    model: string,
-    history: Msg[],
-    specs: ToolSpec[],
-    signal: AbortSignal,
-    turn: number,
-  ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-    if (!client) {
-      const ol = ollamaOf(cfg);
-      const chat = (tools: ToolSpec[]) =>
-        ollamaChat({
-          baseURL: ol.baseURL,
-          model,
-          numCtx: contextSize(ol.numCtx),
-          think: ol.think ?? 'auto',
-          messages: history,
-          tools,
-          signal,
-          turn,
-          onText: (t) => this.emit({ type: 'text_delta', text: t }),
-          onThinking: (t) => this.emit({ type: 'thinking_delta', text: t }),
-          onWarning: (message) => this.emit({ type: 'error', message }),
-          onUsage: (usage) => this.reportUsage(usage),
-        });
-      try {
-        return await chat(specs);
-      } catch (err) {
-        // An Ollama too old to report capabilities only tells us here: retry once as a plain chat.
-        if (!specs.length || signal.aborted || !/does not support tools/i.test(errorMessage(err))) throw err;
-        this.toolSupport.set(`${ol.baseURL}|${model}`, false);
-        this.emit({ type: 'error', kind: 'notice', message: noToolsNotice(model) });
-        return chat([]);
-      }
-    }
-    let emitted = false;
-    const onEmit = () => (emitted = true);
-    const endpoint = `${client.baseURL}|${model}`;
-    for (;;) {
-      const includeUsage = !this.noStreamUsage.has(endpoint);
-      try {
-        return await this.completeStreaming(client, model, history, specs, signal, turn, includeUsage, onEmit);
-      } catch (err) {
-        if (signal.aborted || emitted || isContextLengthError(err)) throw err;
-        // A gateway or provider that rejects stream_options still streams without it.
-        if (includeUsage && /stream_options|include_usage/i.test(errorMessage(err))) {
-          this.noStreamUsage.add(endpoint);
-          continue;
+  /**
+   * The tool calls as the transcript keeps them. A tool may hide an argument that holds a secret (browser_type's text
+   * for a password field): the stored call, the tool row and hooks get that version, the call runs on the real one.
+   */
+  private async storedCalls(calls: ToolCall[], tools: Tool[], ctx: ToolContext): Promise<ToolCall[]> {
+    const out: ToolCall[] = [];
+    for (const call of calls) {
+      const tool = tools.find((t) => t.name === call.function.name);
+      let shown: Record<string, unknown> | null = null;
+      if (tool?.shownArgs) {
+        try {
+          shown = await tool.shownArgs(JSON.parse(call.function.arguments || '{}'), ctx);
+        } catch {
+          shown = null;
         }
-        // Some gateways/models reject streaming with tools; fall back to a single request
-        // as long as nothing has been shown to the user yet.
-        console.warn('[agent] streaming failed, retrying without streaming:', errorMessage(err));
-        return this.completeOnce(client, model, history, specs, signal, turn);
       }
+      if (!shown) {
+        out.push(call);
+        continue;
+      }
+      this.shownArgs.set(call.id, shown);
+      out.push({ ...call, function: { ...call.function, arguments: JSON.stringify(shown) } });
     }
-  }
-
-  private async completeStreaming(
-    client: OpenAI,
-    model: string,
-    history: Msg[],
-    specs: ToolSpec[],
-    signal: AbortSignal,
-    turn: number,
-    includeUsage: boolean,
-    onEmit: () => void,
-  ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-    const stream = await client.chat.completions.create(
-      { model, messages: history, tools: specs, stream: true, stream_options: includeUsage ? { include_usage: true } : undefined, ...(this.maxOutput ? { max_tokens: this.maxOutput } : {}) },
-      { signal },
-    );
-    let text = '';
-    const calls: ToolCall[] = [];
-    const byId = new Map<string, ToolCall>();
-    const byIndex = new Map<number, ToolCall>();
-    let usage: Usage | null = null;
-
-    for await (const chunk of stream) {
-      // With include_usage the counts arrive on a final chunk whose choices array is empty.
-      if (chunk.usage) usage = mergeUsage(usage, chunk.usage);
-      const delta = chunk.choices?.[0]?.delta;
-      if (!delta) continue;
-      const reasoning = (delta as { reasoning_content?: string; reasoning?: string }).reasoning_content ?? (delta as { reasoning?: string }).reasoning;
-      if (reasoning) this.emit({ type: 'thinking_delta', text: reasoning });
-      if (delta.content) {
-        text += delta.content;
-        onEmit();
-        this.emit({ type: 'text_delta', text: delta.content });
-      }
-      for (const tc of delta.tool_calls ?? []) {
-        let call: ToolCall;
-        const known = tc.id ? byId.get(tc.id) : undefined;
-        if (known) call = known;
-        else if (tc.id) {
-          call = { id: tc.id, type: 'function', function: { name: '', arguments: '' } };
-          calls.push(call);
-          byId.set(tc.id, call);
-          byIndex.set(tc.index ?? calls.length - 1, call);
-        } else {
-          const existing = byIndex.get(tc.index ?? 0) ?? calls[calls.length - 1];
-          if (existing) call = existing;
-          else {
-            call = { id: '', type: 'function', function: { name: '', arguments: '' } };
-            calls.push(call);
-            byIndex.set(tc.index ?? 0, call);
-          }
-        }
-        if (tc.function?.name) call.function.name += tc.function.name;
-        const args = tc.function?.arguments as unknown;
-        if (typeof args === 'string') call.function.arguments += args;
-        else if (args && typeof args === 'object') call.function.arguments += JSON.stringify(args);
-      }
-    }
-    calls.forEach((c, i) => {
-      if (!c.id) c.id = `call_${turn}_${i}`;
-    });
-    if (usage) this.reportUsage(usage);
-    return { text, toolCalls: calls };
-  }
-
-  private async completeOnce(
-    client: OpenAI,
-    model: string,
-    history: Msg[],
-    specs: ToolSpec[],
-    signal: AbortSignal,
-    turn: number,
-  ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-    const res = await client.chat.completions.create({ model, messages: history, tools: specs, stream: false, ...(this.maxOutput ? { max_tokens: this.maxOutput } : {}) }, { signal });
-    if (res.usage) this.reportUsage(mergeUsage(null, res.usage));
-    const msg = res.choices?.[0]?.message;
-    const text = msg?.content ?? '';
-    if (text) this.emit({ type: 'text_delta', text });
-    const toolCalls: ToolCall[] = [];
-    (msg?.tool_calls ?? []).forEach((tc, i) => {
-      if (tc.type !== 'function') return;
-      const args = tc.function.arguments as unknown;
-      toolCalls.push({
-        id: tc.id || `call_${turn}_${i}`,
-        type: 'function',
-        function: { name: tc.function.name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}) },
-      });
-    });
-    return { text, toolCalls };
+    return out;
   }
 
   private async execTool(call: ToolCall, tools: Tool[], ctx: ToolContext): Promise<ToolResult> {
@@ -1614,14 +1338,25 @@ export class Agent {
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
       return { content };
     }
+    // Arguments that hold a secret (Tool.shownArgs) reach the tool row and hooks hidden; the tool gets the real ones.
+    let shown = this.shownArgs.get(call.id);
+    this.shownArgs.delete(call.id);
+    const hiddenKeys = (): string[] => (shown ? Object.keys(shown).filter((k) => JSON.stringify(shown![k]) !== JSON.stringify((args as Record<string, unknown>)?.[k])) : []);
+    let hidden = hiddenKeys();
+    const visible = (a: unknown): unknown => {
+      if (!hidden.length || !a || typeof a !== 'object') return a;
+      const o = { ...(a as Record<string, unknown>) };
+      for (const k of hidden) if (k in o) o[k] = shown![k];
+      return o;
+    };
     if (name.startsWith('browser_') && !this.isForeground()) {
-      this.emit({ type: 'tool_start', id: call.id, name, args });
+      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
       this.emit({ type: 'tool_end', id: call.id, name, result: BROWSER_BACKGROUND, ok: false, durationMs: 0 });
       return { content: BROWSER_BACKGROUND };
     }
     const tool = tools.find((t) => t.name === name);
     if (!tool) {
-      this.emit({ type: 'tool_start', id: call.id, name, args });
+      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
       const content = `Error: unknown tool "${name}". Available tools: ${tools.map((t) => t.name).join(', ')}`;
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
       return { content };
@@ -1631,11 +1366,20 @@ export class Agent {
     // updatedInput replaces the arguments.
     const claudeName = claudeToolName(name);
     const names = toolMatchNames(name);
-    const toolInput = () => claudeToolInput(name, args, ctx.cwd);
-    const hookFields = () => ({ tool_name: claudeName, tool_input: toolInput(), tool_use_id: call.id, silo_tool_name: name, silo_tool_input: args });
+    const toolInput = () => claudeToolInput(name, visible(args), ctx.cwd);
+    const hookFields = () => ({ tool_name: claudeName, tool_input: toolInput(), tool_use_id: call.id, silo_tool_name: name, silo_tool_input: visible(args) });
     const pre = await this.fireHook('PreToolUse', hookFields(), { match: names, tool: { names, input: toolInput() }, signal: ctx.signal });
-    if (pre?.updatedInput && !pre.block && pre.permission !== 'deny') args = nativeToolInput(name, pre.updatedInput);
-    this.emit({ type: 'tool_start', id: call.id, name, args });
+    if (pre?.updatedInput && !pre.block && pre.permission !== 'deny') {
+      const real = args as Record<string, unknown>;
+      args = nativeToolInput(name, pre.updatedInput);
+      // A hook that hands the hidden value back as it saw it (•••) keeps the real one
+      if (hidden.length && args && typeof args === 'object') {
+        const o = args as Record<string, unknown>;
+        for (const k of hidden) if (JSON.stringify(o[k]) === JSON.stringify(shown![k])) o[k] = real?.[k];
+      }
+      hidden = hiddenKeys();
+    }
+    this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
     if (pre?.block || pre?.permission === 'deny') {
       const content = pre.block ?? `PreToolUse:${claudeName} hook denied this tool call${pre.permissionReason ? `: ${pre.permissionReason}` : '.'}`;
       this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
@@ -1681,6 +1425,13 @@ export class Agent {
     const durationMs = elapsed();
     // The same rule the saved transcript applies when it is shown again (sessions.ts).
     const ok = !FAILED_RESULT.test(result.content);
+    if (result.hiddenArgs && !hidden.length) {
+      // The call found a secret the look before it missed (the field turned into a password field meanwhile): hide it
+      // in the stored call too, which is this same object, and from the PostToolUse hooks.
+      shown = result.hiddenArgs;
+      hidden = hiddenKeys();
+      call.function.arguments = JSON.stringify(visible(args));
+    }
 
     // PostToolUse / PostToolUseFailure: what they say reaches the model with the result.
     const extra: string[] = hookContext.length ? [`${HOOK_NOTE_PREFIX}context: PreToolUse]\n${hookContext.join('\n\n')}`] : [];

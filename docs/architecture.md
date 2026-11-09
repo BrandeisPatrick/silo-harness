@@ -9,8 +9,16 @@ index.ts       buildApp() → registerCoreIpc(app) → setupSettings … setupPo
 app.ts         AppHost implements App: config, store, runtime, event bus, RPC registry, registries, services, quit
 runtime.ts     SessionRuntime: one Agent per session, concurrent runs, foreground, LiveState, SessionStatus
 ipc.ts         the existing typed channels (window.oc.*) + the generic 'rpc' channel
-agent.ts       Agent: one run loop bound to one session for its life
-sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession
+agent.ts       Agent: one run loop bound to one session for its life (approvals, hooks, context accounting, compaction, tool execution)
+agent/         prompt.ts (the system prompt and its parts), complete.ts (one model call, streamed or not, and its fallbacks),
+               permissions.ts (the permission rules as a pure decision, and the card's labels), errors.ts (what a run's errors say)
+context-window.ts  contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports them)
+sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
+json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)
+browser.ts     BrowserController: the Browser pane's view and what the browser_* tools do in it
+browser-safety.ts       credential fields (credentialKind) and their redaction; the script prelude that runs in the page's
+                        own isolated world (SAFETY_WORLD), out of reach of the page and of browser_eval
+browser-permissions.ts  the permission handlers on the pane's session: the app's window as before, the pane asks
 ```
 
 Feature setups, in this order, before the window opens: `setupSettings` (settings-service.ts), `setupHistory` (history.ts),
@@ -121,6 +129,10 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 - `ToolContext` adds `sessionId`, `app?`, `foreground()`, and `approve(name, detail, target?, { custom?, alwaysAsk? })`:
   a custom approval is refused in plan mode, asks in ask/acceptEdits/auto, runs in bypass unless `alwaysAsk`; its
   card has only Allow and Deny (`alwaysLabel`/`projectLabel` are '').
+- A tool whose arguments can hold a secret has `shownArgs(args, ctx)`: asked before the assistant message is stored, it
+  gives the arguments the transcript, the tool row and hooks get (browser_type's text into a password field is
+  `•••`); the call runs on the real ones. A call that finds a secret only while it runs returns `hiddenArgs`, and the
+  stored call is hidden then (the history log's copy of the message, written before, keeps the text).
 - `SessionStore.append(s, msg)`, `truncate(s, length)`, `replaceAll(s, msgs, reason)` are the only writes to
   `session.messages`. `onMutation(cb: (session, op: SessionMutation) => void)` also reports `save`, `create`,
   `fork { from, seedLength }`, `rename { title }` and `delete` (before the file goes). Compaction uses reason 'compaction'.
@@ -139,6 +151,28 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 pending deltas); the next `sessions.live(id)` returns that snapshot, and every later event reaches the window
 after the switch reply. The renderer buffers the session's events between the two replies and replays them.
 
+## Renderer modules
+
+`renderer.ts` is the composition root: the window's config, the error shown next to a control, the debug hook
+(`window.__oc_debug`), the feature wiring, init, drag-and-drop and the welcome suggestions, plus the parts that reach
+into everything (the composer and sending, the "#" line, registered commands, `handleEvent`, rewind, the keyboard
+shortcuts, the MCP and rules panels). Everything else is a module made with a `createX(deps)` factory, called at the
+point in `renderer.ts` where its code stood (so every listener is registered in the same order), and reached through
+what the factory returns. Mutable state several modules read stays behind accessors (`running()`, `compacting()`,
+`statusState()`, `currentSessionId()`, `sessions()`, `titleEditing()`).
+
+```
+transcript.ts     following new content, user and system bubbles, the streaming reply and the thinking block, the transcript's clicks
+tool-groups.ts    tool rows and the runs that fold into one line (settleRun, updateGroup, refoldAll); the rows still running
+approvals.ts      the approval card and the question card, and which one waits
+status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter
+side-pane.ts      the Browser, Diff and Terminal tabs (the mods' tabs join through mods-host.ts), the resizer, the URL bar, the native browser view's bounds
+connection.ts     the Ollama check and banner, the setup strip and its actions ("Start Ollama"), the folder picker, the recent-projects row
+sessions-view.ts  the session list and statuses, the session on screen (showSession), new/delete/fork, title editing
+header.ts         the mode and model chips and their menus, applyConfigToUi, config:changed
+slash-menu.ts     the "/" menu;  confirm.ts  the in-app confirmation;  shortcuts.ts  the shortcuts sheet
+```
+
 ## Renderer seams
 
 - `bus.ts`: `bus.on(name, cb)` / `bus.emit`. Events: `'agent-event' (ev, sessionId, onScreen)` for every event
@@ -150,8 +184,8 @@ after the switch reply. The renderer buffers the session's events between the tw
   `proposal` (a `propose_*` call, `{ role: 'proposal', proposalId, … }` from `toTranscript`), drawn from the dreams the
   window keeps (dreaming.ts).
 - `renderer.ts`: events of the session on screen go to `handleEvent` as before; others update the sidebar status
-  (spinner, `.status-dot.attention`, `.status-dot.unread` inside `.trail`). `showSession(id)` renders transcript +
-  LiveState. Hook a feature up under its marker in the "Feature wiring" block above `// ---------- Init ----------`
+  (spinner, `.status-dot.attention`, `.status-dot.unread` inside `.trail`) through `sessions-view.ts`. `showSession(id)`
+  (sessions-view.ts) renders transcript + LiveState. Hook a feature up under its marker in the "Feature wiring" block above `// ---------- Init ----------`
   (`// [feature:mods]`, `pages`, `settings`, `sidebar`, `tasks`, `images`, `history`, `schedules`, `subagents`, `remote`, `dreaming`).
 - `pages.ts`: pages in the main column in place of the session (`.shell.page-open` hides `.content` and the top bar's
   title and buttons, and the native browser view). A route (`scheduled`, `task`, `dreaming`, `project`) is rendered by
