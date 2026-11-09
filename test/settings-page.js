@@ -57,12 +57,15 @@ const { check, done } = require('./support/check.js');
   // --- mods ---------------------------------------------------------------------
   check('every permission has plain words', ['session:read', 'session:send', 'session:control', 'sessions:read', 'model', 'skills:read', 'config:read', 'config:write', 'schedules', 'remote', 'network'].every((k) => m.PERMISSION_WORDS[k] && m.PERMISSION_WORDS[k] !== k));
   check('chips: off, paused, invalid, problems, on', m.modChip({ state: 'off', problems: [] }).label === 'Off' && /Paused/.test(m.modChip({ state: 'paused', problems: [] }).label) && m.modChip({ state: 'invalid', problems: [] }).label === 'Problem' && m.modChip({ state: 'on', problems: [{}] }).label === 'Problem' && m.modChip({ state: 'on', problems: [] }) === null);
-  const manifest = { name: 'Theme', permissions: ['config:read', 'network'], contributes: { styles: ['theme.css'] } };
+  const manifest = { name: 'Panel', permissions: ['config:read', 'network'], contributes: { views: [{ id: 'p', title: 'P', seat: 'rail' }], styles: ['theme.css'] } };
   let sheet = m.grantSheet({ state: 'off', manifest, wants: [], wantsStyles: false, granted: [] });
-  check('turning on lists what the manifest asks, in words', sheet.lines.length === 2 && /Reach the internet/.test(sheet.lines[1]) && /Turn on Theme/.test(sheet.title));
-  check('… with the restyle and network warnings', sheet.warnings.length === 2 && /restyle the whole app/.test(sheet.warnings[0]) && /leave this Mac/.test(sheet.warnings[1]));
+  check('turning on lists what the manifest asks, in words', sheet.lines.length === 2 && /Reach the internet/.test(sheet.lines[1]) && /Turn on Panel/.test(sheet.title));
+  check('… with the network warning, and nothing of its theme (a look asks at its first Use)', sheet.warnings.length === 1 && /leave this Mac/.test(sheet.warnings[0]));
   sheet = m.grantSheet({ state: 'paused', manifest, wants: ['network'], wantsStyles: false, granted: ['config:read'] });
   check('a paused mod lists only what is new', sheet.lines.length === 1 && /wants more access/.test(sheet.title) && sheet.warnings.length === 1);
+  const use = m.useSheet({ state: 'off', manifest: { name: 'Teal', permissions: ['session:read'] }, wants: ['session:read'], approved: false }, 'conversation');
+  check('the first Use of a look: what its pages may do, that it restyles, and to trust where it came from', /Use Teal\?/.test(use.title) && use.lines.length === 1 && /restyles the conversation/.test(use.warnings[0]) && /trust where it came from/.test(use.warnings[1]));
+  check('… a theme and a background say so', /restyles the whole app/.test(m.useSheet({ state: 'off', manifest: { name: 'T' }, wants: [] }, 'theme').warnings[0]) && /draws behind the whole window/.test(m.useSheet({ state: 'off', manifest: { name: 'B' }, wants: [] }, 'background').warnings[0]));
   check('a mod id from a name', m.deriveModId('Word count!') === 'word-count' && m.deriveModId('9 lives') === 'lives' && m.deriveModId('x') === 'x-mod' && m.deriveModId('') === '');
   check('mod ids are validated like the manifest', m.validModId('word-count') && !m.validModId('Word') && !m.validModId('a') && !m.validModId('1abc'));
   check('an SVG icon file is used as is; names and paths out are not', m.modIconFile('icon.svg') === 'icon.svg' && m.modIconFile('gauge') === null && m.modIconFile('../x.svg') === null);
@@ -84,37 +87,39 @@ const { check, done } = require('./support/check.js');
   check('dates in words', m.formatWhenAt(new Date(2026, 10, 5, 9, 5).getTime(), base) === 'Today at 09:05' && m.formatWhenAt(new Date(2026, 10, 6, 14, 0).getTime(), base) === 'Tomorrow at 14:00' && m.formatWhenAt(new Date(2026, 11, 24, 8, 0).getTime(), base) === 'Dec 24 at 08:00');
   check('relative days', m.relativeDays(base + 3 * 86400000, base) === 'in 3 days' && m.relativeDays(base - 3600000, base) === '1 hour ago');
 
-  // --- looks: the region selects, the sets, which set the layout shows, the patch a set makes ---
+  // --- looks: the versions of each kind, what is in use, the sets, the approval ---
   {
-    const lk = (id, title, target) => ({ id, title, target, styles: ['x.css'] });
-    const info = (key, name, contributes, state = 'on') => ({ key, id: key, scope: 'bundled', state, manifest: { name, contributes }, problems: [], settings: {} });
-    const hyper = info('hyperspace', 'Hyperspace', { looks: [lk('holo', 'Holo terminal', 'conversation'), lk('cockpit', 'Cockpit', 'composer')], views: [{ id: 'stars', title: 'Hyperspace', seat: 'background' }] });
+    const lk = (id, title, target, extra = {}) => ({ id, title, target, styles: ['x.css'], ...extra });
+    const info = (key, name, contributes, extra = {}) => ({ key, id: key, scope: 'bundled', state: 'off', approved: true, manifest: { name, contributes }, problems: [], settings: {}, ...extra });
+    const hyper = info('hyperspace', 'Hyperspace', { looks: [lk('holo', 'Holo terminal', 'conversation', { description: 'Panels' }), lk('cockpit', 'Cockpit', 'composer')], views: [{ id: 'stars', title: 'Starfield', seat: 'background', preview: 'stars.png' }] });
     const pair = info('pair', 'Pair', { looks: [lk('a', 'A', 'conversation')], views: [{ id: 'bg', title: 'Bg', seat: 'background' }] });
-    const single = info('single', 'Single', { looks: [lk('only', 'Only', 'conversation')] });
-    const off = info('offset', 'Off set', { looks: [lk('a', 'A', 'conversation'), lk('b', 'B', 'composer')] }, 'off');
-    const mods = [hyper, pair, single, off];
-    check('lookChoices: every look for the region from on mods, named "<mod>: <look>"', JSON.stringify(m.lookChoices(mods, 'conversation')) === JSON.stringify([{ value: 'hyperspace/holo', label: 'Hyperspace: Holo terminal' }, { value: 'pair/a', label: 'Pair: A' }, { value: 'single/only', label: 'Single: Only' }]) && m.lookChoices(mods, 'composer').length === 1);
+    const single = info('single', 'Single', { looks: [lk('only', 'Only', 'conversation')] }, { scope: 'user', approved: false });
+    const broken = info('broken', 'Broken', { looks: [lk('b', 'B', 'conversation')] }, { state: 'invalid' });
+    const paper = info('paper', 'Paper theme', { styles: ['t.css'] });
+    const mods = [hyper, pair, paper, single, broken];
+    const conv = m.lookVersions(mods, 'conversation');
+    check('lookVersions: Default first, then every look of the kind in list order, with its source', JSON.stringify(conv.map((v) => [v.ref, v.title, v.source])) === JSON.stringify([[null, 'Default', 'Silo Harness'], ['hyperspace/holo', 'Holo terminal', 'Hyperspace · Built-in'], ['pair/a', 'A', 'Pair · Built-in'], ['single/only', 'Only', 'Single · Yours']]) && conv[1].description === 'Panels', conv);
+    const bgs = m.lookVersions(mods, 'background', '/data/backgrounds/1700-sunset.png');
+    check('lookVersions: backgrounds, with your picture after Default, and the preview picture of a view', JSON.stringify(bgs.map((v) => v.ref)) === JSON.stringify([null, 'image', 'hyperspace/stars', 'pair/bg']) && bgs[1].source === 'sunset.png' && bgs[2].preview === 'stars.png', bgs);
+    check('lookVersions: a theme per mod with styles, titled by the mod', JSON.stringify(m.lookVersions(mods, 'theme').map((v) => [v.ref, v.title, v.source])) === JSON.stringify([[null, 'Default', 'Silo Harness'], ['paper', 'Paper theme', 'Built-in']]));
+    const L0 = { looks: { conversation: null, composer: null }, background: null, backgroundImage: null, theme: null };
+    check('lookInUse: per kind, your picture as "image"', m.lookInUse(L0, 'background') === null && m.lookInUse({ ...L0, backgroundImage: '/p.png' }, 'background') === 'image' && m.lookInUse({ ...L0, background: 'pair/bg', backgroundImage: '/p.png' }, 'background') === 'pair/bg' && m.lookInUse({ ...L0, theme: 'paper' }, 'theme') === 'paper' && m.lookInUse({ ...L0, looks: { conversation: 'pair/a' } }, 'conversation') === 'pair/a');
+    check('needsApproval: a look of yours not approved yet; never a bundled one', m.needsApproval(single) && !m.needsApproval(hyper) && !m.needsApproval({ ...single, approved: true }));
     const sets = m.lookSets(mods);
-    check('lookSets: on mods with at least two of the three parts', sets.map((x) => x.key).join() === 'hyperspace,pair' && sets[0].background === 'hyperspace/stars' && sets[0].composer === 'hyperspace/cockpit' && sets[1].composer === null, sets);
-    const L0 = { looks: { conversation: null, composer: null }, background: null, backgroundImage: null };
-    check('currentLookSet: None when everything is the app\'s own', m.currentLookSet(mods, L0) === '');
-    check('currentLookSet: a set when the three are exactly its parts', m.currentLookSet(mods, { ...L0, looks: { conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit' }, background: 'hyperspace/stars' }) === 'hyperspace');
-    check('currentLookSet: a set lacking a part needs that part to be the app\'s own', m.currentLookSet(mods, { ...L0, looks: { conversation: 'pair/a', composer: null }, background: 'pair/bg' }) === 'pair' && m.currentLookSet(mods, { ...L0, looks: { conversation: 'pair/a', composer: 'hyperspace/cockpit' }, background: 'pair/bg' }) === 'custom');
-    check('currentLookSet: Custom for a mix, or a user picture under a set', m.currentLookSet(mods, { ...L0, looks: { conversation: 'single/only', composer: null }, background: null }) === 'custom' && m.currentLookSet(mods, { ...L0, looks: { conversation: 'pair/a', composer: null }, backgroundImage: '/x.png' }) === 'custom' && m.currentLookSet(mods, { ...L0, backgroundImage: '/x.png' }) === 'custom');
-    check('currentLookSet: "off:<key>" when all the parts come from a mod that is off or gone', m.currentLookSet(mods, { ...L0, looks: { conversation: 'offset/a', composer: 'offset/b' } }) === 'off:offset' && m.currentLookSet(mods, { ...L0, looks: { conversation: 'gone/a', composer: null }, background: 'gone/bg' }) === 'off:gone');
-    check('currentLookSet: one part of an off mod alone is Custom', m.currentLookSet(mods, { ...L0, looks: { conversation: 'offset/a', composer: null } }) === 'custom');
-    check('lookSetPatch: a set sets all three, a missing part to the app\'s own', JSON.stringify(m.lookSetPatch(sets[0])) === JSON.stringify({ looks: { conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit' }, background: 'hyperspace/stars' }) && m.lookSetPatch(sets[1]).looks.composer === null);
-    const none = m.lookSetPatch(null);
-    check('lookSetPatch: None clears the looks, the background and the picture', none.looks.conversation === null && none.looks.composer === null && none.background === null && none.backgroundImage === null);
-    check('a patch applied gives back the set', m.currentLookSet(mods, { ...L0, ...m.lookSetPatch(sets[0]) }) === 'hyperspace' && m.currentLookSet(mods, { ...L0, ...m.lookSetPatch(sets[1]) }) === 'pair');
-    check('offLookMods: the off mods that have looks', m.offLookMods(mods).join() === 'Off set');
+    check('lookSets: installed mods with at least two kinds, whatever their state', sets.map((x) => x.key).join() === 'hyperspace,pair' && sets[0].background === 'hyperspace/stars' && sets[0].composer === 'hyperspace/cockpit' && sets[0].theme === null && sets[1].composer === null, sets);
+    check('lookSets(…, 1): every mod with a look (the chat card uses it)', m.lookSets(mods, 1).map((x) => x.key).join() === 'hyperspace,pair,paper,single');
+    const patch = m.lookSetPatch(sets[0]);
+    check('lookSetPatch: the parts it has, kinds it lacks left alone', JSON.stringify(patch) === JSON.stringify({ background: 'hyperspace/stars', composer: 'hyperspace/cockpit', conversation: 'hyperspace/holo' }) && JSON.stringify(m.lookSetPatch(sets[0], false)) === JSON.stringify({ background: null, composer: null, conversation: null }) && JSON.stringify(m.lookSetPatch(null)) === '{}');
+    check('setInUse: every part of it in use', m.setInUse(sets[0], { ...L0, background: 'hyperspace/stars', looks: { conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit' }, theme: 'paper' }) && !m.setInUse(sets[0], { ...L0, background: 'hyperspace/stars', looks: { conversation: 'pair/a', composer: 'hyperspace/cockpit' } }));
+    check('isLookOnly: no panel, tab, strip, worker or command', m.isLookOnly(hyper.manifest) && m.isLookOnly(paper.manifest) && !m.isLookOnly({ name: 'x', contributes: { views: [{ id: 'r', seat: 'rail' }], styles: ['a.css'] } }) && !m.isLookOnly({ name: 'x' }) && !m.isLookOnly(null));
     check('modChip: a warning alone is not a problem', m.modChip({ state: 'on', problems: [{ kind: 'manifest', message: 'x', warning: true }] }) === null && m.modChip({ state: 'on', problems: [{ kind: 'runtime', message: 'x' }] }).label === 'Problem');
-    check('grantSheet: looks get the restyle warning', /restyle the whole app/.test(m.grantSheet({ state: 'off', manifest: { name: 'L', contributes: { looks: [lk('a', 'A', 'conversation')] } }, wants: [], wantsStyles: false, granted: [] }).warnings[0] || ''));
+    check('LOOK_TABS: four kinds, each with the prompt Ask the agent starts with and the row of its head', m.LOOK_TABS.map((t) => `${t.tab}:${t.kind}:${t.row}`).join() === 'backgrounds:background:background,chat-bar:composer:look-composer,conversation:conversation:look-conversation,themes:theme:look-theme' && m.LOOK_TABS.find((t) => t.kind === 'composer').prompt === 'Make a chat bar look that ');
   }
 
   // --- kinds of mod and the tabs of Settings → Mods ---
   {
     check('five tabs, Mods first, each with its kind and the New form preset', m.MOD_TABS.map((t) => `${t.id}:${t.kind}:${t.newKind}`).join() === 'mods:general:rail,backgrounds:background:background,chat-bar:composer:look:composer,conversation:conversation:look:conversation,themes:theme:theme');
+    check('the tabs are named in the singular', m.MOD_TABS.map((t) => t.title).join() === 'Mods,Background,Chat bar,Conversation,Theme');
     check('tab ids are recognised', m.isModTab('backgrounds') && m.isModTab('chat-bar') && !m.isModTab('chatbar') && !m.isModTab('general'));
     // Every combination of the five kinds a manifest can contribute
     const parts = {
@@ -157,13 +162,11 @@ const { check, done } = require('./support/check.js');
     check('modsForTab: Mods lists the general ones only (Hyperspace is not there)', keys('mods') === 'plan,combo', keys('mods'));
     check('modsForTab: Backgrounds, Chat bar, Conversation, Themes', keys('backgrounds') === 'hyperspace,backgrounds' && keys('chat-bar') === 'hyperspace' && keys('conversation') === 'hyperspace' && keys('themes') === 'midnight,paper,combo', [keys('backgrounds'), keys('chat-bar'), keys('conversation'), keys('themes')]);
     check('modTabs: Hyperspace is on three tabs; a rail panel with styles on two', m.modTabs(list[0]).join() === 'backgrounds,chat-bar,conversation' && m.modTabs(list[5]).join() === 'mods,themes');
-    check('themeMods: in list order (the order the styles apply)', m.themeMods(list).map((x) => x.key).join() === 'midnight,paper,combo');
+    check('themeMods: in list order', m.themeMods(list).map((x) => x.key).join() === 'midnight,paper,combo');
     check('tabOfKind', m.tabOfKind('composer') === 'chat-bar' && m.tabOfKind('general') === 'mods' && m.tabOfKind('theme') === 'themes');
-    check('backgroundChoices: from mods that are on', JSON.stringify(m.backgroundChoices(list)) === JSON.stringify([{ value: 'hyperspace/starfield', label: 'Hyperspace: Starfield' }, { value: 'backgrounds/aurora', label: 'Backgrounds: Aurora' }]));
-    const L = { looks: { conversation: null, composer: 'hyperspace/cockpit' }, background: 'backgrounds/aurora', backgroundImage: null };
-    check('choiceWords: what Appearance shows for each kind', m.choiceWords(list, L, 'background') === 'Backgrounds: Aurora' && m.choiceWords(list, L, 'composer') === 'Hyperspace: Cockpit' && m.choiceWords(list, L, 'conversation') === 'Default' && m.choiceWords(list, L, 'theme') === 'Paper, Combo', [m.choiceWords(list, L, 'background'), m.choiceWords(list, L, 'theme')]);
-    check('choiceWords: your picture, nothing, a choice whose mod is gone', m.choiceWords(list, { ...L, background: null, backgroundImage: '/p.png' }, 'background') === 'Your picture' && m.choiceWords(list, { ...L, background: null }, 'background') === 'None' && m.choiceWords(list, { ...L, background: 'gone/x' }, 'background') === 'gone/x (off)' && m.choiceWords([], null, 'theme') === 'None');
-    check('offModsOfTab: the off mods of a tab', m.offModsOfTab(list, 'themes').join() === 'Midnight' && m.offModsOfTab(list, 'backgrounds').length === 0);
+    const L = { looks: { conversation: null, composer: 'hyperspace/cockpit' }, background: 'backgrounds/aurora', backgroundImage: null, theme: 'paper' };
+    check('choiceWords: what Appearance shows for each kind (one theme)', m.choiceWords(list, L, 'background') === 'Backgrounds: Aurora' && m.choiceWords(list, L, 'composer') === 'Hyperspace: Cockpit' && m.choiceWords(list, L, 'conversation') === 'Default' && m.choiceWords(list, L, 'theme') === 'Paper', [m.choiceWords(list, L, 'background'), m.choiceWords(list, L, 'theme')]);
+    check('choiceWords: your picture, Default, a choice whose mod is gone', m.choiceWords(list, { ...L, background: null, backgroundImage: '/p.png' }, 'background') === 'Your picture' && m.choiceWords(list, { ...L, background: null }, 'background') === 'Default' && m.choiceWords(list, { ...L, background: 'gone/x' }, 'background') === 'gone/x (not installed)' && m.choiceWords([], null, 'theme') === 'Default');
     check('a section and a tab as one target', m.sectionForTarget('mods:backgrounds') === 'mods' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null);
     check('refMod', m.refMod('hyperspace/holo') === 'hyperspace' && m.refMod('a@/x/y/holo') === 'a@/x/y');
   }

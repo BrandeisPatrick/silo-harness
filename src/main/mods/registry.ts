@@ -238,9 +238,12 @@ export class ModRegistry {
     let granted: ModPermission[] = [];
     let wants: ModPermission[] = [];
     let wantsStyles = false;
-    // The looks: a bundled mod's need no approval; a user or project mod's, the one given at their first Use.
+    // The looks: a bundled mod's need no approval; a user or project mod's, the one given at their first Use. What its
+    // pages may do is the mod's: permissions granted with its switch count for its looks too.
     const approval = e.scope === 'bundled' ? null : cfg.approved?.[e.key];
-    const approved = !!m && looks && (e.scope === 'bundled' || (!!approval && covers(approval.permissions) && !cfg.safeMode));
+    const switchGrant = features && e.scope !== 'bundled' ? cfg.enabled?.[e.key] : undefined;
+    const lookPerms = [...(approval?.permissions ?? []), ...(Array.isArray(switchGrant?.permissions) ? switchGrant!.permissions : [])];
+    const approved = !!m && looks && (e.scope === 'bundled' || (!!approval && covers(lookPerms) && !cfg.safeMode));
     const inUse = m && looks ? inUseKinds(e.key, m, cfg.layout) : [];
     if (!m) state = 'invalid';
     else if (!features) {
@@ -264,14 +267,14 @@ export class ModRegistry {
       if (!grant) {
         state = 'off';
         wants = [...asked];
-        if (approved) granted = asked.filter((p) => approval!.permissions.includes(p));
+        if (approved) granted = asked.filter((p) => lookPerms.includes(p));
       } else {
         const have = Array.isArray(grant.permissions) ? grant.permissions : [];
         // Only what the manifest still asks for and the user approved is in effect.
         granted = asked.filter((p) => have.includes(p));
         wants = asked.filter((p) => !have.includes(p));
         state = cfg.safeMode ? 'off' : wants.length ? 'paused' : 'on';
-        if (state !== 'on') granted = approved ? asked.filter((p) => approval!.permissions.includes(p)) : granted;
+        if (state !== 'on' && approved) granted = asked.filter((p) => lookPerms.includes(p));
       }
     }
     const info: ModInfo = {
