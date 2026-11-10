@@ -64,6 +64,7 @@ const SCRIPTS = [
   { name: 'pane-strip' },
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
+  { name: 'auto-browser', shots: 'none' },
   { name: 'browser-polish' },
   { name: 'browser-hardening' },
   { name: 'browser-drag-regions', shots: 'none' },
