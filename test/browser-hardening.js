@@ -9,7 +9,7 @@ const projectDir = process.argv[2] || path.join(__dirname, '..');
 const dist = (p) => require(path.join(projectDir, 'dist/main', p));
 const { ArtifactStore, ARTIFACT_CSP, serveArtifactRequest } = dist('artifacts.js');
 const { leavesArtifact, opensInTab } = dist('browser/popups.js');
-const { clickRule, sameClickTarget, CHANGED_UNDER_CLICK, siteDecision } = dist('browser/policy.js');
+const { clickRule, sameClickTarget, CHANGED_UNDER_CLICK, siteDecision, clipboardRule, CLIPBOARD_REFUSAL } = dist('browser/policy.js');
 const { pagePrelude } = dist('browser/safety.js');
 const { fencePage, stripFence, pageSite } = dist('browser/fence.js');
 const { BROWSER_RULES } = dist('tools/groups.js');
@@ -140,6 +140,22 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   p5d.onCard = () => { p5d.url = 'https://a.example/other'; };
   r = await standIn(p5d)('browser_get_text', {});
   check('another page of the same site is the same site: the read is returned', /^<page_content site="a\.example">/.test(r), r);
+
+  // ---------- 6. The clipboard is the user's ----------
+  const clipCombos = ['cmd+v', 'ctrl+v', 'Cmd+Shift+V', 'ctrl+shift+v', 'shift+insert', 'cmd+c', 'ctrl+c', 'cmd+x', 'ctrl+x', 'ctrl+insert', 'meta+v', 'command+c'];
+  check('paste, copy and cut combos are refused off exempt hosts', clipCombos.every((k) => clipboardRule(k, false).kind === 'refuse'), clipCombos.filter((k) => clipboardRule(k, false).kind !== 'refuse'));
+  check('… with words that send the model to browser_type', /clipboard is the user's; type the text with browser_type/.test(CLIPBOARD_REFUSAL));
+  const fine = ['cmd+a', 'cmd+z', 'ctrl+a', 'v', 'c', 'shift+v', 'Enter', 'Tab', 'ArrowDown', 'cmd+shift+z', 'insert', 'alt+v'];
+  check('… cmd+a, cmd+z, plain letters and the named keys stay', fine.every((k) => clipboardRule(k, false).kind === 'allow'), fine.filter((k) => clipboardRule(k, false).kind !== 'allow'));
+  check('… and on an exempt host (the user\'s own app) paste goes through', clipboardRule('cmd+v', true).kind === 'allow');
+  const p6 = { tab: 'tab-1', url: 'https://a.example/', text: 'A', reads: 0, clicked: [], keys: [], cards: [], allowed: ['a.example'] };
+  r = await standIn(p6)('browser_press_key', { key: 'cmd+v' });
+  check('browser_press_key cmd+v: refused before any card, nothing pressed', r === CLIPBOARD_REFUSAL && p6.keys.length === 0 && p6.cards.length === 0, r);
+  r = await standIn(p6)('browser_press_key', { key: 'cmd+a' });
+  check('… cmd+a is pressed', r === 'Pressed cmd+a.' && p6.keys.includes('cmd+a'), r);
+  const p6b = { ...p6, url: 'http://localhost:3000/', keys: [], cards: [] };
+  r = await standIn(p6b)('browser_press_key', { key: 'cmd+v' });
+  check('… on localhost (exempt) cmd+v is pressed', r === 'Pressed cmd+v.', r);
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();

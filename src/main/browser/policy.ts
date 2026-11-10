@@ -469,6 +469,28 @@ export function keyRule(combo: string, focusedKind: CredentialKind | 'embedded' 
   return typesACharacter(combo) ? refuse(CREDENTIAL_REFUSAL) : ALLOW;
 }
 
+/** What the model reads when it presses a paste, copy or cut shortcut. */
+export const CLIPBOARD_REFUSAL = "Not permitted: the clipboard is the user's; type the text with browser_type.";
+
+/**
+ * Whether browser_press_key may press a combo that reaches the user's clipboard: paste (cmd/ctrl+v, cmd/ctrl+shift+v,
+ * shift+insert), copy (cmd/ctrl+c, ctrl+insert) and cut (cmd/ctrl+x) are refused, so the agent can neither read what
+ * the user copied (a password, a code) into a page nor plant something there; on an exempt host (the user's own app)
+ * they go through. cmd+a, cmd+z and every other key stay.
+ */
+export function clipboardRule(combo: string, exempt: boolean): TypeRule {
+  if (exempt) return ALLOW;
+  const raw = String(combo ?? '').trim().toLowerCase();
+  const i = raw.endsWith('+') ? raw.length - 1 : raw.lastIndexOf('+');
+  if (i < 0) return ALLOW;
+  const key = raw.slice(i + 1).trim();
+  const mods = new Set(raw.slice(0, i).split('+').map((m) => m.trim()).filter(Boolean));
+  const command = [...mods].some((m) => COMMAND_MODIFIERS.has(m));
+  if (command && (key === 'v' || key === 'c' || key === 'x' || key === 'insert')) return refuse(CLIPBOARD_REFUSAL);
+  if (mods.has('shift') && key === 'insert') return refuse(CLIPBOARD_REFUSAL);
+  return ALLOW;
+}
+
 // ---------- For the card and the tools ----------
 
 /** What a browser tool call does to the page, by tool name (browser_tabs: new opens a URL, the rest only look at the pane). */

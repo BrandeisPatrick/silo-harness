@@ -3,6 +3,7 @@ import {
   actionLine,
   actionOf,
   clickRule,
+  clipboardRule,
   CREDENTIAL_REFUSAL,
   isExempt,
   isSensitive,
@@ -90,6 +91,8 @@ async function credentialCheck(name: string, args: Record<string, unknown>, ctx:
   if (isExempt(activeUrl(ctx), lists(ctx).exempt, ctx.cwd)) return null;
   if (name === 'browser_press_key') {
     const combo = String(args.key ?? '');
+    const clip = clipboardRule(combo, false);
+    if (clip.kind === 'refuse') return clip.message;
     // Enter, Tab, the arrows and shortcuts go through whatever has the focus: the page is asked only for a character
     if (!typesACharacter(combo)) return null;
     const focused = (await askPage(() => ctx.browser.credentialTarget(), null)) as CredentialKind | 'embedded' | null;
@@ -406,7 +409,7 @@ const tools: Tool[] = [
   },
   {
     name: 'browser_press_key',
-    description: 'Press a key or shortcut in the page, e.g. "Enter", "Escape", "Tab", "ArrowDown", "cmd+a".',
+    description: 'Press a key or shortcut in the page, e.g. "Enter", "Escape", "Tab", "ArrowDown", "cmd+a". Paste, copy and cut are refused: the clipboard is the user\'s.',
     parameters: { type: 'object', properties: { key: { type: 'string' }, ...REASON }, required: ['key'] },
     run: async (args, ctx) => ({ content: await ctx.browser.pressKey(String(args.key)) }),
   },
