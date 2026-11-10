@@ -4,3 +4,5 @@ dist/
 .DS_Store
 release/
 .claude/worktrees/
+# Test fixtures may be log files
+!test/fixtures/**/*.log
