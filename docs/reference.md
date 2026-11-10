@@ -185,6 +185,14 @@ Settings → Remote control turns on a small web page, served by the app, for fo
 - **The command line**: `silo` (in the app at `Contents/Resources/bin/silo`; Settings → General → Command line tool links it into `~/.local/bin`) adds, selects and tests providers and sets the other fields, for you or for a coding agent: `silo provider add openrouter --type openrouter --model … --use`, then `silo provider test`.
 - All of it, with the shortest working example for each service, the field reference and the steps for coding agents: [configure.md](configure.md). Schema: [settings.schema.json](settings.schema.json).
 
+### Retries
+
+- **What is tried again**: a lost or refused connection, a stream that drops or sends nothing for 300 s (not on Ollama, where a local model may think long before its first token), and HTTP 408, 409, 429, 500, 502, 503, 504 and 529. Not: a bad request or key (400, 401, 403, 404, 413, 422), a request too long for the context (that compacts instead), an exhausted quota or billing, a Stop.
+- **How often**: 6 tries in all. The waits start at 1 s and double to at most 30 s, each moved by up to 20%. A provider's `Retry-After` (or `retry-after-ms`) sets the wait instead; over 60 s, there is no retry and the error says when to try again ("Rate limited. Try again in 5 min.").
+- **What you see**: one status line while it waits ("Connection lost. Retrying in 4 s (2 of 6)." or "Provider busy. …" for 429 and 5xx), gone when the reply starts. Text a dropped reply had shown is taken back; only the attempt that completes is kept and counted. When all 6 fail: "Could not reach the provider after 6 tries: …" with the provider's own message.
+- **A reply cut at the output limit**: a tool call whose arguments were cut is not run (its result tells the model to send it in smaller pieces); a cut reply without calls is asked to continue, twice at most per message.
+- **A call repeated with the same result**: the third time its result carries a note to try something else; the fifth time the run stops. Reading a terminal with `wait_ms` and listing sessions are exempt.
+
 ## Configuration
 
 Settings is the place for all of it. On disk:
