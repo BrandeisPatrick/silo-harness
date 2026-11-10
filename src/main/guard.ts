@@ -800,7 +800,9 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'cargo' && targets[0] === 'publish') return 'publishes a package';
     if ((prog === 'twine' && targets[0] === 'upload') || (prog === 'gem' && targets[0] === 'push')) return 'publishes a package';
     if (prog === 'gh' && ((targets[0] === 'release' && targets[1] !== 'list' && targets[1] !== 'view') || (targets[0] === 'pr' && (targets[1] === 'merge' || targets[1] === 'close')) || (targets[0] === 'repo' && targets[1] === 'delete'))) return 'publishes or merges on GitHub';
-    if (['aws', 'gcloud', 'az', 'pulumi', 'flyctl', 'heroku', 'vercel', 'netlify'].includes(prog)) return 'cloud or infrastructure change';
+    // A recognised aws read (isAwsRead) is a plain read only when the whole line is one (isReadOnlyCommand): never
+    // inside sh -c, xargs, find -exec or a substitution, nor next to a command that is not a read
+    if (prog === 'aws' ? !(isAwsRead(simple) && isReadOnlyCommand(raw)) : ['gcloud', 'az', 'pulumi', 'flyctl', 'heroku', 'vercel', 'netlify'].includes(prog)) return 'cloud or infrastructure change';
     if (prog === 'kubectl' && ['apply', 'delete', 'rollout', 'scale', 'drain', 'cordon', 'patch', 'replace', 'exec'].includes(targets[0] ?? '')) return 'cloud or infrastructure change';
     if (prog === 'terraform' && ['apply', 'destroy', 'import', 'taint'].includes(targets[0] ?? '')) return 'cloud or infrastructure change';
     if (prog === 'helm' && ['install', 'upgrade', 'uninstall', 'delete', 'rollback'].includes(targets[0] ?? '')) return 'cloud or infrastructure change';
@@ -1031,10 +1033,244 @@ function readOnlyArgs(prog: string, argv: string[]): boolean {
   }
 }
 
+// ---------- Recognised read-only aws commands ----------
+// The one definition of "a recognised aws read": isReadOnlyCommand runs it as it runs ls, and guardCommand then gives
+// it no "cloud or infrastructure change" reason. Anything this does not positively recognise stays as before.
+
+/**
+ * The words of a simple command, read strictly, or null when a shell could read it differently from this: only
+ * printable ASCII; unquoted, only letters, digits and _ . / : @ , + = - (no $ ` \ * ? [ ] { } ~ # ! ( ) < > | ; & %);
+ * a word may not start with an unquoted = (zsh's =cmd); single quotes are literal; double quotes may not hold
+ * $ ` \ or !; no empty word, no unclosed quote.
+ */
+function strictWords(s: string): string[] | null {
+  if (/[^\x20-\x7e\t]/.test(s)) return null;
+  const out: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === ' ' || s[i] === '\t') {
+      i++;
+      continue;
+    }
+    if (s[i] === '=') return null;
+    let cur = '';
+    while (i < s.length && s[i] !== ' ' && s[i] !== '\t') {
+      const c = s[i];
+      if (c === "'" || c === '"') {
+        const end = s.indexOf(c, i + 1);
+        if (end < 0) return null;
+        const body = s.slice(i + 1, end);
+        if (c === '"' && /[$`\\!]/.test(body)) return null;
+        cur += body;
+        i = end + 1;
+        continue;
+      }
+      if (!/[A-Za-z0-9_./:@,+=-]/.test(c)) return null;
+      cur += c;
+      i++;
+    }
+    if (!cur) return null;
+    out.push(cur);
+  }
+  return out;
+}
+
+/** A CLI command or operation name: lower case, single dashes */
+const AWS_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** Words in an operation's name that mark a credential, a secret, a login, a session, a signed URL or a download */
+const AWS_SECRET_WORDS = ['token', 'credential', 'password', 'secret', 'login', 'api-key', 'access-details', 'session', 'presign', 'embed', 'download', 'decrypt', 'private-key', 'export'];
+/**
+ * Read-looking operations that are not plain reads: they return a secret, key material, environment variables or a
+ * signed URL, have a side effect (cognito-identity get-id creates an identity), or write their result to a local file
+ * (streaming output: the CLI takes an outfile argument).
+ */
+const AWS_REFUSED_OPS = new Set([
+  // secrets, credentials, keys
+  'secretsmanager get-secret-value', 'secretsmanager batch-get-secret-value', 'secretsmanager get-random-password',
+  'ecr get-login-password', 'ecr get-authorization-token', 'ecr-public get-login-password', 'ecr-public get-authorization-token',
+  'codeartifact get-authorization-token', 'sts get-session-token', 'sts get-federation-token', 'eks get-token',
+  'sso get-role-credentials', 'redshift get-cluster-credentials', 'redshift get-cluster-credentials-with-iam', 'redshift-serverless get-credentials',
+  'lightsail get-instance-access-details', 'lightsail get-relational-database-master-user-password', 'ec2 get-password-data',
+  'cognito-identity get-credentials-for-identity', 'cognito-identity get-open-id-token', 'cognito-identity get-id',
+  'cognito-idp describe-user-pool-client', 'cognito-idp describe-identity-provider',
+  'appsync list-api-keys', 'apigateway get-api-key', 'apigateway get-api-keys', 'iam get-credential-report',
+  'glue get-connection', 'glue get-connections', 'ivs get-stream-key', 'ivs batch-get-stream-key', 'kms get-parameters-for-import',
+  // environment variables, user data, configuration that often holds secrets
+  'lambda get-function', 'lambda get-function-configuration', 'lambda get-layer-version', 'lambda get-layer-version-by-arn',
+  'ecs describe-task-definition', 'batch describe-job-definitions', 'apprunner describe-service',
+  'amplify get-app', 'amplify get-branch', 'amplify list-apps', 'amplify list-branches', 'amplify get-backend-environment',
+  'elasticbeanstalk describe-configuration-settings', 'ec2 describe-instance-attribute', 'ec2 describe-launch-template-versions',
+  'ec2 get-launch-template-data', 'autoscaling describe-launch-configurations', 'glue get-job', 'glue get-jobs',
+  'sagemaker describe-model', 'sagemaker describe-training-job', 'sagemaker describe-processing-job', 'sagemaker describe-transform-job',
+  // signed URLs
+  'ecr get-download-url-for-layer', 'gamelift get-game-session-log-url',
+  // the result goes to a local file (an outfile argument)
+  's3api get-object', 's3api get-object-torrent', 'cloudfront get-function', 'apigateway get-sdk', 'glacier get-job-output',
+  'mediastore-data get-object', 'kinesis-video-media get-media', 'kinesis-video-archived-media get-clip',
+  'kinesis-video-archived-media get-media-for-fragment-list', 'ebs get-snapshot-block', 'iot-data get-thing-shadow',
+  'codeartifact get-package-version-asset', 'lakeformation get-work-unit-results', 'backupstorage get-chunk',
+  'backupstorage get-object-metadata', 'omics get-read-set', 'omics get-reference', 'sagemaker-geospatial get-tile',
+  'workmailmessageflow get-raw-message-content', 'appconfig get-configuration', 'appconfigdata get-latest-configuration',
+]);
+/**
+ * Whole services left to the check: the CLI's own commands (configure, s3 and history are customisations, apart from
+ * the reads named in AWS_EXPLICIT_READS), Cost Explorer (each request is billed), and sign-in.
+ */
+const AWS_REFUSED_SERVICES = new Set(['configure', 's3', 'history', 'ce', 'sso', 'sso-oidc', 'secretsmanager']);
+/** Reads by explicit name, outside the get-, list- and describe- shapes or the refused services */
+const AWS_EXPLICIT_READS = new Set(['sts get-caller-identity', 's3 ls', 's3api head-object', 's3api head-bucket', 'configure list', 'configure list-profiles']);
+/** Global options that take a value, and the value each takes */
+const AWS_GLOBAL_VALUES: Record<string, RegExp> = {
+  '--profile': /^[A-Za-z0-9_.@+][A-Za-z0-9_.@+-]{0,63}$/,
+  '--region': /^[a-z]{2}(-[a-z]+)+-\d{1,2}$/,
+  '--output': /^(json|text|table|yaml|yaml-stream)$/,
+  '--color': /^(on|off|auto)$/,
+  '--query': /^[^-]/,
+};
+const AWS_GLOBAL_FLAGS = new Set(['--no-cli-pager', '--no-paginate']);
+/** Pagination options, after the operation */
+const AWS_PAGING_VALUES: Record<string, RegExp> = {
+  '--max-items': /^\d{1,9}$/,
+  '--page-size': /^\d{1,9}$/,
+  '--starting-token': /^[A-Za-z0-9+/=_.:-]+$/,
+};
+/**
+ * Options never allowed, nor any abbreviation of one (the CLI's parser accepts an unambiguous prefix: --endpoint is
+ * --endpoint-url): another endpoint, an input file, TLS changes, debug output, a skeleton instead of the call, and
+ * ssm's --with-decryption.
+ */
+const AWS_REFUSED_OPTIONS = [
+  '--endpoint-url', '--cli-input-json', '--cli-input-yaml', '--ca-bundle', '--no-verify-ssl', '--debug', '--generate-cli-skeleton',
+  '--cli-auto-prompt', '--no-cli-auto-prompt', '--cli-binary-format', '--cli-read-timeout', '--cli-connect-timeout', '--no-sign-request',
+  '--with-decryption', '--version',
+];
+/** An operation option's name may not hold these (an input or output file, a secret); pagination tokens are fine */
+const AWS_REFUSED_OPTION_WORDS = /file|password|secret|credential|decrypt|token/;
+const AWS_PAGINATION_TOKENS = new Set(['--next-token', '--continuation-token', '--starting-token']);
+/** A value that makes the CLI read a local file or fetch a URL */
+const AWS_LOADS = /(file|fileb|https?):\/\//i;
+/** s3 ls's own flags, and the one location it lists */
+const AWS_S3_LS_FLAGS = new Set(['--recursive', '--human-readable', '--summarize']);
+const AWS_S3_URI = /^s3:\/\/[a-z0-9][a-z0-9.-]{0,62}(\/[^\s]*)?$|^s3:\/\/$/;
+/**
+ * lambda list-functions returns each function's environment variables; it passes only with a --query that keeps a few
+ * named fields: Functions[].Name, Functions[].[A,B] or Functions[].{K:A,…}.
+ */
+const AWS_LAMBDA_LISTS: Record<string, string> = { 'lambda list-functions': 'Functions', 'lambda list-versions-by-function': 'Versions' };
+const LAMBDA_FIELDS = 'FunctionName|FunctionArn|Runtime|Handler|CodeSize|Description|Timeout|MemorySize|LastModified|CodeSha256|Version|PackageType|Architectures|State|LastUpdateStatus|RevisionId';
+
+function lambdaQueryKeepsFields(list: string, query: string | undefined): boolean {
+  if (query === undefined) return false;
+  const q = query.replace(/\s+/g, '');
+  const f = `(?:${LAMBDA_FIELDS})`;
+  const k = '[A-Za-z][A-Za-z0-9_]*';
+  return new RegExp(`^${list}\\[\\*?\\]\\.(?:${f}|\\[${f}(?:,${f})*\\]|\\{${k}:${f}(?:,${k}:${f})*\\})$`).test(q);
+}
+
+/** An option name the CLI could read as one of the refused ones (itself, or a prefix of one) */
+function awsRefusedOption(name: string): boolean {
+  return AWS_REFUSED_OPTIONS.some((r) => r.startsWith(name)) || name.startsWith('--cli-');
+}
+
+/**
+ * True when a simple command is a recognised read-only aws command: `aws`, then allowed global options, then a service
+ * and an operation that reads by name (get-*, list-*, describe-*, or AWS_EXPLICIT_READS) and is not refused (a
+ * secret, a credential, a signed URL, a side effect, an output file), then its own `--name value` options and the
+ * allowed global ones. No positional argument but s3 ls's one s3:// location, no value that loads a file or URL, no
+ * option repeated. `aws --version`, `aws help`, `aws <service> help` and `aws <service> <operation> help` read too.
+ * The words must read the same to this strict reader and to lex(): no expansion, glob, redirection or escape.
+ */
+export function isAwsRead(simple: string): boolean {
+  // The redirections that write nothing (2>&1, >&2, 2>/dev/null, &>/dev/null) are taken out first; lex() must agree
+  const bare = simple.replace(/(^|[ \t])(?:[12]?>&[12]|(?:[12&]?>)[ \t]?\/dev\/null)(?=[ \t]|$)/g, '$1');
+  const w = strictWords(bare.trim());
+  if (!w || w[0] !== 'aws') return false;
+  const lexed = lex(simple);
+  if (lexed.writes.some((t) => t !== '/dev/null') || lexed.reads.length || lexed.words.length !== w.length || lexed.words.some((x, k) => x !== w[k])) return false;
+  if (w.some((x) => AWS_LOADS.test(x))) return false;
+  if (w.length === 2 && (w[1] === '--version' || w[1] === 'help')) return true;
+  if (w.length === 3 && AWS_NAME.test(w[1]) && w[2] === 'help') return true;
+  if (w.length === 4 && AWS_NAME.test(w[1]) && AWS_NAME.test(w[2]) && w[3] === 'help') return true;
+
+  const seen = new Set<string>();
+  const values = new Map<string, string>();
+  // One option at i (a name, `--name=value` or `--name value`); returns the next index, or -1 to refuse
+  const option = (i: number, after: boolean): number => {
+    const word = w[i];
+    const eq = word.indexOf('=');
+    const name = eq > 0 ? word.slice(0, eq) : word;
+    if (!/^--[a-z0-9]+(-[a-z0-9]+)*$/.test(name) || seen.has(name)) return -1;
+    seen.add(name);
+    const inline = eq > 0 ? word.slice(eq + 1) : undefined;
+    const take = (): string | undefined => {
+      if (inline !== undefined) return inline;
+      const v = w[i + 1];
+      return v === undefined || v.startsWith('-') ? undefined : v;
+    };
+    const global = AWS_GLOBAL_VALUES[name] ?? (after ? AWS_PAGING_VALUES[name] : undefined);
+    if (global) {
+      const v = take();
+      if (v === undefined || !global.test(v)) return -1;
+      values.set(name, v);
+      return inline !== undefined ? i + 1 : i + 2;
+    }
+    if (AWS_GLOBAL_FLAGS.has(name)) return inline !== undefined ? -1 : i + 1;
+    // Before the service only the global options above; after the operation its own options too
+    if (!after || awsRefusedOption(name)) return -1;
+    if (AWS_REFUSED_OPTION_WORDS.test(name) && !AWS_PAGINATION_TOKENS.has(name)) return -1;
+    const v = take();
+    if (v === undefined) return inline !== undefined ? -1 : i + 1; // a flag (--recursive, --include-all …)
+    if (v.startsWith('-')) return -1;
+    values.set(name, v);
+    return inline !== undefined ? i + 1 : i + 2;
+  };
+
+  let i = 1;
+  while (i < w.length && w[i].startsWith('-')) {
+    i = option(i, false);
+    if (i < 0) return false;
+  }
+  const service = w[i];
+  const op = w[i + 1];
+  if (!service || !op || !AWS_NAME.test(service) || !AWS_NAME.test(op)) return false;
+  const name = `${service} ${op}`;
+  const explicit = AWS_EXPLICIT_READS.has(name);
+  if (!explicit) {
+    if (AWS_REFUSED_SERVICES.has(service) || AWS_REFUSED_OPS.has(name)) return false;
+    if (!/^(get|list|describe)-/.test(op)) return false;
+    if (AWS_SECRET_WORDS.some((x) => op.includes(x))) return false;
+  }
+  const positional: string[] = [];
+  i += 2;
+  while (i < w.length) {
+    if (!w[i].startsWith('-')) {
+      positional.push(w[i++]);
+      continue;
+    }
+    if (name === 's3 ls' && AWS_S3_LS_FLAGS.has(w[i])) {
+      if (seen.has(w[i])) return false;
+      seen.add(w[i++]);
+      continue;
+    }
+    i = option(i, true);
+    if (i < 0) return false;
+  }
+  if (name === 's3 ls') {
+    // only its flags, the paging and global options, and at most one s3:// location
+    if ([...seen].some((o) => !AWS_S3_LS_FLAGS.has(o) && !(o in AWS_GLOBAL_VALUES) && !(o in AWS_PAGING_VALUES) && !AWS_GLOBAL_FLAGS.has(o))) return false;
+    return positional.length <= 1 && positional.every((p) => AWS_S3_URI.test(p));
+  }
+  if (positional.length) return false;
+  if (service === 'configure') return [...seen].every((o) => o === '--profile');
+  if (name in AWS_LAMBDA_LISTS) return lambdaQueryKeepsFields(AWS_LAMBDA_LISTS[name], values.get('--query'));
+  return true;
+}
+
 /**
  * True when every simple command in the line only reads (plan mode runs these without asking). False for any
  * substitution ($(…), backticks, <(…)), a redirection into a file, a leading VAR=value, a program outside the list,
- * or a listed program with a flag that writes or runs something (sed -i, sort -o, git -c, rg --pre …).
+ * a listed program with a flag that writes or runs something (sed -i, sort -o, git -c, rg --pre …), or an aws
+ * command isAwsRead does not recognise.
  */
 export function isReadOnlyCommand(command: string): boolean {
   const raw = command.trim();
@@ -1046,6 +1282,10 @@ export function isReadOnlyCommand(command: string): boolean {
     if (lexed.writes.some((t) => !NULL_DEVICES.has(t))) return false;
     const prog = path.basename(argv[0] ?? '');
     if (!prog) continue;
+    if (prog === 'aws') {
+      if (!isAwsRead(simple)) return false;
+      continue;
+    }
     if (!READ_ONLY_PROGRAMS.has(prog)) return false;
     if (!readOnlyArgs(prog, argv)) return false;
   }
