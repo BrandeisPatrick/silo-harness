@@ -9,6 +9,8 @@ const projectDir = process.argv[2] || path.join(__dirname, '..');
 const dist = (p) => require(path.join(projectDir, 'dist/main', p));
 const { ArtifactStore, ARTIFACT_CSP, serveArtifactRequest } = dist('artifacts.js');
 const { leavesArtifact } = dist('browser/popups.js');
+const { clickRule, sameClickTarget, CHANGED_UNDER_CLICK } = dist('browser/policy.js');
+const { pagePrelude } = dist('browser/safety.js');
 const { check, done } = require('./support/check.js');
 
 /** The CSP's directives as { name: [tokens] }. */
@@ -46,6 +48,15 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   check('an artifact page leaving for the web is blocked', leavesArtifact(html.url, 'https://evil.example/?d=x') && leavesArtifact(html.url, 'http://127.0.0.1:9/beacon'));
   check('… for data:, blob:, file: and about:blank too', ['data:text/html,hi', 'blob:artifact://view/x', 'file:///etc/hosts', 'about:blank'].every((u) => leavesArtifact(html.url, u)));
   check('… but another artifact is fine, and a web page may go anywhere', !leavesArtifact(html.url, md.url) && !leavesArtifact('https://a.example/', 'https://b.example/') && !leavesArtifact('', 'https://b.example/'));
+
+  // ---------- 2. The click lands on what was checked ----------
+  const next = { text: 'Next', role: '', tag: 'button', type: '', inCaptcha: false, formHasCardFields: false, formActionHost: null };
+  check('a target the page covered is refused by the click rule, with the safety world\'s words', clickRule({ ...next, blocked: "Something else covers button 'Next' (ref_1); read the page again." }).message === "Something else covers button 'Next' (ref_1); read the page again.");
+  check('the check and the click must see the same element', sameClickTarget(next, { ...next }) && !sameClickTarget(next, { ...next, text: 'Pay now' }) && !sameClickTarget(next, { ...next, frameOrigin: 'https://widget.example' }));
+  check('… otherwise nothing is clicked', /nothing was clicked/.test(CHANGED_UNDER_CLICK));
+  const prelude = pagePrelude();
+  check("the safety helper keeps refs in this world's memory, not a page attribute", prelude.includes('new WeakRef(el)') && !prelude.includes('data-oc-ref'));
+  check('… and calls the DOM methods from its own prototypes', prelude.includes('EP.getBoundingClientRect.call(el)') && prelude.includes('EP.scrollIntoView.call(el'));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();

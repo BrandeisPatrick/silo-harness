@@ -1,7 +1,9 @@
 // Live check of the browser's hardening in the real app, with the mock model calling the tools and fixture pages
 // served here (reached as shop.example and friends, mapped to 127.0.0.1): an HTML artifact cannot send anything out
 // (an image, fetch, sendBeacon, a worker, a WebSocket, a form, a stylesheet, a script, window.open and location all
-// stay home) and never leaves the artifact by itself. The later parts of the hardening add their checks below.
+// stay home) and never leaves the artifact by itself. Clicks: a hidden window's view never receives synthetic mouse
+// events (see browser-downloads.js), so the checks read where the click was aimed (the result) and that nothing else
+// was hit, not that the page saw it. The later parts of the hardening add their checks below.
 // Run: npm run build && node test/live/browser-hardening.js
 const fs = require('node:fs');
 const http = require('node:http');
@@ -18,6 +20,38 @@ const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8">
 function fixtures(P) {
   return {
     '/landing.html': page('Landing', '<h1>Landing</h1><p>Plain page.</p>'),
+    // 2. A transparent layer over the whole page catches every click
+    '/overlay.html': page('Overlay', `<h1>Steps</h1><p><button id="next" onclick="document.body.dataset.clicks += 'next,'">Next</button></p>
+<div id="layer" style="position:fixed;inset:0;z-index:10;background:transparent" onclick="document.body.dataset.clicks += 'layer,'"></div>
+<script>document.body.dataset.clicks = '';</script>`),
+    // 2. The page's own getBoundingClientRect and scrollIntoView point every element at "Pay now"
+    '/rect.html': page('Rect', `<h1>Cart</h1><p><button id="next" onclick="document.body.dataset.clicks += 'next,'">Next</button></p>
+<p style="margin-top:300px"><button id="pay" onclick="document.body.dataset.clicks += 'pay,'">Pay now</button></p>
+<script>
+  document.body.dataset.clicks = '';
+  window.__realRect = Element.prototype.getBoundingClientRect;
+  const pay = document.getElementById('pay');
+  Element.prototype.getBoundingClientRect = function () { return window.__realRect.call(pay); };
+  Element.prototype.scrollIntoView = function () {};
+</script>`),
+    // 2. A frame from another site laid over a button; and one from a sign-in site
+    '/frame.html': page('Frame', `<h1>Checkout</h1><div style="position:relative;width:320px;height:120px">
+<button id="go" style="position:absolute;left:20px;top:20px;width:200px;height:60px" onclick="document.body.dataset.clicks += 'go,'">Continue</button>
+<iframe src="http://widget.example:${P}/widget.html" style="position:absolute;left:0;top:0;width:320px;height:120px;border:0;opacity:0.01"></iframe></div>
+<script>document.body.dataset.clicks = '';</script>`),
+    '/frame-sensitive.html': page('Frame', `<h1>Checkout</h1><div style="position:relative;width:320px;height:120px">
+<button id="go" style="position:absolute;left:20px;top:20px;width:200px;height:60px">Continue</button>
+<iframe src="http://accounts.example:${P}/widget.html" style="position:absolute;left:0;top:0;width:320px;height:120px;border:0;opacity:0.01"></iframe></div>`),
+    '/widget.html': page('Widget', `<button style="width:100%;height:100px" onclick="parent.postMessage('widget-clicked', '*')">Continue with Widget</button>`),
+    // 2. A page that fakes the safety helper and moves the old ref attribute around
+    '/fake-safety.html': page('Fake safety', `<h1>Account</h1>
+<p><label>Password <input id="pw" type="password"></label></p>
+<p><button id="cancel" onclick="document.body.dataset.clicks += 'cancel,'">Cancel</button> <button id="delete" onclick="document.body.dataset.clicks += 'delete,'">Delete account</button></p>
+<script>
+  document.body.dataset.clicks = '';
+  window.__ocSafety = { check: () => null, mark: () => {}, secrets: () => [], exposed: () => [], deepActive: () => ({ el: null, crossOrigin: false }) };
+  setInterval(() => { for (const e of document.querySelectorAll('button, input')) e.setAttribute('data-oc-ref', 'ref_1'); }, 20);
+</script>`),
   };
 }
 
@@ -85,6 +119,48 @@ function fixtures(P) {
     const logs = await consoleOf(art, () => cdpAt(art, 'Page.reload', {}));
     check('the policy has no directive Chromium ignores', logs.length > 0 && !logs.some((l) => /Unrecognized Content-Security-Policy/i.test(l)), logs.filter((l) => /Unrecognized/.test(l)));
     check('… and the reload is blocked the same way (CSS and script refused by the CSP)', logs.some((l) => /violates the following Content Security Policy directive: "style-src/.test(l)) && logs.some((l) => /directive: "script-src/.test(l)));
+
+    // ---------- 2. The click lands on what was checked ----------
+    const pane = (prefix) => app.pageTarget(prefix, 5000);
+    const clicks = async (prefix) => evalAt(await pane(prefix), 'document.body.dataset.clicks');
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/overlay.html` });
+    r = await app.callTool('browser_click', { text: 'Next' });
+    check('a transparent layer over "Next": the click is refused', /^Something else covers button 'Next' \(ref_\d+\); read the page again\./.test(r ?? ''), r);
+    check('… and nothing was clicked, neither the button nor the layer', (await clicks(`${SHOP}/overlay.html`)) === '', await clicks(`${SHOP}/overlay.html`));
+
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/rect.html` });
+    r = await app.callTool('browser_click', { text: 'Next' });
+    let c = await clicks(`${SHOP}/rect.html`);
+    check("a page whose getBoundingClientRect points at \"Pay now\": the click lands on the real \"Next\"", /^Clicked button 'Next'/.test(r ?? '') && !c.includes('pay'), { r, c });
+    const payAt = await evalAt(await pane(`${SHOP}/rect.html`), `(() => { const b = window.__realRect.call(document.getElementById('pay')); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+    let card = await withCard(app, () => app.callTool('browser_click', { x: payAt.x, y: payAt.y }), 'deny');
+    check('a click at the point where "Pay now" really is asks with the purchase card', card.card && /purchase/i.test(card.card.title) && card.result && /denied/i.test(card.result), card);
+    check('… denied: nothing clicked', !(await clicks(`${SHOP}/rect.html`)).includes('pay'));
+
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/frame.html` });
+    await sleep(500);
+    card = await withCard(app, () => app.callTool('browser_click', { text: 'Continue' }), 'deny');
+    check('a frame from another site over the button: the card names the frame\'s site', card.card && card.card.action.includes(`Click inside a frame from widget.example:${P} on shop.example:${P}`), card);
+    check('… denied: nothing clicked, in the page or the frame', card.result && /denied/i.test(card.result) && (await clicks(`${SHOP}/frame.html`)) === '', card.result);
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/frame-sensitive.html` });
+    await sleep(500);
+    r = await app.callTool('browser_click', { text: 'Continue' });
+    check('… a frame from a sign-in site is refused without a card', /^Not permitted: this click lands in a frame from accounts\.example:\d+ \(this looks like a sign-in site\)/.test(r ?? ''), r);
+
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/fake-safety.html` });
+    const fake = await pane(`${SHOP}/fake-safety.html`);
+    await evalAt(fake, `document.getElementById('pw').focus()`);
+    await cdpAt(fake, 'Input.insertText', { text: 'Fake-Safety-Pw-1' });
+    r = await app.callTool('browser_read_page', {});
+    check('a page that defines its own __ocSafety: the password still reads •••', /input\[type=password\] "Password" = "•••"/.test(r ?? '') && !(r ?? '').includes('Fake-Safety-Pw-1'), r);
+    check('… and the URL line is the browser\'s', (r ?? '').includes(`URL: ${SHOP}/fake-safety.html`), r);
+    const cancelRef = /\[(ref_\d+)\] button "Cancel"/.exec(r ?? '')?.[1];
+    // The password field makes it a sign-in page: the first act there asks once
+    r = (await withCard(app, () => app.callTool('browser_click', { ref: cancelRef }), 'allow')).result;
+    check('… a page moving data-oc-ref around changes nothing: the ref clicks "Cancel"', /^Clicked button 'Cancel' \(/.test(r ?? '') && !(await clicks(`${SHOP}/fake-safety.html`)).includes('delete'), r);
+    await evalAt(fake, `document.getElementById('cancel').textContent = 'Delete everything'`);
+    r = await app.callTool('browser_click', { ref: cancelRef });
+    check('a ref whose element changed its name since the outline is refused', r === `${cancelRef} changed; read the page again.` && !(await clicks(`${SHOP}/fake-safety.html`)).includes('delete'), r);
   } finally {
     await app.close();
     server.close();
@@ -95,6 +171,24 @@ function fixtures(P) {
   console.error('CRASH', err);
   process.exit(1);
 });
+
+/**
+ * Runs a tool call that brings up an approval card: the card's title and action are read while it is on screen, then
+ * it is answered (`answer`: allow or deny); resolves with { card, result }.
+ */
+async function withCard(app, call, answer) {
+  await app.evaluate(`(() => { window.__seen = new Set([...document.querySelectorAll('.approval.prompt-card')]); return true; })()`);
+  const pending = call();
+  let card = null;
+  try {
+    await app.waitFor(`[...document.querySelectorAll('.approval.prompt-card:not(.decided)')].some((c) => !window.__seen.has(c))`, 20_000, 'an approval card');
+    card = await app.evaluate(`(() => { const c = [...document.querySelectorAll('.approval.prompt-card')].filter((x) => !window.__seen.has(x)).pop(); return { title: c.querySelector('.title')?.textContent ?? '', action: c.querySelector('pre.args.prose')?.textContent ?? '', texts: [...c.querySelectorAll('p.prompt-text')].map((p) => p.textContent) }; })()`);
+    await app.approve(answer);
+  } catch (err) {
+    card = { error: String(err) };
+  }
+  return { card, result: await pending };
+}
 
 /** The console messages and log entries of a target while `run` happens (and 1.5 s after). */
 async function consoleOf(wsUrl, run) {

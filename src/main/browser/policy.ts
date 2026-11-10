@@ -369,7 +369,19 @@ export interface ClickTarget {
   formHasCardFields: boolean;
   /** The host its form posts to, when the form has an action of its own */
   formActionHost: string | null;
+  /** The click goes into a frame from another site (over the target, or at the point): that frame's origin */
+  frameOrigin?: string | null;
+  /** The click cannot land where it should (the ref changed, something covers it): the refusal the model reads */
+  blocked?: string;
 }
+
+/** Whether two looks at what a click lands on found the same thing (the check, then the click itself). */
+export function sameClickTarget(a: ClickTarget, b: ClickTarget): boolean {
+  return oneLine(a.tag).toLowerCase() === oneLine(b.tag).toLowerCase() && oneLine(a.text) === oneLine(b.text) && oneLine(a.type) === oneLine(b.type) && (a.frameOrigin ?? null) === (b.frameOrigin ?? null);
+}
+
+/** What the model reads when the page moved something under the click between the check and the click. */
+export const CHANGED_UNDER_CLICK = 'The page changed under the click; nothing was clicked. Read the page again.';
 
 export type ClickRule = Allow | { kind: 'ask'; what: 'purchase' | 'account'; detail: string } | Refuse;
 
@@ -392,6 +404,7 @@ export function isPaymentHost(host: string): boolean {
  * and "Sign in" are clicks like any other.
  */
 export function clickRule(target: ClickTarget): ClickRule {
+  if (target.blocked) return refuse(target.blocked);
   if (target.inCaptcha) return refuse(CAPTCHA_REFUSAL);
   const tag = oneLine(target.tag).toLowerCase();
   const type = oneLine(target.type).toLowerCase();

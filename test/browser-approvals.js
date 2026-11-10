@@ -84,6 +84,10 @@ function fakeBrowser(page) {
     clickAt(x, y) {
       page.clicked.push(`(${x}, ${y})`);
     },
+    async clickPoint(x, y) {
+      page.clicked.push(`(${x}, ${y})`);
+      return `Clicked at (${x}, ${y}).`;
+    },
     async credentialTarget(ref, field) {
       if (field) return page.fieldKinds[field] ?? null;
       if (ref) return null;

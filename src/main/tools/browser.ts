@@ -5,6 +5,7 @@ import {
   clickRule,
   CREDENTIAL_REFUSAL,
   isExempt,
+  isSensitive,
   keyRule,
   navigationRule,
   signInPageKey,
@@ -140,18 +141,29 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
 /**
  * browser_click, once the element is known: a click inside a CAPTCHA is refused; one that buys something or makes an
  * account asks with a card of its own (Allow and Deny, in every mode, Bypass included), except on an exempt host,
- * which is the user's own app under development.
+ * which is the user's own app under development. What decides is what is really under the click point (hit-tested in
+ * the safety world): a ref covered by something else, or changed since the outline, is refused; a click that lands in
+ * a frame from another site asks with that site named (in every mode), and is refused when that site is a sensitive
+ * one. `target` is what the rules saw, which the click checks again at the moment it clicks.
  */
-async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<string | null> {
+async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<{ stop: string | null; target: ClickTarget | null }> {
   const target = await askPage<ClickTarget | null>(() => ctx.browser.describeTarget(at), null);
-  if (!target) return null;
+  if (!target) return { stop: null, target: null };
   const rule = clickRule(target);
-  if (rule.kind === 'allow') return null;
-  if (rule.kind === 'refuse') return rule.message;
+  if (rule.kind === 'refuse') return { stop: rule.message, target };
   const url = activeUrl(ctx);
-  if (isExempt(url, lists(ctx).exempt, ctx.cwd)) return null;
+  const exempt = isExempt(url, lists(ctx).exempt, ctx.cwd);
   const site = siteOf(url);
-  return askCard(ctx, 'browser_click', cardDetail(actionLine('browser_click', args, site), args), rule.what, site ?? NO_SITE, { reason: rule.detail });
+  if (target.frameOrigin && !exempt) {
+    const frame = siteOf(target.frameOrigin);
+    const name = frame?.display ?? target.frameOrigin;
+    const sensitive = isSensitive(target.frameOrigin, lists(ctx).sensitive);
+    if (sensitive.sensitive) return { stop: `Not permitted: this click lands in a frame from ${name} (${sensitive.note.replace(/^This/, 'this')}). Ask the user to click it in the Browser pane.`, target };
+    const stop = await askCard(ctx, 'browser_click', cardDetail(`Click inside a frame from ${name} on ${(site ?? NO_SITE).display}`, args), 'sensitive', frame ?? site ?? NO_SITE, { note: `This click goes into a frame from ${name}, another site` });
+    if (stop) return { stop, target };
+  }
+  if (rule.kind === 'allow' || exempt) return { stop: null, target };
+  return { stop: await askCard(ctx, 'browser_click', cardDetail(actionLine('browser_click', args, site), args), rule.what, site ?? NO_SITE, { reason: rule.detail }), target };
 }
 
 /** The optional `reason` of the tools that may need the user's approval: shown on the card, under the action. */
@@ -290,12 +302,10 @@ const tools: Tool[] = [
       const point = !ref && typeof args.x === 'number' && typeof args.y === 'number' ? { x: args.x, y: args.y } : null;
       if (!ref && !point) throw new Error('Provide text, a ref, or x and y.');
       // What the click lands on decides first: a CAPTCHA is refused, a purchase or a new account asks.
-      const stop = await clickCheck(args, ctx, ref ? { ref } : point!);
+      const { stop, target } = await clickCheck(args, ctx, ref ? { ref } : point!);
       if (stop) return { content: stop };
-      if (ref) return { content: await ctx.browser.click(ref, button, Boolean(args.double)) };
-      ctx.browser.clickAt(point!.x, point!.y, button, args.double ? 2 : 1);
-      await new Promise((r) => setTimeout(r, 400));
-      return { content: `Clicked at (${point!.x}, ${point!.y}).` };
+      if (ref) return { content: await ctx.browser.click(ref, button, Boolean(args.double), target) };
+      return { content: await ctx.browser.clickPoint(point!.x, point!.y, button, args.double ? 2 : 1, target) };
     },
   },
   {
