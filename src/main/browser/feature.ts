@@ -17,6 +17,7 @@ import { installCertificateHandler } from './certificates';
 import { tabEvents, type BrowserController } from './controller';
 import { DownloadManager } from './downloads';
 import { configurePermissions, fileStore, permissionsFile } from './permissions';
+import { remoteServerPorts, setRemotePorts } from './own-ports';
 import { BUILT_IN_EXEMPT, SENSITIVE_PATTERNS } from './policy';
 import { browserSession, clearBrowsingData, clearPrivateData, dismissProfileNote, prepareBrowserSession, profileNoteDue } from './session';
 
@@ -76,6 +77,8 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
   tabEvents.navigated.add((tabId, url, contentsId) => permissions.tabNavigated(tabId, url, contentsId));
   tabEvents.closed.add((tabId) => permissions.tabClosed(tabId));
 
+  // The agent never opens the app's own remote-control server (its port is read when a browser call is checked)
+  setRemotePorts(() => remoteServerPorts(app.userData, app.config().remote?.port));
   void prepareBrowserSession({ userData: app.userData, window: () => app.window() });
   const ses = browserSession();
 

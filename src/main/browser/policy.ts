@@ -263,6 +263,33 @@ export function navigationRule(url: string, cwd: string, exempt: readonly string
   return refuse(`Not permitted: the browser opens http and https pages, local files and artifacts, not ${scheme}: URLs.`);
 }
 
+// ---------- The app's own servers ----------
+
+/** What the model reads when it reaches for the app's own remote-control or debugging server. */
+export const OWN_SERVER_REFUSAL = "Not permitted: that address is the app's own remote-control or debugging server, which the agent may not open, read or act on.";
+
+/** Whether a host is this machine: a loopback name or address, 0.0.0.0, or one of its own network addresses. */
+function isThisMachine(host: string, localAddresses: readonly string[]): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '0.0.0.0' || h === '::' || /^127\.\d+\.\d+\.\d+$/.test(h) || /^::ffff:127\./.test(h)) return true;
+  return localAddresses.some((a) => a.toLowerCase().replace(/^\[|\]$/g, '') === h);
+}
+
+/**
+ * Whether the agent may open, read or act on `url` at all, given the ports the app itself listens on (its remote-control
+ * server, a --remote-debugging-port, an --inspect port): one of those on this machine (any loopback name, or one of its
+ * own LAN addresses) is refused, whatever the path or the mode. Every other local address is left to the exemption.
+ */
+export function ownServerRule(url: string, ownPorts: readonly number[], localAddresses: readonly string[] = []): Allow | Refuse {
+  const u = parse(url);
+  if (!u) return ALLOW;
+  const scheme = schemeOf(u);
+  if (!['http', 'https', 'ws', 'wss'].includes(scheme)) return ALLOW;
+  const port = Number(u.port || (scheme === 'https' || scheme === 'wss' ? 443 : 80));
+  if (!ownPorts.includes(port) || !isThisMachine(u.hostname, localAddresses)) return ALLOW;
+  return refuse(OWN_SERVER_REFUSAL);
+}
+
 // ---------- The site decision ----------
 
 /** What a browser tool call does to the page: reads it, acts on it (clicks, types, presses), runs code in it, or opens a URL. */
@@ -298,8 +325,8 @@ export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site:
 /**
  * Whether a browser tool call runs, asks or is refused, in this order: a page with no site (about:blank) runs unless
  * it inherited an origin from the page that made it (`origin`), which then decides as that site; an
- * exempt page runs, every action in every mode; plan mode refuses acting and eval (reading and navigating stay, with
- * their cards); bypass mode runs everything else; a site the user has not allowed this session or always asks with
+ * exempt page runs, every action in every mode but plan; plan mode refuses acting and eval everywhere, exempt hosts
+ * included (reading and navigating stay, with their cards); bypass mode runs everything else; a site the user has not allowed this session or always asks with
  * the site card, whatever the action (reading included: that is where an injection enters); on an allowed site a
  * browser_eval asks in ask and acceptEdits mode, and in auto mode when the eval guard sees the code reach for site
  * data or the network (the reason goes on the card) or the site is sensitive; an act on a sensitive site (the list,
@@ -313,8 +340,9 @@ export function siteDecision(input: SiteDecisionInput): SiteDecision {
   const url = own ? input.url : input.origin && siteOf(input.origin) ? input.origin : input.url;
   const site = own ?? siteOf(url);
   if (!site) return ALLOW;
-  if (isExempt(url, settings.exempt, cwd)) return ALLOW;
+  // Plan mode is read-only everywhere, the user's own servers included
   if (mode === 'plan' && (action === 'act' || action === 'eval')) return refuse(PLAN_BROWSER_BLOCKED);
+  if (isExempt(url, settings.exempt, cwd)) return ALLOW;
   if (mode === 'bypass') return ALLOW;
   const listed = isSensitive(url, settings.sensitive);
   const page = looksLikeSignInPage({ hasPasswordField: Boolean(input.pageHasPasswordField) });

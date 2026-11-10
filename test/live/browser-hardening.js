@@ -220,6 +220,14 @@ function fixtures(P) {
     await app.waitFor(`window.__oc_debug.mods.browser().tabs.some((t) => t.url === ${JSON.stringify(`${SHOP}/landing.html`)})`, 10_000, 'the web link in a new tab');
     check('… a web link with target=_blank still opens a tab', true);
 
+    // ---------- 8. The app's own debugging port ----------
+    r = await app.callTool('browser_navigate', { url: `http://127.0.0.1:${app.port}/json/list` });
+    check("the app's own --remote-debugging-port is refused, on 127.0.0.1", /^Not permitted: that address is the app's own remote-control or debugging server/.test(r ?? ''), r);
+    r = await app.callTool('browser_navigate', { url: `http://localhost:${app.port}/json/version` });
+    check('… and on localhost', /^Not permitted: that address is the app's own/.test(r ?? ''), r);
+    r = await app.callTool('browser_navigate', { url: `${LOCAL}/landing.html` });
+    check('another local port (a dev server) still opens without a card', /^Now at <page_content site="127\.0\.0\.1:\d+">/.test(r ?? ''), r);
+
     // ---------- 7. Downloads are the user's only after the user's own input ----------
     const downloads = () => app.evaluate(`oc.rpc('browser.downloads')`);
     r = await app.callTool('browser_navigate', { url: `${SHOP}/autodl.html` });

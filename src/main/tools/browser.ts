@@ -9,6 +9,7 @@ import {
   isSensitive,
   keyRule,
   navigationRule,
+  ownServerRule,
   signInPageKey,
   siteDecision,
   siteOf,
@@ -19,6 +20,7 @@ import {
   type Site,
 } from '../browser/policy';
 import { fencePage } from '../browser/fence';
+import { localAddresses, ownPorts } from '../browser/own-ports';
 import { looksLikeCredentialLabel, MASK, scrubSecrets, type CredentialKind } from '../browser/safety';
 import type { Tool, ToolContext, ToolResult } from './types';
 
@@ -130,6 +132,9 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
     url = dest;
     if (nav.kind === 'ask') line = opensTab ? `${nav.detail}, in a new tab` : nav.detail;
   }
+  // The app's own remote-control and debugging servers are never the agent's, whatever the mode or the exemption
+  const own = ownServerRule(url, ownPorts(), localAddresses());
+  if (own.kind === 'refuse') return own.message;
   const page = signInPageKey(url);
   // The sign-in page signal, asked for an act until the user allowed one on that page
   const signIn = action === 'act' && page !== null && ctx.mode !== 'bypass' && !ctx.signInPagesAllowed?.().has(page) && !isExempt(url, settings.exempt, ctx.cwd);

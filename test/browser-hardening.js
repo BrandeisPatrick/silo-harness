@@ -9,11 +9,12 @@ const projectDir = process.argv[2] || path.join(__dirname, '..');
 const dist = (p) => require(path.join(projectDir, 'dist/main', p));
 const { ArtifactStore, ARTIFACT_CSP, serveArtifactRequest } = dist('artifacts.js');
 const { leavesArtifact, opensInTab } = dist('browser/popups.js');
-const { clickRule, sameClickTarget, CHANGED_UNDER_CLICK, siteDecision, clipboardRule, CLIPBOARD_REFUSAL } = dist('browser/policy.js');
+const { clickRule, sameClickTarget, CHANGED_UNDER_CLICK, siteDecision, clipboardRule, CLIPBOARD_REFUSAL, ownServerRule, OWN_SERVER_REFUSAL } = dist('browser/policy.js');
 const { pagePrelude } = dist('browser/safety.js');
 const { fencePage, stripFence, pageSite } = dist('browser/fence.js');
 const { BROWSER_RULES } = dist('tools/groups.js');
 const { browserTools } = dist('tools/browser.js');
+const { debugPortsOf } = dist('browser/own-ports.js');
 const { startedByUser, USER_INPUT_MS, quarantineValue } = dist('browser/downloads.js');
 const { check, done } = require('./support/check.js');
 
@@ -164,6 +165,18 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   check('… one with no input on the tab, or older than 5 s, is not (it asks)', !startedByUser(0, now) && !startedByUser(undefined, now) && !startedByUser(now - USER_INPUT_MS - 1, now) && USER_INPUT_MS === 5000);
   check('… nor one "before" the input (a clock that went back)', !startedByUser(now + 10, now));
   check('the quarantine value is the one Safari writes: flags;hex time;app;id', /^0081;[0-9a-f]+;Silo Harness;[0-9A-F-]+$/.test(quarantineValue(now, 'ab-12')) && quarantineValue(now, 'x').split(';')[1] === Math.floor(now / 1000).toString(16));
+
+  // ---------- 8. Local addresses ----------
+  const own = [47613, 9222];
+  const lan = ['192.168.1.20', 'fe80::1'];
+  const refused = ['http://127.0.0.1:47613/r/abc/', 'http://localhost:47613/', 'http://[::1]:47613/api', 'http://app.localhost:47613/', 'http://0.0.0.0:47613/', 'http://192.168.1.20:47613/r/x/', 'http://127.0.0.1:9222/json', 'ws://127.0.0.1:9222/devtools/page/1', 'http://127.0.0.2:47613/'];
+  check("the app's own remote and debugging ports are refused on every local name and its LAN address, any path", refused.every((u) => ownServerRule(u, own, lan).kind === 'refuse'), refused.filter((u) => ownServerRule(u, own, lan).kind !== 'refuse'));
+  check('… with a plain message', ownServerRule(refused[0], own, lan).message === OWN_SERVER_REFUSAL && /remote-control or debugging server/.test(OWN_SERVER_REFUSAL));
+  const fineUrls = ['http://localhost:3000/', 'http://127.0.0.1:8080/', 'https://example.com:47613/', 'http://192.168.1.99:47613/', 'file:///tmp/x', 'about:blank'];
+  check('… other local ports (a dev server), other hosts on that port, and other schemes are left to the exemption', fineUrls.every((u) => ownServerRule(u, own, lan).kind === 'allow'), fineUrls.filter((u) => ownServerRule(u, own, lan).kind !== 'allow'));
+  check('the debugging ports of a command line', JSON.stringify(debugPortsOf(['electron', '--remote-debugging-port=9333', '--inspect', '--inspect-brk=127.0.0.1:9230', '--inspect-port=9231', '--user-data-dir=/x'])) === JSON.stringify([9333, 9229, 9230, 9231]));
+  const plan = { action: 'act', mode: 'plan', cwd: '/tmp/project', settings, sessionAllowed: new Set() };
+  check('plan mode refuses acting on localhost too', siteDecision({ ...plan, url: 'http://localhost:9999/' }).kind === 'refuse' && siteDecision({ ...plan, action: 'eval', url: 'http://localhost:9999/' }).kind === 'refuse' && siteDecision({ ...plan, action: 'read', url: 'http://localhost:9999/' }).kind === 'allow');
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();
