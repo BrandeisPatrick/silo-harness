@@ -202,7 +202,7 @@ Design, about 300 lines, no new dependency (the bench's `toNative()` is a workin
 - What still breaks the cache: a mode switch (the mode text is in the system prompt), the session's rename (now at the very
   end), a prune event, and the 5-minute lifetime between turns (a user who pauses longer pays one cache write per pause).
 
-### Loading tool groups when they are needed
+### Loading tool groups when they are needed (built since)
 
 Measured exactly, per request: the browser tools 2,305 tokens (12 tools), sub-sessions 1,347 (6), schedules 1,044 (4), terminal
 785 (4), mod_check 156; together 5,637 tokens, half of the fixed part, sent with every request whether or not the task needs
@@ -210,7 +210,7 @@ them. The twelve core tools take 3,165. Leaving the five groups out until they a
 agent request of a session that does not use them: over a third of tier 1's input (Q, E and L use none), and about 200K tokens
 (9%) of tier 2 after this change (the browser is needed only from turn 10, and loading it costs one extra request).
 
-This is a large change, so it is designed here and not built:
+It was designed here, then built (see Built, below):
 - `Tool.group` (`browser`, `terminal`, `schedules`, `sessions`, `mods`); `Session.toolGroups` lists the loaded ones (copied on fork).
 - `toolsFor()` leaves out the tools of groups not loaded and adds `load_tools({ groups })`, whose description lists the groups
   not loaded yet, one line each. Prompt sections that belong to a group (the browser bullet, sub-sessions, schedules, mods) come
@@ -223,16 +223,53 @@ This is a large change, so it is designed here and not built:
 - Risk: the model has to think of loading a group. Claude Code works this way with its deferred tools; it needs the browser and
   terminal live tests to confirm it with Haiku.
 
+**Built** (560bcf2, then made safe for prompt caching in ddad3b9). As designed, except:
+- Cache-safe, for the native path and providers that cache on their own: the tools only grow at the end (the core tools,
+  then each group's in the order the session loaded them; nothing unloads or reorders), load_tools' description is the
+  same all session long (one line per group, loaded or not), and the system prompt never changes as groups load (it names
+  the groups in one line). What a group needs the model to know (the browser's rules, the sub-session guide, the
+  schedules and mods sections, the session's name) comes in the load's result, in the conversation; a compaction brief
+  repeats it when the load is folded. A load the model did not ask for (a call by name, a message's address) is stored
+  as a load_tools call of the agent's own, so it is in the conversation too.
+- The up-front rule is narrower than any http(s) address, since a wrong guess costs the browser's 2.3K tokens on every
+  later request: an address the message asks to open (`open https://…`) or names with the word browser.
+- `toolSet` `auto` no longer drops the optional families under a 32K window (as groups they cost nothing until loaded);
+  `all` sends every group up front with the old prompt; `essential` keeps schedules, sub-sessions and mods off.
+
+Measured as above, on e49779d and on ddad3b9 (tier 1 the mean of two runs; no replay):
+
+| Scenario | Input before | Input after | Cost before | Cost after |
+|---|--:|--:|--:|--:|
+| Q | 43,822 | 17,982 (-59%) | $0.0048 | $0.0022 |
+| E | 46,813 | 22,748 (-51%) | $0.0053 | $0.0029 |
+| B | 82,710 | 54,400 (-34%) | $0.0088 | $0.0060 |
+| L | 153,397 | 99,442 (-35%) | $0.0166 | $0.0115 |
+| Tier 1 | 326,742 | 194,571 (-40%) | $0.0356 | $0.0226 (-37%) |
+| Tier 2 (W), two runs after | 2,167,572 | 2,242,037 and 2,492,289 | $0.2285 | $0.2364 and $0.2630 |
+
+A session's first request went from about 10,200 tokens (39 tools) to 4,200 (13 tools), and 6,800 with the browser loaded from
+the message. The system prompt is now the same in every session but for the folder and date (8 sessions shared 2,293 of 2,405
+characters, against 4,325 of 4,532). In tier 2 all 62 agent requests sent one system prompt (two before: the session's title
+changed it) and a tool list that grew once, at its end, when the browser loaded. Every scenario finished with outcome ok; B and
+W's browser turn ("Open … in the browser") loaded the browser from the message, with no extra request, and read the page. Tier 2
+did not get cheaper in these runs: its tool definitions fell from 513K to 297K and 309K tokens (about 4,900 fewer per agent
+request), but the agent made 59 and 62 requests instead of 52 and read more (tool results 1.02M against 1.32M and 1.38M); per
+agent request its input fell 9% and 6%. One tier 2 run varies that much from the next (an earlier build of the same change
+measured 1,988,499, -8%, in 53 requests), so tier 2 needs several runs per side to show a saving of this size. Without the words
+open or browser, in a one-off live check, Haiku called load_tools by itself for the terminal and for a web page and then used
+them, and the live sub-session test has it load the sessions group.
+
 ### Smaller ones
 
 - **The safety check's model.** It runs on the session's model unless `autoMode.model` names another. On Opus 5.5 ($4 per million
   input) each check costs 40 times what it would on Haiku 5.5; a default of the provider's small model would cut it by that.
   Not changed: which model a provider offers is a product decision.
-- **The installed-mods list** in the prompt names all 14 bundled mods, including those that are off (about 150 tokens).
+- **The installed-mods list** names all 14 bundled mods, including those that are off (about 150 tokens; since the tool
+  groups it is in the mods group's load result, not the system prompt).
 - **browser_get_text and browser_read_page** default to 50,000 and 40,000 characters; the 30,000-character cut now bounds them for
   the model.
-- **The fixed part is still about 10,200 tokens.** After the native path and tool groups, the next is the browser and sub-session
-  descriptions themselves.
+- **The fixed part is about 4,200 tokens** since the tool groups (10,200 before). After the native path, the next are the core
+  tools' descriptions (ask_user and create_artifact take about 750 tokens together) and, once loaded, the browser's.
 
 ## What the experiment cost
 
@@ -248,4 +285,6 @@ This is a large change, so it is designed here and not built:
 | Tier 1 final, two runs, with replay | $0.083 |
 | Exact token counts of the tool groups and prompt parts | about $0.012 |
 | Live test scripts (one pass; not recorded, estimated) | about $0.05 |
-| **Total** | **about $1.73** |
+| Tool groups: tier 1 (two runs) and tier 2, before, after the first build and after the cache-safe one (tier 2 twice) | $1.097 |
+| Tool groups: two live checks of the model loading groups, and the live scripts three times (estimated) | about $0.10 |
+| **Total** | **about $2.93** |
