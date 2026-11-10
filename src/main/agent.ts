@@ -61,6 +61,7 @@ import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
+import { answerText, forCheck, LearnedStore } from './agent/learned';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
@@ -100,10 +101,20 @@ interface PendingApproval {
   sessionKey?: string;
   /** A browser tool's card: what its answer allows (the site, or the sign-in page) */
   browser?: BrowserApproval;
+  /** What Auto mode learns from the answer (agent/learned.ts): the tool, its target and the card's line */
+  learn: { tool: string; key: string; line: string };
 }
 
 /** Browser cards a PreToolUse hook's "allow" does not skip: money and accounts are the user's, as in bypass mode. */
 const USER_ONLY_CARDS = new Set(['purchase', 'account']);
+
+/** What an answer concerned, for what Auto mode learns: the site, the MCP server, the programs, a tool's own key. */
+function learnKey(name: string, programs: string[], browser?: BrowserApproval, sessionKey?: string): string {
+  if (browser) return browser.site.key;
+  if (name.startsWith('mcp__')) return programs[0] ?? '';
+  if (name === 'bash' || name === 'terminal_run') return programs.join(', ');
+  return sessionKey ?? '';
+}
 
 /** What a browser action Allow on its Auto mode block lets through once: the tool, the card, the site and the card's first line. */
 function browserActionKey(name: string, detail: string, b: BrowserApproval): string {
@@ -117,6 +128,7 @@ function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
     card: b.card,
     kind,
     site: b.site.display,
+    siteKey: b.site.key,
     ...(b.check?.url ? { url: b.check.url } : {}),
     ...(b.note ? { note: b.note } : {}),
     ...(b.reason ? { flag: b.reason } : {}),
@@ -173,6 +185,8 @@ export interface AgentOptions {
   hooks?: HookEngine | null;
   /** The clock for the cache bookkeeping (default Date.now; tests pass their own) */
   now?: () => number;
+  /** Where Auto mode keeps what it learns from the user's answers (default: the app's 'auto-learned' service; none in bare tests) */
+  learned?: LearnedStore | null;
 }
 
 /**
@@ -226,7 +240,7 @@ export class Agent {
   /** Per session: Auto mode's counters and pause (see AutoState) */
   private autoStates = new Map<string, AutoState>();
   /** Per session: the actions Auto mode blocked in this app session, by call id, with the key Allow lets through once */
-  private autoBlocks = new Map<string, Map<string, { block: AutoBlock; key: string }>>();
+  private autoBlocks = new Map<string, Map<string, { block: AutoBlock; key: string; learn: { tool: string; key: string; line: string } }>>();
   /** Per session: blocked actions the user allowed (actionKey); each runs once without the check */
   private autoAllowed = new Map<string, Set<string>>();
   /** Per session: notes for the model (an allowed block) waiting for the run's next model call */
@@ -577,6 +591,8 @@ export class Agent {
     const p = this.pendingApprovals.get(id);
     if (!p) return {};
     this.pendingApprovals.delete(id);
+    // The user's own answer (a click in the window or on the phone): Auto mode learns from it
+    this.learnAnswer(p.learn, ok ? 'allow' : 'deny');
     const out: ApprovalOutcome = {};
     // A tool's own question has no wider answer, except the "for this session" one its key offers (never a project rule)
     const keep = p.custom && ok && always && !!p.sessionKey;
@@ -744,7 +760,7 @@ export class Agent {
     const browser = on.browser;
     let verdict: Verdict | null = null;
     try {
-      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action), signal);
+      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal);
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
@@ -769,6 +785,32 @@ export class Agent {
     return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON, on.key);
   }
 
+  /** Where Auto mode's answers are kept: the option, else the app's service (none in bare tests). */
+  private learnedStore(): LearnedStore | null {
+    if (this.opts.learned !== undefined) return this.opts.learned;
+    return this.opts.app?.service<LearnedStore>('auto-learned') ?? null;
+  }
+
+  /** Records the user's answer, unless learning is off (Settings → Permissions → Auto mode). Only the user's clicks reach here. */
+  private learnAnswer(learn: { tool: string; key: string; line: string } | undefined, decision: 'allow' | 'deny'): void {
+    if (!learn || this.getConfig().autoMode?.learn === false) return;
+    try {
+      this.learnedStore()?.record({ ...learn, decision });
+    } catch (err) {
+      console.warn('[auto] could not record the answer:', errorMessage(err));
+    }
+  }
+
+  /** The user's earlier answers the check is given, one line each (none while learning is off). */
+  private learnedLines(cfg: AppConfig): string[] {
+    if (cfg.autoMode?.learn === false) return [];
+    try {
+      return forCheck(this.learnedStore()?.all() ?? []).map(answerText);
+    } catch {
+      return [];
+    }
+  }
+
   /** Records a block, tells the window, pauses Auto mode after too many, and returns what the agent reads. */
   private autoBlock(action: ClassifiedAction, reason: string, key = actionKey(action.name, action.detail)): ApprovalResult {
     const st = this.autoState();
@@ -776,7 +818,7 @@ export class Agent {
     st.total++;
     const id = action.callId || `block_${randomUUID()}`;
     const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
-    this.sessionMap(this.autoBlocks).set(id, { block, key });
+    this.sessionMap(this.autoBlocks).set(id, { block, key, learn: { tool: action.name, key: action.browser ? action.browser.siteKey ?? action.browser.site : '', line: block.what } });
     this.emit({ type: 'auto_blocked', block: { ...block } });
     if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {
       st.paused = true;
@@ -796,6 +838,7 @@ export class Agent {
     if (rec.block.allowed) return { ok: true };
     rec.block.allowed = true;
     this.sessionSet(this.autoAllowed).add(rec.key);
+    this.learnAnswer(rec.learn, 'allow');
     // The user's Allow ends a run of blocks, as an action the check allows does
     this.autoState().inARow = 0;
     const note = allowedNote(rec.block.what);
@@ -840,19 +883,20 @@ export class Agent {
    */
   private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval, session?: { key: string; label: string }): Promise<ApprovalResult> {
     const id = randomUUID();
+    const learn = { tool: name, key: learnKey(name, programs, browser, session?.key), line: actionLine(name, undefined, detail) };
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
     // A browser card names its kind and site for the renderer's wording, and carries the amber note
     const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
     if (custom) {
       // Allow and Deny (and the tool's own "for this session" answer): the renderer hides the buttons whose label is empty.
       return new Promise((resolve) => {
-        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true, browser, ...(session ? { sessionKey: session.key } : {}) });
+        this.pendingApprovals.set(id, { resolve, name, programs, reason, custom: true, browser, learn, ...(session ? { sessionKey: session.key } : {}) });
         this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: session?.label ?? '', projectLabel: '', ...extra });
       });
     }
     const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs, browser?.card === 'site' ? browser.site : undefined);
     return new Promise((resolve) => {
-      this.pendingApprovals.set(id, { resolve, name, programs, reason, browser });
+      this.pendingApprovals.set(id, { resolve, name, programs, reason, browser, learn });
       this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel, ...extra });
     });
   }

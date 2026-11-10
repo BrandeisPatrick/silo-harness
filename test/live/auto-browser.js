@@ -77,7 +77,7 @@ const WATCH = `(() => {
     check('allow: one check, no card, the page opened', checks() === n + 1 && r.cards.length === 0 && /^Now at <page_content site="fixture\.example:\d+">/.test(r.result ?? ''), { checks: checks() - n, r });
     check('allow: the check was told the tool, the kind, the site and the URL, not the model\'s reason', /tool: browser_navigate\\nkind: read\\nsite: fixture\.example:\d+\\nurl: http:\/\/fixture\.example:\d+\/landing\.html/.test(lastCheck()) && !lastCheck().includes('MODEL-REASON-77'), lastCheck().slice(-500));
     n = checks();
-    r = await call('browser_read_page', {});
+    r = await call('browser_get_text', {});
     check('allow: the site is allowed for the session, the next read runs without a check or a card', checks() === n && r.cards.length === 0 && (r.result ?? '').includes('You made it.'), { checks: checks() - n, r });
     const est = Math.ceil(lastCheck().length / 4);
     console.log(`a browser check request: ${lastCheck().length} characters, about ${est} tokens`);
@@ -134,6 +134,51 @@ const WATCH = `(() => {
     check('eval: reading cookies goes to the check, which blocks it', r.cards.length === 0 && checks() === n + 1 && (r.result ?? '').startsWith('Blocked by Auto mode: [Credentials] reads cookies') && /code:\\ndocument\.cookie/.test(lastCheck()), r);
 
     check('the check never saw page text', !checkTexts().some((t) => t.includes('You made it.') || t.includes('<page_content')));
+
+    // ---------- Learning: the user's answers above were recorded, and the last check was given them ----------
+    const lastUser = requests.filter((q) => isClassifierRequest(q.payload)).at(-1)?.payload.messages.find((m) => m.role === 'user')?.content ?? '';
+    const answers = /<user_answers>[\s\S]*?<\/user_answers>/.exec(lastUser)?.[0] ?? '';
+    check('learning: the next check got the user\'s answers, not its own verdicts', answers.includes(`- denied browser_click on fixture.example:${P}: click "Pay now" on fixture.example:${P}`) && answers.includes(`- allowed browser_navigate on ask.fixture.example:${P}: open ask.fixture.example:${P}`) && answers.includes(`- denied browser_navigate on down.fixture.example:${P}`) && !answers.includes('landing') && !answers.includes(`open fixture.example:${Q}`), answers);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers;
+    check('learning: kept in the profile folder, its own file', onDisk.length === 4, onDisk.map((e) => `${e.decision} ${e.line}`));
+    await app.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-permissions')?.click(); })()`);
+    await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 4`, 10_000, 'the learned list');
+    const rows = () => app.evaluate(`[...document.querySelectorAll('.auto-learned-list .sp-row')].map((r) => r.innerText.replace(/\\s+/g, ' ').trim())`);
+    let listed = await rows();
+    check('Settings: the switch is on, the list shows what was learned, newest first', (await app.evaluate(`document.querySelector('#sp-row-autoMode-learn input').checked`)) && listed[0].startsWith(`click "Pay now" on fixture.example:${P}`) && listed[0].includes('Denied'), listed);
+    const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-learned-'));
+    for (const t of ['light', 'dark']) {
+      await app.evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(t)}`);
+      await sleep(250);
+      await app.screenshotOf(path.join(shots, `auto-learned-${t}.png`), '#sp-row-autoMode-learn', 0).catch(() => undefined);
+      await app.evaluate(`(() => { const g = document.querySelector('#sp-row-autoMode-learn').parentElement; g.scrollIntoView(); })()`);
+      const box = await app.evaluate(`(() => { const r = document.querySelector('#sp-row-autoMode-learn').parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
+      await app.screenshot(path.join(shots, `auto-learned-group-${t}.png`), { x: Math.max(0, box.x - 16), y: Math.max(0, box.y - 40), width: box.width + 32, height: box.height + 56 });
+    }
+    await app.evaluate(`document.documentElement.dataset.theme = 'light'`);
+    console.log(`screenshots: ${shots}`);
+    await app.evaluate(`document.querySelector('.auto-learned-list .sp-row button').click()`);
+    await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 3`, 5000, 'a row to go');
+    listed = await rows();
+    check('Settings: Remove takes one row away, on disk too', !listed.some((l) => l.startsWith('click "Pay now"')) && JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers.length === 3, listed);
+    await app.click('#sp-row-auto-learned button');
+    await app.waitFor(`document.querySelector('#confirm-dialog').open`, 3000, 'the confirmation');
+    await app.click('#confirm-ok');
+    await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 0`, 5000, 'the list to empty');
+    check('Settings: Forget all empties it', JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers.length === 0 && (await app.text('.auto-learned-list')).includes('Nothing learned yet.'));
+    // The switch off: an answer is not recorded and the check gets none
+    await app.evaluate(`document.querySelector('#sp-row-autoMode-learn input').click()`);
+    await app.waitFor(`window.oc.getConfig().then((c) => c.autoMode && c.autoMode.learn === false)`, 5000, 'learning off');
+    await app.key('Escape');
+    await app.waitFor(`!document.querySelector('#settings').open`, 5000, 'Settings to close');
+    n = checks();
+    replies.push(classifierReply('ask', '[Unsure] x', { when: has('site: off.fixture.example') }));
+    r = await call('browser_navigate', { url: `http://off.fixture.example:${P}/landing.html` }, ['deny']);
+    replies.push(classifierReply('ask', '[Unsure] x', { when: has('site: off.fixture.example') }));
+    r = await call('browser_navigate', { url: `http://off.fixture.example:${P}/landing.html` }, ['deny']);
+    check('off: answers are not recorded, and the check gets none', checks() === n + 2 && r.cards.length === 1 && JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers.length === 0 && !lastCheck().includes('user_answers'), { checks: checks() - n });
+    const cfgOn = JSON.parse(fs.readFileSync(path.join(app.profile, 'config.json'), 'utf8'));
+    check('off: saved, and the rest of autoMode kept', cfgOn.autoMode?.learn === false && cfgOn.autoMode.model === '', cfgOn.autoMode);
     const errors = app.console.filter((x) => /^\[(error|exception)\]/.test(x));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));
   } finally {

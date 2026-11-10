@@ -116,6 +116,7 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     environment: describe(str, "What Auto mode's safety check should know about this Mac, e.g. \"aisolutions-dev is a dev AWS account\". Your own settings.json only."),
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
     model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
+    learn: describe(bool, 'Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only.'),
   },
   webSearch: {
     provider: describe(oneOf('duckduckgo', 'brave', 'tavily', 'exa', 'searxng'), 'The web_search backend. duckduckgo needs no key.'),

@@ -338,6 +338,8 @@ export interface AutoModeConfig {
   environment: string;
   allow: string[];
   model: string;
+  /** Record the user's answers on approval cards and give them to the check (absent: on) */
+  learn?: boolean;
 }
 
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */
