@@ -12,6 +12,7 @@ import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from
 import { aimScript, describeScript, fieldKindScript, flashScript, getTextScript, passwordFieldScript, readPageScript, REF_RE, scrollScript, selectAllScript, targetScript, waitScript } from './page-scripts';
 import { CHANGED_UNDER_CLICK, CREDENTIAL_REFUSAL, sameClickTarget, type ClickTarget } from './policy';
 import { fencePage } from './fence';
+import { DEFAULT_READ, readPiece } from './paging';
 import { leavesArtifact, opensInTab, PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
@@ -25,6 +26,11 @@ import { sanitizeFilename, startedByAgent, type ActingStamps } from './downloads
 import { ownerTabId } from './permissions';
 
 export const MAX_TABS = 12;
+/** The outline is built up to this many characters (refs for every element in it); a read returns a piece of it. */
+const OUTLINE_MAX = 400_000;
+/** A screenshot for the model: JPEG at this quality, its longest side at most MODEL_SHOT_MAX CSS pixels. */
+const MODEL_SHOT_QUALITY = 70;
+const MODEL_SHOT_MAX = 1280;
 export const TOO_MANY_TABS = `Close a tab first: the browser keeps at most ${MAX_TABS}`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -681,24 +687,23 @@ export class BrowserController {
     await wait;
   }
 
-  async getText(maxChars = 50_000): Promise<string> {
+  /** browser_get_text: the text a person can see, from `start`, at most `maxChars` characters (paging.ts). */
+  async getText(maxChars = DEFAULT_READ, start = 0): Promise<string> {
     const text = ((await this.world<string>(getTextScript())) ?? '') as string;
     const s = this.state();
-    const body = text.length > maxChars ? text.slice(0, maxChars) + `\n…[truncated ${text.length - maxChars} characters]` : text;
-    return `URL: ${s.url}\nTitle: ${s.title}\n\n${body || '(no visible text)'}`;
+    return `URL: ${s.url}\nTitle: ${s.title}\n\n${text ? readPiece(text, start, maxChars) : '(no visible text)'}`;
   }
 
-  async readPage(mode: 'interactive' | 'all' = 'interactive', maxChars = 40_000): Promise<string> {
-    const r = await this.world<{ text: string; count: number; truncated: boolean }>(readPageScript(mode, maxChars));
+  /** browser_read_page: the outline with refs (every element numbered), from `start`, at most `maxChars` characters. */
+  async readPage(mode: 'interactive' | 'all' = 'interactive', maxChars = DEFAULT_READ, start = 0): Promise<string> {
+    const r = await this.world<{ text: string; count: number; truncated: boolean }>(readPageScript(mode, OUTLINE_MAX));
     // The address and the title are the browser's, never what a script in the page says they are
     const s = this.state();
-    let out = `URL: ${s.url}\nTitle: ${s.title}\n${r.count} interactive element${r.count === 1 ? '' : 's'}\n\n${r.text || '(nothing visible)'}`;
-    if (r.truncated) out += '\n…[page outline truncated; use browser_find to locate specific elements]';
-    return out;
+    return `URL: ${s.url}\nTitle: ${s.title}\n${r.count} interactive element${r.count === 1 ? '' : 's'}\n\n${r.text ? readPiece(r.text, start, maxChars, r.truncated) : '(nothing visible)'}`;
   }
 
   async find(query: string): Promise<string> {
-    const r = await this.world<{ text: string }>(readPageScript('all', 400_000));
+    const r = await this.world<{ text: string }>(readPageScript('all', OUTLINE_MAX));
     const q = query.toLowerCase();
     const hits = r.text.split('\n').filter((l) => l.toLowerCase().includes(q)).slice(0, 25);
     return hits.length ? hits.join('\n') : `No visible element or text matched "${query}".`;
@@ -706,7 +711,7 @@ export class BrowserController {
 
   /** Outline lines of the visible interactive elements; refs are refreshed as a side effect. */
   private async outlineLines(): Promise<string[]> {
-    const r = await this.world<{ text: string }>(readPageScript('interactive', 400_000));
+    const r = await this.world<{ text: string }>(readPageScript('interactive', OUTLINE_MAX));
     return r.text ? r.text.split('\n') : [];
   }
 
@@ -943,13 +948,18 @@ export class BrowserController {
       );
     }
     const image = await this.wc.capturePage();
+    // The user's copy on disk keeps every pixel; what goes into the conversation (and to the model, when Settings
+    // allow) is a JPEG at CSS scale, its longest side at most 1280 px: a fraction of the image tokens.
     const png = image.toPNG();
     const dir = path.join(app.getPath('temp'), 'silo-harness-screenshots');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `shot-${Date.now()}.png`);
     fs.writeFileSync(file, png);
     const { width, height } = image.getSize();
-    return { path: file, dataUrl: `data:image/png;base64,${png.toString('base64')}`, width, height };
+    const css = { width: Math.max(1, Math.round(this.bounds.width) || width), height: Math.max(1, Math.round(this.bounds.height) || height) };
+    const fit = Math.min(1, MODEL_SHOT_MAX / Math.max(css.width, css.height));
+    const small = image.resize({ width: Math.max(1, Math.round(css.width * fit)), height: Math.max(1, Math.round(css.height * fit)), quality: 'good' });
+    return { path: file, dataUrl: `data:image/jpeg;base64,${small.toJPEG(MODEL_SHOT_QUALITY).toString('base64')}`, width, height };
   }
 
   evaluate(code: string): Promise<string> {

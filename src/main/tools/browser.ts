@@ -21,6 +21,7 @@ import {
 } from '../browser/policy';
 import { fencePage } from '../browser/fence';
 import { localAddresses, ownPorts } from '../browser/own-ports';
+import { DEFAULT_READ } from '../browser/paging';
 import { looksLikeCredentialLabel, MASK, scrubSecrets, type CredentialKind } from '../browser/safety';
 import type { Tool, ToolContext, ToolResult } from './types';
 
@@ -306,23 +307,30 @@ const tools: Tool[] = [
   },
   {
     name: 'browser_get_text',
-    description: 'Return the visible text of the current page (main content first). Best for reading articles and docs.',
-    parameters: { type: 'object', properties: { max_chars: { type: 'integer', description: 'Maximum characters to return (default 50000)' } } },
-    run: async (args, ctx) => ({ content: await ctx.browser.getText(Number(args.max_chars) || 50_000) }),
+    description: 'Return the visible text of the current page (main content first), 12,000 characters at a time; a cut result says the start to call again with. Best for reading articles and docs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        start: { type: 'integer', description: 'Character offset to start from (default 0)' },
+        max_chars: { type: 'integer', description: 'Maximum characters to return (default 12000)' },
+      },
+    },
+    run: async (args, ctx) => ({ content: await ctx.browser.getText(Number(args.max_chars) || DEFAULT_READ, Number(args.start) || 0) }),
   },
   {
     name: 'browser_read_page',
     description:
-      'Outline the current page as a list of visible interactive elements, each tagged with a ref id like [ref_3] that browser_click and browser_type accept. filter="all" also includes headings and text. Password, one-time code and card fields never show their value: a filled one reads = "•••", an empty one (empty).',
+      'Outline the current page as a list of visible interactive elements, each tagged with a ref id like [ref_3] that browser_click and browser_type accept; 12,000 characters at a time (start continues). filter="all" also includes headings and text. Password, one-time code and card fields never show their value: a filled one reads = "•••", an empty one (empty).',
     parameters: {
       type: 'object',
       properties: {
         filter: { type: 'string', enum: ['interactive', 'all'], description: 'interactive (default) or all' },
-        max_chars: { type: 'integer', description: 'Maximum characters to return (default 40000)' },
+        start: { type: 'integer', description: 'Character offset to start from (default 0)' },
+        max_chars: { type: 'integer', description: 'Maximum characters to return (default 12000)' },
       },
     },
     run: async (args, ctx) => ({
-      content: await ctx.browser.readPage(args.filter === 'all' ? 'all' : 'interactive', Number(args.max_chars) || 40_000),
+      content: await ctx.browser.readPage(args.filter === 'all' ? 'all' : 'interactive', Number(args.max_chars) || DEFAULT_READ, Number(args.start) || 0),
     }),
   },
   {
@@ -434,7 +442,7 @@ const tools: Tool[] = [
   {
     name: 'browser_screenshot',
     description:
-      'Capture the browser pane as a PNG, shown to the user and saved to disk (sent to the model only when Settings allows). Refused while a filled credential field has the focus or shows its value on screen.',
+      'Capture the browser pane: saved to disk as a full PNG, shown to the user (and sent to the model only when Settings allows) as a smaller JPEG. Refused while a filled credential field has the focus or shows its value on screen.',
     parameters: { type: 'object', properties: {} },
     run: async (_args, ctx) => {
       const shot = await ctx.browser.screenshot();

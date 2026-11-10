@@ -220,6 +220,19 @@ function fixtures(P) {
     await app.waitFor(`window.__oc_debug.mods.browser().tabs.some((t) => t.url === ${JSON.stringify(`${SHOP}/landing.html`)})`, 10_000, 'the web link in a new tab');
     check('… a web link with target=_blank still opens a tab', true);
 
+    // ---------- 10. Cheaper reads ----------
+    routes['/long.html'] = page('Long', `<h1>Long</h1>${Array.from({ length: 900 }, (_, i) => `<p>Paragraph ${i} with some words to read.</p>`).join('')}`);
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/long.html` });
+    r = await app.callTool('browser_get_text', {});
+    const m = /\n… ([\d,]+) more characters: call again with start=12000<\/page_content>$/.exec(r ?? '');
+    check('a long page: browser_get_text returns 12,000 characters and says how to go on', m && (r ?? '').length < 12_400, (r ?? '').slice(-120));
+    const r2 = await app.callTool('browser_get_text', { start: 12000 });
+    check('… start=12000 continues where it stopped', /Paragraph \d+/.test(r2 ?? '') && !(r2 ?? '').includes('Paragraph 0 '), (r2 ?? '').slice(0, 200));
+    // A hidden window cannot capture its views (capturePage fails with UnknownVizError, before and after this change),
+    // so the screenshot's size and format are reported here rather than checked
+    r = await app.callTool('browser_screenshot', {});
+    console.log('   browser_screenshot in the hidden window:', (r ?? '').slice(0, 120));
+
     // ---------- 9. browser_eval runs without a user gesture ----------
     r = await app.callTool('browser_navigate', { url: `${SHOP}/landing.html` });
     r = (await withCard(app, () => app.callTool('browser_eval', { code: 'navigator.userActivation.isActive' }), 'allow')).result;

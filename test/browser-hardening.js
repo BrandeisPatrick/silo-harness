@@ -16,6 +16,7 @@ const { BROWSER_RULES } = dist('tools/groups.js');
 const { browserTools } = dist('tools/browser.js');
 const { debugPortsOf } = dist('browser/own-ports.js');
 const { installChooserHandlers } = dist('browser/choosers.js');
+const { readPiece, DEFAULT_READ } = dist('browser/paging.js');
 const { EventEmitter } = require('node:events');
 const { startedByUser, USER_INPUT_MS, quarantineValue } = dist('browser/downloads.js');
 const { check, done } = require('./support/check.js');
@@ -200,6 +201,19 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   a = answer((e, cb) => paneWc.emit('select-bluetooth-device', e, [{ deviceId: 'dev-1', deviceName: 'Lock' }], cb));
   check("Web Bluetooth's chooser in a pane page: default prevented, no device", a.prevented && a.args && a.args[0] === '', a);
   check("… other contents get no handler of ours", appWc.listenerCount('select-bluetooth-device') === 0 && paneWc.listenerCount('select-bluetooth-device') === 1);
+
+  // ---------- 10. Cheaper reads ----------
+  const long = 'x'.repeat(43_400);
+  let piece = readPiece(long);
+  check('a read is 12,000 characters by default, ending with how much is left and how to get it', DEFAULT_READ === 12_000 && piece.startsWith('x'.repeat(12_000) + '\n') && piece.endsWith('\n… 31,400 more characters: call again with start=12000'), piece.slice(-70));
+  piece = readPiece(long, 12_000);
+  check('… start continues from there', piece.endsWith('… 19,400 more characters: call again with start=24000') && piece.indexOf('\n') === 12_000);
+  piece = readPiece(long, 36_000);
+  check('… and the last piece has no line', piece === 'x'.repeat(7_400));
+  check('… max_chars asks for more; a start past the end is empty', readPiece(long, 0, 50_000) === long && readPiece('abc', 99) === '');
+  check('… a source that was itself cut says so', /\+ more characters/.test(readPiece('y'.repeat(20_000), 0, 12_000, true)) && /more than this/.test(readPiece('short', 0, 12_000, true)));
+  const tools = Object.fromEntries(browserTools.map((t) => [t.name, t]));
+  check('browser_get_text and browser_read_page offer start', Boolean(tools.browser_get_text.parameters.properties.start && tools.browser_read_page.parameters.properties.start));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();
