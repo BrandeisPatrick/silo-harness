@@ -220,6 +220,11 @@ function fixtures(P) {
     await app.waitFor(`window.__oc_debug.mods.browser().tabs.some((t) => t.url === ${JSON.stringify(`${SHOP}/landing.html`)})`, 10_000, 'the web link in a new tab');
     check('… a web link with target=_blank still opens a tab', true);
 
+    // ---------- 9. browser_eval runs without a user gesture ----------
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/landing.html` });
+    r = (await withCard(app, () => app.callTool('browser_eval', { code: 'navigator.userActivation.isActive' }), 'allow')).result;
+    check('browser_eval runs with no user activation', r === `<page_content site="shop.example:${P}">false</page_content>`, r);
+
     // ---------- 8. The app's own debugging port ----------
     r = await app.callTool('browser_navigate', { url: `http://127.0.0.1:${app.port}/json/list` });
     check("the app's own --remote-debugging-port is refused, on 127.0.0.1", /^Not permitted: that address is the app's own remote-control or debugging server/.test(r ?? ''), r);

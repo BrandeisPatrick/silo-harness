@@ -957,7 +957,8 @@ export class BrowserController {
   }
 
   private async evaluateNow(code: string): Promise<string> {
-    const result = await this.wc.executeJavaScript(code, true);
+    // No user gesture: the agent's code cannot open windows, go full screen or start what a click would allow
+    const result = await this.wc.executeJavaScript(code, false);
     if (result === undefined) return 'undefined';
     try {
       const s = typeof result === 'string' ? result : JSON.stringify(result, null, 2);

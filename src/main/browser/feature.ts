@@ -14,6 +14,7 @@ import type { BrowserConfig, BrowserListField, DownloadAction, PermissionAnswer 
 import type { App } from '../app';
 import { settingsLayer } from '../settings';
 import { installCertificateHandler } from './certificates';
+import { installChooserHandlers } from './choosers';
 import { tabEvents, type BrowserController } from './controller';
 import { DownloadManager } from './downloads';
 import { configurePermissions, fileStore, permissionsFile } from './permissions';
@@ -87,6 +88,9 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     isBrowser: (wc) => wc.session === ses,
     onError: (wc, error) => controller()?.certificateError(wc, error) ?? false,
   });
+
+  // No client certificate, Bluetooth device or HTTP sign-in is ever chosen for a page in the pane (choosers.ts)
+  installChooserHandlers(electronApp as unknown as Parameters<typeof installChooserHandlers>[0], (wc) => (wc as { session?: unknown }).session === ses);
 
   // Downloads: saved without a dialog; the agent's wait for the download bar.
   const downloads = new DownloadManager({

@@ -15,6 +15,8 @@ const { fencePage, stripFence, pageSite } = dist('browser/fence.js');
 const { BROWSER_RULES } = dist('tools/groups.js');
 const { browserTools } = dist('tools/browser.js');
 const { debugPortsOf } = dist('browser/own-ports.js');
+const { installChooserHandlers } = dist('browser/choosers.js');
+const { EventEmitter } = require('node:events');
 const { startedByUser, USER_INPUT_MS, quarantineValue } = dist('browser/downloads.js');
 const { check, done } = require('./support/check.js');
 
@@ -177,6 +179,27 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   check('the debugging ports of a command line', JSON.stringify(debugPortsOf(['electron', '--remote-debugging-port=9333', '--inspect', '--inspect-brk=127.0.0.1:9230', '--inspect-port=9231', '--user-data-dir=/x'])) === JSON.stringify([9333, 9229, 9230, 9231]));
   const plan = { action: 'act', mode: 'plan', cwd: '/tmp/project', settings, sessionAllowed: new Set() };
   check('plan mode refuses acting on localhost too', siteDecision({ ...plan, url: 'http://localhost:9999/' }).kind === 'refuse' && siteDecision({ ...plan, action: 'eval', url: 'http://localhost:9999/' }).kind === 'refuse' && siteDecision({ ...plan, action: 'read', url: 'http://localhost:9999/' }).kind === 'allow');
+
+  // ---------- 9. Device and identity choosers ----------
+  const fakeApp = new EventEmitter();
+  const paneWc = Object.assign(new EventEmitter(), { session: 'pane' });
+  const appWc = Object.assign(new EventEmitter(), { session: 'app' });
+  installChooserHandlers(fakeApp, (wc) => wc.session === 'pane');
+  const ev = () => ({ prevented: false, preventDefault() { this.prevented = true; } });
+  const answer = (emit) => { const e = ev(); let args = null; emit(e, (...a) => (args = a)); return { prevented: e.prevented, args }; };
+  let a = answer((e, cb) => fakeApp.emit('select-client-certificate', e, paneWc, 'https://bank.example/', [{ subjectName: 'Me' }], cb));
+  check('a client certificate request from a pane page: default prevented, answered with no certificate', a.prevented && a.args && a.args.length === 0, a);
+  a = answer((e, cb) => fakeApp.emit('select-client-certificate', e, appWc, 'https://x/', [{}], cb));
+  check("… another window's request keeps Electron's behaviour", !a.prevented && a.args === null, a);
+  a = answer((e, cb) => fakeApp.emit('select-client-certificate', e, null, 'https://x/', [{}], cb));
+  check('… and one from no page (net.fetch in the main process) too', !a.prevented && a.args === null, a);
+  a = answer((e, cb) => fakeApp.emit('login', e, paneWc, { url: 'https://intranet.example/' }, { isProxy: false }, cb));
+  check('HTTP authentication for a pane page is cancelled explicitly', a.prevented && a.args && a.args.length === 0, a);
+  fakeApp.emit('web-contents-created', {}, paneWc);
+  fakeApp.emit('web-contents-created', {}, appWc);
+  a = answer((e, cb) => paneWc.emit('select-bluetooth-device', e, [{ deviceId: 'dev-1', deviceName: 'Lock' }], cb));
+  check("Web Bluetooth's chooser in a pane page: default prevented, no device", a.prevented && a.args && a.args[0] === '', a);
+  check("… other contents get no handler of ours", appWc.listenerCount('select-bluetooth-device') === 0 && paneWc.listenerCount('select-bluetooth-device') === 1);
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();
