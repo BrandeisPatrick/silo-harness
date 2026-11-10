@@ -105,6 +105,8 @@ export interface McpPanel {
   servers(): McpServerInfo[];
   /** Clears the messages left from last time (Settings opened again) */
   resetMessages(): void;
+  /** Scrolls to a server's row and focuses it; with `trust`, its Trust confirmation opens */
+  showRow(key: string, trust?: boolean): void;
 }
 
 const slug = (key: string): string => key.replace(/[^A-Za-z0-9_-]+/g, '-');
@@ -631,6 +633,15 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       }
     },
     servers: () => current,
+    showRow(key: string, trust = false) {
+      const s = current.find((x) => mcpKey(x) === key);
+      if (!s) return;
+      if (trust && s.status === 'blocked') confirming.add(key);
+      panel.render(current);
+      const el = els.list.querySelector<HTMLElement>(`.mcp-row[data-key="${CSS.escape(key)}"]`);
+      el?.scrollIntoView({ block: 'center' });
+      (el?.querySelector<HTMLElement>('.mcp-confirm') ?? el?.querySelector<HTMLElement>('.mcp-primary, .mcp-more'))?.focus();
+    },
     resetMessages() {
       hideStatus();
       hideAddError();
@@ -642,34 +653,74 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
 
 // ---------- /mcp notice card ----------
 
-/** The body of the /mcp card: each server with its status dot and tool names, or how to add one. */
+/**
+ * The body of the /mcp card: one line per server (dot, name, status words with the count, and its action as a link:
+ * Sign in, Retry, or Trust, which opens Settings at that row), or how to add one. The links send an "mcp-action"
+ * event (see installMcpActions).
+ */
 export function mcpCardHtml(servers: McpServerInfo[], note?: string): string {
   const list = cleanServers(servers);
   let html = '<div class="md"><p><strong>MCP servers</strong></p>';
   if (note) html += `<p>${escapeHtml(note)}</p>`;
-  if (!list.length) {
-    return (
-      html +
-      `<p>No servers yet. Add one in Settings with its command line, its URL, or the JSON from its README. ` +
-      `A project's <code>.mcp.json</code> (Claude Code's format) is picked up automatically.</p></div>`
-    );
-  }
+  if (!list.length) return html + '<p>No servers yet. Add one in Settings → MCP servers.</p></div>';
   html += '</div><ul class="mcp-card-list">';
   for (const s of list) {
-    const names = s.tools.map((t) => t.name);
-    const shown = names.slice(0, 40);
-    let detail = '';
-    if (s.status === 'connected' && shown.length) {
-      detail = `<div class="mcp-card-tools">${shown.map((n) => `<code>${escapeHtml(n)}</code>`).join('')}${names.length > shown.length ? `<span class="mcp-card-more">+${names.length - shown.length} more</span>` : ''}</div>`;
-    } else if ((s.status === 'error' || s.status === 'blocked') && s.error?.trim()) {
-      detail = `<div class="mcp-card-note${s.status === 'error' ? ' err' : ''}">${escapeHtml(s.error.trim().split('\n')[0])}</div>`;
-    }
+    const p = primaryAction(s);
+    const action = p && p.kind !== 'tools' ? (p.kind === 'cancel' ? null : p) : null;
+    const link = action
+      ? `<button type="button" class="link-btn mcp-card-action" data-action="${action.kind}" data-name="${escapeHtml(s.name)}" data-scope="${s.scope}">${escapeHtml(action.label)}</button>`
+      : '';
     html +=
-      `<li class="mcp-card-item" data-name="${escapeHtml(s.name)}" data-status="${s.status}"><div class="mcp-card-head"><span class="mcp-dot ${s.status}" aria-hidden="true"></span>` +
-      `<span class="mcp-card-name">${escapeHtml(s.name)}</span><span class="mcp-scope ${s.scope}">${s.scope}</span>` +
-      `<span class="mcp-card-status">${escapeHtml(mcpStatusText(s))}</span></div>${detail}</li>`;
+      `<li class="mcp-card-item" data-name="${escapeHtml(s.name)}" data-status="${s.status}"><span class="mcp-dot ${s.status}" aria-hidden="true"></span>` +
+      `<span class="mcp-card-name">${escapeHtml(s.name)}</span>${s.scope === 'project' ? '<span class="mcp-scope project">project</span>' : ''}` +
+      `<span class="mcp-card-status tone-${statusTone(s.status)}">${escapeHtml(statusText(s))}</span>${link}</li>`;
   }
   return html + '</ul>';
+}
+
+export interface McpActionsOptions {
+  source: () => McpApi | null;
+  servers: () => McpServerInfo[];
+  /** Opens Settings at MCP servers */
+  openSettings: () => void;
+  panel: McpPanel;
+  cleanError: (err: unknown) => string;
+  /** Where a failure is said (the row's own line stays as it was) */
+  notify: (message: string) => void;
+}
+
+/**
+ * Answers the "mcp-action" events of the /mcp card's links and of a failed call's row: Sign in and Retry act on the
+ * server (only on that click), Trust and "Open MCP servers" open Settings at the row (Trust with its confirmation open).
+ */
+export function installMcpActions(root: HTMLElement | Document, o: McpActionsOptions): void {
+  const handle = async (ev: Event) => {
+    const d = (ev as CustomEvent).detail as { action?: string; server?: string; scope?: string } | undefined;
+    const name = typeof d?.server === 'string' ? d.server : '';
+    if (!name) return;
+    const find = () => o.servers().find((x) => x.name === name && (!d?.scope || x.scope === d.scope)) ?? o.servers().find((x) => x.name === name);
+    if (!find()) await o.panel.refresh();
+    const s = find();
+    const api = o.source();
+    try {
+      if (d?.action === 'sign-in' && s && api && s.status === 'needs-auth') await api.signIn(s.name, s.scope);
+      else if (d?.action === 'retry' && s && api) await api.reconnect(s.name, s.scope);
+      else {
+        o.openSettings();
+        // After Settings has opened and re-read the list
+        if (s) window.setTimeout(() => o.panel.showRow(mcpKey(s), d?.action === 'trust'), 250);
+      }
+    } catch (err) {
+      o.notify(`Couldn't ${d?.action === 'retry' ? 'reconnect' : 'sign in to'} ${name}: ${o.cleanError(err)}`);
+    }
+  };
+  root.addEventListener('mcp-action', (ev) => void handle(ev));
+  // The /mcp card's links
+  root.addEventListener('click', (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest?.<HTMLButtonElement>('.mcp-card-action');
+    if (!btn) return;
+    btn.dispatchEvent(new CustomEvent('mcp-action', { bubbles: true, detail: { action: btn.dataset.action, server: btn.dataset.name, scope: btn.dataset.scope } }));
+  });
 }
 
 // ---------- In-memory stand-in for oc.mcp (debug hook) ----------

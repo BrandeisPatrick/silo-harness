@@ -10,6 +10,7 @@ import { cleanTasks, taskProgress, taskSnapshot, taskSummary } from './tasks.js'
 import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, browserApproval, isDeniedResult, type BrowserCardRef } from './tool-labels.js';
 import { homeDir, tilde } from './home.js';
 import { mcpNames } from './mcp-labels.js';
+import { mcpProblem, problemText, type McpProblem } from './mcp-calls.js';
 import { answeredBody, answerMeta, questionsOf } from './questions.js';
 
 export type Args = Record<string, unknown>;
@@ -483,6 +484,8 @@ export interface ToolCard {
   outcome: 'running' | 'ok' | 'failed' | 'denied' | 'interrupted';
   /** Lines a write or an edit added and removed, once it went through */
   diff?: { added: number; removed: number };
+  /** An MCP call that failed because its server needs sign-in or is down */
+  problem?: McpProblem;
   /** write_file made a new file */
   created?: boolean;
   finish(res: ToolResult): void;
@@ -492,6 +495,27 @@ export interface ToolCard {
   noteApproval(detail: string): void;
   /** The approval card for this call was answered: the row keeps the answer ("Allowed once", "Denied") at the top of its body */
   noteDecision(text: string, ok: boolean): void;
+}
+
+/**
+ * "tracker needs sign-in · Sign in" in a failed MCP call's row. The button only asks: it sends an "mcp-action" event
+ * that the window answers (sign-in starts on this click, never by itself).
+ */
+function mcpProblemLine(p: McpProblem): HTMLElement {
+  const line = document.createElement('div');
+  line.className = 'tool-mcp-problem';
+  const text = document.createElement('span');
+  text.textContent = problemText(p);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'link-btn';
+  btn.textContent = p.kind === 'sign-in' ? 'Sign in' : 'Open MCP servers';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    btn.dispatchEvent(new CustomEvent('mcp-action', { bubbles: true, detail: { action: p.kind === 'sign-in' ? 'sign-in' : 'open', server: p.server } }));
+  });
+  line.append(text, btn);
+  return line;
 }
 
 /** Lines of a file's content, without the empty "line" after a trailing newline. */
@@ -950,6 +974,12 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
       if (failed || denied) {
         el.classList.toggle('denied', denied);
         // The row already says "Denied" (its approval's answer): the words written for the model would only repeat it
+        // An MCP call that failed because of its server: one line with what fixes it (the model's text follows as is)
+        const problem = failed && mcpCall ? mcpProblem(res.result) : null;
+        if (problem) {
+          card.problem = problem;
+          body.appendChild(mcpProblemLine(problem));
+        }
         if (!(denied && decided && !decided.ok && /Not permitted: the user denied/.test(res.result))) body.appendChild(outBlock(clip(stripCwd(res.result)), denied ? 'note' : 'error'));
         if (failed) el.open = true;
       } else if (name === 'ask_user') {

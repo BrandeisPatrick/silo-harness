@@ -37,7 +37,7 @@ import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './ar
 import { createChatCards } from './chat-cards.js';
 import { createQueueList } from './queue.js';
 import { normalizeContext } from './context.js';
-import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
+import { createMcpPanel, installMcpActions, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
 import { rememberMcpNames } from './mcp-labels.js';
 import { createMentionPicker, normalizeMention } from './mentions.js';
 import { createRulesPanel, mockRulesSource } from './rules.js';
@@ -1849,6 +1849,9 @@ function subscribeMcp(): void {
     /* an older app without the event */
   }
 }
+
+// The /mcp card's links and a failed MCP call's "Sign in" / "Open MCP servers" (mcp.ts installMcpActions)
+installMcpActions(document, { source: mcpSource, servers: () => mcpPanel.servers(), openSettings: () => openSettings('mcp-section'), panel: mcpPanel, cleanError, notify: (m) => void addSystemMessage(m, 'error') });
 
 /** /mcp: the servers with their status and tool names (or how to add one), and a way into Settings. */
 async function addMcpCard(): Promise<void> {

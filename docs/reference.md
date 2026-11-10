@@ -57,7 +57,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 | --- | --- |
 | `/<skill> [text]` | Run a skill; `/skills` lists them ([the skill format](skills.md)) |
 | `/compact [focus]` | Compact the conversation now; the focus says what the brief must keep |
-| `/mcp` | MCP servers and their tools |
+| `/mcp` | MCP servers: each one's status and the action it needs (Sign in, Retry, Trust) |
 | `/spawn <task>` | Start a sub-session on that task |
 | `/merge [name or id]` | Bring a finished sub-session or fork into this session |
 | `/sessions [name]` | This session's parent, sub-sessions and forks; with a name, every session that matches it |

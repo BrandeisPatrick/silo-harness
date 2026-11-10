@@ -1,5 +1,10 @@
 # MCP servers
 
+1. Settings → MCP servers → **Add server**.
+2. Paste the server's command line, its URL, or the JSON from its README; the line under it says what was understood.
+3. Check the suggested name and the scope (all projects, or this project's `.mcp.json`); add environment variables for a command or headers for a URL.
+4. **Add**. A remote server that wants a sign-in shows **Sign in**; `/mcp` in a conversation lists every server and what it needs.
+
 Servers come from Settings → MCP servers (stored in the app's `config.json` under `mcpServers`) and from a project's `.mcp.json` (Claude Code's format; off until you turn each one on). The model calls their tools as `mcp__<server>__<tool>`.
 
 ## Config keys
@@ -38,7 +43,7 @@ Adding a server with scope "This project" writes `${KEY}` references into `.mcp.
 
 ## Project servers and trust
 
-A project's `.mcp.json` servers stay off until you trust each one. Trust covers the entry as written: when its command, arguments, URL, headers or environment change (after a pull, say), the server stops with "Changed since you trusted it." until you trust it again. A `${VAR}` value changing does not count. The app keeps the names in `mcpTrusted` and a SHA-256 of each entry in `mcpTrustedEntries`, both by folder.
+A project's `.mcp.json` servers stay off until you trust each one (**Trust** on its row, then confirm). A trusted server's tools that say they are read-only (`readOnlyHint`) run without asking; the rest ask as any server's do. Trust covers the entry as written: when its command, arguments, URL, headers or environment change (after a pull, say), the server stops with "Changed since you trusted it." until you trust it again. A `${VAR}` value changing does not count. The app keeps the names in `mcpTrusted` and a SHA-256 of each entry in `mcpTrustedEntries`, both by folder.
 
 ## Statuses
 

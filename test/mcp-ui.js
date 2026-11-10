@@ -91,6 +91,18 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   check('understood: command, URL, block, entry, broken JSON', M.understood('npx -y @example/files-mcp') === 'Local command: npx -y @example/files-mcp' && M.understood('https://docs.example.com/mcp') === 'Remote server: docs.example.com' && M.understood('{"mcpServers": {"a": {}, "b": {}, "c": {}}}') === '3 servers from JSON: a, b, c' && M.understood('{"type": "http", "url": "https://w.example.com/mcp"}') === 'Remote server: w.example.com' && M.understood('{"x"') === 'JSON that does not parse yet.', M.understood('{"mcpServers": {"a": {}, "b": {}, "c": {}}}'));
   check('headers: Name: value per line', JSON.stringify(M.parseHeaders('Authorization: Bearer x\n# note\nX-Team:  core').headers) === JSON.stringify({ Authorization: 'Bearer x', 'X-Team': 'core' }) && /line 1/.test(M.parseHeaders('no colon here').error));
 
+  // ---------- In the conversation: a failed call's server problem, and the folded line ----------
+  const csrc = fs.readFileSync(path.join(projectDir, 'dist/renderer/mcp-calls.js'), 'utf8');
+  const C = await import('data:text/javascript,' + encodeURIComponent(csrc));
+  const signIn = C.mcpProblem('Error: MCP server "tracker" needs sign-in. The user can sign in under Settings → MCP servers.');
+  check('problem: needs sign-in', signIn && signIn.server === 'tracker' && signIn.kind === 'sign-in' && C.problemText(signIn) === 'tracker needs sign-in');
+  check('problem: not connected / reconnecting / lost', C.mcpProblem('MCP server "cal.x" is not connected (fetch failed)').kind === 'down' && C.mcpProblem('Lost the connection to MCP server "cal"; it is reconnecting.').server === 'cal' && C.mcpProblem('MCP server "cal" is reconnecting and did not come back within 60 s.').kind === 'down');
+  check('problem: any other failure is none (and a crafted name is not taken)', C.mcpProblem('Error: nope') === null && C.mcpProblem('MCP server "a b<x>" needs sign-in.') === null);
+  check('fold: one server', JSON.stringify(C.mcpFoldWords([{ server: 'files', outcome: 'ok' }, { server: 'files', outcome: 'ok' }])) === JSON.stringify({ text: 'Used files' }));
+  check('fold: two servers, a sign-in failure named', JSON.stringify(C.mcpFoldWords([{ server: 'files', outcome: 'ok' }, { server: 'docs', outcome: 'ok' }, { server: 'docs', outcome: 'failed', problem: { server: 'docs', kind: 'sign-in' } }])) === JSON.stringify({ text: 'Used docs and files', failed: 'docs needs sign-in' }));
+  check('fold: three servers keep the activity words; a built-in call in the run leaves the line alone', C.mcpFoldWords([{ server: 'a', outcome: 'ok' }, { server: 'b', outcome: 'ok' }, { server: 'c', outcome: 'ok' }]).text === undefined && JSON.stringify(C.mcpFoldWords([{ server: 'a', outcome: 'ok' }, { outcome: 'ok' }])) === '{}');
+  check('fold: two failures say "2 failed" as before', C.mcpFoldWords([{ server: 'a', outcome: 'failed', problem: { server: 'a', kind: 'sign-in' } }, { server: 'a', outcome: 'failed' }]).failed === undefined);
+
   // ---------- The manager's list carries the masked config, the vars and the log ----------
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpui-'));
   let config = { mcpServers: { test: { command: 'node', args: [TEST_SERVER], env: { OC_PROJECT: projectDir, SECRET_TOKEN: 'sk-test-999', GONE: '${OC_SURELY_UNSET_VAR}' } } }, mcpTrusted: {} };

@@ -13,7 +13,7 @@ import type { Ctx, Section } from './ctx.js';
 
 export function mcpSection(_ctx: Ctx, panel: HTMLElement): Section {
   const el = h('section', {}, sectionTitle('MCP servers'));
-  const r = row({ id: 'mcp', title: 'Servers', keywords: 'mcp model context protocol server tools add remove connect', full: true }, panel);
+  const r = row({ id: 'mcp', title: 'Servers', keywords: 'mcp model context protocol server servers tools connector connectors integration integrations add remove connect trust', full: true }, panel);
   r.el.classList.add('sp-panel-row');
   panel.classList.add('sp-embedded');
   el.append(group(null, r));

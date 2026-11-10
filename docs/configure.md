@@ -159,7 +159,7 @@ The command writes only your settings.json, atomically, keeping every key it doe
 | --- | --- |
 | `~/.silo-harness/settings.json` | Yours. Always applied. The command line writes here. |
 | `<project>/.silo-harness/settings.json` | A project's. Applied only once you trust it in Settings → Configuration files; an edit withdraws the approval. Wins over yours. |
-| `~/Library/Application Support/Silo Harness/config.json` | What the window's Settings write. |
+| `~/Library/Application Support/Silo Harness/config.json` | What the window's Settings write. It also keeps the MCP servers' trust (`mcpTrusted`, `mcpTrustedEntries`) and the values typed for a project's servers (`mcpProjectValues`), which only Settings → MCP servers changes. |
 
 Precedence: defaults < config.json < your settings.json < the project's. A field a file sets is read-only in Settings and is never written into config.json. A value of the wrong type, or an unknown key, is skipped and reported (in Settings → Configuration files, in `silo doctor`); the rest of the file still applies. `${VAR}` and `${VAR:-default}` are expanded in every string. The schema, for editors and agents: [settings.schema.json](https://brandeispatrick.github.io/silo-harness/settings.schema.json) (put it in `"$schema"`).
 

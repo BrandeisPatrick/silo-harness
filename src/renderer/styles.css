@@ -1608,13 +1608,15 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 
 /* /mcp notice card */
 .mcp-card .md p { margin-bottom: 8px; }
-.mcp-card-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.mcp-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mcp-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-100); }
-.mcp-card-status { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; }
-.mcp-card-tools { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0 16px; }
-.mcp-card-tools code { padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--code-bg); font: var(--fs-micro)/var(--lh-micro) var(--mono); color: var(--text-200); }
-.mcp-card-more { align-self: center; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+.mcp-card-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mcp-card-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mcp-card-name { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-100); }
+/* The status text gives way first: the name is never cut to "k…" */
+.mcp-card-status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+.mcp-card-status.tone-attention { color: var(--warn); }
+.mcp-card-status.tone-failed { color: var(--danger); }
+.mcp-card-action { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); }
+.tool-mcp-problem { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); }
 .mcp-card-note { margin: 4px 0 0 16px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; }
 .mcp-card-note.err { color: var(--danger); }
 .mcp-card-foot { margin-top: 12px; }
