@@ -3,11 +3,10 @@
 // First: carry over the folders of the app's older names, before any other module reads them.
 import './carry-over';
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, webContents } from 'electron';
-import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
-import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
+import { ARTIFACT_SCHEME, ArtifactStore, serveArtifactRequest } from './artifacts';
 import { loadConfig, saveConfig } from './config';
 import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
 import { TerminalManager } from './terminal';
@@ -263,12 +262,8 @@ app.whenReady().then(() => {
   applyBranding();
   host = buildApp();
   const a = host;
-  const serveArtifact = async (req: Request): Promise<Response> => {
-    const r = a.artifacts?.resolve(req.url);
-    if (!r) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-    if (r.kind === 'page') return new Response(r.html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-    return net.fetch(pathToFileURL(r.path).href);
-  };
+  // Every artifact: response carries the artifact CSP (artifacts.ts): an HTML artifact sends nothing anywhere.
+  const serveArtifact = (req: Request): Promise<Response> => serveArtifactRequest(req.url, a.artifacts, (url) => net.fetch(url));
   protocol.handle(ARTIFACT_SCHEME, serveArtifact);
   // The Browser pane has a session of its own (persist:browser): artifacts must be served there too.
   browserSession().protocol.handle(ARTIFACT_SCHEME, serveArtifact);

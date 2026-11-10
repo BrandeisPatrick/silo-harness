@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ArtifactInfo, ArtifactKind } from '../shared/types';
 import { documentFile, documentTitle, documentKind } from './chat-cards/documents';
 import { localImageFile } from './images/local';
@@ -42,6 +43,52 @@ export interface ArtifactStoreOptions {
 }
 
 export type Resolved = { kind: 'file'; path: string } | { kind: 'page'; html: string };
+
+/** The script CDNs an HTML artifact may load from (claude.ai artifacts allow the same few). */
+export const ARTIFACT_CDNS = ['https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://unpkg.com'] as const;
+
+/**
+ * The Content-Security-Policy of every artifact: response. An HTML artifact runs its own inline code and the CDNs'
+ * scripts and styles, and sends nothing anywhere: no fetch, no beacon, no image, form or frame off the artifact, no
+ * WebSocket or worker that could. What a model that read a secret writes into a page stays in the page.
+ */
+export const ARTIFACT_CSP = [
+  "default-src 'none'",
+  `script-src 'self' 'unsafe-inline' ${ARTIFACT_CDNS.join(' ')}`,
+  `style-src 'self' 'unsafe-inline' ${ARTIFACT_CDNS.join(' ')} https://fonts.googleapis.com`,
+  "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "worker-src 'self' blob:",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+].join('; ');
+
+// No `webrtc 'block'`: Electron 45's Chromium logs "Unrecognized Content-Security-Policy directive 'webrtc'" and
+// ignores it, so a peer connection's ICE servers are the one way out the CSP does not close.
+
+/** `headers` with the artifact CSP added (the viewer pages keep their stricter one in a meta tag as well). */
+export function artifactHeaders(headers: Headers | Record<string, string> = {}): Headers {
+  const h = new Headers(headers);
+  h.set('Content-Security-Policy', ARTIFACT_CSP);
+  h.set('X-Content-Type-Options', 'nosniff');
+  return h;
+}
+
+/**
+ * The artifact: scheme's handler (index.ts gives it the store and net.fetch): a generated page, or a stored file,
+ * always with the artifact CSP, whatever it is (an HTML artifact opened through its files/ address included).
+ */
+export async function serveArtifactRequest(url: string, store: { resolve(url: string): Resolved | null } | null | undefined, fetchFile: (fileUrl: string) => Promise<Response>): Promise<Response> {
+  const r = store?.resolve(url);
+  if (!r) return new Response('Not found', { status: 404, headers: artifactHeaders({ 'content-type': 'text/plain' }) });
+  if (r.kind === 'page') return new Response(r.html, { headers: artifactHeaders({ 'content-type': 'text/html; charset=utf-8' }) });
+  const res = await fetchFile(pathToFileURL(r.path).href);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: artifactHeaders(res.headers) });
+}
 
 function safeId(s: string): string | null {
   return /^[\w-]{1,64}$/.test(s) ? s : null;

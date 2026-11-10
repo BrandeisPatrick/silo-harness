@@ -69,7 +69,7 @@ const { check, done } = checker();
     r = await app.callTool('browser_tabs', { action: 'list' });
     check('browser_tabs list: one line per tab, the active one marked', r && r.includes('2 tabs') && r.includes(`${first}  "Popup opener"  ${site.base}/popup.html`) && new RegExp(`\\* ${second} .*\\(active\\)`).test(r) && !new RegExp(`\\* ${first}`).test(r), r.replace(/\n/g, ' ⏎ '));
     r = await app.callTool('browser_tabs', { action: 'select', tab_id: first });
-    check('browser_tabs select switches the pane', r && r.startsWith(`Now on ${first}: ${site.base}/popup.html`) && (await dbg()).activeId === first, r);
+    check('browser_tabs select switches the pane', r && r.startsWith(`Now on ${first}: <page_content site="${new URL(site.base).host}">${site.base}/popup.html`) && (await dbg()).activeId === first, r);
     check('… and the URL bar follows', (await app.evaluate(`document.querySelector('#url').value`)) === `${site.base}/popup.html`);
     r = await app.callTool('browser_tabs', { action: 'new', url: `${site.base}/login.html` });
     await waitTabs(3);

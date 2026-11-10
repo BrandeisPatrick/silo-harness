@@ -20,6 +20,7 @@
 - **Fewer cache rewrites.** Where the provider caches, old tool output and screenshots are set aside in batches, so the cached prompt is rewritten rarely.
 - **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
+- **Cheaper page reads.** `browser_get_text` and `browser_read_page` return 12,000 characters at a time and say where to continue.
 
 ### Fixed
 
@@ -35,6 +36,14 @@
 - **Home-folder scans ask first.** Searching the whole home folder, `/` or `/Users` asks first, so macOS does not raise a row of privacy prompts unasked.
 - **Screen, camera, clipboard.** Commands that capture the screen, use the camera or microphone, or read the clipboard ask first.
 - **Spotlight for finding files.** The agent finds a file anywhere on the Mac with `mdfind`, which needs no folder access.
+- **Pages are data.** What the agent reads from a page arrives in a fence named by the browser, and text you cannot see is left out.
+- **Clicks land where checked.** A click on something covered, moved or changed since the agent read the page is refused; another site's frame asks first.
+- **Artifacts stay sealed.** An HTML artifact sends nothing out, loads scripts only from cdnjs, jsDelivr or unpkg, and never leaves its page by itself.
+- **Downloads ask unless yours.** A download waits for your Allow unless it starts within five seconds of your own click or key press.
+- **The clipboard stays yours.** The agent's paste, copy and cut shortcuts in the browser are refused.
+- **Safer page-opened tabs.** A page cannot open a local file, `data:`, `blob:` or blank tab.
+- **The app's own ports are off-limits.** The agent's browser cannot open the remote-control server or the app's debugging port.
+- **No silent identity choices.** No client certificate or Bluetooth device is picked for a page, and HTTP sign-in prompts are cancelled.
 
 ### For developers
 

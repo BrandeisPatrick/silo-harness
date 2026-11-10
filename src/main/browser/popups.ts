@@ -8,7 +8,7 @@ import { ipcMain, View, WebContentsView, type BrowserWindow, type BrowserWindowC
 import path from 'node:path';
 import type { Bounds, PopupState } from '../../shared/browser';
 import { BROWSER_PARTITION, cleanUserAgent } from './session';
-import { fetchFavicon, type BrowserTab } from './tab';
+import { faviconAllowed, fetchFavicon, NO_DEVICE_APIS, type BrowserTab } from './tab';
 
 export const MAX_POPUPS = 3;
 /** The card's title bar, above the page area */
@@ -62,6 +62,25 @@ export function popupDecision(d: { disposition: string; features: string; url: s
   if (size.width === undefined && size.height === undefined) return 'tab';
   if (d.openPopups >= MAX_POPUPS) return 'deny';
   return 'popup';
+}
+
+/**
+ * Whether a navigation or a window from `from` to `to` leaves an artifact: page. An artifact the model wrote never
+ * sends the tab (or a new one) anywhere else by itself, a link the user clicks included: the blocked-popup strip
+ * offers the address instead, so leaving takes the user's own click on Show.
+ */
+export function leavesArtifact(from: string, to: string): boolean {
+  return /^\s*artifact:/i.test(String(from ?? '')) && !/^\s*artifact:/i.test(String(to ?? ''));
+}
+
+/**
+ * Whether a page may open `url` in a tab of its own (a link with target=_blank, a window.open without a size, the
+ * context menu's Open Link in New Tab): web pages and artifacts only. A file:, data:, blob:, javascript: or about:
+ * address from a page is refused: loaded from the main process it would skip Chromium's own block, and the agent could
+ * then read a local file it was never given.
+ */
+export function opensInTab(url: string): boolean {
+  return /^\s*(https?|artifact):/i.test(String(url ?? ''));
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
@@ -216,9 +235,19 @@ export class PopupManager {
    * The window-open handler of one tab (and of the popups it opens). `openTab` makes a tab for links and plain
    * window.open calls; a sized window becomes a popup card over the pane.
    */
-  handlerFor(tab: BrowserTab, openTab: (url: string, background: boolean) => void): (details: { url: string; disposition: string; features: string }) => WindowOpenHandlerResponse {
+  handlerFor(tab: BrowserTab, openTab: (url: string, background: boolean) => void, openerUrl: () => string = () => tab.webContents.getURL()): (details: { url: string; disposition: string; features: string }) => WindowOpenHandlerResponse {
     return (details) => {
+      if (leavesArtifact(openerUrl(), details.url)) {
+        tab.blockedPopup(details.url);
+        return { action: 'deny' };
+      }
       const decision = popupDecision({ disposition: details.disposition, features: details.features, url: details.url, openPopups: this.popups.length });
+      // Another scheme is refused and counted on the strip, with no Show: the user can open it some other way if they mean to
+      const blank = /^\s*about:blank\s*$/i.test(details.url) || details.url === '';
+      if (decision !== 'deny' && !opensInTab(details.url) && !(decision === 'popup' && blank)) {
+        tab.blockedPopup();
+        return { action: 'deny' };
+      }
       if (decision === 'tab' || decision === 'background-tab') {
         openTab(details.url, decision === 'background-tab');
         return { action: 'deny' };
@@ -238,7 +267,7 @@ export class PopupManager {
   /** Makes the card for the contents Electron created for the page's window.open, and returns those contents. */
   private create(tab: BrowserTab, size: { width?: number; height?: number }, options: BrowserWindowConstructorOptions, url: string, openTab: (url: string, background: boolean) => void): WebContents {
     const guest = (options as { webContents?: WebContents }).webContents;
-    const prefs = { ...(options.webPreferences ?? {}), sandbox: true, contextIsolation: true, nodeIntegration: false };
+    const prefs = { ...(options.webPreferences ?? {}), sandbox: true, contextIsolation: true, nodeIntegration: false, disableBlinkFeatures: NO_DEVICE_APIS };
     // The contents Electron made carry the opener relation; a fresh view (never seen, kept as a fallback) would not.
     const view = guest && !guest.isDestroyed() ? new WebContentsView({ webContents: guest, webPreferences: prefs }) : new WebContentsView({ webPreferences: { ...prefs, partition: BROWSER_PARTITION } });
     const wc = view.webContents;
@@ -294,7 +323,7 @@ export class PopupManager {
     });
     wc.on('page-favicon-updated', (_e, favicons) => {
       const icon = favicons.find((f) => /^(https?|data):/i.test(f));
-      if (!icon) return;
+      if (!icon || !faviconAllowed(icon, wc.getURL())) return;
       void fetchFavicon(icon).then((data) => {
         if (wc.isDestroyed() || !this.popups.includes(popup)) return;
         popup.favicon = data;
@@ -305,7 +334,7 @@ export class PopupManager {
     // A popup that closes itself (window.close()), or whose contents go, is taken down.
     wc.on('destroyed', () => this.remove(popup));
     // A popup opening another window: the same rules as its tab.
-    wc.setWindowOpenHandler(this.handlerFor(tab, openTab));
+    wc.setWindowOpenHandler(this.handlerFor(tab, openTab, () => (wc.isDestroyed() ? '' : wc.getURL())));
     this.host.onChange();
     return wc;
   }

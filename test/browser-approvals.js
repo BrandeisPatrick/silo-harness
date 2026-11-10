@@ -84,6 +84,10 @@ function fakeBrowser(page) {
     clickAt(x, y) {
       page.clicked.push(`(${x}, ${y})`);
     },
+    async clickPoint(x, y) {
+      page.clicked.push(`(${x}, ${y})`);
+      return `Clicked at (${x}, ${y}).`;
+    },
     async credentialTarget(ref, field) {
       if (field) return page.fieldKinds[field] ?? null;
       if (ref) return null;
@@ -188,7 +192,7 @@ function fakeBrowser(page) {
   check('1: a read on a new site raises the site card', r.cards.length === 1 && r.card.name === 'browser_read_page' && r.card.browser?.card === 'site' && r.card.browser.site === 'example.com', r.card);
   check('1: … with the wider answers for that site', r.card.alwaysLabel === 'Allow example.com for this session' && r.card.projectLabel === 'Always allow example.com', [r.card.alwaysLabel, r.card.projectLabel]);
   check('1: … the action as its detail, and no note on an ordinary site', r.card.detail === 'Read example.com' && r.card.note === undefined && !r.card.reason, r.card);
-  check('1: answered "for this session": the call ran, resolved with scope session', /^URL: https:\/\/example\.com\//.test(r.result ?? '') && r.resolved.length === 1 && r.resolved[0].ok === true && r.resolved[0].scope === 'session', { result: r.result, resolved: r.resolved });
+  check('1: answered "for this session": the call ran, resolved with scope session', /^<page_content site="example\.com">URL: https:\/\/example\.com\//.test(r.result ?? '') && r.resolved.length === 1 && r.resolved[0].ok === true && r.resolved[0].scope === 'session', { result: r.result, resolved: r.resolved });
   const reads = page.reads;
   r = await step('browser_get_text', {});
   check('1: the next call on that site runs without a card', r.cards.length === 0 && page.reads === reads + 1 && /Some text/.test(r.result ?? ''), r.result);
@@ -199,7 +203,7 @@ function fakeBrowser(page) {
   check('1: … and saves nothing', !(app.config().browser.alwaysAllowed || []).length && !Object.keys(app.config().allowRules || {}).length);
   page.url = 'https://example.com:8443/';
   r = await step('browser_read_page', {}, [ONCE]);
-  check('1: another port is another site; "Allow once" runs that call only', r.cards.length === 1 && r.card.browser.site === 'example.com:8443' && /^URL:/.test(r.result ?? '') && r.resolved[0].scope === 'once');
+  check('1: another port is another site; "Allow once" runs that call only', r.cards.length === 1 && r.card.browser.site === 'example.com:8443' && /^<page_content site="[^"]+">URL:/.test(r.result ?? '') && r.resolved[0].scope === 'once');
   r = await step('browser_read_page', {}, [DENY]);
   check('1: … and the next call there asks again', r.cards.length === 1 && r.result === DENIED);
 
@@ -210,7 +214,7 @@ function fakeBrowser(page) {
   page.url = 'https://example.com/b';
   r = await step('browser_read_page', {}, [ALWAYS]);
   check('2: a site allowed for another session asks again in this one', r.cards.length === 1 && r.card.browser.site === 'example.com');
-  check('2: answered "Always": the call ran, resolved with scope project', /^URL:/.test(r.result ?? '') && r.resolved[0].scope === 'project', r.resolved);
+  check('2: answered "Always": the call ran, resolved with scope project', /^<page_content site="[^"]+">URL:/.test(r.result ?? '') && r.resolved[0].scope === 'project', r.resolved);
   check('2: … config.browser.alwaysAllowed holds the site key', JSON.stringify(app.config().browser.alwaysAllowed) === '["example.com"]', app.config().browser);
   check('2: … saved to config.json, and not as a project rule', saved.length > 0 && saved.at(-1).browser.alwaysAllowed.includes('example.com') && !Object.keys(app.config().allowRules || {}).length, saved.at(-1)?.allowRules);
   r = await step('browser_find', { query: 'x' });
@@ -218,7 +222,7 @@ function fakeBrowser(page) {
   sid = rt.create({ cwd: project, foreground: true }).id;
   page.url = 'https://example.com/c';
   r = await step('browser_read_page', {});
-  check('2: a new Agent on the same config does not ask', r.cards.length === 0 && /^URL:/.test(r.result ?? ''), r.result);
+  check('2: a new Agent on the same config does not ask', r.cards.length === 0 && /^<page_content site="[^"]+">URL:/.test(r.result ?? ''), r.result);
   // A second "Always" adds to the list without repeating it
   page.url = 'https://docs.example.org/';
   r = await step('browser_read_page', {}, [ALWAYS]);
@@ -261,9 +265,9 @@ function fakeBrowser(page) {
   r = await step('browser_eval', { code: 'document.title', reason: 'To check the title.' }, [ONCE]);
   check('4: ask mode: browser_eval on an allowed site asks, Allow and Deny only', r.cards.length === 1 && r.card.browser.card === 'eval' && r.card.alwaysLabel === '' && r.card.projectLabel === '', r.card);
   check('4: … its detail is the action, the reason, and the code after a blank line', r.card.detail === 'Run JavaScript on example.com\nTo check the title.\n\ndocument.title', r.card.detail);
-  check('4: … and it ran once allowed', r.result === '"Page"' && page.evals.at(-1) === 'document.title');
+  check('4: … and it ran once allowed', r.result === '<page_content site="example.com">"Page"</page_content>' && page.evals.at(-1) === 'document.title');
   r = await step('browser_eval', { code: 'document.title' }, [SESSION]);
-  check('4: "for this session" on an eval card is "once": the next eval asks again', r.resolved[0].scope === 'once' && r.result === '"Page"');
+  check('4: "for this session" on an eval card is "once": the next eval asks again', r.resolved[0].scope === 'once' && r.result === '<page_content site="example.com">"Page"</page_content>');
   r = await step('browser_eval', { code: 'document.title' }, [DENY]);
   check('4: … and so it does', r.cards.length === 1 && r.result === DENIED);
   mode('auto');
@@ -271,7 +275,7 @@ function fakeBrowser(page) {
   r = await step('browser_eval', { code: 'document.cookie' }, [DENY]);
   check('4: auto mode: document.cookie asks, with the guard\'s reason', r.cards.length === 1 && r.card.browser.card === 'eval' && r.card.reason === "reads the site's cookies or storage" && r.result === DENIED && page.evals.length === evals, r.card);
   r = await step('browser_eval', { code: 'document.title' });
-  check('4: auto mode: document.title runs without a card', r.cards.length === 0 && r.result === '"Page"');
+  check('4: auto mode: document.title runs without a card', r.cards.length === 0 && r.result === '<page_content site="example.com">"Page"</page_content>');
   page.url = 'https://brand-new.example/';
   r = await step('browser_eval', { code: 'document.title' }, [DENY]);
   check('4: auto mode: a new site still asks first, with the site card', r.cards.length === 1 && r.card.browser.card === 'site');
@@ -296,7 +300,7 @@ function fakeBrowser(page) {
   page.url = 'https://shop.example/cart';
   page.targets = { 'Pay now': {}, 'Create account': {}, 'Sign in': { role: 'link', tag: 'a' }, Continue: { formHasCardFields: true }, 'Not a robot': { inCaptcha: true, role: 'checkbox', tag: 'span' } };
   r = await step('browser_read_page', {});
-  check('6: bypass: a new site reads without a card', r.cards.length === 0 && /^URL:/.test(r.result ?? ''));
+  check('6: bypass: a new site reads without a card', r.cards.length === 0 && /^<page_content site="[^"]+">URL:/.test(r.result ?? ''));
   r = await step('browser_click', { text: 'Sign in' });
   check('6: … an ordinary click runs', r.cards.length === 0 && page.clicked.at(-1) === 'Sign in');
   r = await step('browser_click', { text: 'Pay now', reason: 'The user asked me to check out.' }, [DENY]);
@@ -427,7 +431,7 @@ function fakeBrowser(page) {
     page.targets = { 'Pay now': {} };
     groups = [{ event: 'PreToolUse', matcher: 'browser_read_page|browser_click', handlers: [cmd('allow')] }];
     let h = await run('browser_read_page', {});
-    check('10: a PreToolUse allow skips the site card', h.cards.length === 0 && /^URL: https:\/\/hooked\.example\//.test(h.result ?? ''), h);
+    check('10: a PreToolUse allow skips the site card', h.cards.length === 0 && /^<page_content site="hooked\.example">URL: https:\/\/hooked\.example\//.test(h.result ?? ''), h);
     const clicks = page.clicked.length;
     h = await run('browser_click', { text: 'Pay now' });
     check('10: … but not a purchase card, which bypass shows too', h.cards.length === 1 && h.cards[0].browser?.card === 'purchase' && h.result === DENIED && page.clicked.length === clicks, h.cards.map((c) => c.browser));
@@ -449,7 +453,7 @@ function fakeBrowser(page) {
     await run('browser_get_text', {});
     const post = fs.existsSync(seen) ? JSON.parse(fs.readFileSync(seen, 'utf8')) : null;
     const failure = fs.existsSync(denied) ? JSON.parse(fs.readFileSync(denied, 'utf8')) : null;
-    check('10: PostToolUse sees the result of a call the site check let through', post && post.tool_name === 'browser_read_page' && /^URL: https:\/\/hooked\.example\//.test(post.tool_response), post);
+    check('10: PostToolUse sees the result of a call the site check let through', post && post.tool_name === 'browser_read_page' && /^<page_content site="hooked\.example">URL: https:\/\/hooked\.example\//.test(post.tool_response), post);
     check('10: … and PostToolUseFailure the denial of one it stopped', failure && failure.tool_name === 'browser_get_text' && failure.error === DENIED, failure);
   }
 

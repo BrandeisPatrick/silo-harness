@@ -6,7 +6,7 @@ import type { Tool } from './types';
 export const createArtifact: Tool = {
   name: 'create_artifact',
   description:
-    'Create or update an artifact: a self-contained deliverable the user sees rendered in the Browser pane next to the chat. Kinds: "html" for a web page or small app (one file with inline CSS and JS; https CDN scripts are allowed), "svg" for a diagram or illustration, "markdown" for a document, report or write-up, "code" for a standalone code sample (set language). Use it for things meant to be viewed or handed over, not for project files (use write_file for those). To update an artifact, pass the id from an earlier result and the complete new content.',
+    'Create or update an artifact: a self-contained deliverable the user sees rendered in the Browser pane next to the chat. Kinds: "html" for a web page or small app (one file with inline CSS and JS; scripts and styles only from cdnjs.cloudflare.com, cdn.jsdelivr.net or unpkg.com, fonts from Google Fonts; no other network: fetch, beacons, outside images and forms are blocked), "svg" for a diagram or illustration, "markdown" for a document, report or write-up, "code" for a standalone code sample (set language). Use it for things meant to be viewed or handed over, not for project files (use write_file for those). To update an artifact, pass the id from an earlier result and the complete new content.',
   parameters: {
     type: 'object',
     properties: {

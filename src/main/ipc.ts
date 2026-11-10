@@ -5,6 +5,7 @@
 import { app as electronApp, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
 import type { AppHost } from './app';
 import { ARTIFACT_SCHEME } from './artifacts';
@@ -342,8 +343,17 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
       if (file) await shell.openPath(file).catch((err: unknown) => console.warn('[artifact] openPath failed:', err));
       return;
     }
-    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
-      console.warn('[browser] only http, https and file URLs open externally, not', parsed.protocol);
+    // A local file is shown in the Finder, never opened: a page-made file: tab plus one click must not run anything
+    if (parsed.protocol === 'file:') {
+      try {
+        shell.showItemInFolder(fileURLToPath(parsed.href));
+      } catch (err) {
+        console.warn('[browser] cannot show that file:', err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      console.warn('[browser] only http and https URLs open externally, not', parsed.protocol);
       return;
     }
     await shell.openExternal(parsed.href).catch((err: unknown) => console.warn('[browser] openExternal failed:', err));

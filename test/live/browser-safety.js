@@ -116,6 +116,8 @@ function filesHolding(dir, needles) {
     await sleep(150);
     return content;
   }
+  /** A page result without its <page_content> fence (the fence is browser-hardening's to check) */
+  const bare = (s) => String(s ?? '').replace(/^<page_content site="[^"]*">([\s\S]*)<\/page_content>$/, '$1');
   const leaks = (s) => SECRETS.filter((x) => String(s ?? '').includes(x));
 
   try {
@@ -155,11 +157,11 @@ function filesHolding(dir, needles) {
     check('browser_find: the password field shows •••', r && r.includes('= "•••"') && !leaks(r).length, r);
 
     r = await step('browser_eval', { code: `document.getElementById('pw').value` });
-    check('browser_eval reading the password returns •••', r === '•••', r);
+    check('browser_eval reading the password returns •••', bare(r) === '•••', r);
     r = await step('browser_eval', { code: `({ email: document.getElementById('email').value, pw: document.getElementById('pw').value, bare: document.getElementById('bare').value, user: document.getElementById('user').value })` });
     check('browser_eval: in an object both passwords are •••, the email and the username are not', r && !leaks(r).length && r.includes(EMAIL) && r.includes(PLAIN) && (r.match(/•••/g) || []).length === 2, r);
     r = await step('browser_eval', { code: `(() => { const v = document.getElementById('bare').value; document.getElementById('bare').value = ''; return 'was ' + v; })()` });
-    check('browser_eval that clears the field first still gets •••', r === 'was •••', r);
+    check('browser_eval that clears the field first still gets •••', bare(r) === 'was •••', r);
     await paneEval(`(() => { const f = document.getElementById('bare'); f.focus(); f.select(); return true; })()`);
     await cdpAt(pane, 'Input.insertText', { text: USER_SECRET });
 

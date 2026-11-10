@@ -62,6 +62,7 @@ const SCRIPTS = [
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
   { name: 'browser-polish' },
+  { name: 'browser-hardening' },
   { name: 'chat-cards' },
 ];
 
