@@ -37,7 +37,7 @@ function startMock() {
       // matches answers it (`status` makes it fail with that HTTP status), else the summary as before. Streamed
       // requests never take a `nonStream` reply.
       if (!payload.stream && (req.url === '/api/chat' || req.url === '/v1/chat/completions')) {
-        const at = state.replies.findIndex((r) => r.nonStream && (typeof r.when !== 'function' || r.when(payload)));
+        const at = state.replies.findIndex((r) => r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
         // `classifierDefault` ({ decision, reason }): the standing answer of Auto mode's safety check when no reply
         // for it is queued (the screenshot scripts, where every check should pass)
         if (at < 0 && state.classifierDefault && isClassifierRequest(payload)) {
@@ -69,7 +69,7 @@ function startMock() {
         // As on the OpenAI-compatible path: a reply with `when(payload)` only answers requests it matches, and
         // `delayMs` holds it back (a run that stays in progress). Replies without either answer in order, at once.
         // `chunks` streams the content as lines of its own, `chunkDelayMs` apart, before the last line.
-        const at = state.replies.findIndex((r) => !r.nonStream && (typeof r.when !== 'function' || r.when(payload)));
+        const at = state.replies.findIndex((r) => !r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
         const reply = at >= 0 ? state.replies.splice(at, 1)[0] : { content: 'Done.' };
         const message = { role: 'assistant', content: reply.chunks ? '' : (reply.content ?? '') };
         // Ollama's calls carry no id unless `ollamaToolIds` is set (as newer versions send them)
@@ -90,7 +90,7 @@ function startMock() {
       if (!payload.stream) return json(200, { id: 't', object: 'chat.completion', created: 0, model: payload.model, choices: [{ index: 0, message: { role: 'assistant', content: state.summaryFails ? '' : state.summary }, finish_reason: 'stop' }], usage: { prompt_tokens: 400, completion_tokens: 120 } });
       // A reply with `when(payload)` only answers requests it matches (concurrent sessions share one mock); the first
       // matching reply is used. `delayMs` delays that reply; `chunks` streams the content in pieces `chunkDelayMs` apart.
-      const at = state.replies.findIndex((r) => !r.nonStream && (typeof r.when !== 'function' || r.when(payload)));
+      const at = state.replies.findIndex((r) => !r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
       const reply = at >= 0 ? state.replies.splice(at, 1)[0] : { content: 'Done.' };
       setTimeout(async () => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -125,7 +125,7 @@ function startMock() {
  */
 function anthropic(state, payload, res, json) {
   const stream = !!payload.stream;
-  const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(payload)));
+  const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(seen(payload))));
   let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;
   if (!reply && !stream && state.classifierDefault && isClassifierRequest(payload)) {
     const d = state.classifierDefault;
@@ -175,6 +175,21 @@ function anthropic(state, payload, res, json) {
     res.end();
   };
   setTimeout(answer, reply.delayMs ?? state.delayMs ?? 0);
+}
+
+/** The app's context note (src/main/compact.ts CONTEXT_NOTE_PREFIX): appended when the mode, folder or name changes */
+const CONTEXT_NOTE = '[Session context]';
+
+/**
+ * The request as a reply's `when` sees it: without the app's context notes, which come after the user's message
+ * when something changed, so "the last message is the user's" still holds. (state.requests keeps them.)
+ */
+function seen(payload) {
+  if (!Array.isArray(payload?.messages)) return payload;
+  const note = (m) => m && m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(CONTEXT_NOTE);
+  const nativeNote = (m) => m && m.role === 'user' && Array.isArray(m.content) && m.content.length && m.content.every((b) => b.type === 'text' && String(b.text).startsWith(CONTEXT_NOTE));
+  if (!payload.messages.some((m) => note(m) || nativeNote(m))) return payload;
+  return { ...payload, messages: payload.messages.filter((m) => !note(m) && !nativeNote(m)) };
 }
 
 let askSeq = 0;
