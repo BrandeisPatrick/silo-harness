@@ -418,6 +418,8 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   mock.close();
   const warn = console.warn;
   console.warn = (...a) => (/streaming failed/.test(String(a[0])) ? undefined : warn(...a));
+  // The model is gone: the retry loop tries six times; its waits return at once here (agent/retry.ts retryTiming)
+  require(path.join(projectDir, 'dist/main/agent/retry.js')).retryTiming.sleep = async () => {};
   svc.start('manual', proj);
   await waitFor(() => svc.state().dreams[0].status !== 'running', 15000, 'the dream to fail');
   check('10: a dream whose model call fails is failed with the reason', svc.state().dreams[0].status === 'failed' && svc.state().dreams[0].error, svc.state().dreams[0].error);
