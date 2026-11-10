@@ -200,9 +200,14 @@ export interface McpServerInfo {
   error?: string;
   /** Empty unless connected */
   tools: McpToolInfo[];
-  /** The server's own name and version from the handshake */
-  serverInfo?: { name: string; version: string };
+  /** The server's own name, version and title from the handshake (untrusted text) */
+  serverInfo?: { name: string; version: string; title?: string };
+  /** The config with every env and header value written as a ${VAR} reference (no secret leaves the main process) */
   config: McpServerConfig;
+  /** The ${VAR} references in the config: what reads each (`to`: the host a remote server sends it to) and whether it is set */
+  vars?: { name: string; to?: string; set: boolean }[];
+  /** Referenced variables that are not set (and have no default) */
+  unset?: string[];
   /** Tools the server offers that enabledTools/disabledTools keep from the model */
   hiddenTools?: string[];
   /** A remote server with OAuth tokens stored */
@@ -228,6 +233,8 @@ export interface McpApi {
   cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** Deletes the server's tokens and client registration */
   signOut(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** A local server's last lines of stderr, secrets cut (for Show log) */
+  log?(name: string, scope: McpScope): Promise<string[]>;
   /** The full list whenever a server's status or tools change */
   onServers(cb: (servers: McpServerInfo[]) => void): () => void;
 }

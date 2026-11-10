@@ -1,6 +1,6 @@
 # MCP servers
 
-Servers come from Settings → MCP (stored in the app's `config.json` under `mcpServers`) and from a project's `.mcp.json` (Claude Code's format; off until you turn each one on). The model calls their tools as `mcp__<server>__<tool>`.
+Servers come from Settings → MCP servers (stored in the app's `config.json` under `mcpServers`) and from a project's `.mcp.json` (Claude Code's format; off until you turn each one on). The model calls their tools as `mcp__<server>__<tool>`.
 
 ## Config keys
 
@@ -25,7 +25,7 @@ Servers come from Settings → MCP (stored in the app's `config.json` under `mcp
 | `disabled` | any | Off. |
 | `timeout` | any | Milliseconds a tool call may take (1000–86400000; default 120000). Each progress notification from the server starts it again, up to 10 minutes in all (or `timeout`, if longer). Stop cancels a call at once. |
 | `enabledTools` | any | Only these tools (exact names) are offered to the model. An empty list offers none. |
-| `disabledTools` | any | These tools are never offered. Wins over `enabledTools`. Settings → MCP counts them as "off". |
+| `disabledTools` | any | These tools are never offered. Wins over `enabledTools`. Settings → MCP servers lists them as off. |
 | `oauth.clientId` | remote | A client registered with the authorization server beforehand. Without it the app registers itself (dynamic client registration). |
 | `oauth.callbackPort` | remote | A fixed port for the sign-in callback on 127.0.0.1 (some pre-registered clients need one). Default: a free port. |
 | `oauth.scopes` | remote | Scopes to ask for (a list, or one space-separated string). Default: what the server advertises. |
@@ -38,15 +38,20 @@ A project's `.mcp.json` servers stay off until you trust each one. Trust covers 
 
 ## Statuses
 
-| Status | Shown as | What happens |
-| --- | --- | --- |
-| `connecting` | Connecting… | |
-| `connected` | *n* tools | |
-| `reconnecting` | Reconnecting | A remote server's connection dropped. The app tries 5 times, waiting 1 s, 2 s, 4 s, 8 s, 16 s (doubling, at most 30 s). A tool call made meanwhile waits up to 60 s, then fails with one line. Then `error` and the Reconnect button. |
-| `needs-auth` | Sign in | The server answered 401. Nothing more happens until you click Sign in. |
-| `authorizing` | Waiting for browser… | Sign-in is open in your browser. Cancel stops it. |
-| `error` | Failed | The reason is shown. A stdio server that exited after it was connected starts again on its next tool call, once; if that fails it stays here. |
-| `disabled`, `blocked` | Disabled, Enable | Off, or a project server not turned on yet. |
+Each row has one action before its switch; the rest (Reconnect, Sign out, Show log, Copy config, Remove) is in its `…` menu.
+
+| Status | Shown as | Action | What happens |
+| --- | --- | --- | --- |
+| `connecting` | Connecting… | | |
+| `connected` | Connected | *n* tools | |
+| `reconnecting` | Reconnecting… | | A remote server's connection dropped. The app tries 5 times, waiting 1 s, 2 s, 4 s, 8 s, 16 s (doubling, at most 30 s). A tool call made meanwhile waits up to 60 s, then fails with one line. Then `error`. |
+| `needs-auth` | Needs sign-in | Sign in | The server answered 401. Nothing more happens until you click Sign in. |
+| `authorizing` | Signing in… | Cancel | Sign-in is open in your browser. |
+| `error` | Failed | Retry | One line says why: for a local server, the last line it printed (Show log has the rest). A stdio server that exited after it was connected starts again on its next tool call, once; if that fails it stays here. |
+| `disabled` | Off | | |
+| `blocked` | Not trusted | Trust | A project server nobody trusted yet, or one whose entry changed since. Trust first shows what will run, that its read-only tools run without asking, and which `${VAR}`s it reads and where it sends them. |
+
+A `${VAR}` the config uses that is not set shows on the row as "Not set: $VAR". Copy config writes every env and header value as a `${VAR}` reference, never the value; Show log cuts tokens from what it shows and is never sent to the model.
 
 No reconnection runs for a server you turned off or removed, or after a sign-in failure.
 

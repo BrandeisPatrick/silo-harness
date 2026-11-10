@@ -70,7 +70,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('user server connected with 8 tools', s['user:test'].status === 'connected' && s['user:test'].tools.length === 8 && s['user:test'].serverInfo.name === 'oc-test-server', s['user:test'].error);
   check('tool names mcp__server__tool with annotations', s['user:test'].tools.find((t) => t.name === 'echo').fullName === 'mcp__test__echo' && s['user:test'].tools.find((t) => t.name === 'echo').readOnly && s['user:test'].tools.find((t) => t.name === 'remove_item').destructive && !s['user:test'].tools.find((t) => t.name === 'add').readOnly);
   check('dotted server name sanitised', s['user:my.server'].tools[0].fullName === 'mcp__my_server__echo');
-  check('project server blocked until enabled', s['project:proj'].status === 'blocked' && /Enable it in Settings/.test(s['project:proj'].error));
+  check('project server blocked until enabled', s['project:proj'].status === 'blocked' && /Not started until you trust it/.test(s['project:proj'].error));
   check('invalid project entry reported', s['project:bad'].status === 'error' && /Invalid entry/.test(s['project:bad'].error));
   check('missing command reported', s['user:missing'].status === 'error' && /Command not found: definitely-not-a-command-xyz/.test(s['user:missing'].error), s['user:missing'].error);
   check('early exit reported with stderr', s['user:exits'].status === 'error' && /exited right after starting/.test(s['user:exits'].error) && /refusing to start/.test(s['user:exits'].error), s['user:exits'].error);

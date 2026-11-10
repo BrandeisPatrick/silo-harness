@@ -29,6 +29,7 @@ const api: SiloHarnessApi = {
     signIn: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:sign-in', name, scope),
     cancelSignIn: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:cancel-sign-in', name, scope),
     signOut: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:sign-out', name, scope),
+    log: (name: string, scope: McpScope): Promise<string[]> => ipcRenderer.invoke('mcp:log', name, scope),
     onServers: (cb: (servers: McpServerInfo[]) => void): (() => void) => {
       const handler = (_e: IpcRendererEvent, servers: McpServerInfo[]) => cb(servers);
       ipcRenderer.on('mcp:servers', handler);

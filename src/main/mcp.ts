@@ -68,7 +68,7 @@ interface Entry {
   sdkTools: SdkTool[];
   client: Client | null;
   transport: 'stdio' | 'http' | 'sse';
-  serverInfo?: { name: string; version: string };
+  serverInfo?: { name: string; version: string; title?: string };
   stderr: string[];
   /** Bumped on every connect and disconnect so results of a superseded attempt are ignored */
   generation: number;
@@ -273,6 +273,62 @@ export function readProjectServers(cwd: string): { servers: Record<string, McpSe
   return { servers, invalid, fingerprints };
 }
 
+const VAR_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+/** A value that is nothing but one ${VAR} reference */
+const ONLY_REF = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}$/;
+
+/** The variable a header's value is kept in: MCP server "files" + header "X-Api-Key" → FILES_X_API_KEY. */
+export function headerVarName(server: string, header: string): string {
+  return `${server}_${header}`.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase().replace(/^(?=\d)/, '_') || 'MCP_HEADER';
+}
+
+/**
+ * A config as the window may see and copy it: every env and header value that is not already a ${VAR} reference is
+ * written as one (env: its own name; a header: headerVarName), so no secret leaves the main process.
+ */
+export function maskedConfig(name: string, c: McpServerConfig): McpServerConfig {
+  const copy = structuredClone(c) as McpServerConfig & { env?: Record<string, string>; headers?: Record<string, string> };
+  if (copy.env) copy.env = Object.fromEntries(Object.entries(copy.env).map(([k, v]) => [k, ONLY_REF.test(String(v)) ? String(v) : `\${${k}}`]));
+  if (copy.headers) copy.headers = Object.fromEntries(Object.entries(copy.headers).map(([k, v]) => [k, ONLY_REF.test(String(v)) ? String(v) : `\${${headerVarName(name, k)}}`]));
+  return copy;
+}
+
+/**
+ * The ${VAR} references in a config, as written: where each goes (the URL's host for a remote server's URL or
+ * headers; none for a local command, which only reads it) and whether it is set (a default counts as set).
+ */
+export function configVars(c: McpServerConfig, env: NodeJS.ProcessEnv = process.env): { name: string; to?: string; set: boolean }[] {
+  const out: { name: string; to?: string; set: boolean }[] = [];
+  const seen = new Set<string>();
+  const scan = (text: unknown, to?: string) => {
+    if (typeof text !== 'string') return;
+    for (const m of text.matchAll(VAR_REF)) {
+      const key = `${m[1]}|${to ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: m[1], ...(to ? { to } : {}), set: env[m[1]] !== undefined || m[2] !== undefined });
+    }
+  };
+  if ('url' in c && c.url) {
+    let host = '';
+    try {
+      host = new URL(expandEnvRefs(c.url, env)).host;
+    } catch {
+      host = '';
+    }
+    host ||= 'the server';
+    scan(c.url, host);
+    for (const v of Object.values(c.headers ?? {})) scan(v, host);
+  } else {
+    const s = c as Extract<McpServerConfig, { command: string }>;
+    scan(s.command);
+    for (const a of s.args ?? []) scan(a);
+    for (const v of Object.values(s.env ?? {})) scan(v);
+    scan(s.cwd);
+  }
+  return out;
+}
+
 /** JSON with every object's keys sorted, so the same entry always reads the same. */
 function canonicalJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
@@ -287,6 +343,9 @@ function canonicalJson(v: unknown): string {
 export function entryFingerprint(entry: unknown): string {
   return crypto.createHash('sha256').update(canonicalJson(entry)).digest('hex');
 }
+
+/** The note on a project server nobody trusted yet. */
+export const NOT_TRUSTED_YET = `From ${PROJECT_FILE}. Not started until you trust it.`;
 
 /** The note on a trusted project server whose entry changed since. */
 export const CHANGED_SINCE_TRUSTED = 'Changed since you trusted it.';
@@ -569,8 +628,12 @@ export class McpManager extends EventEmitter {
       target: targetOf(e.config),
       status: e.status,
       tools: e.status === 'connected' ? e.tools.map((t) => ({ ...t })) : [],
-      config: structuredClone(e.config),
+      config: maskedConfig(e.name, e.config),
     };
+    const vars = configVars(e.config);
+    if (vars.length) info.vars = vars;
+    const unset = vars.filter((x) => !x.set).map((x) => x.name);
+    if (unset.length) info.unset = [...new Set(unset)];
     if (e.error) info.error = e.error;
     if (e.serverInfo) info.serverInfo = { ...e.serverInfo };
     if (e.status === 'connected' && e.hiddenTools.length) info.hiddenTools = [...e.hiddenTools];
@@ -685,7 +748,7 @@ export class McpManager extends EventEmitter {
         e.status = 'disabled';
       } else if (want.scope === 'project' && trust.get(want.name) !== 'yes') {
         e.status = 'blocked';
-        e.error = trust.get(want.name) === 'changed' ? CHANGED_SINCE_TRUSTED : `Found in ${PROJECT_FILE}. Enable it in Settings → MCP servers to let it run.`;
+        e.error = trust.get(want.name) === 'changed' ? CHANGED_SINCE_TRUSTED : NOT_TRUSTED_YET;
       } else {
         pending.push(this.connect(e));
       }
@@ -790,7 +853,7 @@ export class McpManager extends EventEmitter {
       }
       e.client = client;
       const v = client.getServerVersion();
-      if (v) e.serverInfo = { name: String(v.name), version: String(v.version) };
+      if (v) e.serverInfo = { name: String(v.name).slice(0, 200), version: String(v.version).slice(0, 80), ...(typeof v.title === 'string' && v.title.trim() ? { title: v.title.trim().slice(0, 200) } : {}) };
       const instructions = client.getInstructions();
       e.instructions = typeof instructions === 'string' && instructions.trim() ? instructions.trim().slice(0, MAX_INSTRUCTIONS) : undefined;
       const mine = () => current() && e.client === client;
@@ -1055,6 +1118,13 @@ export class McpManager extends EventEmitter {
     return { server: hit.entry.name, scope: hit.entry.scope, tool: hit.tool.name, readOnly: hit.info.readOnly, destructive: hit.info.destructive };
   }
 
+  /** A local server's last lines of stderr (at most 12), secrets cut: for the user's "Show log", never the model. */
+  log(name: string, scope: McpScope): string[] {
+    const e = this.entries.get(keyOf(scope, name));
+    if (!e) throw new Error(`No ${scope} server named "${name}".`);
+    return e.stderr.map((l) => redactSecrets(l));
+  }
+
   /** The real server and tool names (and the tool's title, if any) behind a model-facing name, for the interface. */
   names(fullName: string): McpCallNames | undefined {
     const hit = this.byFullName.get(fullName);
@@ -1085,7 +1155,7 @@ export class McpManager extends EventEmitter {
   }
 
   private notConnectedText(e: Entry): string {
-    if (e.status === 'needs-auth' || e.status === 'authorizing') return `MCP server "${e.name}" needs sign-in. The user can sign in under Settings → MCP.`;
+    if (e.status === 'needs-auth' || e.status === 'authorizing') return `MCP server "${e.name}" needs sign-in. The user can sign in under Settings → MCP servers.`;
     return `MCP server "${e.name}" is not connected (${firstLine(e.error ?? e.status)})`;
   }
 
