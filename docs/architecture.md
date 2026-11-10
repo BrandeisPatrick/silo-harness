@@ -26,9 +26,11 @@ tools/groups.ts   the tool groups loaded when needed, load_tools, and the groups
 ## The browser (src/main/browser/, tools/browser.ts)
 
 ```
-index.ts         what the rest of the app imports: BrowserController, setupBrowser, openChatLink, browserSession, zoomMenuItems
-controller.ts    BrowserController: the tabs (MAX_TABS 12; one active, the others hidden), the active view's bounds, what the
-                 browser_* tools do on the active tab, the agent's action stamps (acting()), find, zoom, the context menu's
+index.ts         what the rest of the app imports: BrowserController, SessionTabs, setupBrowser, openChatLink, browserSession, zoomMenuItems
+session-tabs.ts  SessionTabs: a BrowserController per session, made on first use; the pane shows the session in front's,
+                 the others are parked (views off the window at the pane's size); deleting a session closes its tabs
+controller.ts    BrowserController: one session's tabs (MAX_TABS 12; one active, the others hidden), the active view's bounds,
+                 what that session's browser_* tools do on its active tab, the agent's action stamps (acting()), find, zoom, the context menu's
                  actions, DevTools, the blocked-popup strip, a popup's tab (tabIdOf), the certificate interstitial's state
 tab.ts           BrowserTab: one WebContentsView in persist:browser, its TabState, the shortcuts pressed in the page
                  (shortcutOf: ⌘⇧N ⌘W ⌘L ⌘F ⌘+ ⌘− ⌘0 ⌥⌘I, taken in before-input-event so neither the page nor the menu sees them)
@@ -189,7 +191,7 @@ from another session is held instead: see Messages between sessions).
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
 `unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the
-browser pane belongs to the session on screen (a background `browser_*` call gets an error result; a background
+browser's tabs are per session (a background session's `browser_*` calls act on its own tabs, out of sight; a background
 artifact is stored without navigating). Terminal tabs and MCP servers are shared.
 
 ## Agent, tools, store

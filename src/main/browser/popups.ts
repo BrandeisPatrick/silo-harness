@@ -386,6 +386,11 @@ export class PopupManager {
     else this.remove(p);
   }
 
+  /** Its controller is gone (its session was deleted, after closeFor on every tab): bar messages no longer come here. */
+  dispose(): void {
+    managers.delete(this);
+  }
+
   /** The popups a tab opened go with it. */
   closeFor(tabId: string): void {
     for (const p of [...this.popups]) if (p.tabId === tabId) this.close(p.id);

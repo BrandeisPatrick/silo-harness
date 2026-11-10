@@ -592,7 +592,15 @@ export function createSidePane({ shell, main: mainEl, browserView, dialogs, brow
     requestAnimationFrame(reportBounds);
   });
 
+  /** The session whose page tabs the strip shows */
+  let pageSession: string | undefined;
+
   function applyBrowserState(s: BrowserState): void {
+    // Another session came forward: its page tabs take the place the pages had, before the tools
+    if (s.session !== pageSession) {
+      if (pageSession !== undefined) pagesPlaced = false;
+      pageSession = s.session;
+    }
     browserTabs.applyState(s);
     browserBars.applyState(s);
     browserFind.applyState(s);

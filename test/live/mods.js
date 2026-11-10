@@ -258,6 +258,10 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'light'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'light'; })()`);
       await app.evaluate(`document.getElementById('new-session-btn').click()`);
       await sleep(800);
+      // Each session has its own tabs: the new one gets a page too, for the alignment checks below
+      const landing = `${site.base}/landing.html`;
+      await app.evaluate(`oc.rpc('browser.go', ${JSON.stringify(landing)})`);
+      await app.waitFor(`oc.browser.state().then((s) => s.url === ${JSON.stringify(landing)} && !s.loading)`, 10_000, 'the landing page in the new session').catch(() => {});
     }
 
     // ---------- Layout: collapse, resize, close and reopen, remembered across a relaunch ----------

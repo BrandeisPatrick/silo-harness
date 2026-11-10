@@ -129,6 +129,8 @@ export interface DownloadState {
   asking: boolean;
   /** The tab it came from (a popup's: the tab that opened it); null when unknown or closed */
   tabId: string | null;
+  /** Asking, from a tab of a session not on screen: its bar waits for that session */
+  elsewhere?: boolean;
 }
 
 export type DownloadAction = 'open' | 'show' | 'cancel' | 'clear' | 'allow' | 'deny';
@@ -147,6 +149,7 @@ export interface BrowserBuiltIns {
 
 /** The pane: every tab, which one is active, and the active tab's fields flat (the URL bar reads those). */
 export interface BrowserState {
+  /** The tabs of the session on screen (each session has its own; a new one has none) */
   tabs: TabState[];
   activeId: string;
   url: string;
@@ -154,6 +157,8 @@ export interface BrowserState {
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
+  /** The session these tabs belong to (absent from older main processes) */
+  session?: string;
 }
 
 /** A popup window a page opened (an OAuth sign-in), drawn as a card over the pane. `bounds` is the page area, under its 32 px bar. */

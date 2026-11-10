@@ -22,8 +22,8 @@ export interface RuntimeOptions {
   config: () => AppConfig;
   /** The skills of a folder (project ones first) */
   skills: (cwd: string) => Skill[];
-  /** The window's browser pane, or null while there is no window */
-  browser: () => BrowserController | null;
+  /** A session's own browser tabs in the window (made on first use), or null while there is no window */
+  browser: (sessionId: string) => BrowserController | null;
   terminal?: TerminalManager;
   artifacts?: ArtifactStore;
   /** Read when an agent is made: the manager is created after the app, which it reads its config through */
@@ -73,17 +73,15 @@ interface Live {
 }
 
 /**
- * The agents get this instead of the window's BrowserController: the window (and with it the controller) can be
- * closed and made again while the agents live on, so every call looks the current one up.
+ * Each agent gets this instead of its session's BrowserController: the window (and with it the session's tabs) can be
+ * closed and made again while the agents live on, so every call looks the current one up (and makes it on first use).
  */
 function browserHandle(current: () => BrowserController | null): BrowserController {
   return new Proxy({} as BrowserController, {
     get(_target, key) {
+      if (key === 'then') return undefined;
       const b = current();
-      if (!b) {
-        if (key === 'then') return undefined;
-        return () => Promise.reject(new Error('The browser pane is not available: the window is closed.'));
-      }
+      if (!b) return () => Promise.reject(new Error('The browser pane is not available: the window is closed.'));
       const v = (b as unknown as Record<PropertyKey, unknown>)[key];
       return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(b) : v;
     },
@@ -94,16 +92,15 @@ export class SessionRuntime {
   private readonly agents = new Map<string, Agent>();
   private readonly lives = new Map<string, Live>();
   private fg: string;
-  private readonly browser: BrowserController;
   private readonly eventListeners = new Set<(sessionId: string, ev: AgentEvent) => void>();
   private readonly statusListeners = new Set<(sessionId: string, status: SessionStatus) => void>();
   private readonly listListeners = new Set<() => void>();
   private readonly foregroundListeners = new Set<(id: string, prev: string) => void>();
+  private readonly forgetListeners = new Set<(id: string) => void>();
   private sink: ((sessionId: string, ev: AgentEvent) => void) | null = null;
   private readonly planClaims = new Set<PlanClaim>();
 
   constructor(private readonly opts: RuntimeOptions) {
-    this.browser = browserHandle(opts.browser);
     this.fg = opts.store.create({ cwd: opts.config().workingDirectory, origin: 'user' }).id;
   }
 
@@ -152,7 +149,7 @@ export class SessionRuntime {
     const session = this.opts.store.get(id);
     if (!session) throw new Error(`No conversation ${id}`);
     const o = this.opts;
-    const agent = new Agent(o.config, this.browser, o.store, o.skills, (ev) => this.dispatch(id, ev), o.terminal, o.artifacts, o.mcp?.() ?? undefined, {
+    const agent = new Agent(o.config, browserHandle(() => o.browser(id)), o.store, o.skills, (ev) => this.dispatch(id, ev), o.terminal, o.artifacts, o.mcp?.() ?? undefined, {
       session,
       app: o.app,
       foreground: () => this.fg === id,
@@ -178,7 +175,14 @@ export class SessionRuntime {
     void agent?.endSession('deleted').catch(() => undefined);
     this.agents.delete(id);
     this.lives.delete(id);
+    for (const cb of [...this.forgetListeners]) cb(id);
     this.listChanged();
+  }
+
+  /** A session was forgotten (deleted): its browser tabs close. */
+  onForget(cb: (id: string) => void): Disposer {
+    this.forgetListeners.add(cb);
+    return () => this.forgetListeners.delete(cb);
   }
 
   /**

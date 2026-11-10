@@ -86,7 +86,8 @@ export function createBrowserBars(o: BrowserBarsDeps) {
     const tab = activeTab();
     const tabIds = new Set((state?.tabs ?? []).map((t) => t.id));
     const req = tab ? requests.find((r) => r.tabId === tab.id) : undefined;
-    const dl = downloads.find((d) => d.asking && (d.tabId === tab?.id || !d.tabId || !tabIds.has(d.tabId)));
+    // One from a tab of a session that is not on screen waits for that session
+    const dl = downloads.find((d) => d.asking && !d.elsewhere && (d.tabId === tab?.id || !d.tabId || !tabIds.has(d.tabId)));
     const want: { key: string; make: () => HTMLElement }[] = [];
     if (req) {
       const text = `${req.site} wants to ${req.phrase}`;

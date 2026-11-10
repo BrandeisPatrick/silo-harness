@@ -23,7 +23,7 @@ Read on branch `next` at 615fb1d. Files: `src/main/browser.ts` (`BrowserControll
 | Navigation | URL bar (`#url`), back, forward, reload, "Open in browser" (`shell.openExternal`, http/https/file only), title and loading state; a bare phrase becomes a DuckDuckGo search; relative paths resolve against the current page | `navigate`, `state`, `emitState`; renderer `applyBrowserState`; `ipc.ts` `browser:open-external` |
 | Agent perception | `browser_read_page` (a DOM walk that tags visible interactive elements `[ref_N]` with a `data-oc-ref` attribute; `filter=all` adds headings and text), `browser_find`, `browser_get_text` (`main`/`article` first), `browser_screenshot` (`capturePage` → PNG in `temp/silo-harness-screenshots`, shown to the user, sent to the model only with `sendScreenshotsToModel`), `browser_eval` (`executeJavaScript` in the main world) | `readPageScript`, `readPage`, `find`, `getText`, `screenshot`, `evaluate` |
 | Agent action | `browser_click` by visible text (`findRef`: exact > prefix > substring, errors list candidates), by ref or by coordinates, with a blue flash on the element; `browser_type` into a field by label/placeholder or ref (`insertText`, optional clear and Enter); `browser_press_key`; `browser_scroll`; `browser_wait_for` (text or selector, 200 ms polling); `browser_navigate` | `click`, `clickAt`, `type`, `pressKey`, `scroll`, `waitFor` |
-| Multi-session rule | The pane belongs to the session on screen; a background session's `browser_*` call gets `BROWSER_BACKGROUND` | `agent.ts` `execTool`, `test/runtime.js` check 6 |
+| Multi-session rule | Each session has its own tabs (`SessionTabs`); a background session's `browser_*` calls act on its own tabs, out of sight (was: refused with `BROWSER_BACKGROUND`) | `session-tabs.ts`, `test/runtime.js` check 6, `test/live/session-tabs.js` |
 | Artifacts | `create_artifact` navigates the pane to `artifact://view/...` and brings the Browser tab forward | `agent.ts` ~1411, renderer |
 | Hooks | `PreToolUse`/`PostToolUse` fire for `browser_*` with the tool's own name and arguments; a hook can `deny`, `ask` or `allow` | `agent.ts` `execTool`; `docs/hooks.md` |
 | Live tests | The rig drives the renderer over CDP; the browser view is another CDP target, not yet used; `browser_screenshot` fails in the hidden test window (backlog #28) | `test/live/rig.js`, `docs/ux-backlog.md` |
@@ -68,7 +68,7 @@ Things we do well that the research confirms are the right call: a real embedded
 | Hooks and mods | Hooks receive `tool_input` and `tool_response`; mods see events the host forwards (no browser API today) | Anything a tool result contains |
 | The transcript, history, export, Dreaming, remote page | Store and search every tool result; `history_read` reads them; the remote page shows them (images withheld) | Anything a tool result contains |
 | Another local process or a disk copy | Read `userData` | The password store, cookies |
-| Another session | A background session's browser calls are refused | To use the foreground user's logins |
+| Another session | A background session's browser calls act on its own tabs only (the profile, and so the sign-ins, is shared) | To act in the foreground session's tabs |
 
 **Mitigations, by layer** (each phase names which it adds):
 - *Store*: passwords encrypted with `safeStorage` (Keychain-backed), never written in plain text, never logged.
@@ -155,7 +155,7 @@ Headless (`npm test`, node, no Electron), new files under `test/`:
 - `browser-downloads.js`: `sanitize` strips `../`, separators, control characters, caps length; `unique` adds counters.
 - `browser-permissions.js`: policy table (auto-allow, deny, ask), store round trip, deferral for inactive tabs.
 - `browser-popups.js`: the disposition rules (tab vs popup vs deny) as a pure function over `{ url, disposition, features, referrer, gesture, openCount }`.
-- `runtime.js` gains checks that `browser_click` asks in Ask mode, is refused in a background session (existing), and is allowed on localhost without a card.
+- `runtime.js` gains checks that `browser_click` asks in Ask mode, reaches only the session's own tabs in a background session, and is allowed on localhost without a card.
 
 Live (`test/live/`, through `rig.js`):
 - Add to the rig `app.browserTarget(tabIndex)`: find the CDP target whose URL is the tab's and attach a second socket, so a test can `evaluate` inside the page. Add `test/support/site.js`: a local HTTP server serving fixtures (`login.html` with a password field, `popup.html` with a `window.open` + `postMessage` flow, `download.html`, `permissions.html` that calls `getUserMedia`, `redirect.html` to a second port that stands in for another site), plus an HTTPS variant with a fixture self-signed certificate in `test/live/fixtures/`.
