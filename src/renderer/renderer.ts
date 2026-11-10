@@ -950,7 +950,13 @@ async function sendComposer(): Promise<void> {
     const list = await oc.skills.list();
     addNoticeCard(
       list.length
-        ? `**Skills**\n\n${list.map((sk) => `- \`/${sk.name}\` ${sk.description || 'No description'} *(${sk.source})*`).join('\n')}`
+        ? `**Skills**\n\n${list
+            // A skill with `user-invocable: false` has no slash command: its name shows bare, marked as the agent's
+            .map((sk) => {
+              const typed = sk.userInvocable !== false;
+              return `- \`${typed ? '/' : ''}${sk.name}\` ${sk.description || 'No description'} *(${sk.source}${typed ? '' : ', agent only'})*`;
+            })
+            .join('\n')}`
         : 'No skills yet. Add one under `.silo-harness/skills`.',
     );
     return;
