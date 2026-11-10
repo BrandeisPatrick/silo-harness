@@ -166,8 +166,13 @@ export function createSidePane({ shell, main: mainEl, browserView, dialogs, brow
     });
     for (const el of closed) el.hidden = true;
     for (const el of shown) el.hidden = false;
+    activeInView();
+  }
+
+  /** An overflowing strip keeps its active tab scrolled into view (after a change, or when the pane narrows). */
+  function activeInView(): void {
     const active = entryElement(activeEntry());
-    if (active && strip.scrollWidth > strip.clientWidth) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    if (active && !active.hidden && strip.scrollWidth > strip.clientWidth) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     markOverflow();
   }
 
@@ -177,7 +182,7 @@ export function createSidePane({ shell, main: mainEl, browserView, dialogs, brow
     strip.classList.toggle('scroll-right', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
   }
   strip.addEventListener('scroll', markOverflow, { passive: true });
-  new ResizeObserver(markOverflow).observe(strip);
+  new ResizeObserver(activeInView).observe(strip);
 
   function saveTools(): void {
     try {
