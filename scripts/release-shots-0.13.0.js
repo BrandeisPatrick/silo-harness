@@ -198,7 +198,7 @@ async function sceneWeb() {
     const ev = app.evaluate;
     await F.mainEval(inspect, fakeWebFetch(web.port, ['www.rfc-editor.org']));
     await openSession(app, ids.main);
-    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
+    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
 
     scriptWeb(mock);
     await app.send('Should the Retry-After on our 429s be a number of seconds or a date? Check what the spec allows.');

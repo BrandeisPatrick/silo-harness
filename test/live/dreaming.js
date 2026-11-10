@@ -80,7 +80,7 @@ function seed(profile, project) {
 
 const shotOf = async (app, name, theme = 'light') => {
   // The conversation alone on screen: the side pane and the rail closed
-  await app.evaluate(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close')?.click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
+  await app.evaluate(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle')?.click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
   await app.evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`);
   await sleep(200);
   await app.screenshot(path.join(SHOTS, `${name}.png`));

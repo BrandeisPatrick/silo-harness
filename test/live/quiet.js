@@ -58,7 +58,7 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
     await theme('light');
     // The reading column on its own, as a user reading a long session would have it
     await app.waitFor(`window.__oc_debug.mods.views().filter((v) => v.hello).length >= 5`, 20_000, 'the rail to start').catch(() => {});
-    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-close');
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
     await app.evaluate(`(() => { const b = document.querySelector('#rail-toggle'); if (b && !b.hidden && b.getAttribute('aria-pressed') === 'true') b.click(); })()`);
 
     // ---------- Turn 1: reads, edits, a failing and a passing command, a reply, a search and a listing ----------

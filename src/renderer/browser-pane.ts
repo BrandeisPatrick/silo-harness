@@ -1,5 +1,5 @@
-// The Browser pane's own chrome beyond the URL bar: the tab strip (a tab per page with its favicon, title and ×, a +
-// at the end), the popups the main process reports (the cards themselves are native views laid over the pane), the
+// The Browser pane's own chrome beyond the URL bar: the page tabs in the side pane's one strip (a tab per page with
+// its favicon, title and ×; side-pane.ts puts them in order among the tool tabs and handles clicks and keys), the popups the main process reports (the cards themselves are native views laid over the pane), the
 // one-time note that the browser now keeps a profile of its own, the zoom chip in the URL pill ("125%", which resets
 // on click) and the strip under the URL bar when the tab's page tried to open a popup that was refused ("A popup was
 // blocked · Show"). side-pane.ts owns the pane and calls in here.
@@ -9,9 +9,13 @@ import { icon } from './icons.js';
 import { onPush, rpc } from './rpc.js';
 
 export interface BrowserPaneDeps {
-  /** The tab strip (role="tablist"); one .browser-tab per tab is rendered into it */
+  /** The side pane's strip (role="tablist"); one .browser-tab per page tab is rendered into it */
   strip: HTMLElement;
   newButton: HTMLButtonElement;
+  /** Whether the browser is the pane's tab in front: only then does its active page tab look active */
+  front(): boolean;
+  /** The page tabs were drawn (one came, went or changed): the strip puts them in order */
+  onTabs(): void;
   /** The note under the URL bar and its × */
   note: HTMLElement;
   noteClose: HTMLButtonElement;
@@ -33,7 +37,7 @@ export function blockedPopupWords(n: number): string {
 }
 
 /** The host of a page, for a tab without a title ("example.com"); the URL itself for pages without one. */
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     const u = new URL(url);
     return u.protocol === 'http:' || u.protocol === 'https:' ? u.host : url;
@@ -50,10 +54,12 @@ export function createBrowserPane(o: BrowserPaneDeps) {
 
   function tabElement(id: string): HTMLElement {
     const el = document.createElement('div');
-    el.className = 'browser-tab';
+    el.className = 'browser-tab strip-tab';
     el.dataset.id = id;
+    el.dataset.tab = `page:${id}`;
     el.setAttribute('role', 'tab');
-    el.innerHTML = `<span class="browser-tab-icon" aria-hidden="true">${GLOBE}</span><span class="browser-tab-title"></span><button type="button" class="browser-tab-close" tabindex="-1" aria-label="Close tab" data-tip="Close tab">${icon('x', 14)}</button>`;
+    el.setAttribute('aria-controls', 'browser-pane');
+    el.innerHTML = `<span class="browser-tab-icon tab-icon" aria-hidden="true">${GLOBE}</span><span class="browser-tab-title tab-title"></span><button type="button" class="browser-tab-close tab-close" tabindex="-1" aria-label="Close tab" data-tip="Close tab">${icon('x', 14)}</button>`;
     return el;
   }
 
@@ -90,18 +96,17 @@ export function createBrowserPane(o: BrowserPaneDeps) {
       el.remove();
       tabEls.delete(id);
     }
-    s.tabs.forEach((t, i) => {
+    const front = o.front();
+    for (const t of s.tabs) {
       let el = tabEls.get(t.id);
       if (!el) {
         el = tabElement(t.id);
         tabEls.set(t.id, el);
+        o.strip.append(el);
       }
-      updateTab(el, t, t.id === s.activeId);
-      const at = o.strip.children.item(i);
-      if (at !== el) o.strip.insertBefore(el, at);
-    });
-    const active = tabEls.get(s.activeId);
-    if (active && o.strip.scrollWidth > o.strip.clientWidth) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+      updateTab(el, t, front && t.id === s.activeId);
+    }
+    o.onTabs();
     renderTabChrome(s.tabs.find((t) => t.id === s.activeId) ?? null);
   }
 
@@ -153,7 +158,7 @@ export function createBrowserPane(o: BrowserPaneDeps) {
     }
   }
 
-  /** The + button and ⌘⇧N: a blank tab, active. */
+  /** ⌘⇧N and the + button (side-pane.ts brings the browser forward first): a blank tab, active. */
   function newTab(): Promise<void> {
     return act(o.newButton, "Couldn't open a tab", () => rpc('browser.newTab'));
   }
@@ -192,63 +197,6 @@ export function createBrowserPane(o: BrowserPaneDeps) {
     void rpc('browser.dismissProfileNote').catch(() => undefined);
   };
 
-  o.newButton.onclick = () => void newTab();
-  o.strip.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
-    const tab = target.closest<HTMLElement>('.browser-tab');
-    const id = tab?.dataset.id;
-    if (!tab || !id) return;
-    if (target.closest('.browser-tab-close')) void closeTab(id);
-    else void activate(id);
-  });
-  // Middle-click closes a tab (and must not start autoscroll).
-  o.strip.addEventListener('mousedown', (e) => {
-    if (e.button === 1) e.preventDefault();
-  });
-  o.strip.addEventListener('auxclick', (e) => {
-    if (e.button !== 1) return;
-    const tab = (e.target as HTMLElement).closest<HTMLElement>('.browser-tab');
-    if (!tab?.dataset.id) return;
-    e.preventDefault();
-    void closeTab(tab.dataset.id);
-  });
-  o.strip.addEventListener('keydown', (e) => {
-    const tab = (e.target as HTMLElement).closest<HTMLElement>('.browser-tab');
-    const id = tab?.dataset.id;
-    const tabs = state?.tabs ?? [];
-    if (!tab || !id || !tabs.length || e.metaKey || e.ctrlKey || e.altKey) return;
-    const at = tabs.findIndex((t) => t.id === id);
-    let next = -1;
-    if (e.key === 'ArrowRight') next = (at + 1) % tabs.length;
-    else if (e.key === 'ArrowLeft') next = (at - 1 + tabs.length) % tabs.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = tabs.length - 1;
-    else if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      void activate(id);
-      return;
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault();
-      void closeTab(id);
-      return;
-    }
-    if (next < 0 || at < 0) return;
-    e.preventDefault();
-    const nextId = tabs[next].id;
-    void activate(nextId);
-    tabEls.get(nextId)?.focus();
-  });
-  // A vertical wheel scrolls an overflowing strip sideways (no arrows).
-  o.strip.addEventListener(
-    'wheel',
-    (e) => {
-      if (o.strip.scrollWidth <= o.strip.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
-      e.preventDefault();
-      o.strip.scrollLeft += e.deltaY;
-    },
-    { passive: false },
-  );
-
   onPush('browser:popups', (list) => {
     popups = Array.isArray(list) ? list : [];
   });
@@ -256,6 +204,16 @@ export function createBrowserPane(o: BrowserPaneDeps) {
 
   return {
     applyState,
+    /** Draws the tabs again (the browser came to the front or went to the back) */
+    refresh: render,
+    /** The page tabs in the browser's order, their elements, and which one is active and blank */
+    ids: () => (state?.tabs ?? []).map((t) => t.id),
+    element: (id: string) => tabEls.get(id) ?? null,
+    activeId: () => state?.activeId ?? '',
+    isBlank: (id: string) => {
+      const t = state?.tabs.find((x) => x.id === id);
+      return !!t && (!t.url || t.url === 'about:blank');
+    },
     newTab,
     closeTab,
     closeActive,

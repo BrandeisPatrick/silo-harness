@@ -133,7 +133,7 @@ export function isIconName(name: string): name is IconName {
 
 /** SVG markup for an icon. Size is in CSS pixels; the drawing is always on the 16px grid. */
 export function icon(name: IconName, size = 16, cls = ''): string {
-  return `<svg class="icon${cls ? ' ' + cls : ''}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
+  return `<svg class="icon${cls ? ' ' + cls : ''}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 }
 
 /** Replaces `data-icon="name"` (and optional `data-icon-size`) placeholders in static markup with SVGs. */

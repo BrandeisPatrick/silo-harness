@@ -84,7 +84,7 @@ async function main() {
     await app.click(`.session-item[data-id=${js(ids.main)}]`);
     await app.waitFor(`document.querySelector('.session-item.active')?.dataset.id === ${js(ids.main)}`, 10_000, 'the main session');
     // The reading column on its own: the side pane and the rail closed
-    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
+    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
 
     scriptTurn(mock);
     await app.send('A missing product should say which id it could not find. Add a test for it, fix it, and run the tests.');

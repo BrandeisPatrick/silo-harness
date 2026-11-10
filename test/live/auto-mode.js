@@ -40,7 +40,7 @@ const userSays = (text) => (p) => {
     app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => ({ text: e.innerText.replace(/\\s+/g, ' ').trim(), tip: e.querySelector('.auto-blocked-words')?.dataset.tip ?? '', allow: Boolean(e.querySelector('.auto-blocked-allow')), shown: Boolean(e.offsetParent) }))`);
   const visibleRows = (needle) => app.evaluate(`[...document.querySelectorAll('#messages .tool')].filter((e) => !e.hidden && e.offsetParent && e.textContent.includes(${JSON.stringify(needle)})).length`);
   try {
-    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-close');
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
 
     // ---------- 1. A blocked command: one quiet line, no card ----------
     replies.push({ content: '', toolCalls: [{ id: 'a1', name: 'bash', args: { command: 'touch blocked.txt', description: 'Create the file' } }], when: userSays('Make blocked.txt') });

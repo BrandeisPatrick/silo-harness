@@ -136,7 +136,7 @@ const $ = byId;
 hydrateIcons();
 
 const shell = document.querySelector<HTMLElement>('.shell')!;
-const contentEl = document.querySelector<HTMLElement>('.content')!;
+const mainEl = document.querySelector<HTMLElement>('.main')!;
 const transcriptWrap = document.querySelector<HTMLElement>('.transcript-wrap')!;
 const messagesEl = $('messages');
 const emptyState = $('empty-state');
@@ -1754,13 +1754,13 @@ const { hideSlashMenu, updateSlashMenu, moveSlashSelection, acceptSlashSelection
   autosize,
 });
 
-// ---------- Side pane: Browser, Diff and Terminal tabs, then the mods' tabs ----------
+// ---------- Side pane: one strip of page tabs and tool tabs (Diff, Terminal, the mods' panes) ----------
 
 const { confirmAction } = createConfirmDialog({ dialog: confirmDialog, hideBrowser: () => oc.browser.setVisible(false), afterClose: () => syncBrowserView() });
 
 const pane = createSidePane({
   shell,
-  content: contentEl,
+  main: mainEl,
   browserView,
   dialogs: [settingsDialog, shortcutsDialog, confirmDialog, lightbox],
   browser: oc.browser,
@@ -2006,6 +2006,7 @@ const modsHost = createModsHost({
   openPage: (page, opts) => (page === 'scheduled' && opts?.form === 'new' ? openTaskForm() : openPage({ page })),
   openLightbox,
   showPane: (tab) => showPaneTab(tab as PaneTab),
+  closePane: (tab) => pane.closeTab(tab),
   paneTabsChanged,
   paneLayoutChanged,
   syncBrowserView,
@@ -2033,7 +2034,7 @@ const dreamingPage = createDreamingPage({
 });
 pagesView = createPages({
   shell,
-  main: document.querySelector<HTMLElement>('.main')!,
+  main: document.querySelector<HTMLElement>('.chat-col')!,
   topbar: document.querySelector<HTMLElement>('.topbar')!,
   changed: (open) => {
     closeMenu();

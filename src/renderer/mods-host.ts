@@ -69,8 +69,10 @@ export interface ModsHostDeps {
   switchSession(id: string): Promise<void>;
   newSession(): Promise<void>;
   openLightbox(src: string, name?: string, caption?: string): void;
-  /** Shows the side pane on a tab: 'browser', 'diff', 'terminal' or 'mod:<view key>' */
+  /** Shows the side pane on a tab: 'browser', 'diff', 'terminal' or 'mod:<view key>' (a tool's tab joins the strip) */
   showPane(tab: string): void;
+  /** Takes a tool's tab out of the side pane's strip, as its × does */
+  closePane(tab: string): void;
   /** The mod tabs changed (one appeared or went away): re-apply the pane */
   paneTabsChanged(): void;
   /** The rail opened, closed or changed width: keep the side pane and the native browser view where they belong */
@@ -83,8 +85,9 @@ export interface ModsHostDeps {
 
 /** What renderer.ts's side-pane code asks the host. */
 export interface ModPaneTabs {
-  /** The mod tab buttons in strip order, after Browser, Diff and Terminal */
-  buttons(): { key: string; el: HTMLButtonElement }[];
+  /** Every pane the mods that are on add, in the mods' order: its view key, its tab (side-pane.ts puts it in the strip
+   *  while it is open) and its title */
+  tabs(): { key: string; el: HTMLButtonElement; title: string }[];
   has(key: string): boolean;
   /** Which mod tab is in front (null: a built-in one or none) and whether the pane shows at all */
   apply(active: string | null, paneVisible: boolean): void;
@@ -189,8 +192,6 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   const bgLayer = $('mod-background');
   const sidePane = $('side-pane');
   const shellEl = document.querySelector<HTMLElement>('.shell');
-  const paneTabs = sidePane?.querySelector<HTMLElement>('.pane-tabs') ?? null;
-  const paneSpacer = paneTabs?.querySelector<HTMLElement>(':scope > .spacer') ?? null;
 
   let mods: ModInfo[] = [];
   let methodPerms: PermissionTable = {};
@@ -231,13 +232,11 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     if (next && !writing) {
       const before = JSON.stringify(layout);
       const looksBefore = JSON.stringify(layout.looks);
-      const closedBefore = JSON.stringify(layout.closedTabs ?? []);
       layout = { ...fallbackLayout(), ...next, collapsed: [...(next.collapsed ?? [])], closedTabs: [...(next.closedTabs ?? [])], looks: { ...fallbackLayout().looks, ...(next.looks ?? {}) } };
       if (JSON.stringify(layout) !== before) {
         applyRail();
         syncBackground();
       }
-      if (ready && JSON.stringify(layout.closedTabs) !== closedBefore) applyMods(mods);
       if (JSON.stringify(layout.looks) !== looksBefore) void syncLooks();
     }
     syncTheme();
@@ -628,7 +627,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         const id = p.view === undefined ? f.slot.ref.view.id : str('view', 100);
         const target = viewKey(mod.key, id);
         if (!mod.manifest?.contributes?.views?.some((v) => v.id === id)) throw bad(`view: ${mod.id} has no view "${id}"`);
-        openOrReopen(target);
+        openView(target);
         return null;
       }
       case 'ui.copy':
@@ -955,7 +954,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       s.tabBtn.setAttribute('aria-label', `${s.title}${s.badge ? `, ${s.badge}` : ''}`);
       s.tabBtn.setAttribute('aria-keyshortcuts', 'Delete');
       s.tabBtn.dataset.tip = s.title;
-      const x = s.tabBtn.querySelector<HTMLElement>('.pane-tab-close');
+      const x = s.tabBtn.querySelector<HTMLElement>('.tab-close');
       if (x) x.dataset.tip = `Close ${s.title}`;
     }
   }
@@ -1044,60 +1043,30 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     panel.hidden = true;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'pane-tab mod-pane-tab';
+    btn.className = 'pane-tab mod-pane-tab strip-tab';
     btn.id = `pane-tab-mod-${n}`;
     btn.setAttribute('role', 'tab');
     btn.setAttribute('aria-selected', 'false');
     btn.setAttribute('aria-controls', panel.id);
     btn.tabIndex = -1;
+    btn.hidden = true;
     btn.dataset.view = ref.key;
-    // The × closes the tab (out of the strip until the ⋯ menu shows it again). A button cannot hold a button, so it is a
-    // span the pointer uses; from the keyboard, Delete on the tab does the same.
-    btn.innerHTML = `${iconHtml(ref.view.icon, ref.mod, 14)}<span class="mod-tab-title pane-tab-label"></span><span class="count-badge" hidden></span><span class="pane-tab-close" aria-hidden="true">${icon('x', 12)}</span>`;
+    // side-pane.ts handles its clicks and keys like every tab in the strip. The × takes it out of the strip; a button
+    // cannot hold a button, so it is a span the pointer uses, and from the keyboard Delete on the tab does the same.
+    btn.dataset.tab = `mod:${ref.key}`;
+    btn.innerHTML = `<span class="tab-icon" aria-hidden="true">${iconHtml(ref.view.icon, ref.mod, 16)}</span><span class="mod-tab-title tab-title"></span><span class="count-badge" hidden></span><span class="tab-close" aria-hidden="true">${icon('x', 14)}</span>`;
     panel.setAttribute('aria-labelledby', btn.id);
-    btn.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.pane-tab-close')) {
-        e.preventDefault();
-        closeTab(ref.key);
-        return;
-      }
-      deps.showPane(`mod:${ref.key}`);
-    });
-    btn.addEventListener('keydown', (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      e.preventDefault();
-      closeTab(ref.key);
-    });
     const s: Slot = { ref, seat: 'tab', el: panel, body: panel, frame: null, next: null, title: ref.view.title, badge: null, height: 0, failedEl: null, queued: [], tabBtn: btn };
     renderSlotHead(s);
     return s;
   }
 
-  const isClosed = (key: string) => (layout.closedTabs ?? []).includes(key);
-
-  /** Takes a mod's tab out of the strip (its page unloads); the ⋯ menu shows it again. */
-  function closeTab(key: string): void {
-    if (isClosed(key)) return;
-    saveLayout({ closedTabs: [...(layout.closedTabs ?? []), key] });
-    applyMods(mods);
-  }
-
-  /** Puts a closed tab back in the strip and in front, opening the pane if it was closed. */
-  function reopenTab(key: string): void {
-    if (isClosed(key)) {
-      saveLayout({ closedTabs: (layout.closedTabs ?? []).filter((k) => k !== key) });
-      applyMods(mods);
-    }
-    deps.showPane(`mod:${key}`);
-  }
-
   const pane: ModPaneTabs = {
-    buttons: () =>
+    tabs: () =>
       viewsFor(mods, 'tab')
-        .filter((r) => !isClosed(r.key))
         .map((r) => slots.get(r.key))
         .filter((s): s is Slot => !!s?.tabBtn)
-        .map((s) => ({ key: s.ref.key, el: s.tabBtn! })),
+        .map((s) => ({ key: s.ref.key, el: s.tabBtn!, title: s.title })),
     has: (key) => slots.get(key)?.seat === 'tab',
     apply(active, visible) {
       paneActive = active;
@@ -1107,120 +1076,13 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
         const on = s.ref.key === active;
         s.tabBtn.classList.toggle('active', on);
         s.tabBtn.setAttribute('aria-selected', String(on));
-        s.tabBtn.tabIndex = on ? 0 : -1;
         s.el.hidden = !on;
-        // Made the first time it is shown, then kept alive while hidden.
+        // Made the first time it is shown, then kept alive while hidden (its tab closed too: the mod keeps running).
         if (on && visible && !s.frame) mountFrame(s);
       }
       syncVisibility();
     },
   };
-
-  // ---------- Fitting the pane's tab strip ----------
-  //
-  // Browser, Diff, Terminal and the mod tabs share one row. When they do not all fit with their full titles, the
-  // tab in front keeps its title (as long as that fits), and the others' titles shorten evenly, built-in and mod
-  // tabs alike, down to icon-only. Widths are measured, so a count badge or the busy dot is always counted and
-  // never overlaps a neighbour. A shortened or hidden title stays the tab's accessible name and its tooltip.
-
-  /** The smallest shortened title worth showing (about four letters and the ellipsis); below it, icon-only. */
-  const MIN_TITLE = 40;
-  let fitting = false;
-
-  function fitPaneTabs(): void {
-    if (!paneTabs || fitting) return;
-    const width = paneTabs.clientWidth;
-    if (!width) return; // the pane is hidden; the resize observer calls again once it shows
-    fitting = true;
-    try {
-      const tabs = [...paneTabs.querySelectorAll<HTMLButtonElement>(':scope > .pane-tab')].filter((b) => !b.hidden);
-      const ceil = (el: Element) => Math.ceil(el.getBoundingClientRect().width);
-      // Measure each tab with its whole title, then icon-only.
-      const m = tabs.map((btn) => {
-        const label = btn.querySelector<HTMLElement>('.pane-tab-label');
-        btn.classList.remove('icon-only');
-        if (label) label.style.maxWidth = '';
-        const full = ceil(btn);
-        // The title as drawn at full size (a mod tab's title has a cap of its own in the CSS)
-        const text = label ? ceil(label) : 0;
-        btn.classList.add('icon-only');
-        const icon = ceil(btn);
-        btn.classList.remove('icon-only');
-        // What the tab is wide without its title: padding, icon, badge and the gaps around the title
-        const chrome = full - text;
-        return { btn, label, full, text, icon, chrome, active: btn.getAttribute('aria-selected') === 'true' };
-      });
-      const cs = getComputedStyle(paneTabs);
-      const gap = parseFloat(cs.columnGap) || 0;
-      const items = [...paneTabs.children].filter((c) => !(c as HTMLElement).hidden && getComputedStyle(c).display !== 'none');
-      const others = items.filter((c) => !tabs.includes(c as HTMLButtonElement) && c !== paneSpacer).reduce((sum, c) => sum + ceil(c), 0);
-      // One pixel of slack per tab against rounding
-      const room = width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - others - gap * Math.max(0, items.length - 1) - tabs.length;
-
-      // title width per tab: its whole title, a shortened one, or null for icon-only
-      const title = new Map<HTMLButtonElement, number | null>();
-      if (m.reduce((sum, t) => sum + t.full, 0) <= room) for (const t of m) title.set(t.btn, t.text);
-      else {
-        const front = m.find((t) => t.active && t.text);
-        const rest = m.filter((t) => t !== front);
-        let left = room - rest.reduce((sum, t) => sum + t.icon, 0);
-        if (front) {
-          // The tab in front keeps what it can of its title, everything else at least icon-only.
-          const can = Math.min(front.text, left - front.chrome);
-          title.set(front.btn, can >= front.text ? front.text : can >= MIN_TITLE ? can : null);
-          left -= title.get(front.btn) !== null ? front.chrome + (title.get(front.btn) as number) : front.icon;
-        }
-        // Water-filling: the shortest titles stay whole, the rest share what is left equally. When the shares get too
-        // small to read, the longest titles go icon-only first and the others share again.
-        const want = rest.filter((t) => t.text).sort((a, b) => a.text - b.text);
-        for (const t of rest) title.set(t.btn, null);
-        for (let k = want.length; k > 0; k--) {
-          const widths = new Map<HTMLButtonElement, number>();
-          let free = left;
-          let n = k;
-          let ok = true;
-          for (const t of want.slice(0, k)) {
-            // Showing a title costs the tab's chrome minus its icon-only width, plus the title itself.
-            const extra = t.chrome - t.icon;
-            const share = free / n - extra;
-            if (share < Math.min(MIN_TITLE, t.text)) {
-              ok = false;
-              break;
-            }
-            const w = Math.min(t.text, Math.floor(share));
-            widths.set(t.btn, w);
-            free -= extra + w;
-            n--;
-          }
-          if (!ok) continue;
-          for (const [btn, w] of widths) title.set(btn, w);
-          break;
-        }
-      }
-      for (const t of m) {
-        const w = title.get(t.btn) ?? null;
-        t.btn.classList.toggle('icon-only', w === null || !t.label);
-        if (t.label) t.label.style.maxWidth = w !== null && w < t.text ? `${w}px` : '';
-        const name = (t.label?.textContent ?? '').trim();
-        const cut = w === null || w < t.text || (!!t.label && t.label.scrollWidth > t.label.clientWidth + 1);
-        // A mod tab always carries its title as a tooltip (renderSlotHead); a built-in one when it is shortened.
-        if (!t.btn.classList.contains('mod-pane-tab')) {
-          if (name && cut) t.btn.dataset.tip = name;
-          else delete t.btn.dataset.tip;
-        }
-      }
-    } finally {
-      fitting = false;
-    }
-  }
-
-  if (paneTabs) {
-    // Fitted right away (not on the next frame), so a narrower pane never draws an overflowing row first.
-    new ResizeObserver(() => fitPaneTabs()).observe(paneTabs);
-    // Tabs coming and going, the one in front changing, a badge or a title changing
-    new MutationObserver(() => fitPaneTabs()).observe(paneTabs, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-selected'] });
-    void document.fonts?.ready.then(() => fitPaneTabs());
-  }
 
   // ---------- The composer strip ----------
 
@@ -1404,7 +1266,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
   function applyMods(list: ModInfo[]): void {
     mods = Array.isArray(list) ? list : [];
     const wanted = new Map<string, ViewRef>();
-    for (const seat of ['rail', 'tab', 'composer', 'worker'] as const) for (const r of viewsFor(mods, seat)) if (seat !== 'tab' || !isClosed(r.key)) wanted.set(r.key, r);
+    for (const seat of ['rail', 'tab', 'composer', 'worker'] as const) for (const r of viewsFor(mods, seat)) wanted.set(r.key, r);
     let tabsChanged = false;
     // Gone, off, paused or no longer that seat: removed at once.
     for (const s of [...slots.values()]) {
@@ -1475,15 +1337,6 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       const s = slots.get(r.key);
       if (s) s.el.style.order = String(i);
     });
-    if (paneTabs) {
-      // Tab buttons hold no frame, so they can be put in order directly, just before the strip's spacer.
-      const order = pane.buttons().map((b) => b.el);
-      const now = [...paneTabs.querySelectorAll<HTMLButtonElement>(':scope > .mod-pane-tab')];
-      if (order.length !== now.length || order.some((el, i) => el !== now[i])) {
-        for (const el of order) paneTabs.insertBefore(el, paneSpacer);
-        tabsChanged = true;
-      }
-    }
     if (bgSlot && changedMods.has(bgSlot.ref.mod.key)) reloadSlot(bgSlot);
     // Previews in Settings reload with their mod's files, whatever its state (it may be a look not in use yet)
     for (const s of slots.values()) {
@@ -1516,12 +1369,6 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     } else if (s.seat === 'tab') deps.showPane(`mod:${key}`);
   }
 
-  /** openView for a key that may be a closed tab: a command or harness.ui.open brings it back. */
-  function openOrReopen(key: string): void {
-    if (!slots.get(key) && isClosed(key) && viewsFor(mods, 'tab').some((r) => r.key === key)) return reopenTab(key);
-    openView(key);
-  }
-
   // ---------- The "⋯" menu: mod tabs and Manage mods ----------
 
   moreBtn?.addEventListener('click', () => {
@@ -1530,17 +1377,15 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     if (tabs.length) {
       sections.push({
         label: 'Tabs',
-        // A tab in the strip comes to the front; a closed one is shown again ("Show Scheduled")
+        // Its tab comes to the front, joining the strip if it is not there
         items: tabs.map((r) => {
           const s = slots.get(r.key);
-          const closed = isClosed(r.key);
-          const title = s?.title || r.view.title;
           return {
-            label: closed ? `Show ${title}` : title,
+            label: s?.title || r.view.title,
             description: r.mod.manifest?.name && r.mod.manifest.name !== r.view.title ? r.mod.manifest.name : undefined,
             icon: (iconSource(r.view.icon, r.mod.origin, isIconName) as { builtin?: IconName } | null)?.builtin ?? (iconSource(r.mod.manifest?.icon, r.mod.origin, isIconName) as { builtin?: IconName } | null)?.builtin ?? 'blocks',
-            checked: !closed && paneVisible && paneActive === r.key,
-            onSelect: () => (closed ? reopenTab(r.key) : deps.showPane(`mod:${r.key}`)),
+            checked: paneVisible && paneActive === r.key,
+            onSelect: () => deps.showPane(`mod:${r.key}`),
           };
         }),
       });
@@ -1652,7 +1497,6 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     const name = isObj(data) && typeof data.name === 'string' ? data.name : '';
     const viewId = mod?.manifest?.contributes?.commands?.find((c) => c.name === name)?.view;
     const wantedKey = viewId ? viewKey(modKey, viewId) : '';
-    if (wantedKey && !slots.get(wantedKey) && isClosed(wantedKey)) reopenTab(wantedKey);
     const target = viewId ? slots.get(wantedKey) : undefined;
     if (target) openView(target.ref.key);
     for (const s of slots.values()) {
@@ -1895,9 +1739,13 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     looks: () => looks.map((l) => ({ target: l.target, ref: l.ref, mod: l.mod, bytes: l.css.length })),
     lookCss: (target: string) => looks.find((l) => l.target === target)?.css ?? null,
     browser: () => deps.browserDebug(),
-    open: (key: string) => openOrReopen(key),
-    closeTab: (key: string) => closeTab(key),
-    tabs: () => viewsFor(mods, 'tab').map((r) => ({ key: r.key, closed: isClosed(r.key), inStrip: !!slots.get(r.key)?.tabBtn?.isConnected })),
+    open: (key: string) => openView(key),
+    closeTab: (key: string) => deps.closePane(`mod:${key}`),
+    tabs: () =>
+      viewsFor(mods, 'tab').map((r) => {
+        const btn = slots.get(r.key)?.tabBtn;
+        return { key: r.key, inStrip: !!btn?.isConnected && !btn.hidden };
+      }),
   };
   const dbgHost = (window as unknown as { __oc_debug?: Record<string, unknown> }).__oc_debug;
   if (dbgHost) dbgHost.mods = debug;
