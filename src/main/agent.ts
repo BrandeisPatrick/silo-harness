@@ -116,9 +116,13 @@ function learnKey(name: string, programs: string[], browser?: BrowserApproval, s
   return sessionKey ?? '';
 }
 
-/** What a browser action Allow on its Auto mode block lets through once: the tool, the card, the site and the card's first line. */
+/**
+ * What a browser action Allow on its Auto mode block lets through once: the tool, the card, the site and the card's
+ * first line. A page script also by its code: the Allow covers the script that was blocked, not another on that site.
+ */
 function browserActionKey(name: string, detail: string, b: BrowserApproval): string {
-  return actionKey(name, [b.card, b.site.key, detail.split('\n')[0] ?? ''].join('\u0000'));
+  const code = b.card === 'eval' ? (b.check?.code ?? '') : '';
+  return actionKey(name, [b.card, b.site.key, detail.split('\n')[0] ?? '', code].join('\u0000'));
 }
 
 /** What Auto mode's check is told about a browser card (classifier.ts): never the page's text or the model's reason. */
@@ -712,7 +716,7 @@ export class Agent {
     if (decision.kind === 'refuse') return settle(decision);
     if (decision.kind === 'allow' || (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? ''))) return Promise.resolve({ ok: true });
     // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
-    // by its card, site and first line: the model's reason under it may differ on the retry)
+    // by its card, site and first line, a page script also by its code: the model's reason under it may differ on the retry)
     const onceKey = opts.browser ? (CHECKED_BROWSER_CARDS.has(opts.browser.card) ? browserActionKey(name, detail, opts.browser) : null) : opts.custom ? null : actionKey(name, detail);
     if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve({ ok: true });
     if (decision.kind !== 'classify') return settle(decision);

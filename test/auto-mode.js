@@ -421,6 +421,20 @@ console.warn = (...a) => {
   check('browser block, then Allow', res.ok === false && agent.allowBlocked('b_blk').ok);
   res = await browse('browser_navigate', 'Open blocked.example\nanother reason', { site: site('blocked.example'), card: 'site', check: { kind: 'read', url: 'https://blocked.example/' } }, 'b_blk2');
   check('browser Allow: the retry runs once without the check or a card', res.ok === true && checkRequests().length === 1 && !of('approval_request').length, { res, checks: checkRequests().length });
+  // Allow on a blocked page script covers that script only: other code on the site is checked again
+  reset();
+  const script = (code, id) => browse('browser_eval', `Run JavaScript on docs.example\n\n${code}`, { site: site('docs.example'), card: 'eval', reason: "reads the site's cookies or storage", check: { kind: 'eval', url: 'https://docs.example/', code } }, id);
+  state.replies.push(classifierReply('block', '[Credentials] reads storage'));
+  res = await script('localStorage.length', 'b_ev1');
+  check('browser eval block, then Allow', res.ok === false && agent.allowBlocked('b_ev1').ok);
+  state.replies.push(classifierReply('block', '[Credentials] reads cookies'));
+  res = await script('document.cookie', 'b_ev2');
+  check('browser eval Allow: other code on the site is checked again', res.ok === false && checkRequests().length === 2 && !of('approval_request').length, { res, checks: checkRequests().length });
+  res = await script('localStorage.length', 'b_ev3');
+  check('browser eval Allow: the allowed script runs once without the check', res.ok === true && checkRequests().length === 2, { res, checks: checkRequests().length });
+  state.replies.push(classifierReply('block', '[Credentials] reads storage'));
+  res = await script('localStorage.length', 'b_ev4');
+  check('browser eval Allow: only once', res.ok === false && checkRequests().length === 3, { res, checks: checkRequests().length });
   // ask for a command is no answer: blocked, as before (never a card, never allowed)
   agent.session = store.create({ cwd });
   reset();
