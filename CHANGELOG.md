@@ -63,6 +63,7 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Artifacts stay sealed.** An HTML artifact sends nothing out, loads scripts only from cdnjs, jsDelivr or unpkg, and never leaves its page by itself.
 - **Downloads ask unless yours.** A download waits for your Allow unless it starts within five seconds of your own click or key press.
 - **The clipboard stays yours.** The agent's paste, copy and cut shortcuts in the browser are refused.
+- **Tabs named by site.** `browser_tabs` shows a tab's title and address only for sites you allowed; other tabs show their site name alone.
 - **Safer page-opened tabs.** A page cannot open a local file, `data:`, `blob:` or blank tab.
 - **App ports off-limits.** The agent's browser cannot open the remote-control server or the app's debugging port.
 - **No silent identity choices.** No client certificate or Bluetooth device is picked for a page, and HTTP sign-in prompts are cancelled.

@@ -245,11 +245,30 @@ function guarded(tool: Tool): Tool {
   };
 }
 
+/** Whether the agent may read this page without a card, as siteDecision decides a read. */
+function readable(url: string, ctx: ToolContext): boolean {
+  try {
+    return siteDecision({ url, action: 'read', mode: ctx.mode, cwd: ctx.cwd, settings: lists(ctx), sessionAllowed: ctx.sitesAllowed?.() ?? new Set() }).kind === 'allow';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the tab tools say of a tab. Its title and URL are the page's own words (and a URL can carry a token), so they
+ * are fenced under the tab's site, and shown only when the agent may read that site: otherwise the site's name alone,
+ * as the card would name it. Listing tabs is not a way to read a page the user has not allowed.
+ */
+function tabLabel(t: { title: string; url: string }, ctx: ToolContext): string {
+  const url = t.url || 'about:blank';
+  if (!readable(url, ctx)) return `${(siteOf(url) ?? NO_SITE).display}  (not allowed yet: reading it asks the user)`;
+  const title = String(t.title ?? '').replace(/\s+/g, ' ').trim();
+  return fencePage(url, `${title ? `"${title}"  ` : ''}${url}`);
+}
+
 /** One line per tab for browser_tabs list: the active one marked. */
-function tabLines(tabs: { id: string; title: string; url: string; loading: boolean }[], activeId: string): string {
-  return tabs
-    .map((t) => `${t.id === activeId ? '*' : ' '} ${t.id}  ${t.title ? `"${t.title}"  ` : ''}${t.url || 'about:blank'}${t.loading ? '  (loading)' : ''}${t.id === activeId ? '  (active)' : ''}`)
-    .join('\n');
+function tabLines(tabs: { id: string; title: string; url: string; loading: boolean }[], activeId: string, ctx: ToolContext): string {
+  return tabs.map((t) => `${t.id === activeId ? '*' : ' '} ${t.id}  ${tabLabel(t, ctx)}${t.loading ? '  (loading)' : ''}${t.id === activeId ? '  (active)' : ''}`).join('\n');
 }
 
 const tools: Tool[] = [
@@ -274,7 +293,7 @@ const tools: Tool[] = [
       const action = String(args.action ?? 'list');
       const list = () => {
         const s = b.state();
-        return `${s.tabs.length} tab${s.tabs.length === 1 ? '' : 's'}:\n${tabLines(s.tabs, s.activeId)}`;
+        return `${s.tabs.length} tab${s.tabs.length === 1 ? '' : 's'}:\n${tabLines(s.tabs, s.activeId, ctx)}`;
       };
       if (action === 'list') return { content: list() };
       if (action === 'new') {
@@ -289,7 +308,7 @@ const tools: Tool[] = [
         if (!args.tab_id) throw new Error('select needs tab_id (see list).');
         b.activate(String(args.tab_id));
         const s = b.state();
-        return { content: `Now on ${s.activeId}: ${fencePage(s.url, `${s.url}${s.title ? ` — "${s.title}"` : ''}`)}` };
+        return { content: `Now on ${s.activeId}: ${tabLabel(s, ctx)}` };
       }
       if (action === 'close') {
         const id = args.tab_id ? String(args.tab_id) : b.state().activeId;
