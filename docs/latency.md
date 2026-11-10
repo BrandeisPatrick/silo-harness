@@ -39,3 +39,21 @@ node scripts/timing-report.js ~/Library/Application\ Support/Silo\ Harness/timin
 A line holds, per run: the provider's type, the model id's last part, the mode, the wall time and how it ended; per model turn: the harness's steps before the request, when the request went out, the first event, the first thinking, text and tool-call delta, the last event, attempts, retry waits, fallbacks, the finish reason and the token counts; per tool call: the built-in tool's name (an MCP tool is `mcp`), the queue, hooks, each permission question (how it was settled and how long it took, a safety check's result and time, your wait on a card), execution, storing, its wall time, its outcome and how many calls ran alongside it. A value the provider did not report is left out, not set to 0.
 
 **Never recorded**: prompts, arguments, commands, paths, URLs, output, session titles, account or profile names, base URLs, keys. A session is a short random id. Recording is always on in memory and costs well under a microsecond per streamed event.
+
+## The benchmark
+
+`npm run build && node scripts/latency-bench.js [--runs 20]` drives the agent with the mock model and made-up files, no window. Tool and model delays are simulated. Each scenario runs with `toolConcurrency` 1 (before) and 4 (after); wall time of the whole run, median / p95 in ms, 20 runs each (Apple Silicon Mac, 2026-11-10):
+
+| Scenario | Before | After | Holds | After, from the timing record (medians) |
+| --- | ---: | ---: | :---: | --- |
+| A. three reads (300, 100, 200 ms) | 620 / 633 | 316 / 320 | yes | tools 303 |
+| B. local read (100 ms) + remote read (400 ms) | 514 / 518 | 415 / 419 | yes | tools 402 |
+| C. read, edit, read (reads 200 ms) | 420 / 425 | 419 / 426 | yes | the edit never overlaps a read |
+| D. uncertain command in Auto mode, check takes 300 ms and blocks | 316 / 322 | 314 / 319 | yes | safety checks 304 |
+| D2. the same, the check answers nonsense | 317 / 321 | 316 / 319 | yes | blocked (fails closed) |
+| E. first event at 400 ms, thinking streamed over 500 ms | 1019 / 1022 | 1016 / 1019 | yes | first event 403, thinking 508 |
+| F. Stop 200 ms into three 2 s reads | 205 / 206 | 203 / 205 | yes | every call answered |
+| G. provider fails once (503), then answers | 1010 / 1014 | 1009 / 1013 | yes | retry wait 1002 |
+
+"Holds" checks each run: results in call order, the edit alone, the check's block kept, a valid history after Stop, the retry counted. Only A and B change: the other scenarios have nothing that may run together.
+
