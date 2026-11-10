@@ -792,8 +792,17 @@ export interface SessionMeta {
 export interface SkillInfo {
   name: string;
   description: string;
+  /** The SKILL.md (or command file) */
   path: string;
   source: 'project' | 'user' | 'bundled';
+  /** The skill's folder */
+  dir?: string;
+  /** Shown after /name in the slash menu (`argument-hint`) */
+  argumentHint?: string;
+  /** False when `user-invocable: false`: left out of the slash menu */
+  userInvocable?: boolean;
+  /** What is wrong with the file, one short line each (docs/skills.md) */
+  problems?: string[];
 }
 
 export type TranscriptItem =

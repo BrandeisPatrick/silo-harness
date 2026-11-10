@@ -1,6 +1,7 @@
 ---
 name: summarize-page
-description: Open a URL in the built-in browser and summarize it. Usage: /summarize-page <url>
+description: Opens a web page in the built-in browser and summarizes it in a few bullet points. Use when the user asks what a page or link says, or to summarize a URL.
+argument-hint: <url>
 ---
 Summarize the web page at the URL the user gave.
 

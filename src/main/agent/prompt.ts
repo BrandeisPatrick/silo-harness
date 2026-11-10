@@ -9,7 +9,7 @@ import { CONTEXT_NOTE_PREFIX } from '../compact';
 import { instructionsPrompt, loadInstructions } from '../instructions';
 import type { McpManager } from '../mcp';
 import type { Msg } from '../sessions';
-import type { Skill } from '../skills';
+import { skillsPrompt, type Skill } from '../skills';
 import { BROWSER_RULES, groupsPromptLine, type ToolGroup } from '../tools/groups';
 
 /** Tells the model what is missing, so it can say so instead of improvising. */
@@ -148,9 +148,7 @@ How to work:
 - Skills: a <skill> block in a user message holds instructions for that request; follow them. Only load a skill with the skill tool when the user invoked it with /name or the task clearly matches its description, never as a substitute for finishing the task.
 - Mentions: when the user writes @path, that file's contents (or a folder's listing) follow their message in a <file> block; treat it as the current contents of that file and do not read it again unless the block says it was cut short.
 - Tasks: for work with several steps, keep a short task list with update_tasks so the user can follow along; skip it for quick answers.`;
-  const skillList = skills.length
-    ? `\n\nAvailable skills:\n${skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}`).join('\n')}`
-    : '';
+  const skillList = skillsPrompt(skills);
   const servers = mcp?.describe() ?? '';
   const mcpText = servers
     ? `\n\nMCP servers provide extra tools named mcp__<server>__<tool> (their descriptions say what they do). Use them when they fit the task; the user approves calls that can change something.\n${servers}`

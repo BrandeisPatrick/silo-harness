@@ -252,11 +252,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.replies.push({ content: 'ok' });
   await agent.run('hi');
   sysNow = state.requests.find((q) => q.url === '/api/chat' && q.payload.stream === true).payload.messages[0].content;
-  check('J: OPENCODER.md takes precedence over AGENTS.md', /Instructions from OPENCODER\.md/.test(sysNow) && !/Instructions from AGENTS\.md/.test(sysNow));
+  check('J: AGENTS.md and OPENCODER.md are both included, the app\'s own file last', /Instructions from AGENTS\.md[\s\S]*Instructions from OPENCODER\.md/.test(sysNow));
   const files = loadInstructions(cwd);
   check('J: loader reports the file and label', files.some((f) => f.label === 'OPENCODER.md' && f.text === 'Prefer OPENCODER.md') && instructionsPrompt([]) === '');
-  fs.writeFileSync(path.join(cwd, 'OPENCODER.md'), 'y'.repeat(30000));
-  check('J: long files truncated', loadInstructions(cwd).find((f) => f.label === 'OPENCODER.md').truncated === true && loadInstructions(cwd).find((f) => f.label === 'OPENCODER.md').text.length < 24100);
+  fs.writeFileSync(path.join(cwd, 'OPENCODER.md'), 'y'.repeat(40000));
+  check('J: long files truncated to the 32 KiB budget', loadInstructions(cwd).find((f) => f.label === 'OPENCODER.md').truncated === true && loadInstructions(cwd).find((f) => f.label === 'OPENCODER.md').text.length < 32 * 1024 + 200);
 
   await mcp.close();
   mock.close();

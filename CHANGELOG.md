@@ -2,8 +2,17 @@
 
 ## Unreleased
 
+### New
+
+- **Claude Code skills load.** Skills in `.claude/skills` and `.agents/skills`, and commands in `.claude/commands`, load next to the app's own.
+- **A skill that writes skills.** `/create-skill` writes a skill, loads it and fixes what the check reports.
+- **Skill arguments.** A skill takes what you type after its name as `$ARGUMENTS` or `$1` to `$9`, with a hint in the slash menu.
+
 ### Improved
 
+- **Skill problems shown.** Settings → Skills and the skill tool say what is wrong with a skill file instead of skipping it.
+- **Instructions from every folder.** `AGENTS.md` and `CLAUDE.md` are read from the project root down to the session folder, and can pull in files with `@path`.
+- **A better mod-writing skill.** `/create-mod` covers every kind of mod and checks its work with `mod_check`.
 - **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
 - **Prompt caching on Claude.** Anthropic providers use Claude's own API, which caches the prompt and the conversation from one request to the next.
 - **Caching through gateways.** Claude through OpenRouter, Portkey, LiteLLM or Vercel asks for prompt caching, and OpenAI gets the session as its cache key.
@@ -26,6 +35,10 @@
 - **Home-folder scans ask first.** Searching the whole home folder, `/` or `/Users` asks first, so macOS does not raise a row of privacy prompts unasked.
 - **Screen, camera, clipboard.** Commands that capture the screen, use the camera or microphone, or read the clipboard ask first.
 - **Spotlight for finding files.** The agent finds a file anywhere on the Mac with `mdfind`, which needs no folder access.
+
+### For developers
+
+- **Skill format defined.** [docs/skills.md](docs/skills.md) sets out the fields, the folders and every problem message.
 
 ## 0.12.0 — 2026-11-09
 
