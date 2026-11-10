@@ -137,6 +137,10 @@ function startMock() {
  */
 function anthropic(state, payload, res, json) {
   const stream = !!payload.stream;
+  // An endpoint without deferred tools (`rejectDeferred`): refuses a request that has any
+  if (state.rejectDeferred && JSON.stringify(payload.tools ?? []).includes('"defer_loading"')) {
+    return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'tools.20.defer_loading: Extra inputs are not permitted (mock)' } });
+  }
   const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(seen(payload))));
   let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;
   if (!reply && !stream && state.classifierDefault && isClassifierRequest(payload)) {

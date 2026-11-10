@@ -1,7 +1,8 @@
 # Token benchmark
 
-What the harness itself sends to the model, measured on real requests, and what was cut. November 2026, Claude Haiku 5.5 through
-Anthropic's OpenAI-compatible endpoint (`https://api.anthropic.com/v1`), the provider the live tests use.
+What the harness itself sends to the model, measured on real requests, and what was cut. November 2026, Claude Haiku 5.5. Until
+the native path was built, everything went through Anthropic's OpenAI-compatible endpoint (`https://api.anthropic.com/v1`), which
+does not cache; [Prompt caching, measured](#prompt-caching-measured) is the native Messages API with caching.
 
 ## How it is measured
 
@@ -20,17 +21,22 @@ provider's `prompt_tokens` as the total: images by their pixel size, the rest sh
   lookup across the codebase, git status and diff, the project's website in the browser, a question about something read earlier,
   more reading, a docs edit, and two turns after compaction. Titles on. Context window 180K with the compaction threshold at 0.5,
   so compaction happens at about 90K, under Haiku's 100K price step. The report is per turn, with flags for what cost the most.
-- **`--native`** replays the agent and safety-check requests, in order, through the native Messages API with `cache_control` on
-  the tools, the system prompt and the last message, to measure what prompt caching would save.
+- **The path.** By default the app's provider is of type `anthropic` on the proxy, so agent turns and Auto mode's check use the
+  native Messages API with the app's own cache marks, and titles and the compaction summary the OpenAI-compatible endpoint, as
+  for a user. `--compat` puts everything on the OpenAI-compatible endpoint, as the earlier runs below were.
+- **`--native`** (with `--compat`) replays the agent and safety-check requests through the native API afterwards: the
+  projection used before the native path existed.
 
-Prices used (Claude Haiku 5.5, USD per million tokens, prompts up to 100K): input 0.10, output 0.50, cache write (5 minutes) 0.125,
-cache read 0.01. Above 100K: input 0.50, output 2.50.
+Prices used (Claude Haiku 5.5, USD per million tokens, prompts up to 100K): input 0.10, output 0.50, cache read 0.01, cache write
+0.125 for five-minute entries and 0.20 for one-hour entries, from the reply's `usage.cache_creation` split. Above 100K: input
+0.50, output 2.50, and the cache prices five times theirs.
 
 ```
 npm run build
 set -a; . /path/to/api.env; set +a
-node scripts/token-bench.js --runs 2 --native          # tier 1
-node scripts/token-bench.js --tier 2 --native          # tier 2
+node scripts/token-bench.js --runs 2                   # tier 1, native path
+node scripts/token-bench.js --tier 2                   # tier 2, native path
+node scripts/token-bench.js --compat --runs 2 --native # the old endpoint, with the replay
 ```
 
 ## What was found
@@ -42,7 +48,8 @@ node scripts/token-bench.js --tier 2 --native          # tier 2
   output was only pruned past 60% of the context window, which a large window (128K by default, 200K or 1M for Claude) reaches
   late or never, so every request carried all earlier output until compaction.
 - **The OpenAI-compatible endpoint reports no caching** (no `prompt_tokens_details` at all; identical prefixes seconds apart get
-  no discount). The native Messages API with `cache_control` would have cut the cost by 73% (tier 1) and 79% (tier 2).
+  no discount). The replay projected that caching would cut the cost by 73% (tier 1) and 79% (tier 2). Measured since on the
+  native path: 71% and 74 to 76% less than the same build without caching ([below](#prompt-caching-measured)).
 - **The prompt prefix was not stable across sessions**: the working directory and date were on the second line, so two sessions
   shared only the first 229 of 6,721 characters. Within a session, tools and prompt were byte-identical except for one change
   when the session got its title (the name line).
@@ -165,11 +172,85 @@ after, it looked the function up again with one targeted grep and sed (a 1-2K re
 tokens), and answered correctly. Otherwise files were read again about as often before and after (agent.ts five and seven
 times, always in parts with offset and limit; compact.ts two and three times within one turn).
 
+## Prompt caching, measured
+
+The native path (agent turns and Auto mode's check on the Messages API, with cache marks on the tools, the system prompt and the
+conversation) and the tool groups sent deferred, measured on fd01575 plus the deferred groups. Tier 1 two runs, tier 2 one run,
+on November 10, 2026. Every scenario finished with outcome ok. Raw reports: `report.md` and `results.json` of each run.
+
+### Tier 1 (mean of two runs)
+
+| Scenario | Requests | Input | Uncached | Written (5 min) | Written (1 h) | Read | Read share | Output | Cost |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Q | 5.5 | 25,029 | 84 | 2,721 | 0 | 22,224 | 89% | 1,339 | $0.0012 |
+| E | 5 | 16,254 | 449 | 1,792 | 0 | 14,014 | 86% | 602 | $0.0007 |
+| B | 8.5 | 58,267 | 116 | 4,386 | 0 | 53,765 | 92% | 1,030 | $0.0016 |
+| L | 17.5 | 97,278 | 1,945 | 4,606 | 0 | 90,727 | 93% | 2,440 | $0.0029 |
+| **Total** | 36.5 | **196,827** | 2,594 | 13,504 | 0 | **180,730** | **92%** | 5,411 | **$0.0065** |
+
+Against the earlier measurements of the same four scenarios:
+
+| | Input | Cost |
+|---|--:|--:|
+| Before any cut (be2ee39) | 356,929 | $0.0386 |
+| After the cuts, without caching (ddad3b9) | 194,571 | $0.0226 |
+| With caching | 196,827 | $0.0065 (-71% against the line above, -83% against the first) |
+
+The input is about the same as without caching: what changed is its price. 92% of it was read from the cache at a tenth of the
+input price.
+
+### Tier 2
+
+| | Requests (agent / check / title / compaction) | Input | Uncached | Written (5 min) | Read | Read share | Output | Cost |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| Before any cut (be2ee39) | 82 (55 / 25 / 1 / 1) | 3,661,785 | | | 0 | 0% | 30,071 | $0.3812 |
+| After the cuts, without caching (ddad3b9, two runs) | | 2,242,037 and 2,492,289 | | | 0 | 0% | | $0.2364 and $0.2630 |
+| With caching | 69 (52 / 16 / 1 / 0) | 3,385,953 | 26,113 | 140,783 | 3,219,057 | 95% | 19,834 | $0.0623 |
+
+The session cost $0.0623, 74% and 76% less than the two runs without caching and 84% less than before any cut. Its input is
+larger than without caching: on a provider that caches, old tool output is set aside only once a request reaches 90K tokens, so
+requests grew to 89K before the one batch in turn 15 brought them to 55K. Cache reads of that output cost less than the
+rewrites that setting it aside earlier would have caused. No compaction happened.
+
+### How it was run
+
+`node scripts/token-bench.js --runs 2` and `node scripts/token-bench.js --tier 2`: the app's provider of type `anthropic` on the
+recording proxy, which forwards `/v1/messages` and records the native usage, including `cache_creation`'s split into five-minute
+and one-hour writes. Model `claude-haiku-5-5`, thinking off (the native path turns it off where a model allows it).
+
+### Side calls
+
+- **Auto mode's check** (native, its instructions marked for the cache): 16 calls in tier 2, 42,110 tokens in, 16,240 of them
+  read from the cache (the 1,015 tokens of instructions each time), $0.0031. What follows the instructions (the user's messages,
+  the recent tool calls, the action) changes every call and is paid in full. Tier 1: 4 calls per run, $0.0004 and $0.0005.
+- **Titles** stay on the OpenAI-compatible endpoint: one per session, 70 to 122 tokens in, under $0.0001 each.
+- **Compaction summary**: none happened in these runs. It stays on the OpenAI-compatible endpoint, so when one happens it is
+  paid in full.
+
+### Where the cache is still written
+
+- **At the start of each session**, the new conversation: 166 to 2,782 tokens in a session's first request (the user's message
+  and the context note; more when the browser loads from the message). The tools and the system prompt (4,156 tokens, kept an
+  hour) were read in every session: they were already cached by runs minutes before. After an hour without use they are written
+  once again: 4,156 tokens at 0.20 per million, about $0.0008 (computed from the measured size).
+- **New content each step**: every request writes what it adds (the reply, the tool results), five-minute entries.
+- **One rebuild in tier 2**, turn 15: old output set aside in one batch (about 38K tokens), and the next request wrote 50,783
+  tokens. Before the batch rule, old output was set aside a little more at each new turn past 48K.
+- **Loading a group no longer rebuilds**: the browser loaded in turn 10 of tier 2, and one tool list was sent in all 52 agent
+  requests. The groups' tools are in every request, deferred, and a load's result references them.
+
+### One run to the next
+
+In tier 1, run 2 of Q made one request more than run 1 (6 against 5): its input was 28,574 against 21,483 (+33%), its cost
+$0.0013 against $0.0012 (+14%), because the extra request was nearly all cache reads. The totals of the two runs differed by 11%
+in input and 3% in cost ($0.0064 and $0.0066). With caching, a run that takes more steps costs little more.
+
 ## Found but not changed
 
-### A native Anthropic path with prompt caching (the biggest saving)
+### A native Anthropic path with prompt caching (built since, measured above)
 
-The replay through the Messages API, with breakpoints on the last tool, the system prompt and the last message:
+The projection, before it was built: the replay through the Messages API, with breakpoints on the last tool, the system prompt
+and the last message:
 
 | | Cost without caching | Cost with caching | Saving |
 |---|--:|--:|--:|
@@ -287,4 +368,6 @@ them, and the live sub-session test has it load the sessions group.
 | Live test scripts (one pass; not recorded, estimated) | about $0.05 |
 | Tool groups: tier 1 (two runs) and tier 2, before, after the first build and after the cache-safe one (tier 2 twice) | $1.097 |
 | Tool groups: two live checks of the model loading groups, and the live scripts three times (estimated) | about $0.10 |
-| **Total** | **about $2.93** |
+| Prompt caching: a tier 1 trial (Q), tier 1 (two runs) and tier 2 | $0.076 |
+| Prompt caching: API probes of deferred tools and the live checks (estimated) | about $0.03 |
+| **Total** | **about $3.04** |

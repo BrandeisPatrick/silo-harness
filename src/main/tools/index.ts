@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import type { PermissionMode } from '../../shared/types';
 import type { Tool } from './types';
+import { GROUP_OF } from './groups';
 import { readFile, writeFile, editFile, listDirectory, glob, grep } from './fs';
 import { bash } from './shell';
 import { browserTools } from './browser';
@@ -27,8 +28,11 @@ export function allTools(mode: PermissionMode = 'ask'): Tool[] {
 }
 
 export function toSpec(tool: Tool): OpenAI.Chat.Completions.ChatCompletionTool {
-  return {
+  const spec: OpenAI.Chat.Completions.ChatCompletionTool = {
     type: 'function',
     function: { name: tool.name, description: tool.description, parameters: tool.parameters },
   };
+  // A group's tool says so where only the native path looks (groups.ts GROUP_OF): not enumerable, never serialised
+  if (tool.group) Object.defineProperty(spec, GROUP_OF, { value: tool.group });
+  return spec;
 }

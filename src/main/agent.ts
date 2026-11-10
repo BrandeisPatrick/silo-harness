@@ -38,7 +38,7 @@ import {
 } from './compact';
 import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
-import { GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isToolGroup, loadToolsTool, requestedGroups, type ToolGroup } from './tools/groups';
+import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isToolGroup, loadToolsTool, requestedGroups, type ToolGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
@@ -58,7 +58,7 @@ import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPrompt
 import { batchMarks, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
-import { THINKING_KEY } from './agent/anthropic';
+import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
@@ -374,8 +374,9 @@ export class Agent {
   /**
    * The tools a request offers, append-only for prompt caching: the core tools of the pool with load_tools after the
    * built-in ones (its definition the same all session long), then each loaded group's tools in the order the session
-   * loaded them. A load adds at the end; nothing else changes the list. (A native path could send every group's tools
-   * here marked deferred and keep the same order.)
+   * loaded them. A load adds at the end; nothing else changes the list. On Anthropic's native path every loadable
+   * group's tools come after load_tools from the first request, in the groups' fixed order, loaded or not: that path
+   * sends them deferred and a load references them (agent/anthropic.ts), so the list never changes at all.
    */
   private toolsFor(cfg: AppConfig): Tool[] {
     const pool = this.toolPool(cfg);
@@ -388,8 +389,18 @@ export class Agent {
       if (builtIn.has(t)) at = i + 1;
     });
     offered.splice(at, 0, loadToolsTool(loadable));
-    for (const g of this.loadedGroups()) if (loadable.includes(g)) offered.push(...pool.filter((t) => t.group === g));
+    const groups = this.defersGroups(cfg) ? loadable : this.loadedGroups().filter((g) => loadable.includes(g));
+    for (const g of groups) offered.push(...pool.filter((t) => t.group === g));
     return offered;
+  }
+
+  /** Anthropic's native path, which sends the groups' tools deferred from the first request (see toolsFor). */
+  private defersGroups(cfg: AppConfig): boolean {
+    try {
+      return isNativeAnthropic(resolveProvider(cfg));
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -495,7 +506,7 @@ export class Agent {
     }
     const pool = this.toolPool(cfg);
     const groups = this.loadedGroups().filter((g) => !inKept.has(g) && pool.some((t) => t.group === g));
-    return groups.length ? `## Tool groups loaded earlier in this session\n${groups.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n')}` : '';
+    return groups.length ? `${FOLDED_GROUPS_HEADING}\n${groups.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n')}` : '';
   }
 
   /** True while the approval card `id` is waiting for this agent. */
@@ -1274,7 +1285,9 @@ export class Agent {
     const chars = (t: string) => (t ? Math.ceil(t.length / 4) : 0);
     const parts = systemPromptParts(cfg, this.getSkills(cfg.workingDirectory), this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
     const noTools = isOllama(cfg) && this.toolSupport.get(`${ollamaOf(cfg).baseURL}|${ollamaOf(cfg).model}`) === false;
-    const tools = noTools ? [] : this.toolsFor(cfg);
+    // The groups' tools the native path sends deferred take no room until a load brings them in
+    const loaded = new Set(this.loadedGroups());
+    const tools = noTools ? [] : this.toolsFor(cfg).filter((t) => !t.group || loaded.has(t.group) || allGroupsUpFront(cfg) || !!this.ownTools());
     const byServer = new Map<string, Tool[]>();
     for (const t of tools) if (t.mcp) byServer.set(t.mcp.server, [...(byServer.get(t.mcp.server) ?? []), t]);
     let summary = 0;
