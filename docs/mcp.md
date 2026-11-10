@@ -50,6 +50,8 @@ No reconnection runs for a server you turned off or removed, or after a sign-in 
 
 For remote servers without their own `Authorization` header. It uses the MCP SDK's client auth:
 
+![Settings → MCP servers: one remote server connected with 7 tools, one waiting for you to sign in](releases/0.13.0/mcp-sign-in.png)
+
 1. You click **Sign in**. The app listens on `127.0.0.1` (a free port, or `oauth.callbackPort`) at `/callback`.
 2. It reads the server's protected-resource and authorization-server metadata, registers a client unless `oauth.clientId` is set, and opens the authorization page in your default browser. The request carries a random `state` and a PKCE S256 challenge.
 3. The browser comes back to the callback. One request with the right path and `state` is accepted; the page says "Signed in. You can close this tab." and the listener closes. A wrong `state` or an error ends the sign-in. The listener also closes after 5 minutes or on Cancel.
