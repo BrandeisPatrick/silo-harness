@@ -8,6 +8,7 @@
 - **A system prompt that stays put.** A mode switch, a rename or a new day adds a short note to the conversation, so providers keep the prompt cached.
 - **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Prompt caching on Claude.** Anthropic providers use Claude's own API, which caches the prompt and conversation, so long sessions cost about 70% less.
+- **Caching through gateways.** Claude through OpenRouter, Portkey, LiteLLM or Vercel asks for prompt caching, and OpenAI gets the session as its cache key.
 
 ## 0.12.0 — 2026-11-09
 

@@ -1328,6 +1328,7 @@ export class Agent {
       toolSupport: this.toolSupport,
       maxOutput: () => this.maxOutput,
       thinking: this.sessionThinking(),
+      cacheKey: this.session.id,
     };
   }
 

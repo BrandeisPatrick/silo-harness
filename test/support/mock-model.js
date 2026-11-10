@@ -27,6 +27,10 @@ function startMock() {
       if (req.url === '/v1/models' && req.method === 'GET') return json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
       if (req.url === '/api/show') return json(200, { capabilities: ['completion', 'tools'] });
       if (req.url.startsWith('/v1/messages')) return anthropic(state, payload, res, json);
+      // A gateway that refuses prompt-cache fields it does not know (`rejectCacheFields`), as some do
+      if (req.url === '/v1/chat/completions' && state.rejectCacheFields && /"(?:cache_control|prompt_cache_key|session_id)"/.test(body)) {
+        return json(state.rejectCacheFields === 422 ? 422 : 400, { error: { message: 'Unrecognized request argument supplied: cache_control (mock)' } });
+      }
       // The local models, for the model menu: whatever `ollamaModels` lists (none unless a test sets it)
       if (req.url === '/api/tags' && state.ollamaModels) return json(200, { models: state.ollamaModels.map((name) => ({ name, model: name })) });
       // A one-shot request (titles, summaries, Auto mode's safety check): a queued reply marked `nonStream` that
