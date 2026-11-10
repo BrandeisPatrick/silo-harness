@@ -95,6 +95,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         portkey: { ...current.portkey, ...next.portkey },
         dreaming: { ...current.dreaming, ...next.dreaming },
         browser: { ...current.browser, ...next.browser },
+        webSearch: { ...current.webSearch, ...next.webSearch },
         // Named providers change through the files, the command line and providers.setModel only.
         providers: current.providers,
         mcpServers: current.mcpServers,

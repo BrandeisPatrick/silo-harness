@@ -402,7 +402,7 @@ function cleanCut(msgs, cut) {
   for (const f of 'abc') state.replies.push(read(`${f}.txt`));
   state.replies.push({ content: 'ok' });
   await agent.run('Read a.txt, b.txt and c.txt.');
-  check('10: at 0.5 a 16k session compacts where 0.8 would not', agent.session.compactions && agent.session.compactions.length === 1, { ctx: agent.contextInfo(), notices: notices(), ev: events.filter((e) => e.type === 'context').map((e) => e.context.tokens) });
+  check('10: at 0.5 a 16k session compacts where 0.8 would not', agent.session.compactions && agent.session.compactions.length >= 1 && agent.session.compactions[0].stage === 'summary', { ctx: agent.contextInfo(), notices: notices(), ev: events.filter((e) => e.type === 'context').map((e) => e.context.tokens) });
   fresh({ portkey: { contextWindow: 16000 }, compactThreshold: 0.8 });
   await firstTurn();
   reset();

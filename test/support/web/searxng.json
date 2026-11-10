@@ -1,0 +1,31 @@
+{
+  "query": "electron browserwindow",
+  "number_of_results": 0,
+  "results": [
+    {
+      "url": "https://www.electronjs.org/docs/latest/api/browser-window",
+      "title": "BrowserWindow | Electron",
+      "content": "Create and control browser windows. Process: Main",
+      "engine": "duckduckgo",
+      "parsed_url": ["https", "www.electronjs.org", "/docs/latest/api/browser-window", "", "", ""],
+      "engines": ["duckduckgo", "brave"],
+      "positions": [1, 1],
+      "score": 4.0,
+      "category": "general"
+    },
+    {
+      "url": "https://stackoverflow.com/questions/1/electron-browserwindow",
+      "title": "Electron BrowserWindow &amp; frames",
+      "content": "A question about <b>BrowserWindow</b> frames. ",
+      "engine": "brave",
+      "engines": ["brave"],
+      "score": 1.0,
+      "category": "general"
+    }
+  ],
+  "answers": [],
+  "corrections": [],
+  "infoboxes": [],
+  "suggestions": [],
+  "unresponsive_engines": []
+}

@@ -10,7 +10,7 @@ import { instructionsPrompt, loadInstructions } from '../instructions';
 import type { McpManager } from '../mcp';
 import type { Msg } from '../sessions';
 import { skillsPrompt, type Skill } from '../skills';
-import { BROWSER_RULES, groupsPromptLine, type ToolGroup } from '../tools/groups';
+import { BROWSER_RULES, WEB_RULES, groupsPromptLine, type ToolGroup } from '../tools/groups';
 
 /** Tells the model what is missing, so it can say so instead of improvising. */
 export const ESSENTIAL_NOTE =
@@ -142,7 +142,7 @@ You have tools for the filesystem, a shell (bash), ${panes}and create_artifact f
 How to work:
 - Act with tools instead of guessing. Explore with glob/grep/read_file before editing. Read a file before you edit it, and prefer edit_file for targeted changes.
 - Use bash for builds, tests, git and other one-off commands (non-interactive)${upFront ? '; use terminal_run for what should keep running or the user should watch' : ''}.
-- Images the user attaches are visible to you if the model supports vision. Never append "/think", "/no_think" or similar switches to commands, file contents or tool arguments.${upFront ? `\n- ${BROWSER_RULES}` : ''}
+- Images the user attaches are visible to you if the model supports vision. Never append "/think", "/no_think" or similar switches to commands, file contents or tool arguments.${upFront ? `\n- ${BROWSER_RULES}\n- ${WEB_RULES}` : ''}
 - Keep going until the task is complete, then finish with a short summary of what you did and what you found. Do not ask questions you can answer with a tool.
 - If a tool reports that an action was not permitted, do not retry it; explain what you would have done and continue with what you can do.
 - Skills: a <skill> block in a user message holds instructions for that request; follow them. Only load a skill with the skill tool when the user invoked it with /name or the task clearly matches its description, never as a substitute for finishing the task.

@@ -25,7 +25,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const brief = `[Context compacted]\nBrief.\n\n${G.FOLDED_GROUPS_HEADING}\nLoaded browser: browser_navigate, browser_click.\nBrowser rules…\n\n## Files touched\n- read: a`;
   check('1: the groups a brief says were loaded', same(G.foldedGroups(brief), ['browser']) && same(G.foldedGroups('no heading'), []));
   const plan = A.deferPlan('claude-haiku-5-5', [{ role: 'user', content: brief }, { role: 'user', content: 'go' }], specs);
-  check('1: after a fold, the folded group is sent up front, the other deferred', !plan.deferred.has('browser_navigate') && plan.deferred.has('terminal_run') && [...plan.deferred].every((n) => n.startsWith('terminal_')), [...plan.deferred]);
+  check('1: after a fold, the folded group is sent up front, the other deferred', !plan.deferred.has('browser_navigate') && plan.deferred.has('terminal_run') && [...plan.deferred].every((n) => /^(terminal_|web_)/.test(n)), [...plan.deferred]);
   const noGroups = A.deferPlan('claude-haiku-5-5', [{ role: 'user', content: 'q' }], specs.filter((s) => !G.groupOfSpec(s)));
   check('1: no groups, nothing deferred', noGroups.deferred.size === 0);
 
@@ -62,7 +62,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('2: four requests, the same tools in every one (a load changes nothing there)', reqs.length === 4 && reqs.every((r) => JSON.stringify(r.tools) === tools0), reqs.length);
   const t0 = reqs[0].tools;
   const deferredNames = t0.filter((t) => t.defer_loading).map((t) => t.name);
-  check('2: the groups\' tools are deferred, the core tools and load_tools are not', deferredNames.length > 5 && deferredNames.every((n) => /^(browser_|terminal_)/.test(n)) && t0.some((t) => t.name === 'load_tools' && !t.defer_loading) && t0.some((t) => t.name === 'bash' && !t.defer_loading), deferredNames);
+  check('2: the groups\' tools are deferred, the core tools and load_tools are not', deferredNames.length > 5 && deferredNames.every((n) => /^(browser_|terminal_|web_)/.test(n)) && deferredNames.includes('web_fetch') && t0.some((t) => t.name === 'load_tools' && !t.defer_loading) && t0.some((t) => t.name === 'bash' && !t.defer_loading), deferredNames);
   check('2: the cache mark on the last tool loaded up front, none on a deferred one', t0.filter((t) => t.cache_control).length === 1 && !t0.find((t) => t.cache_control).defer_loading);
   const afterLoad = reqs[2].messages;
   const loadTurn = afterLoad.find((m) => m.role === 'user' && m.content.some((b) => b.type === 'tool_result' && b.tool_use_id === 'toolu_load'));

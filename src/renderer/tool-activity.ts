@@ -64,6 +64,8 @@ const KINDS: Record<string, Omit<Kind, 'key' | 'target'>> = {
   propose_mod: counted('proposed', 'a', 'mod'),
   withdraw_proposal: counted('withdrew', 'a', 'proposal'),
   browser_screenshot: counted('took', 'a', 'screenshot'),
+  web_fetch: counted('fetched', 'a', 'page'),
+  web_search: times('searched the web'),
 };
 
 /** What a denied call would have been, for a line of denials only: "Denied a command", "Denied 2 edits" */
@@ -79,7 +81,7 @@ const DENIED: Record<string, [string, string]> = {
 };
 
 /** Kinds that share a phrase share a key, so "ran 2 searches" counts grep and glob together */
-const SHARED: Record<string, string> = { glob: 'search', grep: 'search', bash: 'command', terminal_run: 'command', history_read: 'session_read' };
+const SHARED: Record<string, string> = { glob: 'search', grep: 'search', bash: 'command', terminal_run: 'command', history_read: 'session_read', web_search: 'web' };
 
 function kindOf(c: ActivityCall): Kind {
   const name = c.name;

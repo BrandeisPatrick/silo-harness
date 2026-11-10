@@ -75,10 +75,11 @@ const SCALARS: Record<string, Check> = {
   toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods.'),
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
+  checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
 };
 
 /** Sections a settings file may set field by field. */
-const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode', Record<string, Check>> = {
+const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode' | 'webSearch', Record<string, Check>> = {
   ollama: {
     baseURL: describe(str, "The Ollama server's OpenAI-compatible endpoint, e.g. http://localhost:11434/v1."),
     model: describe(str, 'The Ollama model tag, e.g. qwen3:8b.'),
@@ -116,10 +117,15 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
     model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
   },
+  webSearch: {
+    provider: describe(oneOf('duckduckgo', 'brave', 'tavily', 'exa', 'searxng'), 'The web_search backend. duckduckgo needs no key.'),
+    apiKey: describe(str, 'The key for brave, tavily or exa. Not allowed in a project file.'),
+    baseUrl: describe(str, 'Your SearXNG instance, e.g. http://localhost:8888 (it may be on your own network). Not allowed in a project file.'),
+  },
 };
 
 /** Fields of the built-in blocks that hold a secret: never shown, never accepted from a project's file. */
-export const SECRET_FIELDS = ['portkey.apiKey', 'portkey.providerApiKey'];
+export const SECRET_FIELDS = ['portkey.apiKey', 'portkey.providerApiKey', 'webSearch.apiKey'];
 
 /** Variable names that hold a secret by their look; a project's env block may not set them. */
 const SECRET_ENV = /(KEY|TOKEN|SECRET|PASSWORD)$/i;
@@ -355,13 +361,24 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       }
       value = block;
     }
+    if (key === 'webSearch' && scope === 'project' && isRecord(value)) {
+      // The key is a secret, and the address is where queries go (and the one host allowed on a private network).
+      const block: Record<string, unknown> = { ...value };
+      for (const f of ['apiKey', 'baseUrl']) {
+        if (f in block) {
+          bad(`webSearch.${f}`, "a project's settings.json may not set this; set it in Settings → Browser or your own settings.json");
+          delete block[f];
+        }
+      }
+      value = block;
+    }
     if (key === 'autoMode' && scope === 'project') {
       // What the safety check allows and which model judges is the user's alone: a cloned repository could otherwise
       // allow its own actions, or send the conversation to a model of its choosing.
       bad(key, "a project's settings.json may not set autoMode; set it in your own settings.json");
       continue;
     }
-    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser' || key === 'autoMode') {
+    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser' || key === 'autoMode' || key === 'webSearch') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);
         continue;

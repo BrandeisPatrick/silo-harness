@@ -9,6 +9,9 @@
 - **Skill arguments.** A skill takes what you type after its name as `$ARGUMENTS` or `$1` to `$9`, with a hint in the slash menu.
 - **Sign in to MCP servers.** A remote server that needs OAuth shows Sign in under Settings → MCP and opens your browser only when you click it.
 - **Server tool filters.** `enabledTools` and `disabledTools` in a server entry choose which of its tools reach the model.
+- **Read web pages.** `web_fetch` reads a public page as text, 12,000 characters at a time, without opening the Browser pane.
+- **Search the web.** `web_search` uses DuckDuckGo, or Brave, Tavily, Exa or your own SearXNG, chosen under Settings → Browser.
+- **Update notice.** A line in the sidebar says when a newer release is out; the daily check can be switched off in Settings.
 
 ### Improved
 
@@ -55,11 +58,15 @@
 - **The app's own ports are off-limits.** The agent's browser cannot open the remote-control server or the app's debugging port.
 - **No silent identity choices.** No client certificate or Bluetooth device is picked for a page, and HTTP sign-in prompts are cancelled.
 - **Careful MCP sign-in.** Sign-in uses PKCE, accepts only https or loopback endpoints, and keeps tokens in a file only you can read.
+- **Public sites only.** `web_fetch` refuses private and local-network addresses, re-checks every redirect, and asks for a new site as the browser does.
+- **Web text is data.** Fetched pages and search results arrive in a fence, and text imitating the fence is made harmless.
+- **Search keys stay put.** A search key is masked in Settings, never shown to the model and cannot be set by a project's settings file.
 
 ### For developers
 
 - **Skill format defined.** [docs/skills.md](docs/skills.md) sets out the fields, the folders and every problem message.
-- **MCP reference.** [docs/mcp.md](docs/mcp.md) covers every server key, sign-in, reconnection and the test mocks.
+- **MCP reference.** [docs/mcp.md](docs/mcp.md) covers every server key, sign-in and reconnection.
+- **Web reference.** [docs/web.md](docs/web.md) covers both web tools, their safety rules and the `webSearch` setting.
 
 ## 0.12.0 — 2026-11-09
 

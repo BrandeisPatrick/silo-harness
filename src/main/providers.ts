@@ -327,6 +327,7 @@ export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'pro
   return {
     ...cfg,
     portkey: { ...cfg.portkey, apiKey: mask(cfg.portkey?.apiKey), providerApiKey: mask(cfg.portkey?.providerApiKey) },
+    ...(cfg.webSearch ? { webSearch: { ...cfg.webSearch, apiKey: mask(cfg.webSearch.apiKey) } } : {}),
     providers,
     providerView: providersView(cfg, owned),
   };
@@ -343,6 +344,7 @@ export function acceptFromWindow<T extends Partial<AppConfig>>(current: AppConfi
     if (pk.providerApiKey === KEY_MASK) pk.providerApiKey = current.portkey.providerApiKey;
     (out as Partial<AppConfig>).portkey = pk;
   }
+  if (next.webSearch?.apiKey === KEY_MASK) (out as Partial<AppConfig>).webSearch = { ...next.webSearch, apiKey: current.webSearch?.apiKey ?? '' };
   return out;
 }
 
