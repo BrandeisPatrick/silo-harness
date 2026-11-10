@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // Token benchmark: what the harness itself sends to the model, per request, in fixed scenarios with real tool use.
 //
-// It starts a small recording proxy on 127.0.0.1 that forwards every request to the real API (Anthropic's
-// OpenAI-compatible endpoint, https://api.anthropic.com/v1) and records, per request: the model, what kind of call it
+// It starts a small recording proxy on 127.0.0.1 that forwards every request to the real API and records, per
+// request: the model, what kind of call it
 // is (an agent turn, Auto mode's safety check, a session title, a compaction summary), the size of each part of the
 // request (tool definitions, system prompt, user and assistant history, tool results, images) and the response's
-// usage (prompt, completion and cached tokens). The app is launched hidden through the live rig (test/live/rig.js) on
-// a throwaway profile, with its provider pointed at the proxy, in a temp project with a few files. Each scenario runs
+// usage (prompt, completion, cache reads and the cache writes of each lifetime). The app is launched hidden through the
+// live rig (test/live/rig.js) on a throwaway profile, with its provider pointed at the proxy, in a temp project with a
+// few files. By default the provider is of type anthropic, so the app talks Claude's native Messages API
+// (/v1/messages, with its prompt caching) and its side calls the OpenAI-compatible endpoint (/v1/chat/completions), as
+// it does for a user; --compat puts it on the OpenAI-compatible endpoint for everything, as before. Each scenario runs
 // in a fresh app and session:
 //   Q  "What does this project do?": answered after reading files (bypass mode)
 //   E  an edit plus running the project's tests (Auto mode, so the safety check's side calls are counted)
@@ -25,9 +28,13 @@
 // request's input split by part, the side calls next to it, a bar per turn of how the parts grow, and flags for what
 // cost the most (the tool results carried longest, files read again, the safety check's growing input).
 //
+// A native request is recorded in the chat-completions shape (fromNative) so the rest of the report reads both alike;
+// its deferred tools are left out of the tool part (they are not in the model's context until a load references them).
 // The split of a request's input into parts uses the provider's prompt_tokens as the total: images are estimated
 // from their pixel size (width x height / 750, after the API's resize), and the rest is shared out by characters,
-// which is one consistent chars-per-token ratio per request. Costs use Claude Haiku 5.5's prices (PRICES below).
+// which is one consistent chars-per-token ratio per request. Costs use Claude Haiku 5.5's prices (PRICES below):
+// cache reads at 0.1x the input price, cache writes at 1.25x for five-minute entries and 2x for one-hour entries, from
+// the reply's usage.cache_creation split.
 //
 // With --native, the agent and safety-check requests of each scenario are replayed afterwards, in order, through
 // Anthropic's native Messages API with cache_control breakpoints on the tools, the system prompt and the last message,
@@ -39,7 +46,7 @@
 //   npm run build
 //   set -a; . /path/to/api.env; set +a
 //   node scripts/token-bench.js [--tier 1|2|all] [--runs 2] [--scenarios Q,E,B,L,W] [--out DIR] [--label baseline]
-//                               [--native] [--window 180000] [--threshold 0.5] [--repo-commit be2ee39]
+//                               [--compat] [--native] [--window 180000] [--threshold 0.5] [--repo-commit be2ee39]
 //
 // Writes report.md (the tables), results.json (every request's record, without bodies) and requests.jsonl (the
 // request bodies, for a closer look) to the output folder (default: a new temp folder), and prints the report.
@@ -56,7 +63,7 @@ const KEY = process.env.ANTHROPIC_API_KEY || '';
 const UPSTREAM = (process.env.TOKEN_BENCH_UPSTREAM || 'https://api.anthropic.com').replace(/\/+$/, '');
 
 /** USD per million tokens, Claude Haiku 5.5, prompts up to 100K tokens (above: input 0.50, output 2.50). */
-const PRICES = { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01, longInput: 0.5, longOutput: 2.5, longFrom: 100_000 };
+const PRICES = { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheWrite1h: 0.2, cacheRead: 0.01, longInput: 0.5, longOutput: 2.5, longFrom: 100_000 };
 
 /** Marks of the side calls' system prompts (src/main/agent/classifier.ts, titles.ts, compact.ts). */
 const KINDS = [
@@ -68,7 +75,7 @@ const KINDS = [
 // ---------- Arguments ----------
 
 function parseArgs(argv) {
-  const o = { runs: 1, scenarios: ['Q', 'E', 'B', 'L'], out: '', label: '', native: false, model: LIVE_MODEL, window: 180000, threshold: 0.5, repoCommit: 'be2ee39' };
+  const o = { runs: 1, scenarios: ['Q', 'E', 'B', 'L'], out: '', label: '', native: false, compat: false, model: LIVE_MODEL, window: 180000, threshold: 0.5, repoCommit: 'be2ee39' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -83,6 +90,7 @@ function parseArgs(argv) {
     else if (a === '--out') o.out = path.resolve(next());
     else if (a === '--label') o.label = next();
     else if (a === '--native') o.native = true;
+    else if (a === '--compat') o.compat = true;
     else if (a === '--model') o.model = next();
     else if (a === '--help' || a === '-h') {
       console.log(fs.readFileSync(__filename, 'utf8').split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n'));
@@ -191,15 +199,55 @@ function cached(u) {
   return Number(u?.prompt_tokens_details?.cached_tokens ?? u?.cache_read_input_tokens ?? 0) || 0;
 }
 
+/** Cache writes of a usage, by lifetime (all five-minute when the reply does not split them). */
+function writes(u) {
+  const all = Number(u?.cache_creation_input_tokens ?? u?.prompt_tokens_details?.cache_creation_tokens ?? 0) || 0;
+  const h1 = Number(u?.cache_1h) || 0;
+  const m5 = u?.cache_5m !== undefined ? Number(u.cache_5m) || 0 : Math.max(0, all - h1);
+  return { m5, h1, all: m5 + h1 };
+}
+
 function cost(u) {
   if (!u) return 0;
   const p = Number(u.prompt_tokens) || 0;
   const long = p > PRICES.longFrom;
   const read = cached(u);
-  const write = Number(u.cache_creation_input_tokens ?? u.prompt_tokens_details?.cache_creation_tokens ?? 0) || 0;
-  const plain = Math.max(0, p - read - write);
+  const w = writes(u);
+  const plain = Math.max(0, p - read - w.all);
   const inP = long ? PRICES.longInput : PRICES.input;
-  return (plain * inP + read * PRICES.cacheRead * (long ? 5 : 1) + write * PRICES.cacheWrite * (long ? 5 : 1) + (Number(u.completion_tokens) || 0) * (long ? PRICES.longOutput : PRICES.output)) / 1e6;
+  const x = long ? 5 : 1;
+  return (plain * inP + read * PRICES.cacheRead * x + w.m5 * PRICES.cacheWrite * x + w.h1 * PRICES.cacheWrite1h * x + (Number(u.completion_tokens) || 0) * (long ? PRICES.longOutput : PRICES.output)) / 1e6;
+}
+
+/**
+ * A native Messages request in the chat-completions shape, for the anatomy and the per-turn report: the system blocks
+ * as one system message, tool_result blocks as tool messages, tool_use as tool calls, images as data URLs. Deferred
+ * tools are left out (not in the model's context until referenced); tool references count as their names.
+ */
+function fromNative(body) {
+  const messages = [];
+  const sys = (Array.isArray(body.system) ? body.system.map((b) => b.text || '').join('\n') : String(body.system || '')).trim();
+  if (sys) messages.push({ role: 'system', content: sys });
+  for (const m of body.messages ?? []) {
+    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content ?? [];
+    if (m.role === 'assistant') {
+      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+      const calls = blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, type: 'function', function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } }));
+      messages.push({ role: 'assistant', content: text, ...(calls.length ? { tool_calls: calls } : {}) });
+      continue;
+    }
+    const parts = [];
+    for (const b of blocks) {
+      if (b.type === 'tool_result') {
+        const c = typeof b.content === 'string' ? b.content : (b.content ?? []).map((x) => (x.type === 'text' ? x.text : x.type === 'tool_reference' ? `[${x.tool_name}]` : '')).join('\n');
+        messages.push({ role: 'tool', tool_call_id: b.tool_use_id, content: c });
+      } else if (b.type === 'text') parts.push({ type: 'text', text: b.text });
+      else if (b.type === 'image' && b.source?.type === 'base64') parts.push({ type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
+    }
+    if (parts.length) messages.push({ role: 'user', content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts });
+  }
+  const tools = (body.tools ?? []).filter((t) => !t.defer_loading).map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
+  return { model: body.model, messages, ...(tools.length ? { tools } : {}), stream: Boolean(body.stream), deferred: (body.tools ?? []).filter((t) => t.defer_loading).length };
 }
 
 // ---------- The recording proxy ----------
@@ -252,10 +300,12 @@ function startProxy(state) {
       state.lastAt = Date.now();
     }
     rec.ms = Date.now() - started;
-    if (body && /chat\/completions$/.test(req.url.split('?')[0])) {
-      const a = anatomy(body);
+    const native = body && /\/messages$/.test(req.url.split('?')[0]);
+    if (body && (native || /chat\/completions$/.test(req.url.split('?')[0]))) {
+      if (native) rec.native = true;
+      const a = anatomy(native ? fromNative(body) : body);
       Object.assign(rec, { kind: a.kind, chars: a.chars, images: a.images, imageTok: a.imageTok, toolsHash: a.toolsHash, systemHash: a.systemHash, messages: a.messages, tools: a.perTool.length });
-      const reply = parseReply(text, rec.stream);
+      const reply = native ? parseNativeReply(text, rec.stream) : parseReply(text, rec.stream);
       rec.usage = reply.usage;
       rec.reply = { text: scrub(reply.text).slice(0, 600), toolCalls: reply.toolCalls.map((c) => ({ name: c.name, args: scrub(c.args).slice(0, 300) })) };
       if (rec.status >= 400) rec.errorBody = scrub(text).slice(0, 500);
@@ -263,11 +313,71 @@ function startProxy(state) {
       rec.cost = cost(rec.usage);
       state.perToolByHash.set(a.toolsHash, a.perTool);
       state.systems.set(rec.seq, a.system);
-      state.bodies.push(scrub(JSON.stringify({ seq: rec.seq, run: rec.run, scenario: rec.scenario, turn: rec.turn, kind: a.kind, body })));
+      state.bodies.push(scrub(JSON.stringify({ seq: rec.seq, run: rec.run, scenario: rec.scenario, turn: rec.turn, kind: a.kind, body: native ? fromNative(body) : body, ...(native ? { native: body } : {}) })));
     } else rec.kind = 'non-chat';
     state.records.push(rec);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
+}
+
+/**
+ * The usage, text and tool calls of a native Messages reply (SSE events or JSON), the usage in the chat-completions
+ * names the report reads: prompt_tokens is the whole input (uncached, read and written), with the writes split by
+ * lifetime (cache_5m, cache_1h).
+ */
+function parseNativeReply(text, stream) {
+  let u = null;
+  let out = '';
+  const calls = new Map();
+  const takeUsage = (x) => {
+    if (x) u = { ...(u || {}), ...Object.fromEntries(Object.entries(x).filter(([, v]) => v !== null && v !== undefined)) };
+  };
+  const block = (i, b) => {
+    if (b?.type === 'text' && b.text) out += b.text;
+    if (b?.type === 'tool_use') calls.set(i, { name: b.name, args: b.input && Object.keys(b.input).length ? JSON.stringify(b.input) : '' });
+  };
+  if (stream) {
+    for (const line of text.split('\n')) {
+      const m = /^data:\s*(.*)$/.exec(line.trim());
+      if (!m) continue;
+      let ev;
+      try {
+        ev = JSON.parse(m[1]);
+      } catch {
+        continue;
+      }
+      if (ev.type === 'message_start') takeUsage(ev.message?.usage);
+      else if (ev.type === 'message_delta') takeUsage(ev.usage);
+      else if (ev.type === 'content_block_start') block(ev.index, ev.content_block);
+      else if (ev.type === 'content_block_delta') {
+        if (ev.delta?.type === 'text_delta') out += ev.delta.text;
+        if (ev.delta?.type === 'input_json_delta' && calls.has(ev.index)) calls.get(ev.index).args += ev.delta.partial_json;
+      }
+    }
+  } else {
+    try {
+      const j = JSON.parse(text);
+      takeUsage(j.usage);
+      (j.content ?? []).forEach((b, i) => block(i, b));
+    } catch {
+      /* not JSON */
+    }
+  }
+  let usage = null;
+  if (u) {
+    const read = Number(u.cache_read_input_tokens) || 0;
+    const write = Number(u.cache_creation_input_tokens) || 0;
+    const split = u.cache_creation || {};
+    usage = {
+      prompt_tokens: (Number(u.input_tokens) || 0) + read + write,
+      completion_tokens: Number(u.output_tokens) || 0,
+      cache_read_input_tokens: read,
+      cache_creation_input_tokens: write,
+      cache_5m: Number(split.ephemeral_5m_input_tokens ?? write - (Number(split.ephemeral_1h_input_tokens) || 0)) || 0,
+      cache_1h: Number(split.ephemeral_1h_input_tokens) || 0,
+    };
+  }
+  return { usage, text: out, toolCalls: [...calls.values()] };
 }
 
 /** The usage, text and tool calls of a streamed (SSE) or plain JSON reply. */
@@ -659,8 +769,11 @@ async function runScenario(id, run, opts, state) {
   state.turn = 0;
   const counters = { approvals: 0, questions: 0 };
   const replies = [];
+  const window = sc.tier === 2 ? opts.window : 200000;
   const config = {
-    portkey: { baseURL: `http://127.0.0.1:${state.port}/v1`, apiKey: '', model: opts.model, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: sc.tier === 2 ? opts.window : 200000 },
+    portkey: { baseURL: `http://127.0.0.1:${state.port}/v1`, apiKey: '', model: opts.model, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: window },
+    // Claude's native API through the proxy (the key comes from ANTHROPIC_API_KEY in the app's environment, never a file)
+    ...(opts.compat ? {} : { provider: 'bench', providers: { bench: { type: 'anthropic', baseURL: `http://127.0.0.1:${state.port}/v1`, model: opts.model, contextWindow: window } } }),
     autoTitles: true,
     ...(sc.tier === 2 ? { compactThreshold: opts.threshold } : {}),
     ...(sc.config || {}),
@@ -779,12 +892,16 @@ const PARTS = ['tools', 'system', 'user', 'assistant', 'toolResults', 'images'];
 const PART_LABEL = { tools: 'Tools', system: 'System', user: 'User', assistant: 'Assistant', toolResults: 'Tool results', images: 'Images' };
 
 function sum(recs) {
-  const s = { requests: recs.length, agent: 0, classifier: 0, title: 0, compaction: 0, other: 0, input: 0, output: 0, cached: 0, cost: 0, parts: Object.fromEntries(PARTS.map((p) => [p, 0])) };
+  const s = { requests: recs.length, agent: 0, classifier: 0, title: 0, compaction: 0, other: 0, input: 0, output: 0, cached: 0, write5m: 0, write1h: 0, uncached: 0, cost: 0, parts: Object.fromEntries(PARTS.map((p) => [p, 0])) };
   for (const r of recs) {
     s[r.kind in s ? r.kind : 'other']++;
     s.input += Number(r.usage?.prompt_tokens) || 0;
     s.output += Number(r.usage?.completion_tokens) || 0;
     s.cached += cached(r.usage);
+    const w = writes(r.usage);
+    s.write5m += w.m5;
+    s.write1h += w.h1;
+    s.uncached += Math.max(0, (Number(r.usage?.prompt_tokens) || 0) - cached(r.usage) - w.all);
     s.cost += r.cost || 0;
     if (r.split) for (const p of PARTS) s.parts[p] += r.split[p];
   }
@@ -794,11 +911,11 @@ function sum(recs) {
 function tables(records, results, ids) {
   const lines = [];
   const chat = records.filter((r) => r.kind !== 'non-chat');
-  lines.push('| Scenario | Requests (agent / check / title / other) | Input | Output | Cached | Cost |', '|---|---|--:|--:|--:|--:|');
+  lines.push('| Scenario | Requests (agent / check / title / other) | Input | Uncached | Written 5m | Written 1h | Read | Read share | Output | Cost |', '|---|---|--:|--:|--:|--:|--:|--:|--:|--:|');
   const rows = [...ids.map((id) => [id, chat.filter((r) => r.scenario === id)]), ['Total', chat]];
   for (const [id, recs] of rows) {
     const s = sum(recs);
-    lines.push(`| ${id} | ${s.requests} (${s.agent} / ${s.classifier} / ${s.title} / ${s.compaction + s.other}) | ${n0(s.input)} | ${n0(s.output)} | ${n0(s.cached)} | ${usd(s.cost)} |`);
+    lines.push(`| ${id} | ${s.requests} (${s.agent} / ${s.classifier} / ${s.title} / ${s.compaction + s.other}) | ${n0(s.input)} | ${n0(s.uncached)} | ${n0(s.write5m)} | ${n0(s.write1h)} | ${n0(s.cached)} | ${s.input ? Math.round((100 * s.cached) / s.input) : 0}% | ${n0(s.output)} | ${usd(s.cost)} |`);
   }
   lines.push('', 'Input split by part (tokens):', '', `| Scenario | ${PARTS.map((p) => PART_LABEL[p]).join(' | ')} |`, `|---|${PARTS.map(() => '--:').join('|')}|`);
   for (const [id, recs] of rows) {
@@ -807,13 +924,13 @@ function tables(records, results, ids) {
   }
   const side = chat.filter((r) => r.kind !== 'agent');
   if (side.length) {
-    lines.push('', 'Side calls:', '', '| Scenario | Kind | Requests | Input | Output | Cost |', '|---|---|--:|--:|--:|--:|');
+    lines.push('', 'Side calls:', '', '| Scenario | Kind | Requests | Input | Read | Output | Cost |', '|---|---|--:|--:|--:|--:|--:|');
     for (const id of ids)
       for (const kind of ['classifier', 'title', 'compaction', 'other']) {
         const recs = side.filter((r) => r.scenario === id && r.kind === kind);
         if (!recs.length) continue;
         const s = sum(recs);
-        lines.push(`| ${id} | ${kind} | ${s.requests} | ${n0(s.input)} | ${n0(s.output)} | ${usd(s.cost)} |`);
+        lines.push(`| ${id} | ${kind} | ${s.requests} | ${n0(s.input)} | ${n0(s.cached)} | ${n0(s.output)} | ${usd(s.cost)} |`);
       }
   }
   if (results) {
@@ -1102,9 +1219,9 @@ function replayCost(replay) {
   const md = [
     `# Token benchmark${opts.label ? `: ${opts.label}` : ''}`,
     '',
-    `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC · model ${opts.model} via ${UPSTREAM}/v1 (OpenAI-compatible) · ${opts.runs} run(s) · scenarios ${opts.scenarios.join(', ')}`,
+    `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC · model ${opts.model} via ${UPSTREAM}/v1 (${opts.compat ? 'OpenAI-compatible' : 'native Messages API; side calls but the safety check on the OpenAI-compatible endpoint'}) · ${opts.runs} run(s) · scenarios ${opts.scenarios.join(', ')}`,
     '',
-    `Prices (USD per million tokens, Claude Haiku 5.5, prompts up to 100K): input ${PRICES.input}, output ${PRICES.output}, cache write ${PRICES.cacheWrite}, cache read ${PRICES.cacheRead}. Characters per token in these requests: ${ratios.length ? `${Math.min(...ratios).toFixed(2)}–${Math.max(...ratios).toFixed(2)} (median ${ratios.sort((a, b) => a - b)[Math.floor(ratios.length / 2)].toFixed(2)})` : 'n/a'}.`,
+    `Prices (USD per million tokens, Claude Haiku 5.5, prompts up to 100K): input ${PRICES.input}, output ${PRICES.output}, cache write ${PRICES.cacheWrite} (5 minutes) or ${PRICES.cacheWrite1h} (1 hour), cache read ${PRICES.cacheRead}. Characters per token in these requests: ${ratios.length ? `${Math.min(...ratios).toFixed(2)}–${Math.max(...ratios).toFixed(2)} (median ${ratios.sort((a, b) => a - b)[Math.floor(ratios.length / 2)].toFixed(2)})` : 'n/a'}.`,
     '',
   ];
   const parsedBodies = state.bodies.map((l) => JSON.parse(l));
@@ -1118,7 +1235,7 @@ function replayCost(replay) {
     md.push(`Run ${run} cost ${usd(spent)} in the app's requests.`, '');
   }
   if (opts.runs > 1) {
-    md.push('## Across runs (mean, min–max)', '', '| Scenario | Requests | Input | Output | Cost |', '|---|--:|--:|--:|--:|');
+    md.push('## Across runs (mean, min–max)', '', '| Scenario | Requests | Input | Read | Output | Cost |', '|---|--:|--:|--:|--:|--:|');
     for (const id of [...opts.scenarios, 'Total']) {
       const per = [];
       for (let run = 1; run <= opts.runs; run++) per.push(sum(chatRecs.filter((r) => r.run === run && (id === 'Total' || r.scenario === id))));
@@ -1126,7 +1243,7 @@ function replayCost(replay) {
         const v = per.map((p) => p[k]);
         return `${fmt(v.reduce((a, b) => a + b, 0) / v.length)} (${fmt(Math.min(...v))}–${fmt(Math.max(...v))})`;
       };
-      md.push(`| ${id} | ${f('requests', (v) => v.toFixed(1).replace(/\.0$/, ''))} | ${f('input', n0)} | ${f('output', n0)} | ${f('cost', usd)} |`);
+      md.push(`| ${id} | ${f('requests', (v) => v.toFixed(1).replace(/\.0$/, ''))} | ${f('input', n0)} | ${f('cached', n0)} | ${f('output', n0)} | ${f('cost', usd)} |`);
     }
     md.push('');
   }
