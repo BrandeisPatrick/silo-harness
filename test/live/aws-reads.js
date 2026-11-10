@@ -81,7 +81,7 @@ const userSays = (text) => (p) => {
     await app.send('Who am I in the cloud account?');
     await app.waitFor(`Boolean(document.querySelector('.approval:not(.decided) .btn'))`, 30_000, 'the card for the read');
     let c = await card();
-    check('ask: a recognised read shows the plain card, no reason', c && !c.flagged && !/cloud or infrastructure/.test(c.text) && /Allow aws for this session/.test(c.text), c);
+    check('ask: a recognised read shows the plain card, no reason', c && !c.flagged && !/cloud or infrastructure/.test(c.text) && /aws sts get-caller-identity/.test(c.text), c);
     await app.screenshot(path.join(shots, 'aws-read-card.png'));
     await app.approve('deny');
     await app.waitIdle(30_000);

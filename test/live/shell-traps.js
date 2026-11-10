@@ -68,10 +68,11 @@ const userSays = (text) => (p) => {
     check('wildcard: a read, so no check', checks() === 1, checks());
 
     // ---------- 3. A timeout says how to raise it ----------
+    app.mock.state.classifierDefault = { decision: 'allow', reason: '[Local Work] waits' };
     res = await turn('t4', 'bash', { command: 'sleep 5', timeout_ms: 1000 }, 'Wait a little.');
     check('timeout: the hint, then the exit code', /\[timed out: raise timeout_ms \(up to 600000, now 1000\), or run it with terminal_run\]\n\[exit code: killed \(timeout after 1000 ms\)\]$/.test(res), res);
     const row = await app.evaluate(`[...document.querySelectorAll('#messages .tool')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim()).find((t) => t.includes('sleep 5')) ?? ''`);
-    check('timeout: the row still shows how the command ended', /killed \(timeout after 1000 ms\)/.test(row), row);
+    check('timeout: the row still shows how the command ended', /exit killed \(timeout after/.test(row), row);
     await app.screenshot(path.join(shots, 'shell-traps.png'));
 
     const errors = app.console.filter((x) => /^\[(error|exception)\]/.test(x));
