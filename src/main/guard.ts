@@ -750,6 +750,8 @@ export function guardCommand(command: string, cwd: string): string | null {
   // A walk of the home folder or a privacy prompt (screen, camera, clipboard): kept until the whole line is read, so
   // a stronger reason anywhere in it (reads secrets, sudo, deletes …) comes first
   let soft: string | null = null;
+  // Where a walk with no folder named starts: it follows a `cd` earlier in the line (cd ~ && find . -name x)
+  let walkCwd = cwd;
   for (const simple of allSimpleCommands(raw)) {
     const { argv, lexed } = argvOf(simple);
     const prog = path.basename(argv[0] ?? '');
@@ -814,7 +816,8 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'sed' && flags.some((f) => /^-[a-zA-Z]*i/.test(f) || f === '--in-place') && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (WRITE_PROGRAMS.has(prog) && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (prog === 'tee' && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
-    soft ??= privacyReason(prog, args) ?? (scansHome(prog, args, cwd) ? SCAN_REASON : null);
+    if ((prog === 'cd' || prog === 'pushd') && args[0] !== '-') walkCwd = path.resolve(walkCwd, expandHome(targets[0] ?? '~'));
+    soft ??= privacyReason(prog, args) ?? (scansHome(prog, args, walkCwd) ? SCAN_REASON : null);
   }
   return soft;
 }

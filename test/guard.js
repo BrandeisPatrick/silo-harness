@@ -330,6 +330,14 @@ const privacy = [
   ['rg x', SCAN, '/Users/bob'],
   ['ls *', SCAN, home], // lists inside every folder in home
   ['ls -R *', SCAN, home],
+  // …and it follows a cd earlier in the line
+  ['cd ~ && find . -name x', SCAN],
+  ['cd && rg token', SCAN],
+  ['cd ~; grep -rn token .', SCAN],
+  ['cd / && du -sh', SCAN],
+  ['cd ~/projects/app && rg token', null],
+  ['cd src && find . -name x', null],
+  ['cd - && find . -name x', null],
   ['rg token', null],
   ['find . -name x', null],
   ['ls', null, home],

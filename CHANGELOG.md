@@ -23,6 +23,9 @@
 - **Read-only means read-only.** Redirections, `VAR=` prefixes and flags such as `sed -i`, `git -c`, `rg --pre` and `sort -o` no longer pass as read-only.
 - **Secrets ask before reading.** Reading keys, `.env` files or the app's data with any tool or command asks first, Plan mode included.
 - **Protected files always ask.** Writes to `.vscode`, `.mcp.json`, `.envrc`, CI workflows, git hooks, mods or shell start-up files ask every time, except in Bypass.
+- **Home-folder scans ask first.** Searching the whole home folder, `/` or `/Users` asks first, so macOS does not raise a row of privacy prompts unasked.
+- **Screen, camera, clipboard.** Commands that capture the screen, use the camera or microphone, or read the clipboard ask first.
+- **Spotlight for finding files.** The agent finds a file anywhere on the Mac with `mdfind`, which needs no folder access.
 
 ## 0.12.0 — 2026-11-09
 
