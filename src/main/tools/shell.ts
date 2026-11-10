@@ -34,7 +34,7 @@ function buildPath(): string {
 export const bash: Tool = {
   name: 'bash',
   description:
-    'Run a shell command (zsh) in the working directory and return stdout, stderr and the exit code. Non-interactive only: never run commands that wait for input. Default timeout 120 s, max 600 s.',
+    'Run a shell command (zsh) in the working directory and return stdout, stderr and the exit code. Non-interactive only: never run commands that wait for input. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
   parameters: {
     type: 'object',
     properties: {

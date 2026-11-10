@@ -262,5 +262,173 @@ check('secret read: Auto with the check sends it to the check', d.kind === 'clas
 check('secret read: a session allowance for the reason is honoured', read(mode('plan', { allowed: { ...noneAllowed, reason: (r) => r === 'reads secrets' } })).kind === 'allow');
 check('secret read: a saved project rule for the reason is honoured', read(mode('ask', { rules: { reasons: ['reads secrets'] } })).kind === 'allow');
 
+// macOS privacy prompts: a walk of the home folder, the screen, the camera and microphone, the clipboard. Pure text
+// checks: nothing here reads the home folder (it and /Users/bob are only strings handed to the guard as cwd).
+const SCAN = 'scans the home folder';
+const user = path.basename(home);
+// [command, guardCommand, cwd (default: the project folder)]
+const privacy = [
+  // walks of the home folder, /, /Users, /Volumes, ~/Library
+  ['find ~ -name "*.pdf"', SCAN],
+  ['find ~/ -name x', SCAN],
+  ['find $HOME -name x', SCAN],
+  ['find ${HOME} -type f', SCAN],
+  [`find /Users/${user} -name x`, SCAN],
+  ['find /Users/someone -name x', SCAN],
+  ['find / -name x', SCAN],
+  ['find /Users -name x', SCAN],
+  ['find /Volumes -name x', SCAN],
+  ['find ~/Library -name x', SCAN],
+  ['find ~/* -name x', SCAN],
+  ['find -L ~ -name x', SCAN],
+  ['find ~ -maxdepth 2 -name x', SCAN],
+  ['find ~ -depth 1', SCAN], // BSD -depth n tests the depth, it still walks everything
+  ['fd pdf ~', SCAN],
+  ['fdfind -e pdf report /', SCAN],
+  ['fd -d 2 x ~', SCAN],
+  ['fd x --search-path ~', SCAN],
+  ['grep -r token ~', SCAN],
+  ['grep -R token ~', SCAN],
+  ['grep -rn token ~', SCAN],
+  ['grep -Rl token ~/', SCAN],
+  ['grep --recursive token $HOME', SCAN],
+  ['grep -rie token ~', SCAN],
+  ['grep -r -e token -e key ~', SCAN],
+  ['egrep -r "a|b" /Users', SCAN],
+  ['fgrep -r x /', SCAN],
+  ['rg token ~', SCAN],
+  ['rg -n -g "*.md" token ~', SCAN],
+  ['rg --files ~', SCAN],
+  ['ag token ~', SCAN],
+  ['ack token ~', SCAN],
+  ['ls -R ~', SCAN],
+  ['ls -laR /', SCAN],
+  ['ls ~/*', SCAN],
+  ['du ~', SCAN],
+  ['du -sh ~', SCAN],
+  ['du -d 0 ~', SCAN],
+  ['du -sh ~/*', SCAN],
+  ['tree ~', SCAN],
+  ['tree -L 2 ~', SCAN],
+  // nested
+  ['sh -c "find ~ -name x"', SCAN],
+  ['bash -lc \'grep -r key ~\'', SCAN],
+  ['echo $(grep -r key ~)', SCAN],
+  ['ls | xargs -I{} find / -name {}', SCAN],
+  ['git status && rg foo ~', SCAN],
+  ['find ~ -name x | head', SCAN],
+  ['timeout 10 find ~ -name x', SCAN],
+  // with no folder named, the working directory: flagged when it is the home folder, /, /Users or /Volumes
+  ['rg token', SCAN, home],
+  ['find . -name x', SCAN, home],
+  ['grep -rn token', SCAN, home],
+  ['grep -rn token .', SCAN, home],
+  ['du -sh', SCAN, home],
+  ['tree', SCAN, home],
+  ['ls -R', SCAN, home],
+  ['fd x', SCAN, '/'],
+  ['rg x', SCAN, '/Users/bob'],
+  ['ls *', SCAN, home], // lists inside every folder in home
+  ['ls -R *', SCAN, home],
+  ['rg token', null],
+  ['find . -name x', null],
+  ['ls', null, home],
+  ['ls -la', null, home],
+  ['cat notes.txt', null, home],
+  ['grep token notes.txt', null, home],
+  ['grep -r token projects/app', null, home],
+  // not walks of the home folder
+  ['ls ~', null],
+  ['ls -la ~', null],
+  ['ls -d ~/*', null],
+  ['cat ~/notes.txt', null],
+  ['find ~/projects/app -name x', null],
+  ['find ~/Desktop -name x', null],
+  ['find ~ -maxdepth 1 -name x', null],
+  ['find ~ -maxdepth 0', null],
+  ['fd -d 1 x ~', null],
+  ['fd --max-depth 1 x ~', null],
+  ['fd --max-depth=1 x ~', null],
+  ['tree -L 1 ~', null],
+  ['rg --max-depth 1 x ~', null],
+  ['du -sh ~/projects', null],
+  ['grep token ~/notes.txt', null],
+  ['grep token ~', null], // not recursive: grep reads no folder
+  ['grep -e ~ f.txt', null], // ~ is the pattern
+  ['rg "~" src', null],
+  ['mdfind -name report.pdf', null],
+  ['mdfind -onlyin ~ report', null],
+  // a stronger reason wins
+  ['grep -r key ~/.aws', 'reads secrets'],
+  ['find ~ -name x | xargs rm -rf ~', 'recursive delete of a broad path'],
+  ['find / -name x > ~/out.txt', 'writes outside the working directory'],
+  ['rg token ~; sudo ls', 'uses sudo'],
+  ['find ~ -name x; cat ~/.ssh/id_rsa', 'reads secrets'],
+  ['pbpaste | sudo tee /etc/x', 'uses sudo'],
+  ['screencapture /tmp/s.png; rm -rf /', 'recursive delete of a broad path'],
+  // the screen, the camera and microphone, the clipboard, macOS settings
+  ['screencapture -x /tmp/s.png', 'records the screen'],
+  ['sh -c "screencapture s.png"', 'records the screen'],
+  ['imagesnap photo.jpg', 'uses the camera or microphone'],
+  ['ffmpeg -f avfoundation -i "0:0" out.mov', 'uses the camera or microphone'],
+  ['ffprobe -f avfoundation -list_devices true -i ""', 'uses the camera or microphone'],
+  ['ffplay -f avfoundation -i default', 'uses the camera or microphone'],
+  ['ffmpeg -i in.mov out.mp4', null],
+  ['rec out.wav', 'uses the camera or microphone'],
+  ['sox -d out.wav', 'uses the camera or microphone'],
+  ['sox --default-device out.wav', 'uses the camera or microphone'],
+  ['sox in.wav out.mp3', null],
+  ['pbpaste', 'reads the clipboard'],
+  ['echo $(pbpaste)', 'reads the clipboard'],
+  ['pbpaste | wc -c', 'reads the clipboard'],
+  ['echo hi | pbcopy', null],
+  ['tccutil reset All', 'changes macOS settings'],
+  ['crontab -l', null],
+  ['crontab -e', 'system control'],
+  ['crontab -r', 'system control'],
+  ['crontab jobs.txt', 'system control'],
+  ['echo "* * * * * x" | crontab -', 'system control'],
+];
+for (const [cmd, want, at] of privacy) {
+  const got = guardCommand(cmd, at ?? cwd);
+  check(`privacy guard: ${cmd}${at ? ` (in ${at === home ? '~' : at})` : ''}`, got === want, got);
+}
+// mdfind (not -live) is read-only and runs in Plan mode; the walks stay read-only and ask with the reason; the
+// prompts that capture or read the clipboard are not read-only, so Plan mode refuses them
+check('mdfind -name x is read-only', isReadOnlyCommand('mdfind -name report.pdf') && isReadOnlyCommand('mdfind -onlyin ~/Documents "kind:pdf"'));
+check('mdfind -live is not read-only', !isReadOnlyCommand('mdfind -live -name x'));
+for (const cmd of ['find ~ -name x', 'rg token ~', 'grep -rn token ~', 'ls -R ~', 'du -sh ~', 'tree ~', 'fd x ~']) {
+  check(`read-only and asks in Plan: ${cmd}`, isReadOnlyCommand(cmd), cmd);
+  d = sh(cmd, mode('plan'));
+  check(`plan: ${cmd} asks "${SCAN}"`, d.kind === 'ask' && d.reason === SCAN && !d.custom, d);
+}
+for (const cmd of ['screencapture s.png', 'imagesnap x.jpg', 'ffmpeg -f avfoundation -i 0 o.mov', 'rec o.wav', 'sox -d o.wav', 'pbpaste', 'tccutil reset All', 'crontab -e']) {
+  check(`not read-only: ${cmd}`, !isReadOnlyCommand(cmd));
+  check(`plan: ${cmd} is refused`, sh(cmd, mode('plan')).kind === 'refuse');
+  const r = guardCommand(cmd, cwd);
+  d = sh(cmd, mode('auto', { auto: 'check' }));
+  check(`auto with the check: ${cmd} goes to the check with "${r}"`, d.kind === 'classify' && d.reason === r, d);
+  d = sh(cmd, mode('auto'));
+  check(`auto without the check: ${cmd} asks "${r}"`, d.kind === 'ask' && d.reason === r, d);
+}
+// The walk across the modes
+const scan = 'find ~ -name "*.pdf"';
+for (const m of ['ask', 'acceptEdits', 'auto', 'plan']) {
+  d = sh(scan, mode(m));
+  check(`scan: ${m} asks "${SCAN}" with the wider answers`, d.kind === 'ask' && d.reason === SCAN && !d.custom, d);
+}
+d = sh(scan, mode('auto', { auto: 'check' }));
+check('scan: Auto with the check sends it to the check with the reason', d.kind === 'classify' && d.reason === SCAN, d);
+d = sh(scan, mode('auto', { auto: 'check', allowed: { ...noneAllowed, program: () => true } }));
+check('scan: … a program rule (find) does not skip it', d.kind === 'classify' && d.reason === SCAN, d);
+check('scan: Bypass runs it', sh(scan, mode('bypass')).kind === 'allow');
+const scanAllowed = { ...noneAllowed, reason: (r) => r === SCAN };
+check('scan: allowed for the session, it runs in Plan', sh(scan, mode('plan', { allowed: scanAllowed })).kind === 'allow');
+check('scan: … and in Auto without the check', sh(scan, mode('auto', { allowed: scanAllowed })).kind === 'allow');
+d = sh(scan, mode('ask', { allowed: scanAllowed }));
+check('scan: … in Ask mode the command still asks, as any command does, without the reason', d.kind === 'ask' && d.reason === null, d);
+check('scan: a saved project rule for the reason is honoured in Auto with the check', sh(scan, mode('auto', { auto: 'check', rules: { reasons: [SCAN] } })).kind === 'allow');
+check('scan: not a protected reason', !require(path.join(projectDir, 'dist/main/guard.js')).PROTECTED_REASONS.has(SCAN));
+
 fs.rmSync(cwd, { recursive: true, force: true });
 done();

@@ -3,7 +3,7 @@
 
 import type { PermissionMode, StoredRules } from '../../shared/types';
 import { siteCardLabels, type Site } from '../browser/policy';
-import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from '../guard';
+import { guardCommand, guardWrite, isHomeScanRoot, isReadOnlyCommand, programsOf, SCAN_REASON } from '../guard';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
 import { alwaysAskReason, protectedWrite, PROTECTED_REASONS } from './auto-rules';
@@ -15,7 +15,7 @@ const PLAN_CMD_BLOCKED = 'Not permitted in plan mode: only read-only commands (l
 const PLAN_MCP_BLOCKED = 'Not permitted in plan mode: this MCP tool is not marked read-only. Describe this step in your plan instead.';
 /** Programs that run whatever they are given: an allow rule for one of them does not skip Auto mode's check. */
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'python', 'python3', 'node', 'deno', 'bun', 'bunx', 'npx', 'uvx', 'perl', 'ruby', 'php', 'osascript', 'eval', 'xargs']);
-/** The tools that read files: they ask only when the path is a secret one (tools/fs.ts) */
+/** The tools that read files: they ask only for a secret path, or grep and glob for a walk of the home folder (tools/fs.ts) */
 const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_directory']);
 const SECRET_REASON = 'reads secrets';
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
@@ -98,11 +98,13 @@ export function decideApproval(name: string, detail: string, target: string | un
   }
   // A protected path's reason ("writes a protected file", "modifies the .git directory") is never covered by a rule
   const reasonAllowed = (r: string) => !PROTECTED_REASONS.has(r) && (ctx.allowed.reason(r) || !!rules?.reasons?.includes(r));
-  // A read tool asks only for a secret path (fs.ts decides that): every mode, Plan included, asks "reads secrets"
-  // unless that reason is allowed; Auto mode with its check sends it to the check.
+  // A read tool asks only for a secret path, or grep and glob rooted at the home folder, /, /Users … (fs.ts decides
+  // that; the reason follows from the root): every mode, Plan included, asks unless that reason is allowed; Auto mode
+  // with its check sends it to the check.
   if (READ_TOOLS.has(name)) {
-    if (reasonAllowed(SECRET_REASON)) return allow;
-    return checked ? check(SECRET_REASON, []) : ask(SECRET_REASON, []);
+    const why = (name === 'grep' || name === 'glob') && target && isHomeScanRoot(target, cwd) ? SCAN_REASON : SECRET_REASON;
+    if (reasonAllowed(why)) return allow;
+    return checked ? check(why, []) : ask(why, []);
   }
   if (mode === 'plan') {
     if (isEdit) return refuse(PLAN_EDIT_BLOCKED);

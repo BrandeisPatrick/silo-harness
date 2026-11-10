@@ -5,6 +5,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
+// A fake home folder (os.homedir() follows HOME): the walks of "the home folder" below never touch the real one
+const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-home-'));
+process.env.HOME = fakeHome;
+const { decideApproval } = require(path.join(projectDir, 'dist/main/agent/permissions.js'));
 const { readFile, listDirectory, grep, glob, findRipgrep, setRipgrep } = require(path.join(projectDir, 'dist/main/tools/fs.js'));
 const { check, done } = require('./support/check.js');
 
@@ -87,7 +91,67 @@ const { check, done } = require('./support/check.js');
   setRipgrep(undefined);
   fs.rmSync(g, { recursive: true, force: true });
 
+  // grep and glob rooted at the home folder, ~/Library, /, /Users or /Volumes ask "scans the home folder" first
+  fs.mkdirSync(path.join(fakeHome, 'projects', 'app'), { recursive: true });
+  fs.writeFileSync(path.join(fakeHome, 'projects', 'app', 'n.txt'), 'NEEDLE at home\n');
+  fs.writeFileSync(path.join(fakeHome, 'notes.txt'), 'NEEDLE notes\n');
+  for (const [tool, args, root] of [
+    [grep, { pattern: 'x', path: '~' }, fakeHome],
+    [grep, { pattern: 'x', path: '~/' }, fakeHome],
+    [grep, { pattern: 'x', path: '/' }, '/'],
+    [grep, { pattern: 'x', path: '/Users' }, '/Users'],
+    [glob, { pattern: '**/*.pdf', path: '~' }, fakeHome],
+    [glob, { pattern: '*', path: '/Volumes' }, '/Volumes'],
+    [glob, { pattern: '*', path: '~/Library' }, path.join(fakeHome, 'Library')],
+  ]) {
+    out = await run(tool, args);
+    check(`${tool.name} rooted at ${args.path} asks before it walks`, calls.length === 1 && calls[0][0] === tool.name && calls[0][2] === root && out === 'Not permitted: denied.', { calls, out });
+  }
+  const hctx = { ...ctx, cwd: fakeHome };
+  calls.length = 0;
+  out = (await grep.run({ pattern: 'NEEDLE' }, hctx)).content;
+  check('grep with no path in the home folder asks', calls.length === 1 && calls[0][2] === fakeHome && out === 'Not permitted: denied.', calls);
+  calls.length = 0;
+  out = (await glob.run({ pattern: '*' }, hctx)).content;
+  check('glob with no path in the home folder asks', calls.length === 1 && out === 'Not permitted: denied.', calls);
+  out = await run(grep, { pattern: 'NEEDLE', path: '~/projects' });
+  check('grep in a named folder under home does not ask', calls.length === 0 && out.includes('n.txt'), out);
+  out = await run(glob, { pattern: '*.txt', path: '~/projects/app' });
+  check('glob in a named folder under home does not ask', calls.length === 0 && out === 'n.txt', out);
+  out = await run(listDirectory, { path: '~' });
+  check('list_directory of the home folder does not ask (it lists one level)', calls.length === 0 && out.includes('projects/'), out);
+  out = await run(readFile, { path: '~/notes.txt' });
+  check('read_file of a file in home does not ask', calls.length === 0 && out.includes('NEEDLE notes'), out);
+  answer = { ok: true };
+  out = await run(grep, { pattern: 'NEEDLE', path: '~' });
+  check('grep at home, allowed, searches', calls.length === 1 && out.includes('notes.txt'), out);
+  answer = { ok: false, message: 'Not permitted: denied.' };
+
+  // What the rules decide for that approval, per mode; a secret root keeps "reads secrets"
+  const SCAN = 'scans the home folder';
+  const none = { mcp: () => false, reason: () => false, program: () => false, custom: () => false };
+  const mctx = (mode, over = {}) => ({ mode, auto: 'guard', cwd: tmp, rules: undefined, mcp: () => undefined, allowed: none, ...over });
+  const decide = (name, target, c) => decideApproval(name, target, target, {}, c);
+  let d;
+  for (const name of ['grep', 'glob']) {
+    for (const m of ['ask', 'acceptEdits', 'auto', 'plan']) {
+      d = decide(name, fakeHome, mctx(m));
+      check(`${name} at home: ${m} asks "${SCAN}"`, d.kind === 'ask' && d.reason === SCAN && !d.custom, d);
+    }
+    d = decide(name, '/', mctx('auto', { auto: 'check' }));
+    check(`${name} at /: Auto with the check sends it to the check`, d.kind === 'classify' && d.reason === SCAN, d);
+    check(`${name} at home: Bypass runs it`, decide(name, fakeHome, mctx('bypass')).kind === 'allow');
+    check(`${name} at home: allowed for the session, it runs`, decide(name, fakeHome, mctx('ask', { allowed: { ...none, reason: (r) => r === SCAN } })).kind === 'allow');
+    check(`${name} at home: a saved project rule runs it`, decide(name, fakeHome, mctx('plan', { rules: { reasons: [SCAN] } })).kind === 'allow');
+    check(`${name} at home: allowing "reads secrets" does not cover it`, decide(name, fakeHome, mctx('ask', { allowed: { ...none, reason: (r) => r === 'reads secrets' } })).kind === 'ask');
+    d = decide(name, path.join(tmp, '.ssh'), mctx('ask'));
+    check(`${name} at .ssh: still "reads secrets"`, d.kind === 'ask' && d.reason === 'reads secrets', d);
+  }
+  d = decide('read_file', path.join(fakeHome, '.ssh/id_rsa'), mctx('ask'));
+  check('read_file of a secret: still "reads secrets"', d.kind === 'ask' && d.reason === 'reads secrets', d);
+
   fs.rmSync(tmp, { recursive: true, force: true });
+  fs.rmSync(fakeHome, { recursive: true, force: true });
   done();
 })().catch((err) => {
   console.error('CRASH', err);
