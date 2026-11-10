@@ -1224,6 +1224,8 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
   font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none; user-select: none;
   animation: pop-in 0.12s ease-out;
 }
+/* A menu capped to the room it has (popover.ts) scrolls */
+.popover { overflow-y: auto; overscroll-behavior: contain; }
 .pop-label { padding: 8px 8px 4px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 400; color: var(--text-400); }
 .pop-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: var(--r-control); color: var(--text-100); text-align: left; }
 .pop-item.active { background: var(--hover); }

@@ -23,8 +23,14 @@ function startMock() {
       if (state.apiKey && req.url.startsWith('/v1/') && !req.url.startsWith('/v1/messages') && req.headers.authorization !== `Bearer ${state.apiKey}`) {
         return json(401, { error: { message: 'Invalid API key (mock)', type: 'authentication_error' } });
       }
-      // The models list most OpenAI-compatible services have (GET /v1/models)
-      if (req.url === '/v1/models' && req.method === 'GET') return json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+      // The models list most OpenAI-compatible services have (GET /v1/models); `modelsDelayMs` holds it back and
+      // `modelsStatus` fails it with that HTTP status
+      if (req.url === '/v1/models' && req.method === 'GET') {
+        return setTimeout(() => {
+          if (state.modelsStatus) return json(state.modelsStatus, { error: { message: `mock error ${state.modelsStatus}` } });
+          json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+        }, state.modelsDelayMs ?? 0);
+      }
       if (req.url === '/api/show') return json(200, { capabilities: ['completion', 'tools'] });
       if (req.url.startsWith('/v1/messages')) return anthropic(state, payload, res, json);
       // A gateway that refuses prompt-cache fields it does not know (`rejectCacheFields`), as some do
