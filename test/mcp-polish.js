@@ -45,7 +45,8 @@ function manager(cwd, initial, more = {}) {
     const full = m.tools().map((t) => t.name);
     const odd = full.find((n) => n.endsWith('list__items'));
     check('the model-facing names are sanitised (acme.docs → acme_docs)', full.includes('mcp__acme_docs__echo') && odd === 'mcp__acme_docs__list__items', full);
-    check('names(): the real server and tool for a sanitised name', JSON.stringify(m.names('mcp__acme_docs__echo')) === JSON.stringify({ server: 'acme.docs', tool: 'echo' }));
+    check('names(): the real server and tool for a sanitised name, with the title', JSON.stringify(m.names('mcp__acme_docs__echo')) === JSON.stringify({ server: 'acme.docs', tool: 'echo', title: 'Echo text' }), m.names('mcp__acme_docs__echo'));
+    check('names(): annotations.title when there is no title', m.names('mcp__acme_docs__add').title === 'Add numbers' && m.names('mcp__acme_docs__fail').title === undefined);
     check('names(): a tool with "__" in its name is not split there', JSON.stringify(m.names(odd)) === JSON.stringify({ server: 'acme.docs', tool: 'list__items' }));
     check('names(): unknown name → undefined', m.names('mcp__nope__x') === undefined);
     const ev = withMcpNames({ type: 'tool_start', id: '1', name: odd, args: {} }, m);

@@ -83,7 +83,8 @@ export function mcpParts(name: string): McpToolName | null {
 
 /** Verb = the tool's own name; argument = its first string argument, else the arguments as compact JSON. */
 function mcpLabel(p: McpToolName, a: Args): ToolLabel {
-  const base = { verb: p.tool, verbMono: true, icon: 'plug' as const, server: p.server };
+  // The tool's title when its server gives one (interface only), else its name in the mono face
+  const base = { verb: p.title || p.tool, verbMono: !p.title, icon: 'plug' as const, server: p.server };
   const first = firstString(a);
   if (first) {
     const line = first.replace(/\s+/g, ' ').trim();
@@ -858,6 +859,9 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
   const body = document.createElement('div');
   body.className = 'tool-body';
   el.append(summary, body);
+  // An MCP call's real server and tool names, once the row is open (the summary shows a title)
+  const mcpCall = mcpParts(name);
+  if (mcpCall) body.insertAdjacentHTML('beforeend', `<div class="tool-mcp-names">${escapeHtml(`${mcpCall.server} · ${mcpCall.tool}`)}</div>`);
   // show_image has no row: the image itself appears in the reply (images.ts). Only a failure shows the row.
   if (name === 'show_image') el.hidden = true;
 

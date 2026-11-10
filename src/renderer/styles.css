@@ -1564,10 +1564,17 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-log-text { margin: 0; max-height: 180px; overflow: auto; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-control); background: var(--code-bg); font: var(--fs-micro)/var(--lh-micro) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-tools-head { padding: 6px 10px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); border-bottom: 1px solid var(--border-subtle); }
 .mcp-tools { margin: -2px 12px 12px 50px; max-height: 320px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--r-control); }
-.mcp-tool { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; }
-.mcp-tool + .mcp-tool { border-top: 1px solid var(--border-subtle); }
-.mcp-tool-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.mcp-tool-name { min-width: 0; font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); overflow-wrap: anywhere; }
+.mcp-tools-group { padding: 8px 10px 2px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 600; color: var(--text-400); }
+.mcp-tools-group ~ .mcp-tools-group { margin-top: 2px; border-top: 1px solid var(--border-subtle); }
+.mcp-tool { display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
+.mcp-tool-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mcp-tool-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.mcp-tool-title { min-width: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); overflow-wrap: anywhere; }
+.mcp-tool-name { min-width: 0; font: var(--fs-micro)/var(--lh-micro) var(--mono); color: var(--text-400); overflow-wrap: anywhere; }
+.mcp-tool.off .mcp-tool-title, .mcp-tool.off .mcp-tool-desc { color: var(--text-400); }
+.mcp-tool-off { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); }
+.mcp-tool-switch { flex: none; display: inline-flex; cursor: pointer; }
+.mcp-tool-switch input.switch { transform: scale(0.85); }
 .mcp-tag { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 16px; padding: 0 6px; border-radius: 999px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; }
 .mcp-tag.ro { color: var(--success); background: var(--success-soft); }
 .mcp-tag.danger { color: var(--danger); background: var(--danger-soft); }
@@ -1585,6 +1592,15 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-add-error .icon { flex: none; margin-top: 1px; }
 #mcp-add-btn { flex: none; }
 #mcp-add-btn.busy { pointer-events: none; opacity: 0.7; }
+
+.tool-mcp-names { margin-bottom: 4px; font: var(--fs-micro)/var(--lh-micro) var(--mono); color: var(--text-400); overflow-wrap: anywhere; }
+
+.prompt-head .prompt-sub { margin-left: 4px; font-weight: 400; color: var(--text-400); }
+.mcp-args { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--code-bg); }
+.mcp-arg-key { margin: 0; font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-400); }
+.mcp-arg-value { margin: 0; min-width: 0; font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-arg-value.long { max-height: 160px; overflow-y: auto; }
+.mcp-arg-value.literal { color: var(--text-200); }
 
 /* /mcp notice card */
 .mcp-card .md p { margin-bottom: 8px; }

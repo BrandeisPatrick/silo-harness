@@ -12,6 +12,7 @@ import { icon } from './icons.js';
 import { closeMenu, isMenuOpen, menuAnchoredTo, openMenu } from './popover.js';
 import { createQuestionCard } from './questions.js';
 import { agentApproval, browserApproval, browserDecision } from './tool-labels.js';
+import { argsListHtml, argsObject } from './mcp-args.js';
 import { approvalTitle, displayPath, editStartLine, fileLines, linkPath, mcpParts, type ToolCard } from './tools.js';
 
 export interface ApprovalsDeps {
@@ -97,7 +98,7 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     const agent = mcp ? null : browser ? browserApproval(browser) : agentApproval(ev.name, ev.detail);
     if (agent && !browser) card?.noteApproval(ev.detail);
     if (mcp) el.classList.add('mcp');
-    el.innerHTML = `<div class="prompt-head"><div class="title" id="${uid}-title">${escapeHtml(approvalTitle(ev.name, ev.detail, card?.args, browser ?? undefined))}</div></div>`;
+    el.innerHTML = `<div class="prompt-head"><div class="title" id="${uid}-title">${escapeHtml(approvalTitle(ev.name, ev.detail, card?.args, browser ?? undefined))}${mcp?.title ? ` <span class="prompt-sub">${escapeHtml(mcp.title)}</span>` : ''}</div></div>`;
     const body = document.createElement('div');
     body.className = 'approval-body prompt-body';
     body.id = `${uid}-body`;
@@ -137,7 +138,8 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       // The arguments, pretty-printed by the main process, in the same mono block as a command.
       subject = `${mcp.tool} · ${mcp.server}`;
       const json = typeof ev.detail === 'string' ? ev.detail.trim() : '';
-      body.insertAdjacentHTML('beforeend', json && json !== '{}' ? `<div class="cmd json"><code>${highlight(json, 'json')}</code></div>` : '<div class="tool-note">No arguments</div>');
+      const list = argsListHtml(argsObject(card?.args, json) ?? {});
+      body.insertAdjacentHTML('beforeend', list ?? (json && json !== '{}' ? `<div class="cmd json"><code>${highlight(json, 'json')}</code></div>` : '<div class="tool-note">No arguments</div>'));
     } else if (ev.name === 'bash' || ev.name === 'terminal_run') {
       subject = ev.detail.split('\n')[0];
       body.insertAdjacentHTML('beforeend', `<div class="cmd"><span class="cmd-prompt">$</span><code>${highlight(ev.detail, 'sh')}</code></div>`);

@@ -74,6 +74,8 @@ interface Entry {
   generation: number;
   /** Tools filtered out by enabledTools/disabledTools */
   hiddenTools: string[];
+  /** The same tools, described (for Settings, which lists them as off) */
+  offTools?: McpToolInfo[];
   /** The server's `instructions`, capped (untrusted) */
   instructions?: string;
   /** A stdio server that exited after it was connected: respawned once on the next tool call */
@@ -401,6 +403,13 @@ function sanitizeName(s: string): string {
   return s.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+/** A tool's `title`, else `annotations.title`: one line, at most 64 characters, for the interface only. */
+export function toolTitle(t: { title?: unknown; annotations?: { title?: unknown } }): string {
+  const raw = typeof t.title === 'string' && t.title.trim() ? t.title : typeof t.annotations?.title === 'string' ? t.annotations.title : '';
+  const line = raw.replace(/\s+/g, ' ').trim();
+  return line.length > 64 ? `${line.slice(0, 63)}…` : line;
+}
+
 /** JSON of a tool's arguments for the approval card, pretty and bounded. */
 export function approvalDetail(args: unknown): string {
   let text: string;
@@ -637,6 +646,7 @@ export class McpManager extends EventEmitter {
     if (e.error) info.error = e.error;
     if (e.serverInfo) info.serverInfo = { ...e.serverInfo };
     if (e.status === 'connected' && e.hiddenTools.length) info.hiddenTools = [...e.hiddenTools];
+    if (e.status === 'connected' && e.offTools?.length) info.offTools = e.offTools.map((t) => ({ ...t }));
     if (e.signedIn) info.signedIn = true;
     return info;
   }
@@ -1036,13 +1046,19 @@ export class McpManager extends EventEmitter {
     const kept = tools.filter((t) => (!allow || allow.includes(t.name)) && !deny.has(t.name));
     e.hiddenTools = tools.filter((t) => !kept.includes(t)).map((t) => t.name);
     e.sdkTools = kept;
-    e.tools = kept.map((t) => ({
-      name: t.name,
-      fullName: '', // assigned by rebuildIndex (needs the global view for collisions)
-      description: String(t.description ?? '').trim(),
-      readOnly: t.annotations?.readOnlyHint === true,
-      destructive: t.annotations?.destructiveHint === true,
-    }));
+    const info = (t: SdkTool): McpToolInfo => {
+      const title = toolTitle(t);
+      return {
+        name: t.name,
+        fullName: '', // assigned by rebuildIndex (needs the global view for collisions)
+        description: String(t.description ?? '').trim(),
+        readOnly: t.annotations?.readOnlyHint === true,
+        destructive: t.annotations?.destructiveHint === true,
+        ...(title ? { title } : {}),
+      };
+    };
+    e.tools = kept.map(info);
+    e.offTools = tools.filter((t) => !kept.includes(t)).map(info);
     this.notify();
   }
 
@@ -1306,6 +1322,30 @@ export class McpManager extends EventEmitter {
       }
     }
     this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: [...names] }, mcpTrustedEntries: { ...(cfg.mcpTrustedEntries ?? {}), [cwd]: prints } });
+  }
+
+  /**
+   * Turns one tool of a user server off (adds it to disabledTools) or back on. Project servers' tools are not changed
+   * here: their file is shared.
+   */
+  async setToolEnabled(name: string, scope: McpScope, tool: string, enabled: boolean): Promise<McpServerInfo[]> {
+    if (scope !== 'user') throw new Error("A project server's tools are set in its .mcp.json.");
+    const cfg = this.opts.getConfig();
+    const c = cfg.mcpServers?.[name];
+    if (!c) throw new Error(`No server named "${name}".`);
+    const toolName = String(tool).trim();
+    if (!toolName) throw new Error('No tool named.');
+    const next = { ...c } as McpServerConfig;
+    const off = new Set(next.disabledTools ?? []);
+    if (enabled) {
+      off.delete(toolName);
+      if (next.enabledTools && !next.enabledTools.includes(toolName)) next.enabledTools = [...next.enabledTools, toolName];
+    } else off.add(toolName);
+    if (off.size) next.disabledTools = [...off];
+    else delete next.disabledTools;
+    this.opts.saveConfig({ mcpServers: { ...cfg.mcpServers, [name]: next } });
+    await this.reload();
+    return this.list();
   }
 
   async reconnect(name: string, scope: McpScope): Promise<McpServerInfo[]> {

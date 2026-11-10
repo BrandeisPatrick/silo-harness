@@ -8,7 +8,7 @@ import { escapeHtml } from './dom.js';
 import { icon, type IconName } from './icons.js';
 import { tilde } from './home.js';
 import { noteMcpServers } from './mcp-labels.js';
-import { hasSwitch, MENU_LABELS, menuActions, primaryAction, reasonLine, safeLines, serverSubtitle, STATUS_WORDS, statusText, statusTone, trustLines, unsetText, copyText, plural, type MenuKind } from './mcp-model.js';
+import { toolGroups, type ToolEntry, hasSwitch, MENU_LABELS, menuActions, primaryAction, reasonLine, safeLines, serverSubtitle, STATUS_WORDS, statusText, statusTone, trustLines, unsetText, copyText, plural, type MenuKind } from './mcp-model.js';
 import { openMenu, type MenuItem } from './popover.js';
 
 /** The status words (mcp-model.ts), kept under the old name for the debug hook and tests */
@@ -113,15 +113,19 @@ function shortDir(p: string): string {
   return tilde(p).replace(/\/+$/, '');
 }
 
-function toolHtml(t: McpToolInfo): string {
-  const desc = typeof t.description === 'string' ? t.description.trim() : '';
-  const tags =
-    (t.readOnly ? `<span class="mcp-tag ro" title="Read-only: runs without asking">${icon('eye', 12)}<span>read-only</span></span>` : '') +
-    (t.destructive ? `<span class="mcp-tag danger" title="Destructive: auto mode asks before running it">destructive</span>` : '');
+function toolHtml(t: ToolEntry, key: string, switchable: boolean): string {
+  const desc = t.description;
+  const sw = switchable
+    ? `<label class="mcp-tool-switch" title="${escapeHtml(t.off ? `Turn ${t.name} on` : `Turn ${t.name} off`)}"><input type="checkbox" class="switch sm" data-tool="${escapeHtml(t.name)}" ${t.off ? '' : 'checked'} aria-label="${escapeHtml(`${t.title} on`)}" data-focus-key="${escapeHtml(`${key}|tool|${t.name}`)}"></label>`
+    : '';
   return (
-    `<div class="mcp-tool" role="listitem"><div class="mcp-tool-head"><code class="mcp-tool-name">${escapeHtml(t.name)}</code>${tags}</div>` +
+    `<div class="mcp-tool${t.off ? ' off' : ''}" role="listitem"><div class="mcp-tool-text"><div class="mcp-tool-head"><span class="mcp-tool-title">${escapeHtml(t.title)}</span>` +
+    (t.showName ? `<code class="mcp-tool-name">${escapeHtml(t.name)}</code>` : '') +
+    (t.destructive ? `<span class="mcp-tag danger" title="Destructive: auto mode asks before running it">destructive</span>` : '') +
+    (t.off ? '<span class="mcp-tool-off">off</span>' : '') +
+    `</div>` +
     (desc ? `<div class="mcp-tool-desc" title="${escapeHtml(desc.length > 1200 ? `${desc.slice(0, 1200)}…` : desc)}">${escapeHtml(desc)}</div>` : '') +
-    `</div>`
+    `</div>${sw}</div>`
   );
 }
 
@@ -180,7 +184,8 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     const pending = busy.get(key);
     const on = pending?.enabled ?? (s.status !== 'disabled' && s.status !== 'blocked');
     const tools = s.tools;
-    const open = expanded.has(key) && tools.length > 0;
+    const listed = tools.length + (s.offTools?.length ?? 0);
+    const open = expanded.has(key) && listed > 0;
     const toolsId = `mcp-tools-${slug(key)}`;
     const tone = statusTone(s.status);
     const el = document.createElement('div');
@@ -247,16 +252,32 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       box.appendChild(pre);
       el.appendChild(box);
     }
-    if (tools.length) {
+    if (listed) {
       const list = document.createElement('div');
       list.className = 'mcp-tools';
       list.id = toolsId;
       list.setAttribute('role', 'list');
       list.setAttribute('aria-label', `${name} tools`);
       list.hidden = !open;
-      const off = s.hiddenTools?.length ? `<div class="mcp-tools-head">${escapeHtml(`${s.hiddenTools.length} off: ${s.hiddenTools.join(', ')}`)}</div>` : '';
-      list.innerHTML = off + tools.map(toolHtml).join('');
+      // A user server's tools have a switch each (it writes disabledTools); a project server's file is shared: read-only here
+      const switchable = s.scope === 'user' && typeof opts.source()?.setToolEnabled === 'function';
+      const offCount = s.offTools?.length ?? s.hiddenTools?.length ?? 0;
+      list.innerHTML =
+        (offCount && !s.offTools?.length ? `<div class="mcp-tools-head">${escapeHtml(`${offCount} off`)}</div>` : '') +
+        toolGroups(s)
+          .map((g) => `<div class="mcp-tools-group" role="presentation">${escapeHtml(g.label)}</div>` + g.tools.map((t) => toolHtml(t, key, switchable)).join(''))
+          .join('');
       el.appendChild(list);
+      list.querySelectorAll<HTMLInputElement>('input.switch[data-tool]').forEach((box) => {
+        box.addEventListener('change', () => {
+          const tool = box.dataset.tool ?? '';
+          if (busy.has(key) || !tool) {
+            box.checked = !box.checked;
+            return;
+          }
+          void act(s, box.checked ? 'enable a tool of' : 'turn off a tool of', (api) => api.setToolEnabled!(name, s.scope, tool, box.checked));
+        });
+      });
     }
 
     const sw = el.querySelector<HTMLInputElement>('input.switch');
@@ -405,9 +426,9 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     }
   }
 
-  const VERBS: Record<string, string> = { enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove', 'sign in': 'sign in to', 'cancel sign-in for': 'cancel sign-in for', 'sign out of': 'sign out of' };
+  const VERBS: Record<string, string> = { 'enable a tool of': 'turn on a tool of', 'turn off a tool of': 'turn off a tool of', enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove', 'sign in': 'sign in to', 'cancel sign-in for': 'cancel sign-in for', 'sign out of': 'sign out of' };
 
-  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove' | 'sign in' | 'cancel sign-in for' | 'sign out of', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
+  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove' | 'sign in' | 'cancel sign-in for' | 'sign out of' | 'enable a tool of' | 'turn off a tool of', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
     const key = mcpKey(s);
     if (busy.has(key)) return;
     const api = opts.source();
@@ -703,6 +724,20 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
       const s = find(name, scope);
       delete s.signedIn;
       s.status = 'needs-auth';
+      return done();
+    },
+    async setToolEnabled(name: string, scope: McpScope, tool: string, enabled: boolean) {
+      const s = find(name, scope);
+      const on = s.tools.find((t) => t.name === tool);
+      const off = (s.offTools ?? []).find((t) => t.name === tool);
+      if (!enabled && on) {
+        s.tools = s.tools.filter((t) => t !== on);
+        s.offTools = [...(s.offTools ?? []), on];
+      } else if (enabled && off) {
+        s.offTools = (s.offTools ?? []).filter((t) => t !== off);
+        s.tools = [...s.tools, off];
+      }
+      s.hiddenTools = (s.offTools ?? []).map((t) => t.name);
       return done();
     },
     async log(name: string, scope: McpScope) {

@@ -25,7 +25,7 @@ Servers come from Settings → MCP servers (stored in the app's `config.json` un
 | `disabled` | any | Off. |
 | `timeout` | any | Milliseconds a tool call may take (1000–86400000; default 120000). Each progress notification from the server starts it again, up to 10 minutes in all (or `timeout`, if longer). Stop cancels a call at once. |
 | `enabledTools` | any | Only these tools (exact names) are offered to the model. An empty list offers none. |
-| `disabledTools` | any | These tools are never offered. Wins over `enabledTools`. Settings → MCP servers lists them as off. |
+| `disabledTools` | any | These tools are never offered. Wins over `enabledTools`. Settings → MCP servers lists them as off; for a user server each tool's switch writes this list. |
 | `oauth.clientId` | remote | A client registered with the authorization server beforehand. Without it the app registers itself (dynamic client registration). |
 | `oauth.callbackPort` | remote | A fixed port for the sign-in callback on 127.0.0.1 (some pre-registered clients need one). Default: a free port. |
 | `oauth.scopes` | remote | Scopes to ask for (a list, or one space-separated string). Default: what the server advertises. |

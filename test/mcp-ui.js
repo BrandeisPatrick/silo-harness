@@ -62,6 +62,28 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   const lv = configVars({ type: 'stdio', command: 'node', args: ['${DIR}/s.js'], env: { K: '${K}' } }, { DIR: '/x' });
   check('configVars: a local command reads its refs', JSON.stringify(lv) === JSON.stringify([{ name: 'DIR', set: true }, { name: 'K', set: false }]), lv);
 
+  // ---------- Tools: titles, two groups, off tools listed ----------
+  const t = (name, o = {}) => ({ name, fullName: `mcp__files__${name}`, description: o.desc || '', readOnly: !!o.ro, destructive: !!o.danger, ...(o.title ? { title: o.title } : {}) });
+  const groups = M.toolGroups({ tools: [t('read_file', { ro: true, title: 'Read file' }), t('search', { ro: true }), t('write_file', { danger: true, title: 'Write file' })], offTools: [t('delete_tree', { danger: true })] });
+  check('tools: two groups with counts', JSON.stringify(groups.map((g) => g.label)) === JSON.stringify(['Read-only · 2', 'Can make changes · 2']), groups.map((g) => g.label));
+  check('tools: the title, with the real name beside it when they differ', groups[0].tools[0].title === 'Read file' && groups[0].tools[0].showName && groups[0].tools[1].title === 'search' && !groups[0].tools[1].showName);
+  check('tools: off tools are listed, marked off', groups[1].tools.some((x) => x.name === 'delete_tree' && x.off) && groups[1].tools.find((x) => x.name === 'write_file').destructive);
+  check('tools: a group with no tools is left out', M.toolGroups({ tools: [t('a', { ro: true })] }).length === 1);
+  check('tools: a title is one line, capped at 64', M.toolGroups({ tools: [t('a', { ro: true, title: 'x\n'.repeat(80) })] })[0].tools[0].title.length === 64);
+  check('primary: all tools off still opens the list', M.primaryAction(srv({ tools: [], offTools: [t('a')] })).label === '0 tools');
+  const { toolTitle } = require(path.join(projectDir, 'dist/main/mcp.js'));
+  check('toolTitle: title, else annotations.title, one line', toolTitle({ title: 'A\n b' }) === 'A b' && toolTitle({ annotations: { title: 'C' } }) === 'C' && toolTitle({}) === '' && toolTitle({ title: 'x'.repeat(100) }).length === 64);
+
+  // ---------- The approval card's arguments ----------
+  const asrc = fs.readFileSync(path.join(projectDir, 'dist/renderer/mcp-args.js'), 'utf8');
+  const A = await import('data:text/javascript,' + encodeURIComponent(asrc));
+  const flat = A.argsListHtml({ path: '~/Projects/demo/NOTES.md', content: '# Notes\n\n- Rate limits', n: 3, ok: true });
+  check('args: a flat object is a key and value list, strings with real line breaks', flat.startsWith('<dl class="mcp-args">') && flat.includes('<dt class="mcp-arg-key">content</dt><dd class="mcp-arg-value long"># Notes\n\n- Rate limits</dd>') && flat.includes('<dd class="mcp-arg-value literal">3</dd>'), flat);
+  check('args: nested values fall back to JSON', A.argsListHtml({ a: { b: 1 } }) === null && A.argsListHtml({ a: [1] }) === null && A.argsListHtml({}) === null);
+  check('args: markup and hidden characters are escaped', A.argsListHtml({ '<k>': 'a<b>‮c​' }) === '<dl class="mcp-args"><dt class="mcp-arg-key">&lt;k&gt;</dt><dd class="mcp-arg-value">a&lt;b&gt;\\u{202e}c\\u{200b}</dd></dl>', A.argsListHtml({ '<k>': 'a<b>‮c​' }));
+  check('args: nothing is cut (a long value scrolls)', A.argsListHtml({ x: 'y'.repeat(5000) }).includes('y'.repeat(5000)) && A.argsListHtml({ x: 'y'.repeat(5000) }).includes('long'));
+  check('args: from the call, else from the card\'s JSON', A.argsObject({ a: 1 }, '{}').a === 1 && A.argsObject(undefined, '{"b":2}').b === 2 && A.argsObject(undefined, '{"b": 2\n…') === null);
+
   // ---------- The manager's list carries the masked config, the vars and the log ----------
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpui-'));
   let config = { mcpServers: { test: { command: 'node', args: [TEST_SERVER], env: { OC_PROJECT: projectDir, SECRET_TOKEN: 'sk-test-999', GONE: '${OC_SURELY_UNSET_VAR}' } } }, mcpTrusted: {} };
@@ -73,6 +95,16 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   const log = m.log('test', 'user');
   check('log(): what the server printed', Array.isArray(log) && log.includes('test server starting'), log);
   check('log(): unknown server rejected', (() => { try { m.log('nope', 'user'); return false; } catch { return true; } })());
+  // per-tool switch (user servers): writes disabledTools, the tool is listed as off, and back on
+  await m.setToolEnabled('test', 'user', 'add', false);
+  let i2 = m.list()[0];
+  check('tool off: written to disabledTools, offered no more, listed as off', JSON.stringify(config.mcpServers.test.disabledTools) === '["add"]' && !m.tools().some((x) => x.name === 'mcp__test__add') && i2.offTools.some((x) => x.name === 'add' && x.title === 'Add numbers'), i2.offTools);
+  await m.setToolEnabled('test', 'user', 'add', true);
+  i2 = m.list()[0];
+  check('tool on again: disabledTools removed, offered again', config.mcpServers.test.disabledTools === undefined && m.tools().some((x) => x.name === 'mcp__test__add') && !i2.offTools);
+  let refused = '';
+  try { await m.setToolEnabled('test', 'project', 'add', false); } catch (e) { refused = e.message; }
+  check("a project server's tools are not switched here", /\.mcp\.json/.test(refused));
   await m.close();
 
   done();

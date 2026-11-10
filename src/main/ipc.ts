@@ -168,6 +168,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
     return Promise.race([done, new Promise<McpServerInfo[]>((r) => setImmediate(() => r(mcp.list())))]);
   });
   ipcMain.handle('mcp:cancel-sign-in', (_e, name: string, scope: McpScope) => requireMcp().cancelSignIn(String(name), scope === 'project' ? 'project' : 'user'));
+  ipcMain.handle('mcp:set-tool-enabled', (_e, name: string, scope: McpScope, tool: string, enabled: boolean) => requireMcp().setToolEnabled(String(name), scope === 'project' ? 'project' : 'user', String(tool ?? ''), Boolean(enabled)));
   ipcMain.handle('mcp:log', (_e, name: string, scope: McpScope) => requireMcp().log(String(name), scope === 'project' ? 'project' : 'user'));
   ipcMain.handle('mcp:sign-out', (_e, name: string, scope: McpScope) => requireMcp().signOut(String(name), scope === 'project' ? 'project' : 'user'));
 

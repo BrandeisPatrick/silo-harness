@@ -7,8 +7,8 @@ const { z } = require(path.join((process.env.OC_PROJECT || path.join(__dirname, 
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 const server = new McpServer({ name: 'oc-test-server', version: '1.2.3' }, process.env.OC_TEST_INSTRUCTIONS ? { instructions: process.env.OC_TEST_INSTRUCTIONS } : undefined);
-server.registerTool('echo', { description: 'Echoes text back', inputSchema: { text: z.string() }, annotations: { readOnlyHint: true } }, async ({ text }) => ({ content: [{ type: 'text', text: `echo: ${text}` }] }));
-server.registerTool('add', { description: 'Adds two numbers', inputSchema: { a: z.number(), b: z.number() } }, async ({ a, b }) => ({ content: [{ type: 'text', text: String(a + b) }] }));
+server.registerTool('echo', { title: 'Echo text', description: 'Echoes text back', inputSchema: { text: z.string() }, annotations: { readOnlyHint: true } }, async ({ text }) => ({ content: [{ type: 'text', text: `echo: ${text}` }] }));
+server.registerTool('add', { description: 'Adds two numbers', inputSchema: { a: z.number(), b: z.number() }, annotations: { title: 'Add numbers' } }, async ({ a, b }) => ({ content: [{ type: 'text', text: String(a + b) }] }));
 server.registerTool('remove_item', { description: 'Removes an item from the list (irreversible)', inputSchema: { id: z.string() }, annotations: { destructiveHint: true } }, async ({ id }) => ({ content: [{ type: 'text', text: `removed ${id}` }] }));
 server.registerTool('picture', { description: 'Returns a PNG', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'image', data: PNG_B64, mimeType: 'image/png' }, { type: 'text', text: 'a 1x1 png' }] }));
 server.registerTool('fail', { description: 'Always fails', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: 'nope' }], isError: true }));

@@ -210,6 +210,8 @@ export interface McpServerInfo {
   unset?: string[];
   /** Tools the server offers that enabledTools/disabledTools keep from the model */
   hiddenTools?: string[];
+  /** The same tools, described, for Settings to list them as off */
+  offTools?: McpToolInfo[];
   /** A remote server with OAuth tokens stored */
   signedIn?: boolean;
 }
@@ -233,6 +235,8 @@ export interface McpApi {
   cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** Deletes the server's tokens and client registration */
   signOut(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Turns one tool of a user server off (disabledTools) or back on */
+  setToolEnabled?(name: string, scope: McpScope, tool: string, enabled: boolean): Promise<McpServerInfo[]>;
   /** A local server's last lines of stderr, secrets cut (for Show log) */
   log?(name: string, scope: McpScope): Promise<string[]>;
   /** The full list whenever a server's status or tools change */

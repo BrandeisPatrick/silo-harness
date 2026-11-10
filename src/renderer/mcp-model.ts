@@ -2,7 +2,7 @@
 // colour per meaning, one primary action, the rest in a menu, a one-line reason, and what trusting a project server
 // lets it do. Pure and types only, so test/mcp-ui.js loads it as is; mcp.ts draws it.
 
-import type { McpServerInfo, McpStatus } from '../shared/types';
+import type { McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
 
 /** The words for each status, used by the row, the /mcp card and the docs */
 export const STATUS_WORDS: Record<McpStatus, string> = {
@@ -80,7 +80,7 @@ export function reasonLine(s: Pick<McpServerInfo, 'status' | 'error' | 'transpor
 export type PrimaryKind = 'sign-in' | 'cancel' | 'retry' | 'trust' | 'tools';
 
 /** The one action a row offers before its switch, chosen by status; null when there is none. */
-export function primaryAction(s: Pick<McpServerInfo, 'status' | 'tools'>): { kind: PrimaryKind; label: string } | null {
+export function primaryAction(s: Pick<McpServerInfo, 'status' | 'tools' | 'offTools'>): { kind: PrimaryKind; label: string } | null {
   switch (s.status) {
     case 'needs-auth':
       return { kind: 'sign-in', label: 'Sign in' };
@@ -91,7 +91,7 @@ export function primaryAction(s: Pick<McpServerInfo, 'status' | 'tools'>): { kin
     case 'blocked':
       return { kind: 'trust', label: 'Trust' };
     case 'connected':
-      return s.tools.length ? { kind: 'tools', label: plural(s.tools.length, 'tool') } : null;
+      return s.tools.length || s.offTools?.length ? { kind: 'tools', label: plural(s.tools.length, 'tool') } : null;
     default:
       return null;
   }
@@ -161,4 +161,30 @@ export function serverSubtitle(s: Pick<McpServerInfo, 'name' | 'serverInfo'>): s
   const raw = safeLine(s.serverInfo?.version, 24).replace(/^v/i, '');
   const version = raw ? (title ? raw : `v${raw}`) : '';
   return [title && title !== s.name ? title : '', version].filter(Boolean).join(' ');
+}
+
+/** A tool as the opened list shows it: its title (else its name), the real name beside it when the two differ */
+export interface ToolEntry {
+  name: string;
+  title: string;
+  /** Show the real name beside the title (they differ) */
+  showName: boolean;
+  description: string;
+  destructive: boolean;
+  off: boolean;
+}
+
+/** The opened tools list: "Read-only" and "Can make changes", each with its tools; off tools are listed, marked off. */
+export function toolGroups(s: Pick<McpServerInfo, 'tools' | 'offTools'>): { label: string; tools: ToolEntry[] }[] {
+  const entry = (t: McpToolInfo, off: boolean): ToolEntry => {
+    const title = safeLine(t.title, 64) || safeLine(t.name, 128);
+    return { name: safeLine(t.name, 128), title, showName: title !== safeLine(t.name, 128), description: typeof t.description === 'string' ? t.description.trim() : '', destructive: !!t.destructive, off };
+  };
+  const all = [...(s.tools ?? []).map((t) => [t, false] as const), ...(s.offTools ?? []).map((t) => [t, true] as const)].filter(([t]) => t && typeof t.name === 'string');
+  const ro = all.filter(([t]) => t.readOnly).map(([t, off]) => entry(t, off));
+  const rw = all.filter(([t]) => !t.readOnly).map(([t, off]) => entry(t, off));
+  return [
+    { label: `Read-only · ${ro.length}`, tools: ro },
+    { label: `Can make changes · ${rw.length}`, tools: rw },
+  ].filter((g) => g.tools.length);
 }
