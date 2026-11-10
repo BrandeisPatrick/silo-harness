@@ -129,7 +129,8 @@ server.listen(0, async () => {
   events = []; requests.length = 0; delayMs = 1500;
   replies.push({ content: 'slow' });
   const run4 = agent.run('slow one');
-  await sleep(100);
+  // Stop once the mock holds the request: one still on the wire would take the next reply
+  for (let i = 0; i < 400 && !requests.length; i++) await sleep(5);
   const q4 = agent.enqueue('dropped?');
   agent.stop();
   await run4;

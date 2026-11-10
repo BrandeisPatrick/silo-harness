@@ -127,6 +127,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.replies.push({ toolCalls: [call('mcp__test__slow', { ms: 8000 })] });
   const t0 = Date.now();
   const run = agent.run('slow');
+  // The mock holds the request before the stop: one still on the wire would take G's first reply
+  for (let i = 0; i < 400 && !state.requests.length; i++) await sleep(5);
   await sleep(400);
   agent.stop();
   await run;
