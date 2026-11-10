@@ -8,8 +8,8 @@
 // on that tab (the controller knows; the agent's synthetic events do not count), while no browser tool is acting or
 // just ended, or from the context menu's Save Image
 // As… is the user's and starts at once. Every other one, the agent's or a page's own, is paused at once, kept out of the downloads folder (it goes to a staging
-// folder in userData), and the download bar under the URL bar asks "The agent started a download: …" with Allow and
-// Don't allow. Allow resumes it and moves it into the folder when it is complete; Don't allow cancels it and removes
+// folder in userData), and the download bar under the URL bar asks "The agent started a download: …" (or "A page
+// started a download: …" when no browser tool was acting) with Allow and Don't allow. Allow resumes it and moves it into the folder when it is complete; Don't allow cancels it and removes
 // it, so nothing is written where the user keeps their files. The user's own downloads start at once.
 //
 // The name rules and the agent window are pure: test/browser-downloads.js.
@@ -149,6 +149,7 @@ export function cleanDownloadList(raw: unknown): DownloadState[] {
       state: asking ? 'cancelled' : state === 'progressing' || state === 'paused' ? 'interrupted' : state,
       startedAt: Number(o.startedAt) || 0,
       byAgent: o.byAgent === true,
+      fromPage: o.fromPage === true,
       asking: false,
       tabId: null,
     });
@@ -238,9 +239,10 @@ export class DownloadManager {
     // The user's only right after their own input on that tab and not while (or just after) the agent acts; everything
     // else asks as the agent's do (no window: nothing asks)
     const now = Date.now();
-    const byAgent = stamps && !asked ? !startedByUser(this.host.userInputAt?.(tabId) ?? 0, now) || startedByAgent(stamps, now) : false;
+    const acting = stamps ? startedByAgent(stamps, now) : false;
+    const byAgent = stamps && !asked ? acting || !startedByUser(this.host.userInputAt?.(tabId) ?? 0, now) : false;
     const entry: Entry = {
-      state: { id, filename, path: '', url, host: downloadHost(url), received: 0, total: Math.max(0, item.getTotalBytes()), state: 'progressing', startedAt: Date.now(), byAgent, asking: byAgent, tabId },
+      state: { id, filename, path: '', url, host: downloadHost(url), received: 0, total: Math.max(0, item.getTotalBytes()), state: 'progressing', startedAt: Date.now(), byAgent, fromPage: byAgent && !acting, asking: byAgent, tabId },
       item,
       staged: '',
       done: null,

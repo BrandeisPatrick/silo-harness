@@ -71,7 +71,7 @@ const { check, done } = checker();
     await app.waitFor(`window.__oc_debug.mods.browser().safety.bars.some((b) => b.kind === 'download')`, 10_000, 'the download bar');
     l = await list();
     const agent = l.find((x) => x.url.endsWith('/files/agent-report.txt'));
-    check("the agent's download is the agent's, paused and asking", agent && agent.byAgent && agent.asking && agent.state === 'paused' && agent.path === '', agent);
+    check("the agent's download is the agent's, paused and asking", agent && agent.byAgent && !agent.fromPage && agent.asking && agent.state === 'paused' && agent.path === '', agent);
     check('… nothing of it is in the folder', !files().some((f) => f.startsWith('agent-report')), files());
     let bar = (await dbg()).safety.bars.find((b) => b.kind === 'download');
     check('the download bar asks, naming the file, its size and the site', bar && bar.text === `The agent started a download: agent-report.txt (28 B) from ${site.host}` && JSON.stringify(bar.buttons) === JSON.stringify(['Allow', "Don't allow"]), bar);

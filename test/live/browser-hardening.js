@@ -257,6 +257,8 @@ function fixtures(P) {
     const auto = (await downloads()).find((x) => x.filename === 'auto.txt');
     check('a download a page starts by itself 3 s after loading, with no input, asks on the download bar', auto && auto.asking && auto.state === 'paused' && !fs.existsSync(path.join(downloadsDir, 'auto.txt')), auto);
     await app.waitFor(`window.__oc_debug.mods.browser().safety.bars.some((b) => b.kind === 'download')`, 10_000, 'the download bar');
+    const autoBar = await app.evaluate(`window.__oc_debug.mods.browser().safety.bars.find((b) => b.kind === 'download').text`);
+    check('… and the bar says a page started it, not the agent', auto && auto.fromPage === true && /^A page started a download: auto\.txt/.test(autoBar ?? ''), { fromPage: auto && auto.fromPage, autoBar });
     await app.evaluate(`(() => { const b = [...document.querySelectorAll('#browser-bars .browser-ask.download button')].find((x) => x.textContent === "Don't allow"); b.click(); return true; })()`);
     await sleep(500);
     r = await app.callTool('browser_navigate', { url: `${SHOP}/userdl.html` });
