@@ -62,7 +62,7 @@ const providerRef: Check = describe(
 const SCALARS: Record<string, Check> = {
   provider: providerRef,
   permissionMode: describe(oneOf('ask', 'acceptEdits', 'auto', 'plan', 'bypass'), 'The permission mode a session starts in.'),
-  maxTurns: describe(positiveInt, 'How many tool calls one request may make before it stops and asks you to continue.'),
+  maxTurns: describe(positiveInt, 'How many model calls one request may make before it stops and asks you to continue.'),
   sendScreenshotsToModel: describe(bool, 'Attach browser screenshots to the conversation as images (needs a vision model).'),
   systemPromptExtra: describe(str, 'Added to every request: house rules, coding style, project context.'),
   theme: describe(oneOf('system', 'light', 'dark'), 'The window theme.'),

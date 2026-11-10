@@ -87,7 +87,7 @@ export function generalSection(ctx: Ctx): Section {
       cli,
       ctx.switchField({ id: 'notifications', title: 'Notifications', desc: 'Notify when a run finishes or needs approval.', keywords: 'alert notify banner sound', field: 'notifications' }),
       ctx.switchField({ id: 'autoTitles', title: 'Generated titles', desc: 'Name a session from its first exchange.', keywords: 'session name rename title', field: 'autoTitles' }),
-      ctx.textField({ id: 'maxTurns', inputId: 'maxTurns', title: 'Max tool turns', desc: 'Tool calls per request before it stops to ask.', keywords: 'limit steps iterations', field: 'maxTurns', type: 'number', width: 96, parse: (t) => parseInteger(t, 1, 500) }),
+      ctx.textField({ id: 'maxTurns', inputId: 'maxTurns', title: 'Max tool turns', desc: 'Model calls per request before it stops to ask.', keywords: 'limit steps iterations', field: 'maxTurns', type: 'number', width: 96, parse: (t) => parseInteger(t, 1, 500) }),
       ctx.textField({
         id: 'systemPromptExtra',
         inputId: 'systemPromptExtra',
