@@ -124,14 +124,19 @@ export function requestedGroups(args: unknown): string[] {
 const WEB_ADDRESS = /(?:\bhttps?:\/\/|\blocalhost:\d|\b127\.0\.0\.1:\d)/i;
 /** "open https://…", "visit localhost:3000": the message asks to open the address itself. */
 const OPEN_ADDRESS = /\b(?:open|visit|go to|navigate to)\s+<?(?:https?:\/\/|localhost:\d|127\.0\.0\.1:\d)/i;
+/** "a sub-session", "another session", "the session called atlas", "rename this session": not a bare "session". */
+const OTHER_SESSIONS = /\b(?:sub-?sessions?|(?:other|another|new|parallel)\s+sessions?|sessions?\s+(?:called|named|titled)|(?:rename|call|name)\s+this\s+session)\b/i;
 
 /**
  * The groups a user message clearly needs, loaded before the first request so the model does not spend a step on it:
- * the browser, for a web address the message asks to open or names together with the browser. Anything less clear is
- * left to the model (a wrong guess would cost the group's tokens on every later request).
+ * the browser, for a web address the message asks to open or names together with the browser; sessions, for a message
+ * about other sessions or this one's name. Anything less clear is left to the model (a wrong guess would cost the
+ * group's tokens on every later request).
  */
 export function groupsForMessage(text: string): ToolGroup[] {
   const t = String(text ?? '');
-  if (!WEB_ADDRESS.test(t)) return [];
-  return OPEN_ADDRESS.test(t) || /\bbrowser\b/i.test(t) ? ['browser'] : [];
+  const out: ToolGroup[] = [];
+  if (WEB_ADDRESS.test(t) && (OPEN_ADDRESS.test(t) || /\bbrowser\b/i.test(t))) out.push('browser');
+  if (OTHER_SESSIONS.test(t)) out.push('sessions');
+  return out;
 }

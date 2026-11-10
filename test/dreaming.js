@@ -66,7 +66,7 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   app.push = (ch, p) => (pushes.push([ch, p]), origPush(ch, p));
   let n = 0;
   const call = (name, args) => ({ id: `c${++n}`, name, args });
-  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user');
+  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const isDream = (p) => typeof firstUser(p)?.content === 'string' && firstUser(p).content.startsWith('[Dream]');
   const has = (m, tag) => typeof m?.content === 'string' && m.content.includes(tag);
   const reply = (tag, r) => state.replies.push({ ...r, when: (p) => has(firstUser(p), tag) });

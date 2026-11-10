@@ -49,7 +49,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   const of = (sid, type) => events.filter((e) => e.sid === sid && (!type || e.ev.type === type)).map((e) => e.ev);
   let callId = 0;
   const call = (name, args) => ({ id: `c${++callId}`, name, args });
-  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user');
+  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const lastUser = (payload) => [...(payload.messages || [])].reverse().find((m) => m.role === 'user');
   const has = (m, tag) => typeof m?.content === 'string' && m.content.includes(tag);
   const reply = (tag, r) => state.replies.push({ ...r, when: (p) => has(firstUser(p), tag) });

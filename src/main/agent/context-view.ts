@@ -7,12 +7,15 @@
 //     replaced by a line saying so. Images the user attached are always sent.
 //   - Results the agent set aside to save context (Session.prunedResults, see pruneForModel) keep only their start
 //     and end, as pruning does in a small window.
+//   - A context note right after the user's message (or several in a row) comes before it, so the model does not read
+//     it as part of what the user wrote (notesFirst).
 // On a provider that caches a request's prefix every change to an earlier message is paid for (the rest of the
 // request is written to the cache again), so there both cuts come in batches: old screenshots SHOT_BATCH at a time,
 // old output once the view reaches a high-water mark, down to a low-water mark (batchMarks). After a pause longer than
 // the cache lasts the whole conversation is written again anyway, so a batch then starts much lower (COLD_BATCH_FROM).
 
 import type { Msg } from '../sessions';
+import { isContextNote } from '../compact';
 
 /** Characters of one tool result the model gets; longer output keeps its start and end (about 8–10K tokens). */
 export const MODEL_RESULT_CHARS = 30_000;
@@ -106,7 +109,7 @@ export function modelMessages(messages: Msg[], pruned: ReadonlySet<string> = new
   let drop = Math.max(0, carriers.length - KEEP_SCREENSHOTS);
   if (opts.batchShots) drop = Math.floor(drop / SHOT_BATCH) * SHOT_BATCH;
   const keepShot = new Set(carriers.slice(0, carriers.length - drop));
-  return messages.map((m, i) => {
+  const out = messages.map((m, i) => {
     if (m.role === 'tool') {
       const text = typeof m.content === 'string' ? m.content : textOf(m.content);
       if (pruned.has(m.tool_call_id)) {
@@ -122,6 +125,29 @@ export function modelMessages(messages: Msg[], pruned: ReadonlySet<string> = new
     }
     return m;
   });
+  return notesFirst(out);
+}
+
+/**
+ * The messages with each context note that directly follows a run of user messages moved to the front of that run. A
+ * note after a tool result or a reply stays. Only those messages trade places, so the rest keep their indexes.
+ */
+export function notesFirst(messages: Msg[]): Msg[] {
+  const out = messages.slice();
+  let start = -1;
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i];
+    if (isContextNote(m)) {
+      if (start >= 0) {
+        out.splice(i, 1);
+        out.splice(start, 0, m);
+      }
+      start = -1;
+    } else if (m.role === 'user') {
+      if (start < 0) start = i;
+    } else start = -1;
+  }
+  return out;
 }
 
 /**

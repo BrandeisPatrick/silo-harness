@@ -130,6 +130,8 @@ function parseArgs(raw: string): Record<string, unknown> {
 const EMPTY_USER = '(empty message)';
 const EMPTY_ASSISTANT = '(no reply)';
 const EMPTY_RESULT = '(no output)';
+/** The head of a group load's text in the user turn, so the model does not read it as the user's words */
+export const LOAD_RESULT_HEAD = '[load_tools result: set by the app, not typed by the user]';
 
 /**
  * The OpenAI-shaped history as a Messages request: system messages become the system blocks; assistant tool calls
@@ -143,8 +145,16 @@ export function toAnthropic(history: Msg[], stripThinkingBefore = 0, refs: Reado
   const messages: MessageParam[] = [];
   const push = (role: 'user' | 'assistant', blocks: Block[]) => {
     const last = messages[messages.length - 1];
-    if (last && last.role === role) (last.content as Block[]).push(...blocks);
-    else messages.push({ role, content: [...blocks] });
+    if (last && last.role === role) {
+      // The API reads adjacent text blocks as one text, so text added to a turn after text starts with a blank line
+      // (tool results move to the front of a user turn, so the text before it is what it follows)
+      const turn = last.content as Block[];
+      const before = turn.filter((b) => b.type !== 'tool_result').pop();
+      const first = blocks.findIndex((b) => b.type !== 'tool_result');
+      const b = blocks[first];
+      if (before?.type === 'text' && b?.type === 'text') blocks = blocks.map((x, k) => (k === first ? { ...b, text: '\n\n' + b.text } : x));
+      turn.push(...blocks);
+    } else messages.push({ role, content: [...blocks] });
   };
   history.forEach((m, i) => {
     if (m.role === 'system' || m.role === 'developer') {
@@ -170,7 +180,7 @@ export function toAnthropic(history: Msg[], stripThinkingBefore = 0, refs: Reado
         // A group's load: its result is the references alone (the API takes nothing else beside them), and what the
         // load says (the group's guidance) follows the results as text in the same turn
         const content = named.map((tool_name) => ({ type: 'tool_reference', tool_name })) as unknown as Anthropic.ToolResultBlockParam['content'];
-        push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content }, ...(text.trim() ? [{ type: 'text' as const, text }] : [])]);
+        push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content }, ...(text.trim() ? [{ type: 'text' as const, text: `${LOAD_RESULT_HEAD}\n${text}` }] : [])]);
       } else push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: text.trim() ? text : EMPTY_RESULT }]);
     }
   });

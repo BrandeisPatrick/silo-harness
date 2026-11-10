@@ -16,6 +16,32 @@ const small = [{ role: 'user', content: 'hi' }, call('a', 'bash', { command: 'ls
 const same = modelMessages(small);
 check('1: nothing to cut: the same messages, the same objects', same.length === small.length && same.every((m, i) => m === small[i]));
 
+// ---- 1b: a context note right after the user's message comes before it; the stored order does not change ----
+const A = require(path.join(projectDir, 'dist/main/agent/anthropic.js'));
+const note = (n) => ({ role: 'user', content: `[Session context] note ${n}` });
+const texts = (ms) => ms.map((m) => (typeof m.content === 'string' ? m.content : m.role));
+const u1 = { role: 'user', content: 'U1' };
+const n1 = note(1);
+const first = [u1, n1];
+check('1b: the note goes before the message it follows', texts(modelMessages(first)).join('|') === '[Session context] note 1|U1' && first[0] === u1 && first[1] === n1);
+const toolFirst = [u1, call('t', 'bash'), result('t', 'out'), note(2)];
+check('1b: …a note after a tool result stays where it is', modelMessages(toolFirst).every((m, i) => m === toolFirst[i]));
+const afterReply = [u1, { role: 'assistant', content: 'hi' }, note(3)];
+check('1b: …as does one after a reply', modelMessages(afterReply).every((m, i) => m === afterReply[i]));
+const queued = [u1, { role: 'assistant', content: 'hi' }, { role: 'user', content: 'U2' }, { role: 'user', content: 'U3' }, note(4)];
+check('1b: two queued messages, then a note: the note before both, the rest in place', texts(modelMessages(queued)).join('|') === 'U1|hi|[Session context] note 4|U2|U3');
+const loadAfter = [u1, n1, call('l', 'load_tools', { groups: ['browser'] }), result('l', 'Loaded browser.')];
+check('1b: an early load after the note: note, message, load, result', texts(modelMessages(loadAfter)).join('|') === '[Session context] note 1|U1||Loaded browser.');
+const grown = [u1, n1, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'U2' }, note(5)];
+const v1 = modelMessages(first);
+const v2 = modelMessages(grown);
+check('1b: the first request is still the start of a later one', v1.every((m, i) => m === v2[i]) && texts(v2).join('|') === '[Session context] note 1|U1|A1|[Session context] note 5|U2');
+const r1 = JSON.stringify(A.toAnthropic(v1).messages);
+const r2 = JSON.stringify(A.toAnthropic(modelMessages([u1, n1, { role: 'assistant', content: 'A1' }, { role: 'user', content: 'U2' }])).messages);
+check('1b: …and so is its native request', r2.startsWith(r1.slice(0, -1)), [r1, r2]);
+check('1b: the merged turn: the note, then the message after a blank line', JSON.stringify(A.toAnthropic(v1).messages[0].content) === JSON.stringify([{ type: 'text', text: '[Session context] note 1' }, { type: 'text', text: '\n\nU1' }]));
+check('1b: the stored messages are untouched', grown[0] === u1 && grown[1] === n1 && grown.length === 5);
+
 // ---- 2: a long read_file result is cut after a whole line, with the offset to continue ----
 const lines = Array.from({ length: 3000 }, (_, i) => `${String(i + 1).padStart(4)}| ${'x'.repeat(40)} line ${i + 1}`);
 const readText = `${lines.slice(0, 2000).join('\n')}\n…(3000 lines total; continue with offset=2001)`;

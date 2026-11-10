@@ -947,7 +947,11 @@ export class BrowserController {
           : `Screenshot refused: ${what} on screen shows a filled-in credential in clear text. Scroll it out of view, or ask the user to look, instead.`,
       );
     }
-    const image = await this.wc.capturePage();
+    // A hidden view's first capture can fail (UnknownVizError): one more try after a moment
+    const image = await this.wc.capturePage().catch(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return this.wc.capturePage();
+    });
     // The user's copy on disk keeps every pixel; what goes into the conversation (and to the model, when Settings
     // allow) is a JPEG at CSS scale, its longest side at most 1280 px: a fraction of the image tokens.
     const png = image.toPNG();

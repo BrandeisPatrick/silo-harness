@@ -97,6 +97,10 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   check('a message that asks to open a web address loads the browser', groupsForMessage('Open https://example.com and tell me the title').join() === 'browser' && groupsForMessage('visit localhost:3000 please').join() === 'browser');
   check('…as does one that names an address with the browser', groupsForMessage('What does http://127.0.0.1:8080/ show in the browser?').join() === 'browser');
   check('…but not an address the task only mentions', groupsForMessage('Clone https://github.com/a/b and run its tests').length === 0 && groupsForMessage('Open a PR at https://github.com/a/b').length === 0 && groupsForMessage('Open the browser settings file').length === 0);
+  const sess = (t) => groupsForMessage(t).join() === 'sessions';
+  check('a message about other sessions loads sessions', sess('Read the session called atlas notes and sum it up') && sess('Start a sub-session to run the tests') && sess('spawn two subsessions') && sess('Ask another session to check') && sess('Open a NEW SESSION for this') && sess('run it in parallel sessions') && sess('the sessions named alpha and beta') && sess('the session titled Build') && sess('Rename this session to Docs') && sess('name this session Atlas') && sess('look at the other sessions'));
+  check('…but a bare "session" or "this session" does not', ['fix the session cookie', 'in this session we refactor', 'the session expired', 'session management code', 'sessions.ts has a bug', 'end this session'].every((t) => groupsForMessage(t).length === 0));
+  check('…and both rules can hold', groupsForMessage('Open https://example.com in another session').join() === 'browser,sessions');
   check('load_tools arguments are read leniently', requestedGroups({ groups: ['Browser', 'terminal', 'browser'] }).join() === 'browser,terminal' && requestedGroups({ groups: 'sessions, schedules' }).join() === 'sessions,schedules' && requestedGroups({ group: 'mods' }).join() === 'mods' && requestedGroups(['terminal']).join() === 'terminal' && requestedGroups({}).length === 0);
 
   // ---- A: a fresh session offers the core tools and load_tools, which names the groups ----
@@ -195,7 +199,8 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   req = streams()[0];
   const msgs = req.payload.messages;
   check('E: the first request already offers the browser, at the end of the tools', names(req).slice(-12).every((t) => t.startsWith('browser_')) && JSON.stringify(e.session.toolGroups) === '["browser"]', names(req).slice(-13));
-  check("E: …after the message, a load_tools call of the agent's own whose result has the browser's rules", msgs[1].role === 'user' && msgs[2].role === 'assistant' && msgs[2].tool_calls[0].function.name === 'load_tools' && msgs[3].role === 'tool' && /^Loaded browser: browser_tabs, /.test(msgs[3].content) && /act by visible text/.test(msgs[3].content), msgs.map((m) => m.role));
+  check("E: …the context note, the message, then a load_tools call of the agent's own whose result has the browser's rules", msgs[1].role === 'user' && msgs[1].content.startsWith('[Session context]') && msgs[2].content === 'Open https://example.com and tell me its title.' && msgs[3].role === 'assistant' && msgs[3].tool_calls[0].function.name === 'load_tools' && msgs[4].role === 'tool' && /^Loaded browser: browser_tabs, /.test(msgs[4].content) && /act by visible text/.test(msgs[4].content), msgs.map((m) => m.role));
+  check('E: stored: the message, the note, the load and its result', e.session.messages.map((m) => (m.role === 'user' && String(m.content).startsWith('[Session context]') ? 'note' : m.role)).join() === 'user,note,assistant,tool,assistant', e.session.messages.map((m) => m.role));
   check('E: the system prompt is the one every session starts with', system(req) === firstSystem);
   items = toTranscript(e.session);
   check('E: the transcript shows the message and the reply only', items.map((i) => i.role).join() === 'user,assistant', items.map((i) => i.role));

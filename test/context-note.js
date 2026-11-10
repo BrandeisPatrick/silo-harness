@@ -64,7 +64,7 @@ const { check, done } = require('./support/check.js');
   await turn('three');
   const reqs = streams();
   const system = reqs.map((p) => p.messages[0].content);
-  check('1: the first request: system, the message, then the note', reqs[0].messages.map((m) => m.role).join() === 'system,user,user' && reqs[0].messages[1].content === 'one' && notesIn(reqs[0].messages).length === 1);
+  check('1: the first request: system, the note, then the message (stored after it)', reqs[0].messages.map((m) => m.role).join() === 'system,user,user' && C.isContextNote(reqs[0].messages[1]) && reqs[0].messages[2].content === 'one' && notesIn(reqs[0].messages).length === 1 && C.isContextNote(session.messages[1]));
   check('1: the note says where and when, and what the session is named', /Working directory: /.test(notesIn(reqs[0].messages)[0].content) && /Today: \d{4}-\d{2}-\d{2}/.test(notesIn(reqs[0].messages)[0].content) && /This session is named/.test(notesIn(reqs[0].messages)[0].content));
   check('1: the system prompt has none of it', !/Working directory:|Today:|This session is named/.test(system[0]));
   check('1: no note per turn or per call: still one after three runs and a tool loop', notesIn(session.messages).length === 1 && reqs.length === 4, reqs.length);
@@ -127,7 +127,7 @@ const { check, done } = require('./support/check.js');
   check('4: the compaction folded the older notes', r.ok && notesIn(session.compactions[0].folded).length >= 5 && keptNotes <= 1, r);
   await turn('after the fold');
   const last = streams().pop();
-  check('4: the next request has exactly one note, the current one', C.isCompactPreamble(last.messages[1]) && notesIn(last.messages).length === 1 && P.contextNoteState(notesIn(last.messages)[0].content) === P.sessionContext(config, { shared: '', session: app.promptFor({ cwd: project, mode: 'ask', sessionId: session.id, part: 'session' }) }), last.messages.map((m) => String(m.content).slice(0, 24)));
+  check('4: the next request has exactly one note, the current one', C.isContextNote(last.messages[1]) && C.isCompactPreamble(last.messages[2]) && notesIn(last.messages).length === 1 && P.contextNoteState(notesIn(last.messages)[0].content) === P.sessionContext(config, { shared: '', session: app.promptFor({ cwd: project, mode: 'ask', sessionId: session.id, part: 'session' }) }), last.messages.map((m) => String(m.content).slice(0, 24)));
   // A /compact that folds the whole conversation takes the note too: it comes back before the next call
   session.messages.splice(0, session.messages.length, ...session.messages.filter((m) => !C.isContextNote(m)));
   check('4: (without a note in the kept part)', notesIn(session.messages).length === 0);

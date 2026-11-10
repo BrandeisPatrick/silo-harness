@@ -58,7 +58,7 @@ async function waitFor(fn, ms = 5000, what = 'condition') {
   const call = (name, args) => ({ id: `c${++callId}`, name, args });
   /** Matches the requests of the session whose first message carries `tag`. */
   const forTag = (tag) => (payload) => {
-    const first = (payload.messages || []).find((m) => m.role === 'user');
+    const first = (payload.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
     return typeof first?.content === 'string' && first.content.includes(tag);
   };
   const reply = (tag, r) => state.replies.push({ ...r, when: forTag(tag) });

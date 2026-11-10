@@ -144,8 +144,9 @@ export interface App {
   A group is loaded by `load_tools`, by a call to one of its tools by name (before the reply's calls are stored, so
   `shownArgs` and hooks see the tool; the agent stores a `load_tools` call of its own first in that reply, with the
   load's result, then the call runs as usual), or before the first request by a message that clearly needs it
-  (`groupsForMessage`: a web address it asks to open, or one named with the word browser; again a `load_tools` call of
-  the agent's own, right after the message). `load_tools` is the agent's own: it runs before the reply's other calls,
+  (`groupsForMessage`: a web address it asks to open, or one named with the word browser; other sessions or this one's
+  name; any message from another session loads `sessions`; again a `load_tools` call of the agent's own, right after
+  the message and its context note). `load_tools` is the agent's own: it runs before the reply's other calls,
   without a tool row, an approval or hooks; `toTranscript`, the export and Auto mode's check leave its calls out.
   `toolSet: 'all'` (`allGroupsUpFront`) offers every group from the first request, with the browser's rules, the
   Terminal pane and every section in the system prompt, and no `load_tools`; a session with a tool set of its own has

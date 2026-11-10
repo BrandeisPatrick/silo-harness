@@ -42,9 +42,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         { role: 'assistant', content: [{ type: 'tool_use', id: 's1', name: 'browser_screenshot', input: {} }, { type: 'tool_use', id: 's2', name: 'bash', input: {} }] },
         { role: 'user', content: [{ type: 'tool_result', tool_use_id: 's1', content: 'shot' }, { type: 'tool_result', tool_use_id: 's2', content: 'ok' }, { type: 'text', text: '[Screenshot returned by browser_screenshot]' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }] },
       ] }],
-    ['consecutive user messages are one turn (a message, then the context note)',
-      [{ role: 'user', content: 'one' }, { role: 'user', content: '[Session context] note' }],
-      { system: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'one' }, { type: 'text', text: '[Session context] note' }] }] }],
+    ['consecutive user messages are one turn (the context note, then a message), the later text after a blank line',
+      [{ role: 'user', content: '[Session context] note' }, { role: 'user', content: 'one' }],
+      { system: [], messages: [{ role: 'user', content: [{ type: 'text', text: '[Session context] note' }, { type: 'text', text: '\n\none' }] }] }],
     ['empty contents get placeholders the API accepts',
       [{ role: 'user', content: '  ' }, { role: 'assistant', content: '' }, { role: 'user', content: 'q' }, { role: 'assistant', content: null, tool_calls: [call('e1', 'bash', '')] }, { role: 'tool', tool_call_id: 'e1', content: '' }],
       { system: [], messages: [
@@ -69,6 +69,17 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const got = A.toAnthropic(history);
     check(`1: ${label}`, same(got, want), got);
   }
+  // Text added to a turn after text starts with a blank line (the API reads adjacent text blocks as one); a load's
+  // guidance has a head line saying the app set it; nothing an earlier request sent changes
+  const loads = [{ role: 'user', content: 'go' }, { role: 'assistant', content: '', tool_calls: [call('l1', 'load_tools', { groups: ['browser'] }), call('l2', 'load_tools', { groups: ['terminal'] })] }, { role: 'tool', tool_call_id: 'l1', content: 'Loaded browser: browser_tabs.' }, { role: 'tool', tool_call_id: 'l2', content: 'Loaded terminal: terminal_list.' }];
+  const refs = new Map([['l1', ['browser_tabs']], ['l2', ['terminal_list']]]);
+  const loaded = A.toAnthropic(loads, 0, refs).messages[2].content;
+  check('1: a load\'s guidance follows the references under its head line', same(loaded.map((b) => b.type), ['tool_result', 'tool_result', 'text', 'text']) && loaded[2].text === `${A.LOAD_RESULT_HEAD}\nLoaded browser: browser_tabs.` && A.LOAD_RESULT_HEAD === '[load_tools result: set by the app, not typed by the user]', loaded);
+  check('1: …a second one after a blank line', loaded[3].text === `\n\n${A.LOAD_RESULT_HEAD}\nLoaded terminal: terminal_list.`, loaded[3]);
+  check('1: without the references the result is sent as stored', A.toAnthropic(loads).messages[2].content[0].content === 'Loaded browser: browser_tabs.');
+  const later = A.toAnthropic([...loads, { role: 'user', content: 'and then' }], 0, refs).messages[2].content;
+  check('1: a message after them: a blank line before it, the blocks before as they were', same(later.slice(0, 4), loaded) && later[4].text === '\n\nand then', later[4]);
+  check('1: a message after a tool result alone gets no blank line', A.toAnthropic([{ role: 'user', content: 'q' }, { role: 'assistant', content: '', tool_calls: [call('b1', 'bash', {})] }, { role: 'tool', tool_call_id: 'b1', content: 'ok' }, { role: 'user', content: 'next' }]).messages[2].content[1].text === 'next');
   const think = [{ type: 'thinking', thinking: 'hmm', signature: 'sig' }];
   const withThinking = [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a', tool_calls: [call('k1', 'bash', {})], [A.THINKING_KEY]: think }, { role: 'tool', tool_call_id: 'k1', content: 'r' }];
   check('1: kept thinking goes first in its reply', same(A.toAnthropic(withThinking).messages[1].content[0], think[0]));

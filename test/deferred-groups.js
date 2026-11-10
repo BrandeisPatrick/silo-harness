@@ -78,7 +78,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const result = loadTurn.content.find((b) => b.tool_use_id === 'toolu_load');
   const termNames = t0.filter((t) => t.name.startsWith('terminal_')).map((t) => t.name);
   check('2: the load\'s result is the terminal tools\' references, nothing else', Array.isArray(result.content) && result.content.every((b) => b.type === 'tool_reference') && same(result.content.map((b) => b.tool_name), termNames), result.content);
-  check('2: …and what the load says follows it as text in the same turn', loadTurn.content.some((b) => b.type === 'text' && /^Loaded terminal: /.test(b.text)) && loadTurn.content[0].type === 'tool_result');
+  check('2: …and what the load says follows it as text in the same turn, under a head line saying the app set it', loadTurn.content.some((b) => b.type === 'text' && b.text.startsWith('[load_tools result: set by the app, not typed by the user]\nLoaded terminal: ')) && loadTurn.content[0].type === 'tool_result');
+  check('2: the stored result has no head line', agent.session.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'toolu_load').content.startsWith('Loaded terminal: '));
   check('2: the loaded tool ran and the run ended', events.filter((e) => e.type === 'run_end').pop()?.text === 'Listed.' && agent.session.toolGroups.includes('terminal'), [events.filter((e) => e.type === 'run_end'), agent.session.toolGroups]);
   check('2: the stored history is as before (the result is text)', typeof agent.session.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'toolu_load').content === 'string');
   // The context breakdown counts only the loaded groups' tools

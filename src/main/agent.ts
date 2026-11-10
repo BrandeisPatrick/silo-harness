@@ -1034,9 +1034,14 @@ export class Agent {
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
-      // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation
-      const early = this.ownTools() ? [] : this.loadGroups(cfg, groupsForMessage(userText));
+      // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
+      // A message from another session is answered with session_send, so it loads the sessions group.
+      const wanted = groupsForMessage(userText);
+      if (origin === 'session' && !wanted.includes('sessions')) wanted.push('sessions');
+      const early = this.ownTools() ? [] : this.loadGroups(cfg, wanted);
       if (early.length) {
+        // The note first, so it sits with the message (the model gets it before the message) and not after the load
+        this.addContextNote(cfg);
         const load = this.syntheticLoad(early);
         const pool = this.toolPool(cfg);
         this.store.append(this.session, { role: 'assistant', content: '', tool_calls: [load] });

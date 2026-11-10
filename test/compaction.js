@@ -350,7 +350,7 @@ function cleanCut(msgs, cut) {
   state.replies.push({ content: 'falcon' });
   await agent.run('What was the code word?');
   check('7: …and the conversation goes on from the brief', streams().length === 1 && streams()[0].messages.length === 4 && runEnd().reason === 'done', streams().map((q) => q.messages.map((m) => m.role)));
-  check('7: …with the context note again, after the request, since the fold took the old one', C.isContextNote(streams()[0].messages[3]) && agent.session.messages.filter(C.isContextNote).length === 1, streams()[0].messages.map((m) => String(m.content).slice(0, 30)));
+  check('7: …with the context note again, sent before the brief and the request, since the fold took the old one', C.isContextNote(streams()[0].messages[1]) && agent.session.messages.filter(C.isContextNote).length === 1, streams()[0].messages.map((m) => String(m.content).slice(0, 30)));
 
   // ---- 8: fallbacks when no summary can be produced ----
   // (a) prune harder
