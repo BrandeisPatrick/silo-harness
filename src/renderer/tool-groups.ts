@@ -93,15 +93,17 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
       arg.textContent = '';
     }
     group.classList.toggle('live', live);
-    // One icon the calls share (a run of commands, of MCP calls), otherwise the files
-    const icons = new Set(cards.map((c) => c.el.dataset.icon ?? ''));
-    const kind: IconName = icons.size === 1 && isIconName([...icons][0]) ? ([...icons][0] as IconName) : 'files';
+    // The icon of the call in flight while the run goes on, then the first kind's
+    const iconOf = (c: ToolCard | undefined) => c?.el.dataset.icon ?? '';
+    const want = now ? iconOf(now) : iconOf(cards[0]);
+    const kind: IconName = isIconName(want) ? (want as IconName) : 'files';
     const groupIcon = group.querySelector<HTMLElement>(':scope > summary > .group-icon')!;
     if ((groupIcon.dataset.kind ?? 'files') !== kind) {
       groupIcon.dataset.kind = kind;
       groupIcon.innerHTML = icon(kind);
     }
-    const busy = live || (!summaryMode() && cards.some((c) => c.running));
+    // A live line shimmers (styles.css) instead of spinning; a group of reads in Every call spins as it always did
+    const busy = !summaryMode() && cards.some((c) => c.running);
     const failed = cards.filter((c) => c.outcome === 'failed').length;
     // A folded run says "N failed" in red on its right; a group of reads (Every call) marks its icon, as it always did
     groupIcon.className = `group-icon${busy ? ' spin' : failed && !summaryMode() ? ' err' : ''}`;
@@ -119,6 +121,15 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     group.querySelector(':scope > summary > .group-meta')!.innerHTML = meta.join(' ');
     const summary = group.querySelector<HTMLElement>(':scope > summary')!;
     summary.setAttribute('aria-label', [now ? `${verb.textContent} ${arg.textContent}`.trim() : words.text, ...meta.map((m) => m.replace(/<[^>]+>/g, ''))].join(', '));
+    syncCap(group);
+  }
+
+  /** An opened list longer than the cap scrolls; its last row fades out until the end is reached (styles.css). */
+  function syncCap(group: Element): void {
+    const body = group.querySelector<HTMLElement>(':scope > .group-body');
+    if (!body || !(group as HTMLDetailsElement).open) return;
+    const more = body.scrollHeight - body.scrollTop - body.clientHeight > 2;
+    body.classList.toggle('more', more);
   }
 
   function createGroup(): HTMLDetailsElement {
@@ -129,10 +140,17 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
       if (!group.open) return;
       const cards = groupCards(group);
       if (cards.length === 1) cards[0].el.open = true;
+      syncCap(group);
     });
     group.innerHTML =
       `<summary><span class="tool-chevron">${icon('chevron-right')}</span><span class="group-icon">${icon('files')}</span>` +
       `<span class="tool-verb group-verb"></span><span class="tool-arg group-arg"></span><span class="tool-meta group-meta"></span></summary><div class="group-body"></div>`;
+    const body = group.querySelector<HTMLElement>(':scope > .group-body')!;
+    body.addEventListener('scroll', () => syncCap(group), { passive: true });
+    // A row opened to its output (or shut again) changes the list's height
+    body.addEventListener('toggle', () => syncCap(group), true);
+    // With Every call nothing is folded by default
+    group.open = !summaryMode();
     return group;
   }
 

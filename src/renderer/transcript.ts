@@ -31,9 +31,11 @@ export interface TranscriptDeps {
   cleanError(err: unknown): string;
   /** A reply was finished, with its Markdown source: the cards it names go under it (chat-cards.ts) */
   replyEnded?(msg: HTMLElement, raw: string): void;
+  /** A node went in (turn-fold.ts: a turn's first call gives it its header) */
+  nodeAdded?(el: HTMLElement): void;
 }
 
-export function createTranscript({ messages: messagesEl, emptyState, workingDirectory, pickedPaths, changesApi, openLightbox, rewindTo, foldable, endLiveRun, showError, cleanError, replyEnded }: TranscriptDeps) {
+export function createTranscript({ messages: messagesEl, emptyState, workingDirectory, pickedPaths, changesApi, openLightbox, rewindTo, foldable, endLiveRun, showError, cleanError, replyEnded, nodeAdded }: TranscriptDeps) {
   /** Whether the view follows new content (the user is at the bottom) */
   let stick = true;
   const jumpBtn = byId<HTMLButtonElement>('jump-latest');
@@ -65,6 +67,7 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     el.classList.add('fade-in');
     messagesEl.appendChild(el);
     if (!foldable(el)) endLiveRun();
+    nodeAdded?.(el);
     scrollToBottom();
   }
 

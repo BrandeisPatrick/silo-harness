@@ -39,6 +39,7 @@ const SCRIPTS = [
   { name: 'session-messages' },
   { name: 'names' },
   { name: 'tool-rows' },
+  { name: 'chat-fold' },
   { name: 'quiet' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },

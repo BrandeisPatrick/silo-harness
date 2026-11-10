@@ -554,6 +554,8 @@ export interface SessionStatus {
 export interface LiveState {
   running: boolean;
   startedAt?: number;
+  /** When the turn going on now began: a message delivered during the run starts a turn of its own */
+  turnStartedAt?: number;
   /** Text of the assistant message being streamed (not yet in the transcript) */
   text: string;
   thinking: string;
@@ -867,9 +869,10 @@ export type TranscriptItem =
   /**
    * images: data URLs of the attached images, in order; mentions: @-mentioned paths whose contents went to the model;
    * turn: the message's checkpoint index, present when the conversation can be rewound to it (sessions.rewind);
-   * origin/from: set when the message was not typed in the window (see MessageOrigin)
+   * origin/from: set when the message was not typed in the window (see MessageOrigin); worked: how long the turn it
+   * started worked, in ms, when that was recorded (the "Worked for 53s" line)
    */
-  | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string }
+  | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string; worked?: number }
   | { role: 'assistant'; text: string }
   | { role: 'tool'; name: string; args: string; result: string; ok: boolean }
   /** A submit_plan call is shown as a plan card instead of a tool row */

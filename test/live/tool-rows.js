@@ -189,7 +189,8 @@ async function runMode(mode, shots) {
     record('mod_check (broken)', s.row);
 
     await light();
-    // Each call is one folded line; open them to show the rows
+    // Each turn folded under its header and each call is one folded line; open both to show the rows
+    await app.unfold();
     await app.evaluate(`document.querySelectorAll('#messages > .tool-group').forEach((g) => (g.open = true))`);
     await app.evaluate(`document.querySelectorAll('#messages .tool').forEach((r) => (r.open = false))`);
     await app.evaluate(`document.querySelector('.tool[data-tool="session_spawn"]').scrollIntoView({ block: 'start' })`);

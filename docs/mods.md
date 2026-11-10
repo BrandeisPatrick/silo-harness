@@ -181,6 +181,7 @@ They are removed when the look goes away. A setting is how a look offers a choic
 | `.tool-status`, `.tool-status.spin`, `.tool-status.err` | the row's icon: `.spin` while the tool runs, `.err` when it failed |
 | `.tool-group` | several rows folded into one (a `<details>` like `.tool`) |
 | `.tool-group > summary`, `.group-stat`, `.group-failed`, `.group-denied` | the folded line (`.live` on the group while its calls run), and on its right the lines added and removed, the failed count and the denied count |
+| `.turn-head`, `.turn-head-btn`, `.turn-hidden` | the "Working for 18s" / "Worked for 53s" header over a turn's process (`.live` while it runs, `.folded` when folded), and the process nodes it hides |
 | `.cmd`, `.out pre` | a command and its output inside a tool row |
 | `.approval` | an approval card (restyle with care: it has to stay readable) |
 | `.plan-card`, `.task-list`, `.task-row` (`data-status`: `pending`, `in_progress`, `completed`) | a plan, the task list card and its rows |
