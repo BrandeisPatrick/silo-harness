@@ -36,6 +36,8 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Cache-safe tool groups.** On Claude's own API, loading the browser or terminal tools no longer rewrites the cached prompt.
 - **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
+- **Smaller search results.** grep cuts each line at 400 characters; grep and glob results stop at 12,000 characters and say how much is left.
+- **Cheaper safety checks.** On Claude's own API, Auto mode's check caches your instruction files instead of sending them at full price each time.
 - **Retries you can see.** A failed or dropped model call is tried up to 6 times with growing waits, shown on one status line.
 - **Cheaper page reads.** `browser_get_text` and `browser_read_page` return 12,000 characters at a time and say where to continue.
 - **Servers reconnect themselves.** A remote MCP server that drops is retried 5 times with growing waits, and a crashed local one restarts on its next call.

@@ -73,4 +73,4 @@ A text result over 100,000 characters is written in full to `<os tmp>/silo-harne
 
 ## Server instructions
 
-A server's `instructions` (from the handshake) are kept, at most 2,000 characters: `McpManager.serverInstructions()`. They are not in the prompt yet. They are untrusted text from the server.
+A server's `instructions` (from the handshake) are kept, at most 2,000 characters: `McpManager.serverInstructions()`. They go in the prompt as quoted notes, 8,000 characters at most for all servers (`serverNotes` in `agent/prompt.ts`). They are untrusted text from the server.
