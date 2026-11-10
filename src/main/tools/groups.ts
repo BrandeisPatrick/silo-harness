@@ -10,6 +10,10 @@
 // them), load_tools' description and the system prompt never change when a group loads, and what a group needs the
 // model to know (the browser's rules, the sub-session guide) comes in the load's result, in the conversation. Every
 // group is described here, in one place, so a native path can send all their tools up front as deferred instead.
+//
+// Anthropic's native path does that (agent/anthropic.ts nativeRequest): every group's tools are in the request from the
+// first one, marked defer_loading, and a load's result carries tool_reference blocks that bring them into the model's
+// context, so the tools, and the cached prefix, never change when a group loads.
 
 import type { Tool } from './types';
 
@@ -37,6 +41,30 @@ export const GROUP_GUIDANCE: Partial<Record<ToolGroup, string>> = {
   browser: BROWSER_RULES,
   terminal: 'Use terminal_run for what should keep running or the user should watch; bash stays the tool for one-off commands.',
 };
+
+/**
+ * The group of a tool definition (a ToolSpec from tools/index.ts toSpec), kept as a symbol: invisible to JSON, so the
+ * OpenAI-shaped requests are the same as before, and read by the native path, which defers the groups' tools.
+ */
+export const GROUP_OF = Symbol('toolGroup');
+
+export function groupOfSpec(spec: object): ToolGroup | undefined {
+  const g = (spec as Record<symbol, unknown>)[GROUP_OF];
+  return isToolGroup(g) ? g : undefined;
+}
+
+/** The heading a compaction brief puts over what the folded loads of groups told the model (Agent.foldedGroupsText). */
+export const FOLDED_GROUPS_HEADING = '## Tool groups loaded earlier in this session';
+
+/** The groups a brief says were loaded earlier ("Loaded <group>: …" lines under FOLDED_GROUPS_HEADING). */
+export function foldedGroups(text: string): ToolGroup[] {
+  const at = text.indexOf(FOLDED_GROUPS_HEADING);
+  if (at < 0) return [];
+  const rest = text.slice(at + FOLDED_GROUPS_HEADING.length);
+  const end = rest.search(/\n## /);
+  const section = end >= 0 ? rest.slice(0, end) : rest;
+  return cleanGroups([...section.matchAll(/^Loaded (\w+):/gm)].map((m) => m[1]));
+}
 
 /** The tool that loads groups. Internal: no tool row, no approval, no hooks; the transcript leaves its calls out. */
 export const LOAD_TOOLS = 'load_tools';

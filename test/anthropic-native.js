@@ -152,7 +152,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const r1 = reqs[1].payload;
   check('4: model, max_tokens, thinking off for Haiku 5.5', r1.model === 'claude-haiku-5-5' && r1.max_tokens === 32000 && same(r1.thinking, { type: 'disabled' }), { model: r1.model, max: r1.max_tokens, thinking: r1.thinking });
   check('4: the second request has the tool_use and its tool_result', r1.messages[1].role === 'assistant' && r1.messages[1].content.some((b) => b.type === 'tool_use' && b.id === 'toolu_1' && b.input.path === 'notes.txt') && r1.messages[2].content[0].type === 'tool_result' && /hello/.test(r1.messages[2].content[0].content));
-  check('4: the tools are Anthropic tools with the last one marked', r1.tools.every((t) => t.name && t.input_schema && !t.function) && same(r1.tools[r1.tools.length - 1].cache_control, { type: 'ephemeral', ttl: '1h' }));
+  // (the groups' tools come deferred after the others: the mark is on the last tool loaded up front; deferred-groups.js)
+  const upFront = r1.tools.filter((t) => !t.defer_loading);
+  check('4: the tools are Anthropic tools with the last one loaded up front marked', r1.tools.every((t) => t.name && t.input_schema && !t.function) && same(upFront[upFront.length - 1].cache_control, { type: 'ephemeral', ttl: '1h' }) && r1.tools.filter((t) => t.cache_control).length === 1);
   check('4: the first request is the start of the second, apart from where the tail mark moved', (() => {
     const strip = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'cache_control' ? undefined : v)));
     const a = strip(reqs[0].payload);

@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AgentEvent } from '../../shared/types';
 import type { ToolCall, ToolSpec, Usage } from '../ollama';
 import type { Msg } from '../sessions';
+import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requestedGroups, type ToolGroup } from '../tools/groups';
 
 type Block = Anthropic.ContentBlockParam;
 type MessageParam = Anthropic.MessageParam;
@@ -136,7 +137,7 @@ const EMPTY_RESULT = '(no output)';
  * of one role are one turn. `stripThinkingBefore`: leave out the thinking of messages before that index (a history
  * the API no longer accepts them for). Pure and deterministic.
  */
-export function toAnthropic(history: Msg[], stripThinkingBefore = 0): { system: Anthropic.TextBlockParam[]; messages: MessageParam[] } {
+export function toAnthropic(history: Msg[], stripThinkingBefore = 0, refs: ReadonlyMap<string, string[]> = new Map()): { system: Anthropic.TextBlockParam[]; messages: MessageParam[] } {
   const system: Anthropic.TextBlockParam[] = [];
   const messages: MessageParam[] = [];
   const push = (role: 'user' | 'assistant', blocks: Block[]) => {
@@ -163,7 +164,13 @@ export function toAnthropic(history: Msg[], stripThinkingBefore = 0): { system: 
       push('assistant', blocks);
     } else if (m.role === 'tool') {
       const text = typeof m.content === 'string' ? m.content : contentBlocks(m.content).map((b) => (b.type === 'text' ? b.text : '')).join('\n');
-      push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: text.trim() ? text : EMPTY_RESULT }]);
+      const named = refs.get(m.tool_call_id);
+      if (named?.length) {
+        // A group's load: its result is the references alone (the API takes nothing else beside them), and what the
+        // load says (the group's guidance) follows the results as text in the same turn
+        const content = named.map((tool_name) => ({ type: 'tool_reference', tool_name })) as unknown as Anthropic.ToolResultBlockParam['content'];
+        push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content }, ...(text.trim() ? [{ type: 'text' as const, text }] : [])]);
+      } else push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: text.trim() ? text : EMPTY_RESULT }]);
     }
   });
   for (const msg of messages) {
@@ -184,15 +191,89 @@ export function toAnthropic(history: Msg[], stripThinkingBefore = 0): { system: 
   return { system, messages };
 }
 
-/** OpenAI-shaped tool specs as Anthropic tools. */
-export function toolsOf(specs: ToolSpec[]): Anthropic.Tool[] {
+/** OpenAI-shaped tool specs as Anthropic tools; those named in `deferred` with defer_loading. */
+export function toolsOf(specs: ToolSpec[], deferred: ReadonlySet<string> = new Set()): Anthropic.Tool[] {
   const out: Anthropic.Tool[] = [];
   for (const s of specs) {
     if (s.type !== 'function') continue;
     const params = (s.function.parameters ?? { type: 'object', properties: {} }) as Anthropic.Tool.InputSchema;
-    out.push({ name: s.function.name, ...(s.function.description ? { description: s.function.description } : {}), input_schema: { ...params, type: 'object' } });
+    const tool: Anthropic.Tool = { name: s.function.name, ...(s.function.description ? { description: s.function.description } : {}), input_schema: { ...params, type: 'object' } };
+    if (deferred.has(tool.name)) (tool as { defer_loading?: boolean }).defer_loading = true;
+    out.push(tool);
   }
   return out;
+}
+
+// ---------- Tool groups, deferred ----------
+
+/** Models that refused deferred tools or tool references once: they get the groups the old way for the process's life. */
+export const deferRefused = new Set<string>();
+
+/**
+ * Which tools a request defers and which tool results reference them. The agent offers every group's tools on this
+ * path (Agent.toolsFor); they are deferred, and each load_tools result in the history references the deferred tools of
+ * the groups it asked for, which brings them into the model's context without changing `tools`. Groups whose loads a
+ * compaction folded (named in the brief) are sent as ordinary tools from then on: a reference can only sit in a tool
+ * result, and the fold rewrote the prefix anyway. A model that refused all this (deferRefused) gets the old way: only
+ * the groups the history loaded or used, as ordinary tools in the order it loaded them, and no references.
+ */
+export function deferPlan(model: string, history: Msg[], specs: ToolSpec[]): { specs: ToolSpec[]; deferred: Set<string>; refs: Map<string, string[]> } {
+  const deferred = new Set<string>();
+  const refs = new Map<string, string[]>();
+  const groupOf = new Map<string, ToolGroup>();
+  for (const s of specs) {
+    const g = groupOfSpec(s);
+    if (g && s.type === 'function') groupOf.set(s.function.name, g);
+  }
+  if (!groupOf.size) return { specs, deferred, refs };
+  // The groups the history loaded (load_tools calls, by id) or used, in order, and those a brief says it loaded
+  const loads = new Map<string, ToolGroup[]>();
+  const order: ToolGroup[] = [];
+  const add = (g: ToolGroup) => {
+    if (!order.includes(g)) order.push(g);
+  };
+  const folded: ToolGroup[] = [];
+  for (const m of history) {
+    if (m.role === 'user' && typeof m.content === 'string' && m.content.includes(FOLDED_GROUPS_HEADING)) for (const g of foldedGroups(m.content)) if (!folded.includes(g)) folded.push(g);
+    if (m.role !== 'assistant') continue;
+    for (const tc of m.tool_calls ?? []) {
+      if (tc.type !== 'function') continue;
+      if (tc.function.name === LOAD_TOOLS) {
+        let args: unknown = tc.function.arguments;
+        try {
+          args = JSON.parse(tc.function.arguments || '{}');
+        } catch {
+          /* a bare list of names is read as it is */
+        }
+        const gs = requestedGroups(args).filter((g): g is ToolGroup => [...groupOf.values()].includes(g as ToolGroup)) as ToolGroup[];
+        loads.set(tc.id, gs);
+        gs.forEach(add);
+      } else {
+        const g = groupOf.get(tc.function.name);
+        if (g) add(g);
+      }
+    }
+  }
+  if (deferRefused.has(model)) {
+    const used = [...folded, ...order.filter((g) => !folded.includes(g))];
+    const core = specs.filter((s) => s.type !== 'function' || !groupOf.has(s.function.name));
+    const grouped = used.flatMap((g) => specs.filter((s) => s.type === 'function' && groupOf.get(s.function.name) === g));
+    return { specs: [...core, ...grouped], deferred, refs };
+  }
+  for (const [name, g] of groupOf) if (!folded.includes(g)) deferred.add(name);
+  // Never defer everything: the API wants at least one tool it loads up front
+  if (deferred.size >= specs.length) deferred.clear();
+  for (const [id, gs] of loads) {
+    const names = [...groupOf].filter(([name, g]) => gs.includes(g) && deferred.has(name)).map(([name]) => name);
+    if (names.length) refs.set(id, names);
+  }
+  return { specs, deferred, refs };
+}
+
+/** A 400 about deferred tools or tool references (a model or endpoint without them). */
+export function isDeferRefusal(err: unknown): boolean {
+  const e = err as { status?: number; message?: string };
+  return e?.status === 400 && /defer_loading|tool_reference|deferred|defer loading/i.test(String(e.message));
 }
 
 // ---------- Cache marks ----------
@@ -230,7 +311,8 @@ const mark = (b: object, ttl: '1h' | '5m') => {
  * before it (five minutes), so a long tool loop always has an entry within a breakpoint's lookback.
  */
 export function addCacheMarks(req: { tools?: Anthropic.Tool[]; system?: Anthropic.TextBlockParam[]; messages: MessageParam[] }): void {
-  const lastTool = req.tools?.[req.tools.length - 1];
+  // A deferred tool may not carry a mark: the last one loaded up front does (the deferred ones are not in the prefix)
+  const lastTool = [...(req.tools ?? [])].reverse().find((t) => !(t as { defer_loading?: boolean }).defer_loading);
   if (lastTool) mark(lastTool, STABLE_TTL);
   const lastSystem = req.system?.[req.system.length - 1];
   if (lastSystem) mark(lastSystem, STABLE_TTL);
@@ -272,8 +354,9 @@ export function nativeUsage(u: { input_tokens?: number | null; output_tokens?: n
 
 /** The request for a history and tool specs, marks included. */
 export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], maxTokens: number, stripThinkingBefore = 0): Anthropic.MessageCreateParamsStreaming {
-  const { system, messages } = toAnthropic(history, stripThinkingBefore);
-  const tools = toolsOf(specs);
+  const plan = deferPlan(model, history, specs);
+  const { system, messages } = toAnthropic(history, stripThinkingBefore, plan.refs);
+  const tools = toolsOf(plan.specs, plan.deferred);
   addCacheMarks({ tools, system, messages });
   const req: Anthropic.MessageCreateParamsStreaming = { model, max_tokens: maxTokens, messages, stream: true };
   if (system.length) req.system = system;
@@ -317,6 +400,12 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
     return await attempt(strip);
   } catch (raw) {
     const err = nativeError(raw);
+    // Deferred tools or tool references refused: this model gets the groups the old way from now on (deferPlan)
+    if (!signal.aborted && isDeferRefusal(err) && !deferRefused.has(model)) {
+      deferRefused.add(model);
+      console.warn(`[anthropic] ${model} refused deferred tools; tool groups load the old way:`, err.message);
+      return completeAnthropic(host, client, model, history, specs, signal, turn);
+    }
     if (signal.aborted || !isThinkingRefusal(err) || !history.slice(strip).some((m) => thinkingOf(m))) throw err;
     // Thinking blocks are bound to the history they were made in; a pruned or folded history refuses them
     if (host.thinking) host.thinking.stripBefore = history.length;
