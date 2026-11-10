@@ -11,6 +11,8 @@ import { statHtml } from './diff.js';
 import { icon, isIconName, type IconName } from './icons.js';
 import { activityWords } from './tool-activity.js';
 import { createToolCard, mcpParts, type ToolCard } from './tools.js';
+import { mcpFoldWords } from './mcp-calls.js';
+import { escapeHtml } from './dom.js';
 
 export interface ToolGroupsDeps {
   /** The transcript the rows and groups live in */
@@ -79,6 +81,8 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
         server: mcpParts(c.name)?.server,
       })),
     );
+    // A run of MCP calls from one or two servers: "Used docs and files", and "tracker needs sign-in" for its failure
+    const mcpFold = mcpFoldWords(cards.map((c) => ({ server: mcpParts(c.name)?.server, outcome: c.outcome, problem: c.problem })));
     // While the run goes on, the line reads like the row of the call in flight; once it is over, what the run did
     const now = live ? (cards.filter((c) => c.running).pop() ?? cards[cards.length - 1]) : undefined;
     if (now) {
@@ -89,7 +93,7 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
       arg.textContent = rowArg?.textContent ?? '';
       arg.classList.toggle('mono', Boolean(rowArg?.classList.contains('mono')));
     } else {
-      verb.textContent = words.text;
+      verb.textContent = mcpFold.text ?? words.text;
       verb.classList.remove('mono');
       arg.textContent = '';
     }
@@ -115,11 +119,11 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     }
     const meta: string[] = [];
     if (added || removed) meta.push(`<span class="group-stat">${statHtml(added, removed)}</span>`);
-    if (failed) meta.push(`<span class="group-failed meta-err">${failed} failed</span>`);
+    if (failed) meta.push(`<span class="group-failed meta-err">${escapeHtml(mcpFold.failed ?? `${failed} failed`)}</span>`);
     if (words.denied) meta.push(`<span class="group-denied">${words.denied} denied</span>`);
     group.querySelector(':scope > summary > .group-meta')!.innerHTML = meta.join(' ');
     const summary = group.querySelector<HTMLElement>(':scope > summary')!;
-    summary.setAttribute('aria-label', [now ? `${verb.textContent} ${arg.textContent}`.trim() : words.text, ...meta.map((m) => m.replace(/<[^>]+>/g, ''))].join(', '));
+    summary.setAttribute('aria-label', [now ? `${verb.textContent} ${arg.textContent}`.trim() : (mcpFold.text ?? words.text), ...meta.map((m) => m.replace(/<[^>]+>/g, ''))].join(', '));
   }
 
   function createGroup(): HTMLDetailsElement {
