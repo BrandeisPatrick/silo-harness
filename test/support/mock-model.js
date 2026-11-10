@@ -31,6 +31,10 @@ function startMock() {
       if (req.url === '/v1/chat/completions' && state.rejectCacheFields && /"(?:cache_control|prompt_cache_key|session_id)"/.test(body)) {
         return json(state.rejectCacheFields === 422 ? 422 : 400, { error: { message: 'Unrecognized request argument supplied: cache_control (mock)' } });
       }
+      // A service that refuses the reasoning-effort fields (`rejectEffort`), as one without reasoning models does
+      if (req.url === '/v1/chat/completions' && state.rejectEffort && (payload.reasoning_effort !== undefined || payload.reasoning !== undefined)) {
+        return json(400, { error: { message: `Unrecognized request argument supplied: ${payload.reasoning_effort !== undefined ? 'reasoning_effort' : 'reasoning'} (mock)` } });
+      }
       // The local models, for the model menu: whatever `ollamaModels` lists (none unless a test sets it)
       if (req.url === '/api/tags' && state.ollamaModels) return json(200, { models: state.ollamaModels.map((name) => ({ name, model: name })) });
       // A one-shot request (titles, summaries, Auto mode's safety check): a queued reply marked `nonStream` that
@@ -145,6 +149,10 @@ function anthropic(state, payload, res, json) {
   // An endpoint without deferred tools (`rejectDeferred`): refuses a request that has any
   if (state.rejectDeferred && JSON.stringify(payload.tools ?? []).includes('"defer_loading"')) {
     return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'tools.20.defer_loading: Extra inputs are not permitted (mock)' } });
+  }
+  // An endpoint without the effort setting (`rejectEffort`): refuses output_config.effort
+  if (state.rejectEffort && payload.output_config?.effort !== undefined) {
+    return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'output_config.effort: Extra inputs are not permitted (mock)' } });
   }
   const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(seen(payload))));
   let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;

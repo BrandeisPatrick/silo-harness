@@ -5,12 +5,13 @@
 import { randomUUID } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import type OpenAI from 'openai';
-import type { AgentEvent, AppConfig } from '../../shared/types';
+import type { AgentEvent, AppConfig, EffortLevel } from '../../shared/types';
 import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
 import { ollamaOf, resolveProvider } from '../providers';
 import type { Msg } from '../sessions';
 import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropic';
+import { compatEffortFields, effortRefused, effortRefusedNotice, isEffortRefusal } from './effort';
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
 import { idleWatch, isRetryable, StreamDropped, withRetries } from './retry';
@@ -32,6 +33,17 @@ export interface CompletionHost {
   cacheKey?: string;
   /** Where the request's time goes (agent/perf.ts): attempts, retries, fallbacks, the provider's events */
   timing?: RequestTiming;
+  /** The reasoning effort chosen for a provider, read at each request (agent/effort.ts); undefined: send nothing */
+  effort?(provider: string): EffortLevel | undefined;
+}
+
+/** The type of the provider a request goes to ('openai-compatible' when it cannot be resolved). */
+function resolveProviderType(cfg: AppConfig) {
+  try {
+    return resolveProvider(cfg).type;
+  } catch {
+    return 'openai-compatible' as const;
+  }
 }
 
 /** What a request adds for the provider's prompt cache (gateway-cache.ts), or nothing. */
@@ -168,8 +180,9 @@ async function completeAttempt(
   turn: number,
   native?: Anthropic,
 ): Promise<Reply> {
+  const providerName = cfg.provider || 'ollama';
   // Anthropic's own API: the Messages path, which caches (agent/anthropic.ts)
-  if (native) return completeAnthropic(host, native, model, history, specs, signal, turn);
+  if (native) return completeAnthropic({ ...host, effort: () => host.effort?.(providerName) }, native, model, history, specs, signal, turn);
   // The thinking blocks kept for that path go to no other provider
   history = withoutNative(history);
   if (!client) {
@@ -210,10 +223,22 @@ async function completeAttempt(
     shape = null;
   }
   const noFields = refusedCacheFields;
-  const decorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
+  const cacheDecorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
+  // The effort field (agent/effort.ts), read at each request, unless this endpoint refused it
+  let effortFields: Record<string, unknown> = {};
+  const decorate = (): Decorate => {
+    const cache = cacheDecorate();
+    effortFields = effortRefused.has(endpoint) ? {} : compatEffortFields(resolveProviderType(cfg), host.effort?.(providerName));
+    if (!Object.keys(effortFields).length) return cache;
+    const fields = effortFields;
+    return (m, t) => {
+      const d = cache(m, t);
+      return { ...d, extra: { ...d.extra, ...fields } };
+    };
+  };
   for (;;) {
     const includeUsage = !host.noStreamUsage.has(endpoint);
-    const withFields = decorate() !== plain;
+    const withFields = cacheDecorate() !== plain;
     try {
       return await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit, decorate());
     } catch (err) {
@@ -223,6 +248,14 @@ async function completeAttempt(
       if (includeUsage && /stream_options|include_usage/i.test(errorMessage(err))) {
         host.noStreamUsage.add(endpoint);
         host.timing?.fallback('no_stream_usage');
+        continue;
+      }
+      // A service that refuses the effort field gets the request without it, now and for the rest of the process
+      if (Object.keys(effortFields).length && isEffortRefusal(err)) {
+        console.warn('[agent] the provider refused the effort field; sending without it:', errorMessage(err));
+        effortRefused.add(endpoint);
+        host.timing?.fallback('no_effort');
+        host.emit({ type: 'error', kind: 'notice', message: effortRefusedNotice(model) });
         continue;
       }
       // A gateway that refuses the cache fields gets the request without them, now and for the rest of the process

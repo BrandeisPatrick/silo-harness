@@ -28,6 +28,7 @@ const SCRIPTS = [
   { name: 'settings-page' },
   { name: 'settings-delete' },
   { name: 'providers' },
+  { name: 'effort' },
   { name: 'sidebar' },
   { name: 'images' },
   { name: 'history' },

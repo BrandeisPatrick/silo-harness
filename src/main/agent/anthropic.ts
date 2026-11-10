@@ -9,8 +9,10 @@ import type { AgentEvent } from '../../shared/types';
 import type { ToolCall, ToolSpec, Usage } from '../ollama';
 import type { Msg } from '../sessions';
 import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requestedGroups, type ToolGroup } from '../tools/groups';
+import { effortRefused, effortRefusedNotice, isEffortRefusal, nativeEffortFor, thinkingWithEffort } from './effort';
 import { idleWatch, StreamDropped } from './retry';
 import type { RequestTiming } from './perf';
+import type { EffortLevel } from '../../shared/types';
 
 type Block = Anthropic.ContentBlockParam;
 type MessageParam = Anthropic.MessageParam;
@@ -352,6 +354,8 @@ export interface NativeHost {
   thinking?: { stripBefore: number };
   /** Where the request's time goes (agent/perf.ts) */
   timing?: RequestTiming;
+  /** The reasoning effort chosen, read at each request (agent/effort.ts); undefined: send nothing */
+  effort?(): EffortLevel | undefined;
 }
 
 export interface NativeReply {
@@ -373,7 +377,7 @@ export function nativeUsage(u: { input_tokens?: number | null; output_tokens?: n
 }
 
 /** The request for a history and tool specs, marks included. */
-export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], maxTokens: number, stripThinkingBefore = 0): Anthropic.MessageCreateParamsStreaming {
+export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], maxTokens: number, stripThinkingBefore = 0, chosenEffort?: EffortLevel): Anthropic.MessageCreateParamsStreaming {
   const plan = deferPlan(model, history, specs);
   const { system, messages } = toAnthropic(history, stripThinkingBefore, plan.refs);
   const tools = toolsOf(plan.specs, plan.deferred);
@@ -381,8 +385,10 @@ export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], 
   const req: Anthropic.MessageCreateParamsStreaming = { model, max_tokens: maxTokens, messages, stream: true };
   if (system.length) req.system = system;
   if (tools.length) req.tools = tools;
-  const thinking = thinkingFor(model);
+  const effort = nativeEffortFor(model, chosenEffort);
+  const thinking = thinkingWithEffort(thinkingFor(model), effort);
   if (thinking) req.thinking = thinking;
+  if (effort) req.output_config = { effort };
   return req;
 }
 
@@ -415,7 +421,9 @@ function isThinkingRefusal(err: unknown): boolean {
  */
 export async function completeAnthropic(host: NativeHost, client: Anthropic, model: string, history: Msg[], specs: ToolSpec[], signal: AbortSignal, turn: number): Promise<NativeReply> {
   const maxTokens = host.maxOutput() ?? defaultMaxTokens(model);
-  const attempt = (strip: number) => stream(host, client, nativeRequest(model, history, specs, maxTokens, strip), signal, turn);
+  const endpoint = `${client.baseURL}|${model}`;
+  const effort = effortRefused.has(endpoint) ? undefined : nativeEffortFor(model, host.effort?.());
+  const attempt = (strip: number) => stream(host, client, nativeRequest(model, history, specs, maxTokens, strip, effort), signal, turn);
   const strip = host.thinking?.stripBefore ?? 0;
   try {
     return await attempt(strip);
@@ -426,6 +434,14 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
       deferRefused.add(model);
       console.warn(`[anthropic] ${model} refused deferred tools; tool groups load the old way:`, err.message);
       host.timing?.fallback('deferred_tools');
+      return completeAnthropic(host, client, model, history, specs, signal, turn);
+    }
+    // A service that refuses the effort field gets the request without it, now and for the rest of the process
+    if (!signal.aborted && effort && isEffortRefusal(err)) {
+      effortRefused.add(endpoint);
+      console.warn(`[anthropic] ${model} refused the effort field; sending without it:`, err.message);
+      host.timing?.fallback('no_effort');
+      host.emit({ type: 'error', kind: 'notice', message: effortRefusedNotice(model) });
       return completeAnthropic(host, client, model, history, specs, signal, turn);
     }
     if (signal.aborted || !isThinkingRefusal(err) || !history.slice(strip).some((m) => thinkingOf(m))) throw err;

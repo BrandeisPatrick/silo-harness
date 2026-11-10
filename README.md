@@ -29,7 +29,7 @@
    ollama pull qwen3:8b
    ```
 
-The app picks the change up while it runs. Other providers (OpenAI, Anthropic, Portkey, Groq, DeepSeek, Together, LM Studio, any OpenAI-compatible service) are in [configure.md](docs/configure.md); a coding agent can do the setup for you from that page.
+The app picks the change up while it runs. Other providers (OpenAI, Anthropic, Portkey, Groq, DeepSeek, Together, LM Studio, any OpenAI-compatible service) are in [configure.md](docs/configure.md); a coding agent can do the setup for you from that page. Under the chat bar, the model pill switches models and the pill after it sets the reasoning effort where the model takes one.
 
 ## Why
 

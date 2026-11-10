@@ -1,5 +1,7 @@
 // The providers feature's contract with the window (src/main/providers-service.ts): the models a provider offers,
-// choosing one, a quick test, and the command-line tool's row in Settings → General. Types only.
+// choosing one, its effort, a quick test, and the command-line tool's row in Settings → General. Types only.
+
+import type { EffortLevel } from './types';
 
 export interface ProviderTestInfo {
   ok: boolean;
@@ -35,6 +37,8 @@ export interface ProvidersRpc {
   'providers.models': (name: string) => string[];
   /** Sets the model of a provider (any of them) and returns nothing; the window follows config:changed */
   'providers.setModel': (name: string, model: string) => void;
+  /** Sets the reasoning effort of a named provider (null: none, the model's default); the window follows config:changed */
+  'providers.setEffort': (name: string, level: EffortLevel | null) => void;
   /** One tiny chat completion through a provider (default: the one in use) */
   'providers.test': (name?: string) => ProviderTestInfo;
   'cli.status': () => CliStatus;
