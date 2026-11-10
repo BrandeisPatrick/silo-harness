@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
-import type { Tool } from './types';
+import { isSecretPath } from '../guard';
+import type { Tool, ToolContext } from './types';
 import { truncate } from './types';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.venv', 'venv', '__pycache__', '.cache', 'target']);
@@ -10,6 +11,16 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 
 export function resolvePath(cwd: string, p: string): string {
   const expanded = p.replace(/^~(?=$|\/)/, os.homedir());
   return path.resolve(cwd, expanded);
+}
+
+/**
+ * A read of a secret path (keys, credentials, .env, the app's own data) asks first: the rules decide (Bypass runs it,
+ * Auto mode's check or a card with "reads secrets" otherwise). Null when it may go on, else the message for the model.
+ */
+async function approveSecretRead(ctx: ToolContext, name: string, target: string): Promise<string | null> {
+  if (!isSecretPath(target, ctx.cwd)) return null;
+  const approval = await ctx.approve(name, target, target);
+  return approval.ok ? null : approval.message;
 }
 
 export const readFile: Tool = {
@@ -26,6 +37,8 @@ export const readFile: Tool = {
   },
   async run(args, ctx) {
     const file = resolvePath(ctx.cwd, String(args.path));
+    const refused = await approveSecretRead(ctx, 'read_file', file);
+    if (refused) return { content: refused };
     const data = await fs.readFile(file, 'utf8');
     const lines = data.split('\n');
     const start = Math.max(1, Number(args.offset) || 1);
@@ -160,6 +173,8 @@ export const listDirectory: Tool = {
   },
   async run(args, ctx) {
     const dir = resolvePath(ctx.cwd, String(args.path ?? '.'));
+    const refused = await approveSecretRead(ctx, 'list_directory', dir);
+    if (refused) return { content: refused };
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const names = entries
       .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
@@ -216,6 +231,10 @@ export const glob: Tool = {
   },
   async run(args, ctx) {
     const root = resolvePath(ctx.cwd, String(args.path ?? '.'));
+    const refused = await approveSecretRead(ctx, 'glob', root);
+    if (refused) return { content: refused };
+    // Inside a search root that is not secret itself, secret files are left out (not asked about)
+    const skipSecrets = !isSecretPath(root, ctx.cwd);
     const re = globToRegExp(String(args.pattern));
     const results: string[] = [];
     const MAX = 1000;
@@ -230,6 +249,7 @@ export const glob: Tool = {
       for (const e of entries) {
         if (results.length >= MAX) return;
         const relPath = rel ? `${rel}/${e.name}` : e.name;
+        if (skipSecrets && isSecretPath(path.join(dir, e.name))) continue;
         if (e.isDirectory()) {
           if (IGNORED_DIRS.has(e.name)) continue;
           await walk(path.join(dir, e.name), relPath);
@@ -261,6 +281,9 @@ export const grep: Tool = {
   },
   async run(args, ctx) {
     const target = resolvePath(ctx.cwd, String(args.path ?? '.'));
+    const refused = await approveSecretRead(ctx, 'grep', target);
+    if (refused) return { content: refused };
+    const skipSecrets = !isSecretPath(target, ctx.cwd);
     const flags = ['-rnIE'];
     if (args.ignore_case) flags.push('-i');
     for (const d of IGNORED_DIRS) flags.push(`--exclude-dir=${d}`);
@@ -273,7 +296,9 @@ export const grep: Tool = {
       });
     });
     if (!out.trim()) return { content: 'No matches.' };
-    const lines = out.split('\n').filter(Boolean);
+    // Inside a search root that is not secret itself, matches in secret files are left out
+    const lines = out.split('\n').filter((l) => l && !(skipSecrets && isSecretPath(/^(.*?):\d+:/.exec(l)?.[1] ?? '')));
+    if (!lines.length) return { content: 'No matches.' };
     const shown = lines.slice(0, 300).map((l) => (l.startsWith(ctx.cwd + '/') ? l.slice(ctx.cwd.length + 1) : l));
     let text = shown.join('\n');
     if (lines.length > shown.length) text += `\n…(${lines.length - shown.length} more matches; narrow the pattern or path)`;

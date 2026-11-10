@@ -250,5 +250,17 @@ d = sh('echo x > .vscode/tasks.json', mode('auto', { auto: 'check', rules: { pro
 check('protected shell write: with the check, goes to the check', d.kind === 'classify' && d.reason === 'writes a protected file', d);
 check('protected shell write: Bypass allows', sh('echo x > .vscode/tasks.json', mode('bypass')).kind === 'allow');
 
+// Reads of secret paths (the tool asks only for those): Bypass runs, the check decides in Auto, the rest ask
+const read = (c) => decideApproval('read_file', '/x/.env', '/x/.env', {}, c);
+check('secret read: Bypass runs it', read(mode('bypass')).kind === 'allow');
+for (const m of ['ask', 'acceptEdits', 'plan', 'auto']) {
+  d = read(mode(m));
+  check(`secret read: ${m} asks "reads secrets"`, d.kind === 'ask' && d.reason === 'reads secrets' && !d.custom, d);
+}
+d = read(mode('auto', { auto: 'check' }));
+check('secret read: Auto with the check sends it to the check', d.kind === 'classify' && d.reason === 'reads secrets', d);
+check('secret read: a session allowance for the reason is honoured', read(mode('plan', { allowed: { ...noneAllowed, reason: (r) => r === 'reads secrets' } })).kind === 'allow');
+check('secret read: a saved project rule for the reason is honoured', read(mode('ask', { rules: { reasons: ['reads secrets'] } })).kind === 'allow');
+
 fs.rmSync(cwd, { recursive: true, force: true });
 done();

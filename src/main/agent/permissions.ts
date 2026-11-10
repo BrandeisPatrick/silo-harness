@@ -15,6 +15,9 @@ const PLAN_CMD_BLOCKED = 'Not permitted in plan mode: only read-only commands (l
 const PLAN_MCP_BLOCKED = 'Not permitted in plan mode: this MCP tool is not marked read-only. Describe this step in your plan instead.';
 /** Programs that run whatever they are given: an allow rule for one of them does not skip Auto mode's check. */
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'python', 'python3', 'node', 'deno', 'bun', 'bunx', 'npx', 'uvx', 'perl', 'ruby', 'php', 'osascript', 'eval', 'xargs']);
+/** The tools that read files: they ask only when the path is a secret one (tools/fs.ts) */
+const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_directory']);
+const SECRET_REASON = 'reads secrets';
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 
 /**
@@ -59,7 +62,8 @@ export interface ApprovalContext {
  * Decides, per permission mode, whether an action runs, asks, or is refused. A browser card asks: the browser policy
  * (browser/policy.ts siteDecision, clickRule) already weighed the mode, the site and the user's lists, and a purchase
  * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
- * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a protected
+ * mode asks only for destructive ones). A read of a secret path (read_file ~/.ssh/id_rsa) asks "reads secrets" in
+ * every mode but Bypass, or goes to Auto mode's check. Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a protected
  * path asks every time (Allow and Deny only), a guard reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
  * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') sends what its rules (the
  * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
@@ -94,6 +98,12 @@ export function decideApproval(name: string, detail: string, target: string | un
   }
   // A protected path's reason ("writes a protected file", "modifies the .git directory") is never covered by a rule
   const reasonAllowed = (r: string) => !PROTECTED_REASONS.has(r) && (ctx.allowed.reason(r) || !!rules?.reasons?.includes(r));
+  // A read tool asks only for a secret path (fs.ts decides that): every mode, Plan included, asks "reads secrets"
+  // unless that reason is allowed; Auto mode with its check sends it to the check.
+  if (READ_TOOLS.has(name)) {
+    if (reasonAllowed(SECRET_REASON)) return allow;
+    return checked ? check(SECRET_REASON, []) : ask(SECRET_REASON, []);
+  }
   if (mode === 'plan') {
     if (isEdit) return refuse(PLAN_EDIT_BLOCKED);
     if (isCmd) {

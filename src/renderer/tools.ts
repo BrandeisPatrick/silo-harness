@@ -1032,6 +1032,7 @@ export function approvalTitle(name: string, detail: string, args?: Args, browser
   if (name === 'terminal_run') return 'Run this command in the terminal?';
   if (name === 'edit_file') return `Edit ${basename(target) || 'this file'}?`;
   if (name === 'write_file') return `Write ${basename(target) || 'this file'}?`;
+  if (name === 'read_file' || name === 'list_directory' || name === 'grep' || name === 'glob') return `Read ${basename(target) || 'this file'}?`;
   const mcp = mcpParts(name);
   if (mcp) return `Call ${mcp.tool} on ${mcp.server}?`;
   const agent = agentApproval(name, detail);
