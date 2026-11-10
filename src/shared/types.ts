@@ -322,6 +322,8 @@ export interface AppConfig {
   checkForUpdates?: boolean;
   /** Append each run's timing (numbers only, docs/latency.md) to <profile>/timing/timing.jsonl; SILO_TIMING=1 does the same */
   timingLog?: boolean;
+  /** How many read-only tool calls of one reply run at the same time (1 to 10; absent: 4; 1: one after another) */
+  toolConcurrency?: number;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
@@ -461,7 +463,7 @@ export type AgentEvent =
    * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
    * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; callId?: string }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */

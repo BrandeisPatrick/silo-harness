@@ -17,6 +17,17 @@ The parts add up to the run's wall time:
 - **your approvals**: an approval card waiting for you.
 - **other**: the harness itself: the work before each request (pruning, compaction, hooks, building it) and at the start and end of the run.
 
+## Calls that run together
+
+When one reply asks for several tool calls, the read-only ones run at the same time: `read_file`, `grep`, `glob`, `list_directory`, `web_fetch`, and `bash` when the command only reads and the guard has nothing to say about it. Every other call runs alone, after everything before it has ended: edits, writes, other commands, the terminal, the browser, sub-sessions, questions, plans, `web_search` and MCP tools.
+
+- A call is judged after its PreToolUse hook, on the arguments it will run with.
+- Each call still gets its own permission decision. Cards and Auto mode's checks come one at a time; a call waiting for one does not hold up the reads beside it.
+- Results go back to the model in the order the model asked for them.
+- Stop ends every running call; calls that never ran are answered as interrupted.
+
+`toolConcurrency` in settings.json sets how many run at once (1 to 10, default 4); `1` runs every call one after another.
+
 ## The timing log
 
 Off by default. Turn it on with `SILO_TIMING=1` in the environment or `"timingLog": true` in settings.json. Each run is one JSON line in `timing/timing.jsonl` in the app's data folder; past 2 MB the file moves to `timing.1.jsonl` and a new one starts.

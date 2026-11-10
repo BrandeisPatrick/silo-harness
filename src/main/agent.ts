@@ -64,7 +64,8 @@ import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type Aut
 import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
-import { isReadOnlyCommand } from './guard';
+import { guardCommand, isReadOnlyCommand } from './guard';
+import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
 
 // The tool names a timing record keeps (agent/perf.ts): the built-in ones
@@ -137,6 +138,33 @@ interface CallRef {
 
 /** A shell result that ran out of time (tools/shell.ts), for a timing record's outcome. */
 const TIMED_OUT = /killed \(timeout after \d+ ms\)/;
+
+/** The built-in tools (the reads below are shared only when the tool is the built-in one, not a registered namesake) */
+const BUILT_IN_TOOLS: ReadonlySet<Tool> = new Set([...allTools('ask'), ...allTools('plan')]);
+/** Built-in tools that only read, safe to run alongside each other (Agent.shareable; bash is judged per command) */
+const SHARED_READS = new Set(['read_file', 'grep', 'glob', 'list_directory', 'web_fetch']);
+
+/** A tool call ready to run (Agent.prepareTool): its final arguments, its run, and what it gets when a stop comes first. */
+interface PreparedTool {
+  args: unknown;
+  finish(): Promise<ToolResult>;
+  skip(): ToolResult;
+}
+
+/** A call's result as the run loop stores it; `quiet`: a load_tools result or a cut call, stored as it is. */
+interface CallResult {
+  result: ToolResult;
+  quiet?: boolean;
+}
+
+/** A call's arguments as the model sent them, or null when they are not JSON. */
+function parseArgs(raw: string): unknown {
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return null;
+  }
+}
 
 /** How a run's user message was sent (Agent.run, Agent.enqueue). */
 export interface SendOptions {
@@ -258,6 +286,8 @@ export class Agent {
   private turnTimer: TurnTimer | null = null;
   private lastRun: RunRecord | null = null;
   private static timingLogs = new Map<string, TimingLog>();
+  /** One approval card or safety check at a time (inLane) */
+  private lane: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly getConfig: () => AppConfig,
@@ -699,20 +729,36 @@ export class Agent {
       const session = d.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
       return done('card', await this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session, probe, call?.id));
     };
-    const decision = decide(mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
-    if (decision.kind === 'refuse') return settle(decision);
-    if (decision.kind === 'allow') return settle(decision);
-    if (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
-    // An action Auto mode blocked and the user then allowed runs once, without the check or a card
-    if (!opts.browser && !opts.custom && this.sessionSet(this.autoAllowed).delete(actionKey(name, detail))) return Promise.resolve(done('allowed_before', { ok: true }));
-    if (decision.kind !== 'classify') return settle(decision);
-    const checker = classifierTarget(cfg);
-    if (!checker) {
-      // No model can run the check: the rule guard and its cards, as before Auto mode had a check
-      this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
-      return settle(decide('guard'));
-    }
-    return this.autoCheck(checker, cfg, { name, detail, args: call?.args, callId: call?.id }, () => settle(decide('guard')), probe).then((r) => (probe ? done('check', r) : r));
+    // What the rules settle at once (run, refuse, a hook's allow, a blocked action the user allowed), or null when a
+    // card or the safety check must decide
+    const atOnce = (decision: ApprovalDecision): Promise<ApprovalResult> | null => {
+      if (decision.kind === 'refuse' || decision.kind === 'allow') return settle(decision);
+      if (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
+      // An action Auto mode blocked and the user then allowed runs once, without the check or a card
+      if (!opts.browser && !opts.custom && this.sessionSet(this.autoAllowed).delete(actionKey(name, detail))) return Promise.resolve(done('allowed_before', { ok: true }));
+      return null;
+    };
+    const level = (): AutoLevel => (mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
+    const first = atOnce(decide(level()));
+    if (first) return first;
+    // A card or the check: one at a time across calls that run together, each decided again when its turn comes, so
+    // an answer given meanwhile ("for this session"), a pause or a block count weighs as it would one call at a time
+    return this.inLane(async () => {
+      if (this.abortController?.signal.aborted) return done('card', { ok: false, message: INTERRUPTED });
+      before = false;
+      const decision = decide(level());
+      const now = atOnce(decision);
+      if (now) return now;
+      if (decision.kind !== 'classify') return settle(decision);
+      const checker = classifierTarget(cfg);
+      if (!checker) {
+        // No model can run the check: the rule guard and its cards, as before Auto mode had a check
+        this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
+        return settle(decide('guard'));
+      }
+      const r = await this.autoCheck(checker, cfg, { name, detail, args: call?.args, callId: call?.id }, () => settle(decide('guard')), probe);
+      return probe ? done('check', r) : r;
+    });
   }
 
   // ---------- Auto mode ----------
@@ -845,7 +891,8 @@ export class Agent {
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
     // A browser card names its kind and site for the renderer's wording, and carries the amber note
     const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
-    void callId;
+    // The call the card belongs to, so the window puts it on that call's row when several run
+    const owner = callId ? { callId } : {};
     probe?.cardShown();
     const answered = (resolve: (r: ApprovalResult) => void) => (r: ApprovalResult) => {
       probe?.cardAnswered();
@@ -855,13 +902,13 @@ export class Agent {
       // Allow and Deny (and the tool's own "for this session" answer): the renderer hides the buttons whose label is empty.
       return new Promise((resolve) => {
         this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, custom: true, browser, ...(session ? { sessionKey: session.key } : {}) });
-        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: session?.label ?? '', projectLabel: '', ...extra });
+        this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: session?.label ?? '', projectLabel: '', ...extra, ...owner });
       });
     }
     const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs, browser?.card === 'site' ? browser.site : undefined);
     return new Promise((resolve) => {
       this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, browser });
-      this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel, ...extra });
+      this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel, ...extra, ...owner });
     });
   }
 
@@ -1031,7 +1078,9 @@ export class Agent {
     let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
     // Where the run's time goes (agent/perf.ts): always kept in memory, written to a file only when asked for
-    const timer = new RunTimer({ session: this.timingId, mode: cfg.permissionMode, limit: 1 });
+    // How many read-only calls of one reply may run together (AppConfig.toolConcurrency; 1: one at a time)
+    const limit = concurrencyLimit(cfg.toolConcurrency);
+    const timer = new RunTimer({ session: this.timingId, mode: cfg.permissionMode, limit });
     this.runTimer = timer;
     this.turnTimer = null;
 
@@ -1272,44 +1321,65 @@ export class Agent {
         }
 
         let looping = false;
-        for (const call of toolCalls) {
-          if (signal.aborted || this.hookStop) break;
-          // load_tools was run above: its result goes in quietly, without a tool row, an approval or hooks
-          const loaded = loads.results.get(call.id);
-          if (loaded !== undefined) {
-            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: loaded });
-            continue;
-          }
-          // Arguments cut off at the output limit: not run; the result says how to send it instead
-          if (reply.cut && !isCompleteJson(call.function.arguments)) {
-            this.emit({ type: 'tool_start', id: call.id, name: call.function.name, args: call.function.arguments });
-            this.emit({ type: 'tool_end', id: call.id, name: call.function.name, result: CUT_CALL_TEXT, ok: false, durationMs: 0 });
-            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: CUT_CALL_TEXT });
-            continue;
-          }
-          // One call at a time: each is a group of its own
-          const timing = tt.tool(call.function.name, toolCalls.indexOf(call) + 1);
-          const result = await this.execTool(call, tools, ctx, timing);
-          // The same call with the same result again and again: a line on the result, then the run ends
-          const same = repeats.add(call.function.name, call.function.arguments, result.content);
-          if (same >= REPEAT_WARN) result.content = `${result.content}\n${REPEAT_WARNING}`;
-          looping = same >= REPEAT_STOP;
-          const storeAt = performance.now();
-          this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
-          timing.stored(performance.now() - storeAt);
-          const used = tools.find((t) => t.name === call.function.name);
-          if (CHANGING_TOOLS.has(call.function.name) || (used?.mcp && !used.mcp.readOnly)) this.notifyChanges();
-          if (result.image && cfg.sendScreenshotsToModel) {
-            this.store.append(this.session, {
-              role: 'user',
-              content: [
-                { type: 'text', text: `[Screenshot returned by ${call.function.name}]` },
-                { type: 'image_url', image_url: { url: result.image } },
-              ],
-            });
-          }
-          if (looping) break;
-        }
+        // The reply's calls (agent/schedule.ts): read-only ones together, up to toolConcurrency at a time, every other
+        // one alone; each prepared in call order and judged on its final arguments; results stored in call order.
+        const timers = new Map<number, ToolTimer>();
+        await runSchedule<ToolCall, PreparedTool, CallResult>(toolCalls, limit, {
+          candidate: (call) => loads.results.has(call.id) || (!!reply.cut && !isCompleteJson(call.function.arguments)) || this.shareable(call.function.name, parseArgs(call.function.arguments), tools, ctx.cwd),
+          prepare: async (call, i) => {
+            // load_tools was run above: its result goes in quietly, without a tool row, an approval or hooks
+            const loaded = loads.results.get(call.id);
+            if (loaded !== undefined) return { done: { result: { content: loaded }, quiet: true } };
+            // Arguments cut off at the output limit: not run; the result says how to send it instead
+            if (reply.cut && !isCompleteJson(call.function.arguments)) {
+              this.emit({ type: 'tool_start', id: call.id, name: call.function.name, args: call.function.arguments });
+              this.emit({ type: 'tool_end', id: call.id, name: call.function.name, result: CUT_CALL_TEXT, ok: false, durationMs: 0 });
+              return { done: { result: { content: CUT_CALL_TEXT }, quiet: true } };
+            }
+            const timing = tt.tool(call.function.name, 0);
+            timers.set(i, timing);
+            const p = await this.prepareTool(call, tools, ctx, timing);
+            if ('result' in p) return { done: { result: p.result } };
+            return { ready: p, share: this.shareable(call.function.name, p.args, tools, ctx.cwd) };
+          },
+          run: async (p, _call, i, group) => {
+            timers.get(i)?.setGroup(group);
+            return { result: await p.finish() };
+          },
+          skip: (p) => ({ result: p.skip() }),
+          failed: (call, i, err) => {
+            const content = `Error: ${errorMessage(err)}`;
+            this.emit({ type: 'tool_end', id: call.id, name: call.function.name, result: content, ok: false, durationMs: 0 });
+            timers.get(i)?.done('failed');
+            return { result: { content } };
+          },
+          commit: (call, i, { result, quiet }) => {
+            if (quiet) {
+              this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
+              return;
+            }
+            // The same call with the same result again and again: a line on the result, then the run ends
+            const same = repeats.add(call.function.name, call.function.arguments, result.content);
+            if (same >= REPEAT_WARN) result.content = `${result.content}\n${REPEAT_WARNING}`;
+            if (same >= REPEAT_STOP) looping = true;
+            const storeAt = performance.now();
+            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
+            timers.get(i)?.stored(performance.now() - storeAt);
+            const used = tools.find((t) => t.name === call.function.name);
+            if (CHANGING_TOOLS.has(call.function.name) || (used?.mcp && !used.mcp.readOnly)) this.notifyChanges();
+            if (result.image && cfg.sendScreenshotsToModel) {
+              this.store.append(this.session, {
+                role: 'user',
+                content: [
+                  { type: 'text', text: `[Screenshot returned by ${call.function.name}]` },
+                  { type: 'image_url', image_url: { url: result.image } },
+                ],
+              });
+            }
+          },
+          stopped: () => signal.aborted || !!this.hookStop || looping,
+          group: (g, size, wallMs) => tt.group(g, size, wallMs),
+        });
         if (looping) {
           reason = 'loop';
           this.emit({ type: 'error', kind: 'notice', message: REPEAT_STOP_NOTICE });
@@ -2090,12 +2160,40 @@ export class Agent {
     return out;
   }
 
-  private async execTool(call: ToolCall, tools: Tool[], ctx: ToolContext, timing?: ToolTimer): Promise<ToolResult> {
+  /**
+   * Whether a call may run alongside the other reads of its reply (agent/schedule.ts), judged on `args` (after the
+   * PreToolUse hook, which may have rewritten them): the built-in file reads; web_fetch (every call fetches on its own,
+   * its page cache is changed only between awaits, and each site question is its own card); bash only for a
+   * command the guard reads as read-only and has nothing to say about. Everything else runs alone: writes, any other
+   * command, the terminal, the browser, sub-sessions, questions, plans, MCP tools (a server may not take two calls at
+   * once), web_search (its own card and a provider's rate limit), and anything this cannot tell.
+   */
+  private shareable(name: string, args: unknown, tools: Tool[], cwd: string): boolean {
+    const tool = tools.find((t) => t.name === name);
+    if (!tool || tool.mcp || !BUILT_IN_TOOLS.has(tool)) return false;
+    if (SHARED_READS.has(name)) return true;
+    if (name !== 'bash') return false;
+    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
+    if (typeof command !== 'string' || !command.trim()) return false;
+    try {
+      return isReadOnlyCommand(command.trim()) && guardCommand(command.trim(), cwd) === null;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A call's first part, in call order: its arguments, the early exits (not JSON, the browser of a session not on
+   * screen, an unknown tool), the PreToolUse hook (which may rewrite the arguments, block, deny, ask or allow) and
+   * tool_start. Returns the result of an early exit, or the call ready to run: its final arguments, `finish` (approval,
+   * the tool, PostToolUse, tool_end) and `skip` (a stop came before it ran).
+   */
+  private async prepareTool(call: ToolCall, tools: Tool[], ctx: ToolContext, timing?: ToolTimer): Promise<{ result: ToolResult } | PreparedTool> {
     const name = call.function.name;
     // The call's timing ends with how it ended (agent/perf.ts Outcome); an early exit ends it as failed or blocked
-    const end = (r: ToolResult, outcome: Outcome): ToolResult => {
+    const end = (r: ToolResult, outcome: Outcome): { result: ToolResult } => {
       timing?.done(outcome);
-      return r;
+      return { result: r };
     };
     let args: unknown = {};
     try {
@@ -2159,11 +2257,12 @@ export class Agent {
     const hookContext = pre?.context ?? [];
     let hookApproval: HookApproval = pre?.permission === 'allow' ? 'allow' : pre?.permission === 'ask' ? 'ask' : null;
     if (hookApproval === 'ask') {
-      // The card comes up whatever the mode says; once answered, the tool's own check asks no more.
+      // The card comes up whatever the mode says; once answered, the tool's own check asks no more. One card at a
+      // time: it waits for the cards of calls still running before it.
       const input = toolInput();
       const what = typeof input.command === 'string' ? input.command : typeof input.file_path === 'string' ? input.file_path : truncate(JSON.stringify(args ?? {}), 800);
       const probe = timing?.permission();
-      const answer = await this.ask(name, what, this.getConfig().permissionMode, pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call', [], true, undefined, undefined, probe, call.id);
+      const answer = await this.inLane(() => (ctx.signal?.aborted ? Promise.resolve<ApprovalResult>({ ok: false, message: INTERRUPTED }) : this.ask(name, what, this.getConfig().permissionMode, pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call', [], true, undefined, undefined, probe, call.id)));
       probe?.settle('hook', answer.ok);
       if (!answer.ok) {
         this.emit({ type: 'tool_end', id: call.id, name, result: answer.message, ok: false, durationMs: 0 });
@@ -2171,61 +2270,84 @@ export class Agent {
       }
       hookApproval = 'allow';
     }
-
-    // durationMs covers the tool's own work: time spent waiting on an approval card is left out.
-    let waited = 0;
-    const timedCtx: ToolContext = {
-      ...ctx,
-      approve: async (toolName, detail, target, approveOpts) => {
-        const askedAt = Date.now();
-        try {
-          return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow', { id: call.id, args: visible(args), timing });
-        } finally {
-          waited += Date.now() - askedAt;
-        }
-      },
-    };
-    const started = Date.now();
-    const elapsed = () => Math.max(0, Date.now() - started - waited);
-    let result: ToolResult;
     timing?.ready();
-    timing?.started();
-    try {
-      result = await tool.run(args, timedCtx);
-      result.content = truncate(result.content);
-    } catch (err) {
-      result = { content: `Error: ${errorMessage(err)}` };
-    }
-    timing?.ran();
-    const durationMs = elapsed();
-    // The same rule the saved transcript applies when it is shown again (sessions.ts).
-    const ok = !FAILED_RESULT.test(result.content);
-    if (result.hiddenArgs && !hidden.length) {
-      // The call found a secret the look before it missed (the field turned into a password field meanwhile): hide it
-      // in the stored call too, which is this same object, and from the PostToolUse hooks.
-      shown = result.hiddenArgs;
-      hidden = hiddenKeys();
-      call.function.arguments = JSON.stringify(visible(args));
-    }
 
-    // PostToolUse / PostToolUseFailure: what they say reaches the model with the result.
-    const extra: string[] = hookContext.length ? [`${HOOK_NOTE_PREFIX}context: PreToolUse]\n${hookContext.join('\n\n')}`] : [];
-    const interrupted = result.content.startsWith('Tool call was interrupted') || !!ctx.signal?.aborted;
-    const outcome: Outcome = this.outcomeOf(ok, interrupted, result.content, timing);
-    const postAt = performance.now();
-    const post = ok
-      ? await this.fireHook('PostToolUse', { ...hookFields(), tool_response: result.content }, { match: names, tool: { names, input: toolInput() } })
-      : await this.fireHook('PostToolUseFailure', { ...hookFields(), error: result.content, is_interrupt: interrupted }, { match: names, tool: { names, input: toolInput() } });
-    timing?.postHook(performance.now() - postAt);
-    const event = ok ? 'PostToolUse' : 'PostToolUseFailure';
-    if (post?.block) {
-      extra.push(post.block);
-      this.emit({ type: 'error', kind: 'notice', message: `A ${event} hook flagged ${name}: ${plainReason(post.block)}` });
-    }
-    if (post?.context.length) extra.push(`${HOOK_NOTE_PREFIX}context: ${event}]\n${post.context.join('\n\n')}`);
-    if (extra.length) result = { ...result, content: `${result.content}\n\n${extra.join('\n\n')}` };
-    this.emit({ type: 'tool_end', id: call.id, name, result: result.content, ok, image: result.image, durationMs });
-    return end(result, outcome);
+    const finish = async (): Promise<ToolResult> => {
+      // durationMs covers the tool's own work: time spent waiting on an approval card is left out.
+      let waited = 0;
+      const timedCtx: ToolContext = {
+        ...ctx,
+        approve: async (toolName, detail, target, approveOpts) => {
+          const askedAt = Date.now();
+          try {
+            return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow', { id: call.id, args: visible(args), timing });
+          } finally {
+            waited += Date.now() - askedAt;
+          }
+        },
+      };
+      const started = Date.now();
+      const elapsed = () => Math.max(0, Date.now() - started - waited);
+      let result: ToolResult;
+      timing?.started();
+      try {
+        result = await tool.run(args, timedCtx);
+        result.content = truncate(result.content);
+      } catch (err) {
+        result = { content: `Error: ${errorMessage(err)}` };
+      }
+      timing?.ran();
+      const durationMs = elapsed();
+      // The same rule the saved transcript applies when it is shown again (sessions.ts).
+      const ok = !FAILED_RESULT.test(result.content);
+      if (result.hiddenArgs && !hidden.length) {
+        // The call found a secret the look before it missed (the field turned into a password field meanwhile): hide it
+        // in the stored call too, which is this same object, and from the PostToolUse hooks.
+        shown = result.hiddenArgs;
+        hidden = hiddenKeys();
+        call.function.arguments = JSON.stringify(visible(args));
+      }
+
+      // PostToolUse / PostToolUseFailure: what they say reaches the model with the result.
+      const extra: string[] = hookContext.length ? [`${HOOK_NOTE_PREFIX}context: PreToolUse]\n${hookContext.join('\n\n')}`] : [];
+      const interrupted = result.content.startsWith('Tool call was interrupted') || !!ctx.signal?.aborted;
+      const outcome: Outcome = this.outcomeOf(ok, interrupted, result.content, timing);
+      const postAt = performance.now();
+      const post = ok
+        ? await this.fireHook('PostToolUse', { ...hookFields(), tool_response: result.content }, { match: names, tool: { names, input: toolInput() } })
+        : await this.fireHook('PostToolUseFailure', { ...hookFields(), error: result.content, is_interrupt: interrupted }, { match: names, tool: { names, input: toolInput() } });
+      timing?.postHook(performance.now() - postAt);
+      const event = ok ? 'PostToolUse' : 'PostToolUseFailure';
+      if (post?.block) {
+        extra.push(post.block);
+        this.emit({ type: 'error', kind: 'notice', message: `A ${event} hook flagged ${name}: ${plainReason(post.block)}` });
+      }
+      if (post?.context.length) extra.push(`${HOOK_NOTE_PREFIX}context: ${event}]\n${post.context.join('\n\n')}`);
+      if (extra.length) result = { ...result, content: `${result.content}\n\n${extra.join('\n\n')}` };
+      this.emit({ type: 'tool_end', id: call.id, name, result: result.content, ok, image: result.image, durationMs });
+      timing?.done(outcome);
+      return result;
+    };
+    // A stop came before the call could run: its row ends, and the model reads that it did not run
+    const skip = (): ToolResult => {
+      this.emit({ type: 'tool_end', id: call.id, name, result: INTERRUPTED, ok: false, durationMs: 0 });
+      timing?.done('stopped');
+      return { content: INTERRUPTED };
+    };
+    return { args, finish, skip };
+  }
+
+  /**
+   * One approval card or safety check at a time, across the calls of a reply that run together: `fn` starts once the
+   * one before it has ended. A call that needs neither never waits here.
+   */
+  private inLane<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.lane.then(fn);
+    this.lane = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /** How a call that ran ended, for its timing record: read from its permission answers and its result (not kept). */

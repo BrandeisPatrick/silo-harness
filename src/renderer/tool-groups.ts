@@ -237,6 +237,8 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     finishToolCard,
     /** The row added last (the approval and question cards attach to it while it runs) */
     lastCard: () => lastToolCard,
+    /** A running call's row by its id */
+    cardFor: (id: string) => toolCards.get(id),
     /** The last run of calls is live while a run goes on (a session brought on screen mid-run, too) */
     updateLastGroup: () => updateGroup([...messagesEl.querySelectorAll(':scope > .tool-group')].pop() ?? null),
     /** The run ended: every row still running is marked interrupted and its run settles */

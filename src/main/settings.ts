@@ -24,7 +24,7 @@ import type { AppConfig } from '../shared/types';
 import type { SettingsFileInfo, SettingsInfo } from '../shared/settings-info';
 import { ENV_NAME, expandEnvRefs } from './env';
 import { isRecord } from './json';
-import { between, bool, describe, kind, nonNegative, oneOf, positiveInt, str, stringList, timeOfDay, type Check } from './checks';
+import { between, bool, describe, intBetween, kind, nonNegative, oneOf, positiveInt, str, stringList, timeOfDay, type Check } from './checks';
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
 import { configDir, projectConfigDir } from './paths';
 import { hooksSchema, validateHooks } from './hooks/config';
@@ -76,6 +76,7 @@ const SCALARS: Record<string, Check> = {
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
   checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
+  toolConcurrency: describe(intBetween(1, 10), 'How many read-only tool calls of one reply run at the same time; 1 runs every call one after another. Default 4.'),
   timingLog: describe(bool, "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."),
 };
 

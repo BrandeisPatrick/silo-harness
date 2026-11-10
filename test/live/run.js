@@ -39,6 +39,7 @@ const SCRIPTS = [
   { name: 'session-messages' },
   { name: 'names' },
   { name: 'tool-rows' },
+  { name: 'tool-concurrency' },
   { name: 'quiet' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },

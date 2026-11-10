@@ -326,6 +326,7 @@ const approvals = createApprovals({
   running: () => running(),
   currentMode: () => currentMode(),
   lastCard: toolGroups.lastCard,
+  cardFor: toolGroups.cardFor,
   addNode,
   endAssistant,
   finishThinking,

@@ -356,6 +356,11 @@ export class ToolTimer {
     this.span = { turn, group: num(group) ?? 0, name, at, startAt: at, endAt: at, queueMs: 0, preHookMs: 0, permission: [], execMs: 0, postHookMs: 0, storeMs: 0, wallMs: 0, outcome: 'ok', alongside: 0 };
   }
 
+  /** The group of its reply it ran in (agent/schedule.ts) */
+  setGroup(group: number): void {
+    this.span.group = num(group) ?? 0;
+  }
+
   preHook(msSpent: number): void {
     this.span.preHookMs = ms(this.span.preHookMs + msSpent);
   }

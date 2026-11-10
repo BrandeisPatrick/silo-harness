@@ -25,6 +25,8 @@ export const positiveInt = mk({ type: 'integer', minimum: 1 }, (v) => (typeof v 
 export const nonNegative = mk({ type: 'number', minimum: 0 }, (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? null : `expected a number of 0 or more${typeof v === 'number' ? '' : `, got ${kind(v)}`}`));
 export const between = (lo: number, hi: number): Check =>
   mk({ type: 'number', minimum: lo, maximum: hi }, (v) => (typeof v === 'number' && v >= lo && v <= hi ? null : `expected a number from ${lo} to ${hi}${typeof v === 'number' ? '' : `, got ${kind(v)}`}`));
+export const intBetween = (lo: number, hi: number): Check =>
+  mk({ type: 'integer', minimum: lo, maximum: hi }, (v) => (typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi ? null : `expected a whole number from ${lo} to ${hi}${typeof v === 'number' ? '' : `, got ${kind(v)}`}`));
 export const timeOfDay = mk({ type: 'string', pattern: '^([01]?\\d|2[0-3]):[0-5]\\d$' }, (v) =>
   typeof v === 'string' && /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? null : `expected a time of day as "HH:MM" (24-hour), e.g. "03:00"${typeof v === 'string' ? '' : `, got ${kind(v)}`}`,
 );

@@ -23,6 +23,8 @@ export interface ApprovalsDeps {
   currentMode(): PermissionMode;
   /** The row of the call the card belongs to, when it is still running */
   lastCard(): ToolCard | null;
+  /** The row of a call by its id (calls that run together each get their own card on their own row) */
+  cardFor?(id: string): ToolCard | undefined;
   addNode(el: HTMLElement): void;
   endAssistant(): void;
   finishThinking(): void;
@@ -43,7 +45,7 @@ export interface ApprovalsDeps {
   cleanError(err: unknown): string;
 }
 
-export function createApprovals({ input: inputEl, api, setConfig, running, currentMode, lastCard, addNode, endAssistant, finishThinking, scrollToBottom, settleRun, setStatusText, baseVerb, applyConfigToUi, announceMode, refreshRules, dialogOpen, composerEmpty, systemMessage, cleanError }: ApprovalsDeps) {
+export function createApprovals({ input: inputEl, api, setConfig, running, currentMode, lastCard, cardFor, addNode, endAssistant, finishThinking, scrollToBottom, settleRun, setStatusText, baseVerb, applyConfigToUi, announceMode, refreshRules, dialogOpen, composerEmpty, systemMessage, cleanError }: ApprovalsDeps) {
   /** The approval card waiting for an answer, if any */
   let pendingApproval: {
     id: string;
@@ -83,7 +85,9 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     finishThinking();
     pendingApproval?.cancel('Superseded');
     const lastToolCard = lastCard();
-    const card = lastToolCard && lastToolCard.running && lastToolCard.name === ev.name ? lastToolCard : null;
+    // The card's own call when the main process names it (several may run at once), else the row added last
+    const owned = typeof ev.callId === 'string' && cardFor ? (cardFor(ev.callId) ?? null) : undefined;
+    const card = owned !== undefined ? (owned?.running ? owned : null) : lastToolCard && lastToolCard.running && lastToolCard.name === ev.name ? lastToolCard : null;
     const el = document.createElement('div');
     const reason = typeof ev.reason === 'string' ? ev.reason.trim() : '';
     el.className = 'approval prompt-card' + (reason ? ' flagged' : '');
