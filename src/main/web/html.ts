@@ -219,9 +219,19 @@ export function parseHtml(html: string): El {
   const ends = new TagEnds(s);
   let i = 0;
   let count = 0;
-  const text = (t: string) => {
-    if (t) stack.cur.children.push(decodeEntities(t));
+  // An element past the depth cap or the element budget is not opened, so its content would flow into what is open.
+  // When it is one whose content is never shown, that content is left out to its end tag instead. Only tags of its
+  // own name are counted, so an end tag the markup merely implies does not end it: past the limits, hidden stays hidden.
+  let skipTag = '';
+  let skipOpen = 0;
+  const skipFrom = (tag: string) => {
+    skipTag = tag;
+    skipOpen = 1;
   };
+  const text = (t: string) => {
+    if (t && !skipOpen) stack.cur.children.push(decodeEntities(t));
+  };
+  const isVoid = (tag: string, attrs: string) => VOID.has(tag) || (/\/\s*$/.test(attrs) && (tag === 'svg' || tag.includes(':') || tag === 'path'));
   /** Where a raw element's text ends and the tag after it: one scan, to the end of the page at worst */
   const rawEnd = (tag: string, from: number): { body: number; next: number } => {
     if (tag === 'plaintext') return { body: s.length, next: s.length };
@@ -245,7 +255,7 @@ export function parseHtml(html: string): El {
     }
     if (s.startsWith('<![CDATA[', i)) {
       const end = s.indexOf(']]>', i);
-      stack.cur.children.push(s.slice(i + 9, end < 0 ? s.length : end));
+      if (!skipOpen) stack.cur.children.push(s.slice(i + 9, end < 0 ? s.length : end));
       i = end < 0 ? s.length : end + 3;
       continue;
     }
@@ -263,13 +273,20 @@ export function parseHtml(html: string): El {
     }
     i = m.next;
     const tag = m.name.toLowerCase();
+    if (skipOpen) {
+      if (tag === skipTag) skipOpen += m.end ? -1 : isVoid(tag, m.attrs) ? 0 : 1;
+      else if (!m.end && RAW.has(tag)) i = rawEnd(tag, i).next;
+      continue;
+    }
     if (m.end) {
       stack.end(tag);
       continue;
     }
     if (count >= MAX_ELEMENTS) {
-      // Over budget: the tag is ignored, but a raw element's text is still not read as markup
+      // Over budget: the tag is ignored and its text flows on, but a raw element's text is not read as markup, and
+      // what an element hides stays hidden
       if (RAW.has(tag)) i = rawEnd(tag, i).next;
+      else if (!isVoid(tag, m.attrs) && (DROP.has(tag) || isHidden({ attrs: parseAttrs(m.attrs) }))) skipFrom(tag);
       continue;
     }
     count++;
@@ -277,8 +294,7 @@ export function parseHtml(html: string): El {
     const parent = stack.cur;
     const el: El = { tag, attrs: parseAttrs(m.attrs), children: [], parent, depth: parent.depth + 1 };
     parent.children.push(el);
-    const selfClosing = /\/\s*$/.test(m.attrs);
-    if (VOID.has(tag) || (selfClosing && (tag === 'svg' || tag.includes(':') || tag === 'path'))) continue;
+    if (isVoid(tag, m.attrs)) continue;
     if (RAW.has(tag)) {
       const r = rawEnd(tag, i);
       const body = s.slice(i, r.body);
@@ -286,8 +302,9 @@ export function parseHtml(html: string): El {
       i = r.next;
       continue;
     }
-    // At the depth cap the element stays in the tree, but what follows goes into its parent
+    // At the depth cap the element stays in the tree, but what follows goes into its parent, unless it is hidden
     if (el.depth < MAX_DEPTH) stack.push(el);
+    else if (DROP.has(tag) || isHidden(el)) skipFrom(tag);
   }
   return root;
 }
@@ -347,7 +364,7 @@ export function textOf(el: El): string {
 /** Elements whose content is never shown */
 const DROP = new Set(['script', 'style', 'noscript', 'template', 'svg', 'math', 'iframe', 'frame', 'frameset', 'object', 'embed', 'canvas', 'audio', 'video', 'map', 'head', 'link', 'meta', 'base', 'input', 'select', 'option', 'optgroup', 'textarea', 'button', 'datalist', 'output', 'progress', 'meter', 'dialog', 'title', 'noembed', 'noframes', 'xmp', 'plaintext']);
 
-function isHidden(el: El): boolean {
+function isHidden(el: Pick<El, 'attrs'>): boolean {
   const a = el.attrs;
   if ('hidden' in a) return true;
   if ((a['aria-hidden'] ?? '').toLowerCase() === 'true') return true;
@@ -635,7 +652,8 @@ function renderEl(el: El, ctx: Ctx): string {
     case 'strike':
       return nested(ctx, 'markNest', () => wrap(renderChildren(el, ctx), '~~'), () => renderChildren(el, ctx));
     case 'a':
-      return nested(ctx, 'markNest', () => renderLink(el, ctx), () => renderChildren(el, ctx));
+      // A link keeps its address however deep it sits; past the cap only a link inside a link is plain content
+      return nested(ctx, 'markNest', () => renderLink(el, ctx), () => (ctx.inLink ? renderChildren(el, ctx) : renderLink(el, ctx)));
     case 'table':
       return nested(ctx, 'markNest', () => renderTable(el, ctx), () => block(renderChildren(el, ctx)));
     case 'tr':

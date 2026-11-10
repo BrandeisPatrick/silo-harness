@@ -182,10 +182,20 @@ for (const stack = [parseHtml('<span>'.repeat(1000) + 'x')]; stack.length; ) {
   for (const c of e.children) if (typeof c !== 'string') stack.push(c);
 }
 check('the tree is never deeper than 256', maxDepth === 256, maxDepth);
+// Past the limits an element is not opened, but what it hides is still left out
+const deepHidden = md('<div>'.repeat(300) + 'a <div hidden>SECRET <div>INNER</div> <script>"</div>"</script>MORE</div> b <p style="display: none">SECRET</p> c <select><option>SECRET</option></select> d <svg/> e');
+check('past the depth cap, hidden and never-shown elements keep their content out', deepHidden.replace(/\s+/g, ' ') === 'a b c d e', deepHidden);
+const overBudget = md('<b></b>'.repeat(300_000) + 'a <span aria-hidden="true">SECRET <span>INNER</span> MORE</span> b <button>SECRET</button> c');
+check('past the element budget, hidden and never-shown elements keep their content out', overBudget === 'a b c', overBudget.slice(-80));
+const impliedEnd = md('<div>'.repeat(300) + 'a <p hidden>SECRET<p>after an implied end');
+check('past the depth cap, a hidden element ends only at its own end tag', impliedEnd === 'a', impliedEnd);
 const quotes = md('<blockquote>q'.repeat(10));
 check('quotes add their prefix for 8 levels at most', quotes.split('\n').pop() === '> > > > > > > > q', quotes);
 const bolds = md('<b>'.repeat(10) + 'x');
 check('nested emphasis is marked for 8 levels at most', bolds === `${'*'.repeat(16)}x${'*'.repeat(16)}`, bolds);
+const deepLink = md('<table><tr><td>'.repeat(10) + '<a href="/docs">Docs</a>');
+check('a link past the nesting cap keeps its address', deepLink.includes('[Docs](https://example.com/docs)'), deepLink);
+fast('100,000 nested links', '<a href="/x">'.repeat(100_000) + 'x', (out) => out === '[x](https://example.com/x)');
 const longBase = '<base href="https://a.example/' + 'p'.repeat(100_000) + '/">' + '<a href=x>y</a>'.repeat(50_000);
 fast('a long <base> under many short links does not multiply the page', longBase, (out) => out.length <= 2 * longBase.length);
 const padded = '<table><tr>' + '<td>a'.repeat(20_000) + '<tr><td>b'.repeat(100_000) + '</table>';
