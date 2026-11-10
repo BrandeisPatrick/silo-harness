@@ -2,9 +2,9 @@
 // unit test loads it as it is (test/turn-fold.js).
 //
 // A turn is what follows a user message. Its process is the interim replies, thinking, tool rows and groups (with the
-// approvals decided in them), sub-session and message lines and blocked calls; the answer is the reply after its last
-// call. Everything else (shown images, cards, a plan, a card still waiting, notices, errors, compaction markers) is
-// never part of the process.
+// approvals decided in them), sub-session and message lines; the answer is the reply after its last call. Everything
+// else (shown images, cards, a plan, a card still waiting, a call Auto mode blocked with its Allow, notices, errors,
+// compaction markers) is never part of the process.
 
 /** "18s", "1m 05s": the status line's format, which the header shares */
 export function elapsedText(ms: number): string {
@@ -24,7 +24,8 @@ export type NodeKind = 'call' | 'text' | 'process' | 'keep';
 /** What a top-level transcript node is to its turn, from its classes. */
 export function nodeKind(classes: readonly string[]): NodeKind {
   const has = (c: string) => classes.includes(c);
-  if (has('tool') || has('tool-group') || has('auto-blocked') || (has('session-msg') && has('sent'))) return 'call';
+  // A call Auto mode blocked is not: its line offers Allow, which waits for the user like a card
+  if (has('tool') || has('tool-group') || (has('session-msg') && has('sent'))) return 'call';
   if (has('msg') && has('assistant')) return 'text';
   if (has('thinking') || (has('approval') && has('done'))) return 'process';
   return 'keep';

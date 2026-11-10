@@ -21,7 +21,8 @@ const { check, done } = require('./support/check.js');
   check('header of a stored turn without its time', headText(false, undefined) === 'Worked' && headText(false, NaN) === 'Worked' && headText(false, -1) === 'Worked');
 
   const k = (cls) => nodeKind(cls.split(' '));
-  check('calls: rows, groups, blocked calls, sent messages', k('tool') === 'call' && k('tool groupable mcp') === 'call' && k('tool-group live') === 'call' && k('auto-blocked') === 'call' && k('session-msg sent') === 'call', [k('tool'), k('tool-group'), k('auto-blocked'), k('session-msg sent')]);
+  check('calls: rows, groups, sent messages', k('tool') === 'call' && k('tool groupable mcp') === 'call' && k('tool-group live') === 'call' && k('session-msg sent') === 'call', [k('tool'), k('tool-group'), k('session-msg sent')]);
+  check('a call Auto mode blocked stays in sight (its Allow waits for the user)', k('auto-blocked') === 'keep');
   check('replies are text', k('msg assistant') === 'text' && k('msg assistant fade-in') === 'text');
   check('thinking and decided approvals are process', k('thinking') === 'process' && k('approval done') === 'process');
   check('never process: a waiting approval or question, notices, errors, cards, images, plans, compaction, received messages', ['approval', 'question-card prompt-card', 'msg system', 'msg system error', 'msg system notice', 'chat-cards', 'reply-images', 'plan-card', 'compaction', 'session-msg received msg user', 'mod-offer'].every((c) => k(c) === 'keep'), ['approval', 'msg system', 'chat-cards', 'compaction'].map(k));
