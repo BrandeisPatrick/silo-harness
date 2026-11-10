@@ -17,6 +17,7 @@ const { browserTools } = dist('tools/browser.js');
 const { debugPortsOf } = dist('browser/own-ports.js');
 const { installChooserHandlers } = dist('browser/choosers.js');
 const { readPiece, DEFAULT_READ } = dist('browser/paging.js');
+const { faviconAllowed, isLocalNetworkHost, NO_DEVICE_APIS } = dist('browser/tab.js');
 const { EventEmitter } = require('node:events');
 const { startedByUser, USER_INPUT_MS, quarantineValue } = dist('browser/downloads.js');
 const { check, done } = require('./support/check.js');
@@ -214,6 +215,12 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   check('… a source that was itself cut says so', /\+ more characters/.test(readPiece('y'.repeat(20_000), 0, 12_000, true)) && /more than this/.test(readPiece('short', 0, 12_000, true)));
   const tools = Object.fromEntries(browserTools.map((t) => [t.name, t]));
   check('browser_get_text and browser_read_page offer start', Boolean(tools.browser_get_text.parameters.properties.start && tools.browser_read_page.parameters.properties.start));
+
+  // ---------- No macOS prompt from a page alone ----------
+  check('pane pages get no Bluetooth, HID, USB or serial API', NO_DEVICE_APIS.split(',').sort().join() === 'Serial,WebBluetooth,WebHID,WebUSB');
+  check('local network hosts are known', ['192.168.1.1', '10.0.0.2', '172.20.1.1', '169.254.3.4', 'printer.local', 'fd12:3456::1', 'fe80::1', '[::1]'].every(isLocalNetworkHost) && !['8.8.8.8', 'example.com', '172.32.0.1'].some(isLocalNetworkHost));
+  check("a web page's icon on its own host or the web is fetched", faviconAllowed('https://cdn.example/icon.png', 'https://shop.example/') && faviconAllowed('http://192.168.1.5/f.ico', 'http://192.168.1.5/admin') && faviconAllowed('data:image/png;base64,AA', 'https://x/'));
+  check('… one pointing into the local network from another site is not (no Local Network prompt from an icon)', !faviconAllowed('http://192.168.1.1/f.ico', 'https://evil.example/') && !faviconAllowed('http://printer.local/f.ico', 'https://evil.example/') && !faviconAllowed('file:///etc/f.ico', 'https://evil.example/'));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();

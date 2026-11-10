@@ -233,6 +233,10 @@ function fixtures(P) {
     r = await app.callTool('browser_screenshot', {});
     console.log('   browser_screenshot in the hidden window:', (r ?? '').slice(0, 120));
 
+    // ---------- No device API for a page (nothing is called: only whether it is there) ----------
+    const apis = await evalAt(await pane(`${SHOP}/long.html`), `({ bluetooth: typeof navigator.bluetooth, hid: typeof navigator.hid, usb: typeof navigator.usb, serial: typeof navigator.serial })`);
+    check('a pane page has no Bluetooth, HID, USB or serial API to call', apis && Object.values(apis).every((t) => t === 'undefined'), apis);
+
     // ---------- 9. browser_eval runs without a user gesture ----------
     r = await app.callTool('browser_navigate', { url: `${SHOP}/landing.html` });
     r = (await withCard(app, () => app.callTool('browser_eval', { code: 'navigator.userActivation.isActive' }), 'allow')).result;

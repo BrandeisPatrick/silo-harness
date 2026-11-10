@@ -8,7 +8,7 @@ import { ipcMain, View, WebContentsView, type BrowserWindow, type BrowserWindowC
 import path from 'node:path';
 import type { Bounds, PopupState } from '../../shared/browser';
 import { BROWSER_PARTITION, cleanUserAgent } from './session';
-import { fetchFavicon, type BrowserTab } from './tab';
+import { faviconAllowed, fetchFavicon, NO_DEVICE_APIS, type BrowserTab } from './tab';
 
 export const MAX_POPUPS = 3;
 /** The card's title bar, above the page area */
@@ -267,7 +267,7 @@ export class PopupManager {
   /** Makes the card for the contents Electron created for the page's window.open, and returns those contents. */
   private create(tab: BrowserTab, size: { width?: number; height?: number }, options: BrowserWindowConstructorOptions, url: string, openTab: (url: string, background: boolean) => void): WebContents {
     const guest = (options as { webContents?: WebContents }).webContents;
-    const prefs = { ...(options.webPreferences ?? {}), sandbox: true, contextIsolation: true, nodeIntegration: false };
+    const prefs = { ...(options.webPreferences ?? {}), sandbox: true, contextIsolation: true, nodeIntegration: false, disableBlinkFeatures: NO_DEVICE_APIS };
     // The contents Electron made carry the opener relation; a fresh view (never seen, kept as a fallback) would not.
     const view = guest && !guest.isDestroyed() ? new WebContentsView({ webContents: guest, webPreferences: prefs }) : new WebContentsView({ webPreferences: { ...prefs, partition: BROWSER_PARTITION } });
     const wc = view.webContents;
@@ -323,7 +323,7 @@ export class PopupManager {
     });
     wc.on('page-favicon-updated', (_e, favicons) => {
       const icon = favicons.find((f) => /^(https?|data):/i.test(f));
-      if (!icon) return;
+      if (!icon || !faviconAllowed(icon, wc.getURL())) return;
       void fetchFavicon(icon).then((data) => {
         if (wc.isDestroyed() || !this.popups.includes(popup)) return;
         popup.favicon = data;
