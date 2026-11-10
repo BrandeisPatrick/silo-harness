@@ -44,6 +44,7 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Longer MCP calls.** A server entry can set its own `timeout`, and progress from the server keeps a call alive for up to 10 minutes.
 - **Big MCP results saved.** A result over 100,000 characters goes to a private temp file; the model gets its start, its end and the path.
 - **MCP server notes.** An MCP server's own usage notes join the prompt, quoted as the server's words and capped at 2,000 characters each.
+- **One note per setting.** Stepping through the permission modes, or folders, leaves one line in the transcript, not a stack.
 
 ### Fixed
 
