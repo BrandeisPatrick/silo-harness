@@ -110,7 +110,7 @@ export function modCheckTool(registry: ModRegistry, layout?: () => Partial<ModLa
   return {
     name: 'mod_check',
     description:
-      'Check an Silo Harness mod after writing or editing it: where it is, whether it is on, problems in its mod.json, its permissions and views, and the errors its pages threw. Call it after every change to a mod. Without an id it checks every user and project mod.',
+      'Check a Silo Harness mod after writing or editing it: where it is, whether it is on, problems in its mod.json, its permissions and views, and the errors its pages threw. Call it after every change to a mod. Without an id it checks every user and project mod.',
     parameters: {
       type: 'object',
       properties: { id: { type: 'string', description: 'The mod id (its folder name); omit to check all of them' } },

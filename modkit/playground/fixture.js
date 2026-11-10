@@ -40,7 +40,7 @@
   }
 
   var SKILLS = [
-    { name: 'create-mod', description: 'Write an Silo Harness mod: manifest, pages and a check with mod_check.', path: '/app/skills/create-mod/SKILL.md', source: 'bundled' },
+    { name: 'create-mod', description: 'Write a Silo Harness mod: manifest, pages and a check with mod_check.', path: '/app/skills/create-mod/SKILL.md', source: 'bundled' },
     { name: 'git-commit', description: 'Stage and commit with a message that says what changed and why.', path: HOME + '/.silo-harness/skills/git-commit/SKILL.md', source: 'user' },
     { name: 'pdf', description: 'Read, fill and merge PDF files.', path: '/app/skills/pdf/SKILL.md', source: 'bundled' },
     { name: 'review', description: 'Review the current diff for correctness bugs before you commit.', path: HOME + '/.silo-harness/skills/review/SKILL.md', source: 'user' },
