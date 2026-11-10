@@ -17,6 +17,7 @@ import {
   type ClickTarget,
   type Site,
 } from '../browser/policy';
+import { fencePage } from '../browser/fence';
 import { looksLikeCredentialLabel, MASK, scrubSecrets, type CredentialKind } from '../browser/safety';
 import type { Tool, ToolContext, ToolResult } from './types';
 
@@ -169,6 +170,9 @@ async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: {
 /** The optional `reason` of the tools that may need the user's approval: shown on the card, under the action. */
 const REASON = { reason: { type: 'string', description: 'Why, in one sentence (shown if approval is needed)' } };
 
+/** The tools whose whole result is the page's text (the others fence the page's words inside their own sentence). */
+const PAGE_RESULTS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_eval']);
+
 /**
  * Every browser tool's call passes the credential and site checks first (a refusal or a denial is its result), and
  * its result and error pass through here: the values of the page's credential fields, read before and after the
@@ -186,7 +190,9 @@ function guarded(tool: Tool): Tool {
       const before = await secrets(ctx);
       try {
         const r = await run(args, ctx);
-        return { ...r, content: scrubSecrets(r.content, [...before, ...(await secrets(ctx))]) };
+        const content = scrubSecrets(r.content, [...before, ...(await secrets(ctx))]);
+        // What the page says is data from the site: fenced, the site named by the browser
+        return { ...r, content: PAGE_RESULTS.has(tool.name) ? fencePage(activeUrl(ctx), content) : content };
       } catch (err) {
         throw new Error(scrubSecrets(err instanceof Error ? err.message : String(err), [...before, ...(await secrets(ctx))]));
       }
@@ -238,7 +244,7 @@ const tools: Tool[] = [
         if (!args.tab_id) throw new Error('select needs tab_id (see list).');
         b.activate(String(args.tab_id));
         const s = b.state();
-        return { content: `Now on ${s.activeId}: ${s.url}${s.title ? ` — "${s.title}"` : ''}` };
+        return { content: `Now on ${s.activeId}: ${fencePage(s.url, `${s.url}${s.title ? ` — "${s.title}"` : ''}`)}` };
       }
       if (action === 'close') {
         const id = args.tab_id ? String(args.tab_id) : b.state().activeId;

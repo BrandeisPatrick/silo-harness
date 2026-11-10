@@ -11,6 +11,7 @@ import path from 'node:path';
 import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from '../../shared/browser';
 import { aimScript, describeScript, fieldKindScript, flashScript, getTextScript, passwordFieldScript, readPageScript, REF_RE, scrollScript, selectAllScript, targetScript, waitScript } from './page-scripts';
 import { CHANGED_UNDER_CLICK, CREDENTIAL_REFUSAL, sameClickTarget, type ClickTarget } from './policy';
+import { fencePage } from './fence';
 import { leavesArtifact, PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
@@ -647,7 +648,7 @@ export class BrowserController {
     }
     if (tab.certError) return certificateSentence(tab.certError);
     const s = tab.state();
-    return `Now at ${s.url}${s.title ? ` — "${s.title}"` : ''}`;
+    return `Now at ${fencePage(s.url, `${s.url}${s.title ? ` — "${s.title}"` : ''}`)}`;
   }
 
   reload(): Promise<void> {
@@ -759,7 +760,7 @@ export class BrowserController {
     if (this.wc.isLoading()) await this.waitForLoad(this.wc, 5000);
     if (this.activeTab.certError) return ` ${certificateSentence(this.activeTab.certError)}`;
     const after = this.state();
-    if (after.url !== before.url || after.title !== before.title) return ` Now at: ${after.title ? `${after.title} — ` : ''}${after.url}`;
+    if (after.url !== before.url || after.title !== before.title) return ` Now at: ${fencePage(after.url, `${after.title ? `${after.title} — ` : ''}${after.url}`)}`;
     return '';
   }
 
@@ -771,7 +772,7 @@ export class BrowserController {
     for (;;) {
       const found = (await this.world<false | string | { line: string }>(waitScript(text, selector)).catch(() => false)) ?? false;
       if (found === 'bad-selector') throw new Error(`"${selector}" is not a valid CSS selector.`);
-      if (found && typeof found === 'object') return `Found ${what}.${found.line ? ` The page says: "${found.line}"` : ''}`;
+      if (found && typeof found === 'object') return `Found ${what}.${found.line ? ` The page says: ${fencePage(this.state().url, found.line)}` : ''}`;
       if (Date.now() >= deadline) return `Timed out after ${timeoutMs} ms waiting for ${what}. The page may still be loading or the text may differ.`;
       await sleep(200);
     }

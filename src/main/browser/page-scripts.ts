@@ -38,8 +38,8 @@ export function readPageScript(mode: 'interactive' | 'all', maxChars: number): s
         if (node.nodeType === Node.ELEMENT_NODE) {
           const tag = node.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE' || tag === 'svg') return NodeFilter.FILTER_REJECT;
-          if (!visible(node)) return NodeFilter.FILTER_REJECT;
-        }
+          if (!visible(node) || S.hiddenBox(node)) return NodeFilter.FILTER_REJECT;
+        } else if (S.textHidden(node)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -155,7 +155,7 @@ export function waitScript(text: string | undefined, selector: string | undefine
     const selector = ${JSON.stringify(selector ?? '')};
     if (selector) { try { const el = document.querySelector(selector); if (el) return { line: (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200) }; } catch (e) { return 'bad-selector'; } }
     if (text && document.body) {
-      const lines = document.body.innerText.split('\\n');
+      const lines = S.visibleText(document.body).split('\\n');
       const hit = lines.find((l) => l.toLowerCase().includes(text));
       if (hit !== undefined) return { line: hit.replace(/\\s+/g, ' ').trim().slice(0, 200) };
     }
@@ -163,9 +163,9 @@ export function waitScript(text: string | undefined, selector: string | undefine
   `);
 }
 
-/** Runs inside the page (in the safety world): the visible text of the page, main content first. */
+/** Runs inside the page (in the safety world): the text a person can see on the page (S.visibleText), main content first. */
 export function getTextScript(): string {
-  return inSafetyWorld(`const m = document.querySelector('main, article, [role="main"]'); const el = (m && m.innerText && m.innerText.length > 200) ? m : document.body; return el ? el.innerText : '';`);
+  return inSafetyWorld(`const m = document.querySelector('main, article, [role="main"]'); const main = m ? S.visibleText(m) : ''; return main.length > 200 ? main : S.visibleText(document.body);`);
 }
 
 /** Runs inside the page (in the safety world): selects what the focused field holds, so typing replaces it. */

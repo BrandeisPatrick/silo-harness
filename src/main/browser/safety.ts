@@ -317,7 +317,71 @@ export function pagePrelude(): string {
       requestAnimationFrame(() => { box.style.opacity = '0'; });
       setTimeout(() => box.remove(), 800);
     };
-    return { check, mark, deepActive, secrets, exposed, label, resetRefs, addRef, byRef, clickInfo, aim, flash, clean };
+    // ---- Text a person can see: what get_text and the outline give the agent ----
+    const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|svg|HEAD|TITLE|META|LINK)$/;
+    /**
+     * Whether an element hides itself and everything in it from a person: display none, opacity (almost) 0,
+     * aria-hidden, clipped to nothing, a 1×1 box (or none) that hides its overflow, or placed more than a viewport
+     * outside the document. Text merely below the fold is not hidden.
+     */
+    const hiddenBox = (el) => {
+      const s = getComputedStyle(el);
+      if (s.display === 'none') return true;
+      if (s.display === 'contents') return attr(el, 'aria-hidden') === 'true';
+      if (parseFloat(s.opacity) < 0.1) return true;
+      if (attr(el, 'aria-hidden') === 'true') return true;
+      if (/inset\\(\\s*(100|50)%/.test(s.clipPath)) return true;
+      if (/^rect\\(\\s*0(px)?[,\\s]+0(px)?[,\\s]+0(px)?[,\\s]+0(px)?\\s*\\)$/.test(s.clip) && s.position !== 'static') return true;
+      const r = EP.getBoundingClientRect.call(el);
+      const clips = s.overflow !== 'visible' || s.overflowX !== 'visible' || s.overflowY !== 'visible';
+      if (clips && r.width <= 1 && r.height <= 1) return true;
+      if (s.position !== 'static') {
+        const vw = innerWidth || 1;
+        const vh = innerHeight || 1;
+        const left = r.left + scrollX;
+        const top = r.top + scrollY;
+        const docW = Math.max(document.documentElement.scrollWidth, vw);
+        const docH = Math.max(document.documentElement.scrollHeight, vh);
+        if (left + r.width < -vw || top + r.height < -vh || left > docW + vw || top > docH + vh) return true;
+      }
+      return false;
+    };
+    /** A text node's own look: invisible, or smaller than 2 px */
+    const textHidden = (node) => {
+      const p = node.parentElement;
+      if (!p) return true;
+      const s = getComputedStyle(p);
+      return s.visibility === 'hidden' || s.visibility === 'collapse' || parseFloat(s.fontSize) < 2;
+    };
+    const BLOCK = /^(block|flex|grid|list-item|table|table-row|table-caption|flow-root|table-row-group|table-header-group|table-footer-group)$/;
+    /** The text a person can see under root, in reading order, with line breaks where blocks are */
+    const visibleText = (root) => {
+      const out = [];
+      const walk = (el) => {
+        for (let node = el.firstChild; node; node = node.nextSibling) {
+          if (node.nodeType === 3) {
+            if (textHidden(node)) continue;
+            const pre = /^pre/.test(getComputedStyle(node.parentElement).whiteSpace);
+            const t = pre ? node.textContent : node.textContent.replace(/\\s+/g, ' ');
+            if (t.trim() || (t && out.length && !/\\s$/.test(out[out.length - 1]))) out.push(t);
+            continue;
+          }
+          if (node.nodeType !== 1 || SKIP.test(node.tagName)) continue;
+          if (node.tagName === 'BR') { out.push('\\n'); continue; }
+          if (hiddenBox(node)) continue;
+          const d = getComputedStyle(node).display;
+          const block = BLOCK.test(d);
+          if (block) out.push('\\n');
+          if (d === 'table-cell') out.push('\\t');
+          if (node.shadowRoot) walk(node.shadowRoot);
+          walk(node);
+          if (block) out.push('\\n');
+        }
+      };
+      if (root) walk(root);
+      return out.join('').split('\\n').map((l) => l.replace(/[ \\t]+/g, (m) => (m.includes('\\t') ? '\\t' : ' ')).trim()).join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
+    };
+    return { check, mark, deepActive, secrets, exposed, label, resetRefs, addRef, byRef, clickInfo, aim, flash, clean, hiddenBox, textHidden, visibleText };
   })());`;
 }
 
