@@ -158,7 +158,18 @@ function makeCtx(over = {}) {
   check('a start past the end says so', /start 999999 is past the end/.test(end.content));
   check('reading on comes from the cache: the page was fetched once', srv.hits['/long'] === hitsBefore + 1, { before: hitsBefore, after: srv.hits['/long'] });
   const huge = await fetchTool.run({ url: u('/long'), max_chars: 10_000_000 }, ctx);
-  check('max_chars is capped at 100,000 and defaults to 20,000', W.HARD_MAX_CHARS === 100_000 && W.DEFAULT_MAX_CHARS === 20_000 && !/More:/.test(huge.content));
+  const { MODEL_RESULT_CHARS } = dist('agent/context-view.js');
+  check('max_chars is capped at 25,000 (what fits in what the model is sent) and defaults to 20,000', W.HARD_MAX_CHARS === 25_000 && W.HARD_MAX_CHARS < MODEL_RESULT_CHARS && W.DEFAULT_MAX_CHARS === 20_000 && !/More:/.test(huge.content));
+  // A whole result, header, fence and note included, always fits in what the model is sent, so its middle is never cut
+  const bigPage = { at: 0, title: 'T'.repeat(500), url: 'https://example.com/page', text: 'word '.repeat(60_000), note: '' };
+  const full = W.formatPage(bigPage, 0, W.HARD_MAX_CHARS);
+  check('a part at the maximum fits, and says to read on from where it ends', full.length <= MODEL_RESULT_CHARS && /showing 0–25000\./.test(full) && /More: call web_fetch with start=25000 /.test(full), full.length);
+  const longUrl = { ...bigPage, url: `https://example.com/${'p'.repeat(12_000)}` };
+  const lu = W.formatPage(longUrl, 0, W.HARD_MAX_CHARS);
+  const shownTo = Number(/showing 0–(\d+)\./.exec(lu)?.[1]);
+  check('a very long URL: the part is shortened so the whole still fits, and the note matches it', lu.length <= MODEL_RESULT_CHARS && shownTo < 25_000 && lu.includes(`start=${shownTo} `), { length: lu.length, shownTo });
+  const tags = W.formatPage({ ...bigPage, text: '<web_page>'.repeat(10_000) }, 0, W.HARD_MAX_CHARS);
+  check('a page of fence tags (each made longer by &lt;) still fits', tags.length <= MODEL_RESULT_CHARS, tags.length);
 
   let now = 0;
   const timed = new W.PageCache(() => now);
