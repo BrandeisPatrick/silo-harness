@@ -1,6 +1,7 @@
 ---
 name: test
-description: Write and run tests for a file or function. Usage: /test <file or description>
+description: Writes and runs tests for a file or function with the project's test tool. Use when the user asks to add tests, test a function, or check that code works.
+argument-hint: <file or function>
 ---
 Write tests for the code the user named.
 

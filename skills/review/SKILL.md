@@ -1,6 +1,7 @@
 ---
 name: review
-description: Review a file or directory for bugs, security issues and clarity. Usage: /review <path>
+description: Reviews a file or folder for bugs, security issues and unclear code without changing it. Use when the user asks to review, audit or check code before shipping.
+argument-hint: <path>
 ---
 Review the code at the path the user gave (default: the working directory).
 

@@ -41,11 +41,11 @@ export function createSlashMenu({ menu: slashMenu, input: inputEl, listSkills, r
 
   async function updateSlashMenu(): Promise<void> {
     const value = inputEl.value;
-    const m = /^\/([\w-]*)$/.exec(value);
+    const m = /^\/([\w:-]*)$/.exec(value);
     if (!m) return hideSlashMenu();
     const prefix = m[1].toLowerCase();
     const [allSkills, registered] = await Promise.all([listSkills(), registeredCommands()]);
-    const skills = allSkills.filter((sk) => sk.name.toLowerCase().startsWith(prefix));
+    const skills = allSkills.filter((sk) => sk.userInvocable !== false && sk.name.toLowerCase().startsWith(prefix));
     if (inputEl.value !== value) return;
     // The window's own commands first, then the app's registered ones (app.commands), tagged with where they come from.
     const extra: SkillInfo[] = registered
@@ -67,7 +67,8 @@ export function createSlashMenu({ menu: slashMenu, input: inputEl, listSkills, r
         row.className = 'slash-item' + (i === slashIndex ? ' active' : '');
         row.setAttribute('role', 'option');
         const tag = (sk as SkillInfo & { tag?: string }).tag;
-        row.innerHTML = `<span class="name">/${escapeHtml(sk.name)}</span><span class="desc">${escapeHtml(sk.description)}</span><span class="src">${tag ? escapeHtml(tag) : builtin ? 'command' : escapeHtml(sk.source)}</span>`;
+        const hint = sk.argumentHint ? `${escapeHtml(sk.argumentHint)} · ` : '';
+        row.innerHTML = `<span class="name">/${escapeHtml(sk.name)}</span><span class="desc">${hint}${escapeHtml(sk.description)}</span><span class="src">${tag ? escapeHtml(tag) : builtin ? 'command' : escapeHtml(sk.source)}</span>`;
         row.onmousedown = (e) => {
           e.preventDefault();
           slashIndex = i;

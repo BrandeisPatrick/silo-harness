@@ -43,7 +43,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 
 | Command | |
 | --- | --- |
-| `/<skill> [text]` | Run a skill; `/skills` lists them |
+| `/<skill> [text]` | Run a skill; `/skills` lists them ([the skill format](skills.md)) |
 | `/compact [focus]` | Compact the conversation now; the focus says what the brief must keep |
 | `/mcp` | MCP servers and their tools |
 | `/spawn <task>` | Start a sub-session on that task |

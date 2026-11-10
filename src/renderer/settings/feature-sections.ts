@@ -24,7 +24,7 @@ export function skillsSection(ctx: Ctx): Section {
 
   function render(skills: SkillInfo[], configDir: string): void {
     const project = ctx.config().workingDirectory;
-    where.textContent = `Skills live in ${tildePath(configDir)}/skills and ${tildePath(project)}/.silo-harness/skills.`;
+    where.textContent = `Skills live in ${tildePath(configDir)}/skills and ${tildePath(project)}/.silo-harness/skills. .claude/skills and .agents/skills are read too.`;
     listEl.innerHTML = '';
     for (const g of GROUPS) {
       const items = skills.filter((s) => s.source === g.source);
@@ -42,6 +42,10 @@ export function skillsSection(ctx: Ctx): Section {
           }, { icon: 'folder', aria: `Reveal ${s.name}` }),
         );
         r.el.title = s.path;
+        if (s.problems?.length) {
+          r.problem(s.problems.join('\n'));
+          r.el.querySelector<HTMLElement>('.sp-problem span')?.style.setProperty('white-space', 'pre-line');
+        }
         grp.append(r.el);
       }
       listEl.append(grp);
