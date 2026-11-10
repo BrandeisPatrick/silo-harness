@@ -205,11 +205,24 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     return el;
   }
 
-  function addSystemMessage(text: string, kind: 'info' | 'error' | 'notice' = 'info'): HTMLElement {
+  /**
+   * `group` names the setting a note reports (the permission mode, the working directory). A new note takes the place
+   * of its group's earlier ones when only notes came between: stepping through the modes leaves one line.
+   */
+  function addSystemMessage(text: string, kind: 'info' | 'error' | 'notice' = 'info', group?: string): HTMLElement {
     const el = document.createElement('div');
     el.className = `msg system${kind === 'info' ? '' : ` ${kind}`}`;
     // Line breaks kept: /sessions, /merge and a name that fits several sessions answer with one session per line
     el.innerHTML = `${icon(kind === 'error' ? 'circle-alert' : 'info', kind === 'error' ? 16 : 14)}<span>${escapeHtml(text).replace(/\n/g, '<br>')}</span>`;
+    if (group) {
+      el.dataset.group = group;
+      let prev = messagesEl.lastElementChild as HTMLElement | null;
+      while (prev?.classList.contains('system')) {
+        const before = prev.previousElementSibling as HTMLElement | null;
+        if (prev.dataset.group === group) prev.remove();
+        prev = before;
+      }
+    }
     addNode(el);
     return el;
   }

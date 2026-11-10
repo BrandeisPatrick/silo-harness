@@ -1687,7 +1687,7 @@ const connection = createConnection({
   focusComposer: () => inputEl.focus(),
   showError: showInlineError,
   cleanError,
-  notice: (text) => void addSystemMessage(text, 'notice'),
+  notice: (text, group) => void addSystemMessage(text, 'notice', group),
   applyConfigToUi,
   refreshContext,
   syncSpin,

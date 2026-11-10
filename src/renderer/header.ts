@@ -37,7 +37,8 @@ export interface HeaderDeps {
   refreshContext(): Promise<void>;
   openSettings(section?: string): void;
   focusComposer(): void;
-  notice(text: string, kind: 'notice'): void;
+  /** A quiet notice in the transcript; one of a `group` replaces the group's last (transcript.ts addSystemMessage) */
+  notice(text: string, kind: 'notice', group?: string): void;
   showError(anchor: HTMLElement, message: string): void;
   cleanError(err: unknown): string;
 }
@@ -54,7 +55,7 @@ export function createHeader({ modeBtn, modelBtn, cwdBtn, boundary: transcriptWr
     const now = currentMode();
     if (now === before) return;
     if (now !== 'plan') leavePlanPlaceholder();
-    notice(`Permission mode: ${MODES[now].label}. ${MODES[now].desc}.`, 'notice');
+    notice(`Permission mode: ${MODES[now].label}. ${MODES[now].desc}.`, 'notice', 'mode');
   }
 
   async function setMode(mode: PermissionMode): Promise<void> {
