@@ -165,7 +165,9 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
   /** An error sits under the field it is about (or in the form's foot) */
   const showAddError = (message: string, focus?: HTMLElement) => {
     els.error.innerHTML = `${icon('circle-alert', 14)}<span>${escapeHtml(message)}</span>`;
-    const field = focus?.closest('.field');
+    const inField = focus?.closest('.field');
+    // A field in the two-column row (Name, Scope): the line goes under that row, not into it
+    const field = inField?.parentElement?.classList.contains('field-grid') ? inField.parentElement : inField;
     if (field) field.after(els.error);
     else if (errorHome.parent) errorHome.parent.insertBefore(els.error, errorHome.next);
     els.error.classList.toggle('by-field', !!field);
@@ -267,7 +269,7 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       primaryHtml +
       (hasSwitch(s)
         ? `<label class="mcp-switch" title="${escapeHtml(on ? `Turn ${name} off` : `Turn ${name} on`)}"><input type="checkbox" class="switch" ${on ? 'checked' : ''} aria-label="${escapeHtml(`${name} on`)}" data-focus-key="${fk}|switch"></label>`
-        : '') +
+        : '<span class="mcp-switch-space" aria-hidden="true"></span>') +
       `<button type="button" class="icon-btn sm mcp-more" aria-label="${escapeHtml(`More for ${name}`)}" aria-haspopup="menu" title="More" data-focus-key="${fk}|more">${icon('more', 16)}</button>` +
       `</div>`;
 

@@ -978,7 +978,10 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
         const problem = failed && mcpCall ? mcpProblem(res.result) : null;
         if (problem) {
           card.problem = problem;
-          body.appendChild(mcpProblemLine(problem));
+          // First in the open row, under the real names: before the arguments
+          const names = body.querySelector(':scope > .tool-mcp-names');
+          if (names) names.after(mcpProblemLine(problem));
+          else body.prepend(mcpProblemLine(problem));
         }
         if (!(denied && decided && !decided.ok && /Not permitted: the user denied/.test(res.result))) body.appendChild(outBlock(clip(stripCwd(res.result)), denied ? 'note' : 'error'));
         if (failed) el.open = true;

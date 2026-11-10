@@ -2,7 +2,7 @@
 
 1. Settings → MCP servers → **Add server**.
 2. Paste the server's command line, its URL, or the JSON from its README; the line under it says what was understood.
-3. Check the suggested name and the scope (all projects, or this project's `.mcp.json`); add environment variables for a command or headers for a URL.
+3. Check the suggested name and the scope (this Mac, or this project's `.mcp.json`); add environment variables for a command or headers for a URL.
 4. **Add**. A remote server that wants a sign-in shows **Sign in**; `/mcp` in a conversation lists every server and what it needs.
 
 Servers come from Settings → MCP servers (stored in the app's `config.json` under `mcpServers`) and from a project's `.mcp.json` (Claude Code's format; off until you turn each one on). The model calls their tools as `mcp__<server>__<tool>`.

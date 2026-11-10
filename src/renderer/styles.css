@@ -1137,6 +1137,8 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
   font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none; user-select: none;
   animation: pop-in 0.12s ease-out;
 }
+/* A menu shown in the top layer (opened inside a modal dialog): placed by popover.ts, not by the popover defaults */
+.popover[popover] { inset: auto; margin: 0; overflow: visible; color: inherit; }
 .pop-label { padding: 8px 8px 4px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 400; color: var(--text-400); }
 .pop-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: var(--r-control); color: var(--text-100); text-align: left; }
 .pop-item.active { background: var(--hover); }
@@ -1554,6 +1556,8 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-switch:hover input.switch:checked { background: color-mix(in srgb, var(--switch-on) 88%, #000); }
 .mcp-switch input.switch:disabled { cursor: default; }
 .mcp-more { flex: none; }
+/* A row without a switch (not trusted) keeps its action in line with the others' */
+.mcp-switch-space { flex: none; width: 36px; }
 /* Trust confirmation and Show log open inside the row, under its text */
 .mcp-confirm, .mcp-log { margin: -2px 12px 12px 50px; }
 .mcp-confirm { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--r-control); background: var(--bg-100); outline: none; }
