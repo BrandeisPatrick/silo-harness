@@ -1,9 +1,9 @@
 // Settings → Mods: a tab strip (Mods, Background, Chat bar, Conversation). The Mods tab lists the mods that add
 // something (panels, side-pane tabs, composer strips, workers, slash commands), Built-in / Yours / This project, each
-// with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, install, create
-// and reload. The other three are the looks (look-tab.ts): no switches, a preview of what is in use or of the version
-// tried, Use, and every version as a card. While searching, every card and every tab's rows are searched. Follows
-// mods:changed live.
+// with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, New ⌄ (From a
+// template…, Install…) and Reload. The other three are the looks (look-tab.ts): no switches, a preview of what is in
+// use or of the version tried, Use, and every version as a card. While searching, every card and every tab's rows are
+// searched. Follows mods:changed live.
 
 import type { LookKind, ModInfo, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
 import { dirname, escapeHtml, h } from '../dom.js';
@@ -31,7 +31,7 @@ import {
   type NewModKind,
 } from './model.js';
 import { lookTab, type LookTab } from './look-tab.js';
-import { actions, button, chip, group, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
+import { actions, button, chip, group, newMenu, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
 const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look' };
@@ -46,7 +46,7 @@ export function modsSection(ctx: Ctx): Section {
   /** The tab on screen; kept while the app runs, so Settings reopens at it */
   let tab: ModTab = 'mods';
 
-  // ---------- Toolbar: Install…, New mod…, Reload ----------
+  // ---------- Toolbar: New ⌄ (From a template…, Install…), Reload ----------
 
   const status = h('div', { class: 'sp-inline-status', role: 'status', hidden: true });
   const showStatus = (text: string, error = false) => {
@@ -55,8 +55,13 @@ export function modsSection(ctx: Ctx): Section {
     status.innerHTML = text ? `${icon(error ? 'circle-alert' : 'circle-check', 14)}<span>${escapeHtml(text)}</span>` : '';
   };
 
-  const installBtn = button('Install…', () => toggleForm(installForm, installBtn), { icon: 'download' });
-  const newBtn = button('New mod…', () => toggleForm(createForm, newBtn), { icon: 'plus' });
+  const { wrap: newWrap, btn: newBtn } = newMenu(
+    () => [
+      { label: 'From a template…', icon: 'file-plus', run: () => toggleForm(createForm) },
+      { label: 'Install…', icon: 'download', run: () => toggleForm(installForm) },
+    ],
+    'sp-mods-new',
+  );
   const reloadBtn = button('Reload', async (b) => {
     b.disabled = true;
     try {
@@ -69,7 +74,7 @@ export function modsSection(ctx: Ctx): Section {
       b.disabled = false;
     }
   }, { icon: 'refresh' });
-  const toolbar = h('div', { class: 'sp-toolbar sp-only-browse' }, installBtn, newBtn, reloadBtn);
+  const toolbar = h('div', { class: 'sp-toolbar sp-only-browse' }, newWrap, reloadBtn);
 
   // Install: a folder or a Git URL
   const installInput = textControl({ value: '', placeholder: '~/Downloads/my-mod or https://github.com/you/mod.git', width: 420, mono: true, onCommit: () => {} });
@@ -206,14 +211,14 @@ export function modsSection(ctx: Ctx): Section {
   function closeForms(): void {
     installForm.hidden = true;
     createForm.hidden = true;
-    installBtn.classList.remove('active');
     newBtn.classList.remove('active');
     madeHere = null;
     // Back under the Mods tab's toolbar, where they live
     if (toolbar.nextElementSibling !== installForm) toolbar.after(installForm, createForm);
   }
-  function toggleForm(form: HTMLElement, btn: HTMLButtonElement): void {
-    const show = Boolean(form.hidden);
+  /** Opens a form under the toolbar (one at a time); picking the open one again closes it */
+  function toggleForm(form: HTMLElement): void {
+    const show = Boolean(form.hidden) || form.parentElement !== panel;
     closeForms();
     if (show && form === createForm) {
       seat = MOD_TABS.find((t) => t.id === tab)!.newKind;
@@ -221,7 +226,7 @@ export function modsSection(ctx: Ctx): Section {
       createTitle.textContent = NEW_TITLE[seat];
     }
     form.hidden = !show;
-    btn.classList.toggle('active', show);
+    newBtn.classList.toggle('active', show);
     if (show) form.querySelector<HTMLElement>('input')?.focus();
   }
   /** The New form in a look tab, preset to its kind; what it writes is handed to `made` */

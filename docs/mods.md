@@ -71,7 +71,7 @@ Settings → Mods has a tab for each kind, by what the manifest contributes: **M
 - The other three are **looks**: a view in the `background` seat, a look for `composer` and a look for `conversation`. A look has no switch. It is available as soon as it is installed, and its tab decides which one is in use: one per kind, with Default (none) first.
   - At the top of a look tab is a preview of the look in use: the background behind a miniature window (with Dim under it), a sample chat bar or a sample exchange, always in the app's own look. Under it are the look's name and source, and its mod's settings.
   - Under those is every version of the kind as a card: Default, then the built-in ones, yours and the project's. A click on a card shows that version in the preview, and the window stays as it is. **Use** applies it to the window; **Back to current** shows the one in use again. Using a look puts away the one of its kind that was in use.
-  - **New ⌄** asks the agent for one (Settings closes and the composer starts the request) or writes a starter from a template, which shows in the preview, not applied.
+  - **New ⌄** asks the agent for one (Settings closes and the composer starts the request), writes a starter from a template (it shows in the preview, not applied), or installs one (Install…).
   - The first Use of a look of yours or of a project's asks for your approval, once per mod: what its pages may do, and that its stylesheet restyles the app. That approval is the only gate a look has. A bundled look needs none.
 - A mod with both kinds keeps its switch in the Mods tab for its views and commands; its looks are on their tabs, and do not depend on the switch.
 
@@ -402,11 +402,11 @@ Method names are the call names above (`ui.setBadge`, `storage.get`, `session.tr
 
 Ask for it: "make a mod that shows the git branch and how many files changed". The agent loads the `create-mod` skill, writes the folder, and checks it with the `mod_check` tool, which reports manifest problems and any errors the page threw. A card in the chat offers to turn the new mod on; after that the agent's edits reload it as they land, and `mod_check` gives it the page's errors to fix. For a look the card offers **Preview** (its tab in Settings, with it in the preview) and **Use** (the card says what it may do, so using it there is the approval), and the agent's edits show in the preview as they land.
 
-By hand: Settings → Mods → New mod writes a starter folder (a view in the seat you pick, or a conversation or chat bar look) and opens it; on a look tab, New ⌄ → From a template writes one of that kind and shows it previewed. `mod_check` is also what the Settings page shows under a mod's Problems.
+By hand: Settings → Mods → New → From a template… writes a starter folder (a view in the seat you pick, or a conversation or chat bar look) and opens it; on a look tab, New ⌄ → From a template writes one of that kind and shows it previewed. `mod_check` is also what the Settings page shows under a mod's Problems.
 
 ## Installing and sharing
 
-A mod is its folder. Copy it into `~/.silo-harness/mods/`, or use Settings → Mods → Install and give it a folder or a Git URL (the repository is cloned into the mods folder). To share one, publish the folder; adding the `silo-harness-mod` topic on GitHub makes it findable.
+A mod is its folder. Copy it into `~/.silo-harness/mods/`, or use Settings → Mods → New → Install… and give it a folder or a Git URL (the repository is cloned into the mods folder). To share one, publish the folder; adding the `silo-harness-mod` topic on GitHub makes it findable.
 
 ## What keeps this safe
 

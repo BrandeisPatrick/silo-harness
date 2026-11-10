@@ -293,6 +293,8 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 /* A small menu inside the page (New ⌄, ⋯): the window's menus sit under the Settings dialog */
 .sp-menu-wrap { position: relative; display: inline-flex; }
 .sp-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-pop); box-shadow: var(--shadow-pop); }
+/* The Mods toolbar's New ⌄ sits at the left of the page: its menu opens to the right */
+.sp-toolbar .sp-menu { left: 0; right: auto; }
 .sp-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-control); font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); white-space: nowrap; }
 .sp-menu-item .icon { color: var(--text-200); }
 .sp-menu-item:hover, .sp-menu-item:focus-visible { background: var(--hover); outline: none; }

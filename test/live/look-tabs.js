@@ -1,8 +1,9 @@
 // Live checks of the look tabs of Settings → Mods (Background, Chat bar, Conversation), in the real window:
 // each tab's preview shows what is in use; a click on another version previews it there and leaves the window as it
 // is; Use applies it to the window; Default undoes it; the first Use of a look of yours asks once (and Cancel leaves
-// everything as it was); "Use the set" applies a set's parts together; New ⌄ → From a template writes a look
-// that shows previewed, not applied, and Ask the agent… fills the composer; the chat card of a new look offers
+// everything as it was); "Use the set" applies a set's parts together; New ⌄ (the only button of the Versions head)
+// → From a template writes a look that shows previewed, not applied, Install… opens the install form there, Ask the
+// agent… fills the composer, and the menu works from the keyboard; the chat card of a new look offers
 // Preview (its tab, with it previewed) and Use.
 // Screenshots: each look tab in light and dark (one of them with another version previewed), the Use confirmation,
 // and the chat card, at scale 2.
@@ -220,12 +221,49 @@ function writeMod(root, id, manifest, files) {
     check('"Use the set" applies its background, chat bar look and conversation look together', L1.background === 'hyperspace/starfield' && L1.looks.composer === 'hyperspace/cockpit' && L1.looks.conversation === 'hyperspace/holo' && !('theme' in L1), L1);
     check('… and the tab shows it in use, with no set left to use', !(await st('backgrounds')).previewing && !/Use the set/.test((await headText('backgrounds')) || ''));
 
-    // ---------- New ⌄: from a template (previewed, not applied), Ask the agent ----------
+    // ---------- New ⌄: from a template (previewed, not applied), Install…, Ask the agent, the keyboard ----------
+    const menuOf = (tab) => ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="${tab}"] .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
+    for (const tab of TABS) {
+      await openTab(tab);
+      const head = await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="${tab}"] .sp-look-grid-head button')].map((b) => b.textContent.trim())`);
+      check(`${tab}: the Versions head has one button, New (no Install… of its own)`, JSON.stringify(head) === js(['New']), head);
+      await app.click(`.sp-look-tab[data-subtab="${tab}"] .sp-look-new`);
+      await sleep(300);
+      const items = await menuOf(tab);
+      const want = ['Ask the agent…', 'From a template…', ...(tab === 'backgrounds' ? ['Your picture…'] : []), 'Install…'];
+      check(`${tab}: New ⌄ offers ${want.join(', ')}`, JSON.stringify(items) === js(want), items);
+      if (tab === 'backgrounds') await shotSettings('new-menu-backgrounds-light');
+      await app.key('Escape');
+      await sleep(200);
+    }
+    // The keyboard: Enter opens it on the first item, the arrows move, Escape closes it and gives the button its focus back
+    await openTab('conversation');
+    await ev(`document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new').focus()`);
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await sleep(300);
+    const focused = () => ev(`document.activeElement?.textContent?.trim() ?? ''`);
+    const k1 = { open: await ev(`!!document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-menu')`), first: await focused() };
+    await app.key('ArrowDown');
+    const k2 = await focused();
+    await app.key('ArrowUp');
+    await app.key('ArrowUp');
+    const k3 = await focused();
+    await app.key('Escape');
+    await sleep(200);
+    const k4 = { open: await ev(`!!document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-menu')`), onButton: await ev(`document.activeElement === document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new')`), expanded: await ev(`document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new').getAttribute('aria-expanded')`) };
+    check('New ⌄ from the keyboard: Enter opens it on its first item, the arrows move (and wrap), Escape closes it onto the button', k1.open && k1.first === 'Ask the agent…' && k2 === 'From a template…' && k3 === 'Install…' && !k4.open && k4.onButton && k4.expanded === 'false', { k1, k2, k3, k4 });
+    // Install… opens the install form under the Versions head of the tab
+    await app.click('.sp-look-tab[data-subtab="conversation"] .sp-look-new');
+    await sleep(200);
+    await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="conversation"] .sp-menu .sp-menu-item')].find((b) => /Install/.test(b.textContent)).click()`);
+    await sleep(300);
+    check('Install… opens the install form in the tab, its field focused', (await ev(`(() => { const f = document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-form-slot .sp-form[aria-label="Install a mod"]'); return !!f && !f.hidden && document.activeElement === f.querySelector('input'); })()`)) === true);
+    await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="conversation"] .sp-look-form-slot .sp-form[aria-label="Install a mod"] .btn')].find((b) => b.textContent.trim() === 'Cancel').click()`);
+    await sleep(200);
     await openTab('chat-bar');
     await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-new');
     await sleep(300);
-    const menu = await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="chat-bar"] .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
-    check('New ⌄ offers Ask the agent… and From a template…', JSON.stringify(menu) === js(['Ask the agent…', 'From a template…']), menu);
     await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="chat-bar"] .sp-menu .sp-menu-item')].find((b) => /template/.test(b.textContent)).click()`);
     await sleep(300);
     check('From a template opens the New form in the tab, at a chat bar look', (await ev(`(() => { const f = document.querySelector('.sp-look-tab[data-subtab="chat-bar"] .sp-look-form-slot .sp-form'); return !!f && !f.hidden && /New chat bar look/.test(f.innerText) && f.querySelector('select').value === 'look:composer'; })()`)) === true);
@@ -278,6 +316,12 @@ function writeMod(root, id, manifest, files) {
       await shotSettings(`tab-${tab}-dark`);
     }
     await backgroundShots('dark');
+    await openTab('backgrounds');
+    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-new');
+    await sleep(300);
+    await shotSettings('new-menu-backgrounds-dark');
+    await app.key('Escape');
+    await sleep(200);
     await openTab('chat-bar');
     await clickCard('chat-bar', 'teal-bar/main');
     await shotSettings('tab-chat-bar-previewing-teal-dark');
