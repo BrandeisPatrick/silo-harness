@@ -36,6 +36,12 @@ export const PRUNE_HIGH = 90_000;
 export const PRUNE_LOW = 50_000;
 /** Where the prefix is cached: old screenshots are left out this many at a time */
 export const SHOT_BATCH = 4;
+/** How long a provider keeps a cached prefix (Anthropic's 5-minute cache): a request sooner than this after the last reply should read it. */
+export const CACHE_TTL_MS = 5 * 60_000;
+/** A prompt shorter than this may be below a provider's smallest cacheable prefix, so a miss on it says nothing. */
+export const CACHE_EXPECT_MIN_TOKENS = 2_000;
+/** Warm requests in a row that report no cache read or write before a session is treated as not caching (Agent.noteCache). */
+export const CACHE_MISSES_TO_FALLBACK = 3;
 
 /** The high- and low-water marks for a window: PRUNE_HIGH/LOW, or lower for a window whose `fraction` is less. */
 export function batchMarks(limit: number, fraction: number): { high: number; low: number } {

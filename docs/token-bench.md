@@ -212,6 +212,11 @@ larger than without caching: on a provider that caches, old tool output is set a
 requests grew to 89K before the one batch in turn 15 brought them to 55K. Cache reads of that output cost less than the
 rewrites that setting it aside earlier would have caused. No compaction happened.
 
+Every provider type but Ollama and LM Studio is first assumed to cache. A session whose provider reports no cache read or
+write on three requests in a row, each sent within five minutes of the last reply with a prompt of 2,000 tokens or more,
+goes back to the rule without caching (old output set aside past 48K, screenshots one at a time) until a read or write is
+reported again. That fallback has not been measured against a live endpoint.
+
 ### How it was run
 
 `node scripts/token-bench.js --runs 2` and `node scripts/token-bench.js --tier 2`: the app's provider of type `anthropic` on the
