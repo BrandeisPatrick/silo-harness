@@ -282,6 +282,15 @@ export interface AppConfig {
   browser: BrowserConfig;
   /** Auto mode's safety check: what it is told about this Mac, the user's own allow rules, and its model */
   autoMode?: AutoModeConfig;
+  /** web_search's backend (docs/web.md); absent: DuckDuckGo */
+  webSearch?: WebSearchConfig;
+}
+
+/** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
+export interface WebSearchConfig {
+  provider?: 'duckduckgo' | 'brave' | 'tavily' | 'exa' | 'searxng';
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 /**

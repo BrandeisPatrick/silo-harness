@@ -11,6 +11,7 @@ import { terminalTools } from './terminal';
 import { createArtifact } from './artifact';
 import { updateTasks } from './tasks';
 import { askUser } from './ask-user';
+import { webTools } from './web';
 
 export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions, BrowserApproval } from './types';
 
@@ -22,8 +23,8 @@ const planBrowserTools = browserTools.filter((t) => READ_ONLY_BROWSER_TOOLS.has(
  * tools that read; ask_user is in every mode.
  */
 export function allTools(mode: PermissionMode = 'ask'): Tool[] {
-  if (mode === 'plan') return [readFile, listDirectory, glob, grep, bash, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan];
-  return [readFile, writeFile, editFile, listDirectory, glob, grep, bash, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser];
+  if (mode === 'plan') return [readFile, listDirectory, glob, grep, bash, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan, ...webTools];
+  return [readFile, writeFile, editFile, listDirectory, glob, grep, bash, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, ...webTools];
 }
 
 export function toSpec(tool: Tool): OpenAI.Chat.Completions.ChatCompletionTool {

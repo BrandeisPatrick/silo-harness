@@ -1,0 +1,22 @@
+{
+  "requestId": "b5947044c4b78efa9552a7c89b306d95",
+  "resolvedSearchType": "neural",
+  "results": [
+    {
+      "id": "https://www.electronjs.org/docs/latest/api/browser-window",
+      "title": "BrowserWindow | Electron",
+      "url": "https://www.electronjs.org/docs/latest/api/browser-window",
+      "publishedDate": "2026-09-30T00:00:00.000Z",
+      "author": null,
+      "text": "BrowserWindow\n\nCreate and control browser windows.\n\nProcess: Main\n\nThis module cannot be used until the ready event of the app module is emitted."
+    },
+    {
+      "id": "https://github.com/electron/electron",
+      "title": "electron/electron: Build cross-platform desktop apps",
+      "url": "https://github.com/electron/electron",
+      "highlights": ["Build cross-platform desktop apps with JavaScript, HTML, and CSS"],
+      "text": "long text that the highlight wins over"
+    }
+  ],
+  "costDollars": { "total": 0.005 }
+}

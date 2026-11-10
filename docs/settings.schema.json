@@ -282,6 +282,31 @@
         }
       }
     },
+    "webSearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "brave",
+            "tavily",
+            "exa",
+            "searxng"
+          ],
+          "description": "The web_search backend. duckduckgo needs no key."
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "The key for brave, tavily or exa. Not allowed in a project file."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Your SearXNG instance, e.g. http://localhost:8888 (it may be on your own network). Not allowed in a project file."
+        }
+      }
+    },
     "providers": {
       "type": "object",
       "description": "Named providers. \"provider\" selects one by its name. The names \"ollama\" and \"portkey\" are taken by the built-in blocks.",

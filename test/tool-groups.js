@@ -109,9 +109,9 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   const firstSystem = system(req);
   check('A: no tool of a group is offered', !names(req).some((t) => GROUP_TOOLS.test(t)), names(req));
   check('A: the core tools, a registered tool of no group and load_tools are', ['read_file', 'write_file', 'edit_file', 'bash', 'skill', 'create_artifact', 'update_tasks', 'ask_user', 'always_there', 'load_tools'].every((t) => names(req).includes(t)), names(req));
-  check('A: load_tools comes after the built-in tools and takes every group', names(req).indexOf('load_tools') === names(req).indexOf('ask_user') + 1 && loadEnum(req).join() === 'browser,terminal,sessions,schedules,mods', loadEnum(req));
+  check('A: load_tools comes after the built-in tools and takes every group', names(req).indexOf('load_tools') === names(req).indexOf('ask_user') + 1 && loadEnum(req).join() === 'browser,terminal,sessions,schedules,mods,web', loadEnum(req));
   check("A: load_tools' description names each group in one line", /^- browser: open and use web pages in the Browser pane$/m.test(loadTool(req).description) && /^- mods: /m.test(loadTool(req).description) && loadTool(req).description.split('\n').every((l) => l.length <= 250), loadTool(req).description);
-  check('A: the prompt names the groups in one line and says nothing more of them', /More tools come in groups \(browser, terminal, sessions, schedules, mods\): when the task needs one, load it with load_tools\./.test(firstSystem) && !/^- browser:/m.test(firstSystem), firstSystem.slice(0, 500));
+  check('A: the prompt names the groups in one line and says nothing more of them', /More tools come in groups \(browser, terminal, sessions, schedules, mods, web\): when the task needs one, load it with load_tools\./.test(firstSystem) && !/^- browser:/m.test(firstSystem), firstSystem.slice(0, 500));
   check('A: …nor of what belongs to a group (browser rules, terminal_run, sub-sessions, schedules, mods, the session name)', !/browser_click|act by visible text|terminal_run|## Sub-sessions|## Schedules|MODS-SECTION|This session is named/.test(firstSystem));
   check('A: nothing is loaded yet', !a.session.toolGroups);
 
@@ -159,8 +159,8 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   await a.run('Load the schedules');
   const partial = toolMsgs(streams()[1]).pop() ?? '';
   check('C: load_tools fires no hook', !fs.existsSync(hookLog) || !/load_tools/.test(fs.readFileSync(hookLog, 'utf8')));
-  check('C: a mix of new, loaded and unknown names: each said', /^Loaded schedules: schedule_create, schedule_list, schedule_update, schedule_delete\.\n## Schedules\n[^\n]+\n\nAlready loaded: terminal\.\n\nNot a tool group here: nonsense\. The groups are browser, terminal, sessions, schedules, mods\.$/.test(partial), partial);
-  check('C: load_tools still offers every group, unchanged', loadEnum(streams()[1]).join() === 'browser,terminal,sessions,schedules,mods' && JSON.stringify(loadTool(streams()[1])) === firstLoadTool);
+  check('C: a mix of new, loaded and unknown names: each said', /^Loaded schedules: schedule_create, schedule_list, schedule_update, schedule_delete\.\n## Schedules\n[^\n]+\n\nAlready loaded: terminal\.\n\nNot a tool group here: nonsense\. The groups are browser, terminal, sessions, schedules, mods, web\.$/.test(partial), partial);
+  check('C: load_tools still offers every group, unchanged', loadEnum(streams()[1]).join() === 'browser,terminal,sessions,schedules,mods,web' && JSON.stringify(loadTool(streams()[1])) === firstLoadTool);
 
   // ---- D: saved, reloaded, forked and compacted, the groups stay ----
   store.save(a.session);
@@ -250,15 +250,15 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   state.replies.push({ content: 'ok' });
   await j.run('Start a sub-session');
   [r1, r2] = streams();
-  check('I: "essential": the browser and terminal can be loaded, the optional groups cannot', loadEnum(r1).join() === 'browser,terminal' && /turned off/.test(system(r1)), loadEnum(r1));
+  check('I: "essential": the browser, terminal and web can be loaded, the optional groups cannot', loadEnum(r1).join() === 'browser,terminal,web' && /turned off/.test(system(r1)), loadEnum(r1));
   const off = r2.payload.messages.filter((m) => m.role === 'tool').pop()?.content ?? '';
-  check('I: …loading one of those is an error and loads nothing', /^Error: not a tool group here: sessions\. The groups are browser, terminal\.$/.test(off) && !j.session.toolGroups && !names(r2).includes('session_spawn'), off);
+  check('I: …loading one of those is an error and loads nothing', /^Error: not a tool group here: sessions\. The groups are browser, terminal, web\.$/.test(off) && !j.session.toolGroups && !names(r2).includes('session_spawn'), off);
   reset();
   config = { ...config, toolSet: 'auto', portkey: { ...config.portkey, contextWindow: 16000 } };
   const k = agentFor(store.create({ cwd: project }));
   state.replies.push({ content: 'ok' });
   await k.run('hello');
-  check('I: "auto" on a small window can load every group (none costs anything until loaded)', loadEnum(streams()[0]).join() === 'browser,terminal,sessions,schedules,mods' && !/turned off/.test(system(streams()[0])), loadEnum(streams()[0]));
+  check('I: "auto" on a small window can load every group (none costs anything until loaded)', loadEnum(streams()[0]).join() === 'browser,terminal,sessions,schedules,mods,web' && !/turned off/.test(system(streams()[0])), loadEnum(streams()[0]));
   config = { ...config, portkey: { ...config.portkey, contextWindow: 200000 } };
 
   await app.runQuit?.();
