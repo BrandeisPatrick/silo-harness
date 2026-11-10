@@ -1111,6 +1111,38 @@ const AWS_REFUSED_OPS = new Set([
   'codeartifact get-package-version-asset', 'lakeformation get-work-unit-results', 'backupstorage get-chunk',
   'backupstorage get-object-metadata', 'omics get-read-set', 'omics get-reference', 'sagemaker-geospatial get-tile',
   'workmailmessageflow get-raw-message-content', 'appconfig get-configuration', 'appconfigdata get-latest-configuration',
+  // Added after review. From memory, not checked against the real CLI, and not complete: AWS_READ_SERVICES is the
+  // first line of defence, this list the second.
+  // credentials by design, or configuration that commonly embeds secrets (environment, user data, job arguments)
+  'ec2 describe-vpn-connections', 'ec2 get-vpn-connection-device-sample-configuration', 'ec2 describe-spot-fleet-requests',
+  'ec2 describe-spot-instance-requests', 'ec2 describe-verified-access-trust-providers',
+  'ecs describe-tasks', 'ecs describe-express-gateway-service', 'batch describe-jobs',
+  'apigateway get-usage-plan-key', 'apigateway get-usage-plan-keys', 'apigateway get-export',
+  'codepipeline get-job-details', 'codepipeline get-third-party-job-details', 'codepipeline list-webhooks',
+  'glue get-job-run', 'glue get-job-runs', 'glue get-trigger', 'glue get-triggers', 'glue get-workflow', 'glue get-workflow-run',
+  'glue get-workflow-runs', 'glue get-dev-endpoint', 'glue get-dev-endpoints',
+  'ssm get-deployable-patch-snapshot-for-instance', 'athena get-resource-dashboard', 'cloudfront get-connection-function',
+  // a side effect: takes a task off the queue
+  'stepfunctions get-activity-task',
+  // the result goes to a local file
+  'logs get-log-object', 'appsync get-introspection-schema', 'schemas get-code-binding-source', 'appconfig get-hosted-configuration-version',
+  'medialive describe-input-device-thumbnail', 'codeguruprofiler get-profile', 'location get-map-glyphs', 'location get-map-sprites',
+  'location get-map-style-descriptor', 'location get-map-tile', 'geo-maps get-glyphs', 'geo-maps get-sprites', 'geo-maps get-static-map',
+  'geo-maps get-style-descriptor', 'geo-maps get-tile', 'medical-imaging get-image-frame', 'medical-imaging get-image-set-metadata',
+  'tnb get-sol-function-package-content', 'tnb get-sol-function-package-descriptor', 'tnb get-sol-network-package-content',
+  'tnb get-sol-network-package-descriptor', 'iotwireless get-position-estimate', 'iotwireless get-resource-position',
+]);
+/**
+ * The services whose get-, list- and describe- operations may be reads: default-deny, so a service not named here
+ * (cloudcontrol, configservice, sagemaker, appsync, cognito-*, gamelift, lightsail …) goes to the check or a card.
+ */
+const AWS_READ_SERVICES = new Set([
+  'sts', 'iam', 'organizations', 'ec2', 'autoscaling', 'application-autoscaling', 'elb', 'elbv2', 's3api', 'lambda', 'ecs', 'eks', 'ecr',
+  'batch', 'apprunner', 'elasticbeanstalk', 'logs', 'cloudwatch', 'cloudtrail', 'xray', 'events', 'scheduler', 'health', 'cloudformation',
+  'ssm', 'kms', 'acm', 'rds', 'dynamodb', 'dynamodbstreams', 'elasticache', 'redshift', 'opensearch', 'es', 'sqs', 'sns', 'kinesis',
+  'stepfunctions', 'apigateway', 'apigatewayv2', 'cloudfront', 'route53', 'wafv2', 'athena', 'glue', 'codebuild', 'codepipeline',
+  'codedeploy', 'codecommit', 'bedrock', 'efs', 'fsx', 'backup', 'service-quotas', 'resourcegroupstaggingapi', 'pricing', 'budgets',
+  'guardduty', 'securityhub', 'ses', 'sesv2',
 ]);
 /**
  * Whole services left to the check: the CLI's own commands (configure, s3 and history are customisations, apart from
@@ -1167,14 +1199,21 @@ function lambdaQueryKeepsFields(list: string, query: string | undefined): boolea
   return new RegExp(`^${list}\\[\\*?\\]\\.(?:${f}|\\[${f}(?:,${f})*\\]|\\{${k}:${f}(?:,${k}:${f})*\\})$`).test(q);
 }
 
-/** An option name the CLI could read as one of the refused ones (itself, or a prefix of one) */
+/** The global and paging options this reader knows: each must be written in full */
+const AWS_KNOWN_OPTIONS = [...Object.keys(AWS_GLOBAL_VALUES), ...AWS_GLOBAL_FLAGS, ...Object.keys(AWS_PAGING_VALUES)];
+
+/**
+ * An option name the CLI could read as another one: a refused option or a prefix of one, or a proper prefix of a known
+ * option (the CLI takes --no-pag as --no-paginate, a flag, and the next word would be a positional output file).
+ */
 function awsRefusedOption(name: string): boolean {
-  return AWS_REFUSED_OPTIONS.some((r) => r.startsWith(name)) || name.startsWith('--cli-');
+  return AWS_REFUSED_OPTIONS.some((r) => r.startsWith(name)) || name.startsWith('--cli-') || AWS_KNOWN_OPTIONS.some((k) => k !== name && k.startsWith(name));
 }
 
 /**
- * True when a simple command is a recognised read-only aws command: `aws`, then allowed global options, then a service
- * and an operation that reads by name (get-*, list-*, describe-*, or AWS_EXPLICIT_READS) and is not refused (a
+ * True when a simple command is a recognised read-only aws command: `aws`, then allowed global options (in full), then a
+ * service in AWS_READ_SERVICES and an operation that reads by name (get-*, list-*, describe-*), or one of
+ * AWS_EXPLICIT_READS, and is not refused (a
  * secret, a credential, a signed URL, a side effect, an output file), then its own `--name value` options and the
  * allowed global ones. No positional argument but s3 ls's one s3:// location, no value that loads a file or URL, no
  * option repeated. `aws --version`, `aws help`, `aws <service> help` and `aws <service> <operation> help` read too.
@@ -1199,7 +1238,7 @@ export function isAwsRead(simple: string): boolean {
     const word = w[i];
     const eq = word.indexOf('=');
     const name = eq > 0 ? word.slice(0, eq) : word;
-    if (!/^--[a-z0-9]+(-[a-z0-9]+)*$/.test(name) || seen.has(name)) return -1;
+    if (!/^--[a-z0-9]+(-[a-z0-9]+)*$/.test(name) || seen.has(name) || awsRefusedOption(name)) return -1;
     seen.add(name);
     const inline = eq > 0 ? word.slice(eq + 1) : undefined;
     const take = (): string | undefined => {
@@ -1218,6 +1257,8 @@ export function isAwsRead(simple: string): boolean {
     // Before the service only the global options above; after the operation its own options too
     if (!after || awsRefusedOption(name)) return -1;
     if (AWS_REFUSED_OPTION_WORDS.test(name) && !AWS_PAGINATION_TOKENS.has(name)) return -1;
+    // --no-… is a flag: it takes no value, and a word after it is a positional (refused)
+    if (name.startsWith('--no-')) return inline !== undefined ? -1 : i + 1;
     const v = take();
     if (v === undefined) return inline !== undefined ? -1 : i + 1; // a flag (--recursive, --include-all …)
     if (v.startsWith('-')) return -1;
@@ -1236,7 +1277,7 @@ export function isAwsRead(simple: string): boolean {
   const name = `${service} ${op}`;
   const explicit = AWS_EXPLICIT_READS.has(name);
   if (!explicit) {
-    if (AWS_REFUSED_SERVICES.has(service) || AWS_REFUSED_OPS.has(name)) return false;
+    if (!AWS_READ_SERVICES.has(service) || AWS_REFUSED_SERVICES.has(service) || AWS_REFUSED_OPS.has(name)) return false;
     if (!/^(get|list|describe)-/.test(op)) return false;
     if (AWS_SECRET_WORDS.some((x) => op.includes(x))) return false;
   }

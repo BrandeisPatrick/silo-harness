@@ -56,6 +56,13 @@ const reads = [
   '"aws" sts get-caller-identity',
   'aws sts get-caller-identity --query "Account || \'2>&1; rm x\'"',
   "aws 'sts' get-caller-identity",
+  // the common reads, after the review's tightening
+  "aws ec2 describe-instances --filters Name=tag:env,Values=demo --query 'Reservations[].Instances[].InstanceId' --output text",
+  'aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Errors --start-time 2026-01-01T00:00:00Z --end-time 2026-01-02T00:00:00Z --period 3600 --statistics Sum',
+  'aws iam list-users --no-paginate',
+  'aws s3 ls s3://example-bucket/ --recursive',
+  'aws ec2 describe-instances --no-dry-run',
+  'aws ecs describe-services --cluster demo --services web',
 ];
 
 // Not reads: isReadOnlyCommand false; guardCommand gives the cloud reason (or a stronger one: ANY)
@@ -229,6 +236,41 @@ const notReads = [
   'aws sts get-caller-identity –-debug',
   'aws',
   'aws sts',
+  // review: an output file behind an operation's own boolean flag (appsync is outside the read services)
+  'aws appsync get-introspection-schema --api-id abc --format SDL --include-directives package.json',
+  // review: abbreviated global flags and options, the next word then a positional output file
+  'aws ec2 describe-instances --no-pag /tmp/x',
+  'aws ec2 describe-instances --no-p /tmp/x',
+  'aws ec2 describe-instances --no-cli-p /tmp/x',
+  'aws ec2 describe-instances --no-dry-run /tmp/x',
+  'aws ec2 describe-instances --quer /tmp/x',
+  'aws ec2 describe-instances --col /tmp/x',
+  'aws ec2 describe-instances --out json',
+  'aws ec2 describe-instances --reg us-east-1',
+  'aws --prof dev sts get-caller-identity',
+  'aws ec2 describe-instances --max-item 5',
+  'aws ec2 describe-instances --no-paginate=yes',
+  // review: services outside the read list
+  'aws cloudcontrol get-resource --type-name AWS::Lambda::Function --identifier demo',
+  'aws gamelift get-compute-access --fleet-id fleet-1 --compute-name c1',
+  'aws gamelift get-instance-access --fleet-id fleet-1 --instance-id i-1',
+  'aws lightsail get-instances',
+  'aws emr describe-cluster --cluster-id j-1EXAMPLE',
+  'aws cognito-idp list-user-pools --max-results 10',
+  'aws configservice describe-config-rules',
+  'aws sagemaker list-endpoints',
+  // review: refused inside the read services
+  'aws ec2 describe-vpn-connections',
+  'aws apigateway get-usage-plan-keys --usage-plan-id u1',
+  'aws batch describe-jobs --jobs job-1',
+  'aws ecs describe-tasks --cluster demo --tasks t1',
+  'aws stepfunctions get-activity-task --activity-arn arn:aws:states:us-east-1:111122223333:activity:demo',
+  'aws glue get-job-runs --job-name demo',
+  'aws codepipeline list-webhooks',
+  'aws logs get-log-object --log-object-pointer p',
+  // known and left refused: a second value after an option, filter-log-events
+  'aws ec2 describe-instances --instance-ids i-1 i-2',
+  'aws logs filter-log-events --log-group-name /example/app',
 ];
 
 for (const cmd of reads) {
