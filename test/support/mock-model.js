@@ -118,7 +118,8 @@ function startMock() {
         // `cachedTokens`: a cache read reported with every reply, as a gateway that caches would
         const counts = { prompt_tokens: reply.promptTokens ?? (state.promptTokensFromBody ? Math.ceil(body.length / 4) : 300), completion_tokens: 30 };
         if (state.cachedTokens) counts.prompt_tokens_details = { cached_tokens: state.cachedTokens };
-        send({ choices: [], usage: reply.usage ?? counts });
+        // `noUsage`: no usage chunk at all, as a server that does not count tokens
+        if (!reply.noUsage) send({ choices: [], usage: reply.usage ?? counts });
         res.write('data: [DONE]\n\n');
         res.end();
       }, reply.delayMs ?? state.delayMs);

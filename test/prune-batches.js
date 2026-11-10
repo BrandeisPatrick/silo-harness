@@ -174,6 +174,25 @@ const { check, done } = require('./support/check.js');
   built(11, 10 * MIN);
   await pause(0);
   check('5: cold by the stored session\'s last activity (reloaded): set aside too', set() > 0, set());
+  // A provider that reports no usage: the pause is still measured from the last reply, not from the stored time
+  const quiet = async (gap) => {
+    clock += gap;
+    state.replies.push({ content: 'Ok.', noUsage: true });
+    await paused.run('Go on');
+  };
+  built(11, 10 * MIN);
+  await quiet(0);
+  const first = set();
+  for (let i = 1; i <= 4; i++) {
+    const s = paused.session;
+    s.messages.push({ role: 'user', content: `Read f${i}.txt again` });
+    s.messages.push({ role: 'assistant', content: '', tool_calls: [{ id: `q${i}`, type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: `f${i}.txt` }) } }] });
+    s.messages.push({ role: 'tool', tool_call_id: `q${i}`, content: fs.readFileSync(path.join(cwd, `f${i}.txt`), 'utf8') });
+    s.messages.push({ role: 'assistant', content: `Read f${i}.` });
+  }
+  const grown = paused.contextInfo().tokens;
+  await quiet(MIN);
+  check('5: no usage reported: cold once by the stored time, warm after the first reply', first > 0 && grown > 62_000 && grown < 88_000 && set() === first, { first, grown, set: set() });
   config = { ...config, provider: 'local' };
   built(11);
   await pause(0);

@@ -1128,6 +1128,8 @@ export class Agent {
           this.addContextNote(cfg);
           reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn, native);
         }
+        // Also where the provider reports no usage (noteCache never runs): a pause is measured from this reply
+        this.cacheState().lastAt = this.now();
         const { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
         const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
