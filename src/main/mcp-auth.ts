@@ -337,6 +337,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
   async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
     checkDiscovery(state);
+    // A server never signed in to gets no record from a passive 401: nothing is written until the user signs in.
+    if (!this.opts.interactive && !(await this.record()).client) return;
     await this.update((r) => (r.discovery = state));
   }
 

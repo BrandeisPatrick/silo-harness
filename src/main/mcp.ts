@@ -729,6 +729,7 @@ export class McpManager extends EventEmitter {
         if (mine()) this.onDropped(e, 'Connection closed');
       };
       client.onerror = (err) => {
+        if (!mine()) return; // a client already given up (closing it aborts its streams)
         const text = errorText(err);
         console.warn(`[mcp:${e.name}]`, text);
         // The streamable HTTP transport reports a lost stream here rather than closing.
@@ -1035,10 +1036,13 @@ export class McpManager extends EventEmitter {
         this.markNeedsAuth(e);
         throw new Error(this.notConnectedText(e));
       }
-      if (this.isRemote(e) && isConnectionLoss(err) && e.client === client) {
-        this.scheduleReconnect(e, errorText(err));
-        throw new Error(`Lost the connection to MCP server "${e.name}"; it is reconnecting. Try the call again in a moment.`);
+      const closed = err instanceof McpError && err.code === ErrorCode.ConnectionClosed;
+      if (this.isRemote(e) && (closed || isConnectionLoss(err))) {
+        // The transport's own error report may have started the reconnection already (and closed this client).
+        if (e.client === client) this.scheduleReconnect(e, errorText(err));
+        if ((e.status as McpStatus) === 'reconnecting') throw new Error(`Lost the connection to MCP server "${e.name}"; it is reconnecting. Try the call again in a moment.`);
       }
+      if (closed) throw new Error(`MCP server "${e.name}" closed the connection during the call.`);
       throw new Error(errorText(err));
     }
     return spillResult(contentToResult(res), { dir: this.resultsDir, sessionId, server: e.name, tool: toolName });
