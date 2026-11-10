@@ -12,6 +12,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { AppConfig, ModelCapabilities, NamedProviderConfig, OllamaConfig, ProviderType, ProvidersView, ProviderView } from '../shared/types';
 import { expandEnvRefs } from './env';
+import { maskedConfig } from './mcp-values';
 import { anthropicClient, isNativeAnthropic } from './agent/anthropic';
 import { contextSize, ollamaRoot } from './ollama';
 import { PRESETS, validateProviderEntry } from './provider-presets';
@@ -330,6 +331,9 @@ export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'pro
     ...(cfg.webSearch ? { webSearch: { ...cfg.webSearch, apiKey: mask(cfg.webSearch.apiKey) } } : {}),
     providers,
     providerView: providersView(cfg, owned),
+    // MCP env and header values stay in the main process (config:set keeps the current ones)
+    mcpServers: Object.fromEntries(Object.entries(cfg.mcpServers ?? {}).map(([n, c]) => [n, maskedConfig(n, c)])),
+    mcpProjectValues: {},
   };
 }
 

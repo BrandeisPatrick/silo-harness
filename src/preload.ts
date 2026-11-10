@@ -22,7 +22,7 @@ const api: SiloHarnessApi = {
   context: (): Promise<ContextInfo> => ipcRenderer.invoke('chat:context'),
   mcp: {
     list: (): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:list'),
-    add: (name: string, spec: string, scope: McpScope, env?: Record<string, string>): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:add', name, spec, scope, env ?? {}),
+    add: (name: string, spec: string, scope: McpScope, env?: Record<string, string>, headers?: Record<string, string>): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:add', name, spec, scope, env ?? {}, headers ?? {}),
     remove: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:remove', name, scope),
     setEnabled: (name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:set-enabled', name, scope, enabled),
     reconnect: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:reconnect', name, scope),

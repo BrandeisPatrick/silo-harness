@@ -245,6 +245,7 @@ const js = (v) => JSON.stringify(v);
     // MCP panel (debug mock): add, then remove a server
     await app.evaluate(`window.__oc_debug.mcp.mock([])`);
     await open(app, 'mcp');
+    await app.click('#mcp-add-open');
     await app.fill('#mcp-name', 'files');
     await app.fill('#mcp-spec', 'npx -y @modelcontextprotocol/server-filesystem /tmp');
     await app.click('#mcp-add-btn');

@@ -225,7 +225,7 @@ export interface McpApi {
    * Rejects with a message when the name is taken, the spec cannot be read, or a project file cannot be written.
    * Returns the new list.
    */
-  add(name: string, spec: string, scope: McpScope, env?: Record<string, string>): Promise<McpServerInfo[]>;
+  add(name: string, spec: string, scope: McpScope, env?: Record<string, string>, headers?: Record<string, string>): Promise<McpServerInfo[]>;
   remove(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** User servers: the disabled flag. Project servers: enabled=true trusts the server for this working directory (status blocked → connecting). */
   setEnabled(name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]>;
@@ -304,6 +304,11 @@ export interface AppConfig {
    * name. An entry that changes since is not trusted. (A separate key, so older builds still read mcpTrusted.)
    */
   mcpTrustedEntries?: Record<string, Record<string, string>>;
+  /**
+   * Values typed for a project's MCP servers, kept on this Mac (the .mcp.json gets ${KEY} references): by working
+   * directory, server name and variable. Used only to expand that server's own references.
+   */
+  mcpProjectValues?: Record<string, Record<string, Record<string, string>>>;
   /** Summarise the conversation on its own when it nears the context window (see ContextInfo.threshold) */
   autoCompact: boolean;
   /** macOS notifications when a run ends or waits for approval while the window is in the background */

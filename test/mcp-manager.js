@@ -91,7 +91,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   await m.add('fs2', `node ${TEST_SERVER} --flag`, 'user', { OC_PROJECT: projectDir });
   check('add: command line into user scope, connected', by()['user:fs2'].status === 'connected' && config.mcpServers.fs2.args[1] === '--flag' && config.mcpServers.fs2.env.OC_PROJECT === projectDir);
-  check('add: duplicate name rejected', await rejectsWith(m.add('fs2', 'node x', 'user'), /already exists/));
+  check('add: duplicate name rejected', await rejectsWith(m.add('fs2', 'node x', 'user'), /already a/));
   await m.add('', JSON.stringify({ mcpServers: { p1: srv(), p2: srv() } }), 'project');
   const projFile = JSON.parse(fs.readFileSync(path.join(cwd, '.mcp.json'), 'utf8'));
   check('add: mcpServers block into .mcp.json, kept the existing entries', projFile.mcpServers.proj && projFile.mcpServers.p1 && projFile.mcpServers.p2 && projFile.mcpServers.bad);

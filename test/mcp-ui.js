@@ -84,6 +84,13 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   check('args: nothing is cut (a long value scrolls)', A.argsListHtml({ x: 'y'.repeat(5000) }).includes('y'.repeat(5000)) && A.argsListHtml({ x: 'y'.repeat(5000) }).includes('long'));
   check('args: from the call, else from the card\'s JSON', A.argsObject({ a: 1 }, '{}').a === 1 && A.argsObject(undefined, '{"b":2}').b === 2 && A.argsObject(undefined, '{"b": 2\n…') === null);
 
+  // ---------- The Add form ----------
+  check('name: a URL host\'s first label', M.suggestName('https://search.example.com/mcp') === 'search' && M.suggestName('https://mcp.linear.app/sse') === 'linear');
+  check('name: a package\'s last part', M.suggestName('npx -y @example/files-mcp ~/Other') === 'files' && M.suggestName('uvx example-builder-mcp --port 0') === 'example-builder' && M.suggestName('npx -y @modelcontextprotocol/server-filesystem /tmp') === 'filesystem', [M.suggestName('npx -y @example/files-mcp ~/Other'), M.suggestName('uvx example-builder-mcp --port 0'), M.suggestName('npx -y @modelcontextprotocol/server-filesystem /tmp')]);
+  check('name: a script names its folder; JSON names nothing', M.suggestName('node ~/tools/notes-mcp/index.js') === 'notes' && M.suggestName('{"command": "x"}') === '' && M.suggestName('') === '', M.suggestName('node ~/tools/notes-mcp/index.js'));
+  check('understood: command, URL, block, entry, broken JSON', M.understood('npx -y @example/files-mcp') === 'Local command: npx -y @example/files-mcp' && M.understood('https://docs.example.com/mcp') === 'Remote server: docs.example.com' && M.understood('{"mcpServers": {"a": {}, "b": {}, "c": {}}}') === '3 servers from JSON: a, b, c' && M.understood('{"type": "http", "url": "https://w.example.com/mcp"}') === 'Remote server: w.example.com' && M.understood('{"x"') === 'JSON that does not parse yet.', M.understood('{"mcpServers": {"a": {}, "b": {}, "c": {}}}'));
+  check('headers: Name: value per line', JSON.stringify(M.parseHeaders('Authorization: Bearer x\n# note\nX-Team:  core').headers) === JSON.stringify({ Authorization: 'Bearer x', 'X-Team': 'core' }) && /line 1/.test(M.parseHeaders('no colon here').error));
+
   // ---------- The manager's list carries the masked config, the vars and the log ----------
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpui-'));
   let config = { mcpServers: { test: { command: 'node', args: [TEST_SERVER], env: { OC_PROJECT: projectDir, SECRET_TOKEN: 'sk-test-999', GONE: '${OC_SURELY_UNSET_VAR}' } } }, mcpTrusted: {} };
@@ -105,6 +112,38 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   let refused = '';
   try { await m.setToolEnabled('test', 'project', 'add', false); } catch (e) { refused = e.message; }
   check("a project server's tools are not switched here", /\.mcp\.json/.test(refused));
+
+  // ---------- B5: values typed for a project server stay on this Mac ----------
+  const pcwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpui-proj-'));
+  let pconfig = { mcpServers: {}, mcpTrusted: {} };
+  const pm = new McpManager({ getConfig: () => pconfig, saveConfig: (p) => { pconfig = { ...pconfig, ...p }; }, cwd: () => pcwd });
+  await pm.add('vals', `node ${TEST_SERVER}`, 'project', { OC_PROJECT: projectDir, VALS_TOKEN: 'sk-proj-777' });
+  const file = fs.readFileSync(path.join(pcwd, '.mcp.json'), 'utf8');
+  check('project: .mcp.json gets ${KEY} references, not the values', !file.includes('sk-proj-777') && JSON.parse(file).mcpServers.vals.env.VALS_TOKEN === '${VALS_TOKEN}', file);
+  check('project: the values are kept in the settings, by folder and server', pconfig.mcpProjectValues[pcwd].vals.VALS_TOKEN === 'sk-proj-777');
+  check('project: the server runs with them', pm.list()[0].status === 'connected' && (await pm.call('mcp__vals__env', { name: 'VALS_TOKEN' })).content === 'sk-proj-777', pm.list()[0].error);
+  check('project: still trusted (the file is what was trusted)', pm.list()[0].status === 'connected');
+  check('project: no value in what the window sees', !JSON.stringify(pm.list()).includes('sk-proj-777'));
+  // another project server cannot read vals' values
+  fs.writeFileSync(path.join(pcwd, '.mcp.json'), JSON.stringify({ mcpServers: { ...JSON.parse(file).mcpServers, other: { command: 'node', args: [TEST_SERVER], env: { OC_PROJECT: projectDir, STOLEN: '${VALS_TOKEN}' } } } }, null, 2));
+  await pm.reload();
+  await pm.setEnabled('other', 'project', true);
+  check("project: a server's values expand only its own references", (await pm.call('mcp__other__env', { name: 'STOLEN' })).content !== 'sk-proj-777');
+  await pm.remove('vals', 'project');
+  check('project: removing the server removes its values', !pconfig.mcpProjectValues[pcwd].vals);
+  refused = '';
+  try { await pm.add('', JSON.stringify({ mcpServers: { web: { type: 'http', url: 'https://w.example.com/mcp', headers: { Authorization: 'Bearer abc123' } } } }), 'project'); } catch (e) { refused = e.message; }
+  check('project: pasted JSON with a secret is refused, in one line', refused === 'That would put a secret in .mcp.json. Put the value under Environment instead.', refused);
+  await pm.add('hdr', 'https://h.example.com/mcp', 'project', {}, { 'X-Api-Key': 'key-555' });
+  const hfile = JSON.parse(fs.readFileSync(path.join(pcwd, '.mcp.json'), 'utf8'));
+  check('project: a header value becomes ${SERVER_HEADER}', hfile.mcpServers.hdr.headers['X-Api-Key'] === '${HDR_X_API_KEY}' && pconfig.mcpProjectValues[pcwd].hdr.HDR_X_API_KEY === 'key-555', hfile.mcpServers.hdr);
+  await pm.add('uhdr', 'https://u.example.com/mcp', 'user', {}, { 'X-Api-Key': 'key-666' });
+  check('user: headers from the form go into the config', pconfig.mcpServers.uhdr.headers['X-Api-Key'] === 'key-666' && !JSON.stringify(pm.list()).includes('key-666'));
+  await pm.close();
+  const { windowConfig } = require(path.join(projectDir, 'dist/main/providers.js'));
+  const { defaultConfig } = require(path.join(projectDir, 'dist/main/config.js'));
+  const wc = windowConfig({ ...defaultConfig(), mcpServers: pconfig.mcpServers, mcpProjectValues: pconfig.mcpProjectValues });
+  check('the window config holds no MCP env, header or project value', !JSON.stringify(wc).includes('key-666') && !JSON.stringify(wc).includes('key-555') && JSON.stringify(wc.mcpProjectValues) === '{}', wc.mcpServers);
   await m.close();
 
   done();

@@ -32,6 +32,10 @@ Servers come from Settings → MCP servers (stored in the app's `config.json` un
 
 Changing a server's keys reconnects it.
 
+## Values for a project's servers
+
+Adding a server with scope "This project" writes `${KEY}` references into `.mcp.json`, never the values you type under Environment (a command) or Headers (a URL; the reference is named for the server and the header, `TRACKER_AUTHORIZATION`). The values stay in the app's settings on this Mac (`mcpProjectValues`, by folder and server), expand only that server's own references, ahead of the app's environment, and go when the server is removed. Pasted JSON for the project is written as pasted, but refused when a value in it looks like a token.
+
 ## Project servers and trust
 
 A project's `.mcp.json` servers stay off until you trust each one. Trust covers the entry as written: when its command, arguments, URL, headers or environment change (after a pull, say), the server stops with "Changed since you trusted it." until you trust it again. A `${VAR}` value changing does not count. The app keeps the names in `mcpTrusted` and a SHA-256 of each entry in `mcpTrustedEntries`, both by folder.

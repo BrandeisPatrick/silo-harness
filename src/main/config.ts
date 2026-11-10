@@ -43,6 +43,7 @@ export function defaultConfig(): AppConfig {
     mcpServers: {},
     mcpTrusted: {},
     mcpTrustedEntries: {},
+    mcpProjectValues: {},
     autoCompact: true,
     notifications: true,
     allowRules: {},
@@ -152,6 +153,7 @@ export function readStoredConfig(file: string): AppConfig {
       mcpServers: raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers) ? raw.mcpServers : {},
       mcpTrusted: raw.mcpTrusted && typeof raw.mcpTrusted === 'object' && !Array.isArray(raw.mcpTrusted) ? raw.mcpTrusted : {},
       mcpTrustedEntries: isRecord(raw.mcpTrustedEntries) ? (raw.mcpTrustedEntries as Record<string, Record<string, string>>) : {},
+      mcpProjectValues: isRecord(raw.mcpProjectValues) ? (raw.mcpProjectValues as Record<string, Record<string, Record<string, string>>>) : {},
       ollama: { ...d.ollama, ...(raw.ollama ?? {}) },
       portkey: { ...d.portkey, ...(raw.portkey ?? {}) },
       // Sections added after 0.1: an older file has none of them, a hand-edited one may have part of one.

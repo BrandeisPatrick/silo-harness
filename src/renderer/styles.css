@@ -1581,7 +1581,11 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-tool-desc { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .mcp-status, .rules-status { display: flex; align-items: flex-start; gap: 6px; margin: -4px 0 0; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--danger); overflow-wrap: anywhere; }
 .mcp-status .icon, .rules-status .icon { flex: none; margin-top: 1px; }
+.mcp-head { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .mcp-add { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.mcp-add[hidden] { display: none; }
+.mcp-understood { margin-top: -6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-add .mcp-add-error.by-field { margin-top: -6px; padding-top: 0; }
 .mcp-add-title { font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; color: var(--text-200); }
 .field textarea.mono { font-family: var(--mono); font-size: var(--fs-code); line-height: var(--lh-code); }
 #mcp-env { min-height: 58px; }

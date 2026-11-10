@@ -8,7 +8,7 @@ import { escapeHtml } from './dom.js';
 import { icon, type IconName } from './icons.js';
 import { tilde } from './home.js';
 import { noteMcpServers } from './mcp-labels.js';
-import { toolGroups, type ToolEntry, hasSwitch, MENU_LABELS, menuActions, primaryAction, reasonLine, safeLines, serverSubtitle, STATUS_WORDS, statusText, statusTone, trustLines, unsetText, copyText, plural, type MenuKind } from './mcp-model.js';
+import { parseHeaders, suggestName, understood, toolGroups, type ToolEntry, hasSwitch, MENU_LABELS, menuActions, primaryAction, reasonLine, safeLines, serverSubtitle, STATUS_WORDS, statusText, statusTone, trustLines, unsetText, copyText, plural, type MenuKind } from './mcp-model.js';
 import { openMenu, type MenuItem } from './popover.js';
 
 /** The status words (mcp-model.ts), kept under the old name for the debug hook and tests */
@@ -150,8 +150,23 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.status.hidden = true;
     els.status.textContent = '';
   };
+  // The form's other parts, found by id (the panel's hookup in renderer.ts names only the original ones)
+  const form = {
+    root: document.getElementById('mcp-add'),
+    open: document.getElementById('mcp-add-open') as HTMLButtonElement | null,
+    cancel: document.getElementById('mcp-add-cancel') as HTMLButtonElement | null,
+    understood: document.getElementById('mcp-understood'),
+    envLabel: document.getElementById('mcp-env-label'),
+    valuesHint: document.getElementById('mcp-values-hint'),
+  };
+  const errorHome = { parent: els.error.parentElement, next: els.error.nextSibling };
+  /** An error sits under the field it is about (or in the form's foot) */
   const showAddError = (message: string, focus?: HTMLElement) => {
     els.error.innerHTML = `${icon('circle-alert', 14)}<span>${escapeHtml(message)}</span>`;
+    const field = focus?.closest('.field');
+    if (field) field.after(els.error);
+    else if (errorHome.parent) errorHome.parent.insertBefore(els.error, errorHome.next);
+    els.error.classList.toggle('by-field', !!field);
     els.error.hidden = false;
     focus?.focus();
   };
@@ -159,14 +174,38 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.error.hidden = true;
     els.error.textContent = '';
   };
+  /** The name the form filled in last (a name the user typed is never replaced) */
+  let suggested = '';
+  const formOpen = () => !!form.root && !form.root.hidden;
+  const setFormOpen = (open: boolean, focus = true) => {
+    if (!form.root) return;
+    form.root.hidden = !open;
+    form.open?.setAttribute('aria-expanded', String(open));
+    if (open && focus) els.spec.focus();
+    if (!open) {
+      hideAddError();
+      if (focus) form.open?.focus();
+    }
+  };
 
   const syncForm = () => {
     const kind = specKind(els.spec.value);
     const block = kind === 'block';
-    els.nameLabel.textContent = block ? 'Name (optional for an mcpServers block)' : 'Name';
+    const url = kind === 'url' || (kind === 'json' && /"url"\s*:/.test(els.spec.value));
+    els.nameLabel.textContent = block ? 'Name (from the block)' : 'Name';
     els.name.placeholder = block ? 'Taken from the block' : 'e.g. github';
-    els.env.disabled = kind === 'url';
-    els.env.placeholder = kind === 'url' ? 'Not used by URL servers' : 'GITHUB_TOKEN=ghp_…\nONE_PER_LINE=value';
+    els.name.disabled = block;
+    // A URL takes headers ("Name: value"), a command takes environment variables ("KEY=value")
+    if (form.envLabel) form.envLabel.innerHTML = url ? 'Headers <span class="field-opt">· Name: value per line</span>' : 'Environment <span class="field-opt">· KEY=value per line</span>';
+    els.env.placeholder = url ? 'Authorization: Bearer …' : 'GITHUB_TOKEN=ghp_…';
+    els.env.setAttribute('aria-label', url ? 'Headers' : 'Environment');
+    if (form.understood) form.understood.textContent = understood(els.spec.value);
+    if (form.valuesHint) form.valuesHint.hidden = els.scope.value !== 'project';
+    const next = block ? '' : suggestName(els.spec.value);
+    if (!els.name.value.trim() || els.name.value === suggested) {
+      els.name.value = next;
+      suggested = next;
+    }
     // Stays enabled while adding (keeps keyboard focus); the busy class and the `adding` guard stop a second click.
     els.add.disabled = unavailable;
   };
@@ -459,13 +498,25 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
 
   async function add(): Promise<void> {
     if (adding) return;
-    const name = els.name.value.trim();
     const spec = els.spec.value.trim();
     const kind = specKind(spec);
-    if (kind === 'empty') return showAddError("Paste the server's command line, its URL, or the JSON from its README.", els.spec);
-    if (!name && kind !== 'block') return showAddError('Give the server a name.', els.name);
-    const parsed = parseEnv(kind === 'url' ? '' : els.env.value);
+    const name = kind === 'block' ? '' : els.name.value.trim();
+    if (kind === 'empty') return showAddError('Paste a command, a URL or JSON.', els.spec);
+    if (kind === 'json') {
+      try {
+        JSON.parse(spec);
+      } catch {
+        return showAddError("That JSON doesn't parse.", els.spec);
+      }
+    }
+    if (!name && kind !== 'block') return showAddError('Give it a name.', els.name);
+    if (name && !/^[\w.-]{1,64}$/.test(name)) return showAddError('Letters, digits, ".", "-" and "_" only.', els.name);
+    const isUrl = kind === 'url' || (kind === 'json' && /"url"\s*:/.test(spec));
+    const parsed = isUrl ? { env: {}, error: undefined } : parseEnv(els.env.value);
     if (parsed.error) return showAddError(parsed.error, els.env);
+    const parsedHeaders = isUrl ? parseHeaders(els.env.value) : { headers: {}, error: undefined };
+    if (parsedHeaders.error) return showAddError(parsedHeaders.error, els.env);
+    if (current.some((x) => x.name === name && x.scope === (els.scope.value === 'project' ? 'project' : 'user'))) return showAddError(`There is already a server named ${name}.`, els.name);
     const api = opts.source();
     if (!api) return showAddError('Adding servers needs the updated app. Restart Silo Harness and try again.');
     const scope: McpScope = els.scope.value === 'project' ? 'project' : 'user';
@@ -475,12 +526,14 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.add.querySelector('span:last-child')!.textContent = 'Adding…';
     syncForm();
     try {
-      const next = await api.add(name, spec, scope, Object.keys(parsed.env).length ? parsed.env : undefined);
+      const next = await api.add(name, spec, scope, Object.keys(parsed.env).length ? parsed.env : undefined, Object.keys(parsedHeaders.headers).length ? parsedHeaders.headers : undefined);
       hideAddError();
       hideStatus();
       els.name.value = '';
+      suggested = '';
       els.spec.value = '';
       els.env.value = '';
+      setFormOpen(false, false);
       const list = cleanServers(next);
       flashKeys = new Set(list.map(mcpKey).filter((k) => !before.has(k)));
       panel.render(list);
@@ -490,11 +543,13 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       }, 1600);
       opts.onMutated?.();
     } catch (err) {
-      showAddError(opts.cleanError(err));
+      const msg = opts.cleanError(err);
+      // An error about the name or the config sits under that field
+      showAddError(msg, /named|name/i.test(msg) ? els.name : /secret|Environment|env/i.test(msg) ? els.env : /JSON|command|url|mcpServers|transport|args/i.test(msg) ? els.spec : undefined);
     } finally {
       adding = false;
       els.add.classList.remove('busy');
-      els.add.querySelector('span:last-child')!.textContent = 'Add server';
+      els.add.querySelector('span:last-child')!.textContent = 'Add';
       syncForm();
     }
   }
@@ -518,6 +573,19 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
   els.spec.addEventListener('input', () => {
     syncForm();
     if (!els.error.hidden) hideAddError();
+  });
+  els.scope.addEventListener('change', () => syncForm());
+  els.env.addEventListener('input', () => {
+    if (!els.error.hidden) hideAddError();
+  });
+  form.open?.addEventListener('click', () => setFormOpen(!formOpen()));
+  form.cancel?.addEventListener('click', () => setFormOpen(false));
+  form.root?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !e.isComposing) {
+      e.preventDefault();
+      e.stopPropagation(); // the form closes, not Settings
+      setFormOpen(false);
+    }
   });
   els.name.addEventListener('input', () => {
     if (!els.error.hidden) hideAddError();
@@ -677,7 +745,7 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
       if (!entries.length) throw new Error('Nothing to add.');
       for (const [n] of entries) {
         if (!n.trim()) throw new Error('Give the server a name.');
-        if (servers.some((x) => x.name === n && x.scope === scope)) throw new Error(`A ${scope} server named "${n}" already exists.`);
+        if (servers.some((x) => x.name === n && x.scope === scope)) throw new Error(`There is already a server named ${n}.`);
       }
       for (const [n, c] of entries) {
         const s = mockServerFrom(n.trim(), c, scope);

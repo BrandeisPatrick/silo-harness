@@ -130,8 +130,8 @@ function manager(cwd, initial, more = {}) {
     fs.writeFileSync(path.join(cwd, '.mcp.json'), JSON.stringify({ mcpServers: { broken: { args: ['x'] }, fine: srv() } }, null, 2));
     const { m } = manager(cwd, {});
     await m.reload();
-    check('adding over an invalid entry is refused', await rejectsWith(m.add('broken', 'node x.js', 'project'), /already exists/));
-    check('adding over a valid entry is refused', await rejectsWith(m.add('fine', 'node x.js', 'project'), /already exists/));
+    check('adding over an invalid entry is refused', await rejectsWith(m.add('broken', 'node x.js', 'project'), /already a/));
+    check('adding over a valid entry is refused', await rejectsWith(m.add('fine', 'node x.js', 'project'), /already a/));
     check('…and the file is unchanged', JSON.parse(fs.readFileSync(path.join(cwd, '.mcp.json'), 'utf8')).mcpServers.broken.args[0] === 'x');
     await m.close();
   }

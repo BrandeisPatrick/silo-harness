@@ -188,3 +188,80 @@ export function toolGroups(s: Pick<McpServerInfo, 'tools' | 'offTools'>): { labe
     { label: `Can make changes · ${rw.length}`, tools: rw },
   ].filter((g) => g.tools.length);
 }
+
+// ---------- The Add form ----------
+
+const RUNNERS = new Set(['npx', 'pnpx', 'bunx', 'uvx', 'pipx', 'node', 'python', 'python3', 'deno', 'bun', 'docker', 'uv', 'npm', 'pnpm', 'yarn', 'sh', 'bash', 'env']);
+
+/** A server name for what was pasted: a URL's host's first label, a package's last part ("@example/files-mcp" → "files"). */
+export function suggestName(spec: string): string {
+  const text = spec.trim();
+  const clean = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/@[^/@]*$/, (m) => (m.includes('/') ? m : '')) // a version after the name
+      .replace(/\.(m?js|ts|py)$/, '')
+      .replace(/^(mcp[-_]server[-_]|server[-_]|mcp[-_])|([-_]mcp[-_]server|[-_]server|[-_]mcp)$/g, '')
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 64);
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      const host = new URL(text).hostname;
+      const parts = host.split('.');
+      const first = parts.length > 2 && /^(mcp|api|www)$/.test(parts[0]) ? parts[1] : parts[0];
+      return clean(first);
+    } catch {
+      return '';
+    }
+  }
+  if (text.startsWith('{') || text.startsWith('"')) return '';
+  const words = text.split(/\s+/).filter(Boolean);
+  for (const w of words) {
+    if (w.startsWith('-') || RUNNERS.has(w) || /^[A-Z_][A-Z0-9_]*=/.test(w)) continue;
+    const base = w.replace(/\/+$/, '').split('/').filter(Boolean);
+    // a script path names its folder when the file is index.js or main.py
+    const last = base[base.length - 1] ?? '';
+    const pick = /^(index|main|server)\.(m?js|ts|py)$/.test(last) && base.length > 1 ? base[base.length - 2] : last;
+    const name = clean(pick.replace(/^~$/, ''));
+    if (name) return name;
+  }
+  return '';
+}
+
+/** One dim line saying what the Config field holds: "Local command: …", "Remote server: host", "3 servers from JSON: a, b, c". */
+export function understood(spec: string): string {
+  const text = spec.trim();
+  if (!text) return "A command, a URL or JSON from the server's README.";
+  if (/^https?:\/\/\S+$/i.test(text)) return `Remote server: ${hostOf(text)}`;
+  if (text.startsWith('{')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return 'JSON that does not parse yet.';
+    }
+    const o = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    const block = o.mcpServers && typeof o.mcpServers === 'object' && !Array.isArray(o.mcpServers) ? Object.keys(o.mcpServers as object) : null;
+    if (block) return block.length ? `${plural(block.length, 'server')} from JSON: ${safeLine(block.join(', '), 120)}` : 'An empty mcpServers block.';
+    const one = typeof o.url === 'string' ? o : typeof o.command === 'string' ? o : Object.keys(o).length === 1 && o[Object.keys(o)[0]] && typeof o[Object.keys(o)[0]] === 'object' ? (o[Object.keys(o)[0]] as Record<string, unknown>) : o;
+    if (typeof one.url === 'string') return `Remote server: ${safeLine(hostOf(one.url), 120)}`;
+    if (typeof one.command === 'string') return `Local command: ${safeLine([one.command, ...(Array.isArray(one.args) ? one.args : [])].join(' '), 120)}`;
+    return 'JSON without a "command" or a "url".';
+  }
+  return `Local command: ${safeLine(text, 120)}`;
+}
+
+/** "Name: value" per line (blank lines and # comments skipped). */
+export function parseHeaders(text: string): { headers: Record<string, string>; error?: string } {
+  const headers: Record<string, string> = {};
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*:\s*(.*)$/.exec(line);
+    if (!m) return { headers, error: `Header line ${i + 1} should look like Name: value.` };
+    headers[m[1]] = m[2];
+  }
+  return { headers };
+}

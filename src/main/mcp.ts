@@ -19,6 +19,7 @@ import type { AppConfig, McpCallNames, McpOAuthConfig, McpScope, McpServerConfig
 import type { Tool, ToolResult } from './tools/types';
 import { words } from './guard';
 import { expandEnvRefs } from './env';
+import { headerVarName, maskedConfig, VAR_REF } from './mcp-values';
 import { guardedFetch, hasTokens, InsecureEndpointError, McpOAuthProvider, MemoryTokenStore, NeedsSignInError, redactSecrets, signIn as runSignIn, type TokenStore } from './mcp-auth';
 
 export const PROJECT_FILE = '.mcp.json';
@@ -107,7 +108,7 @@ interface ToolIndexEntry {
 const keyOf = (scope: McpScope, name: string) => `${scope}:${name}`;
 
 /** `${VAR}` and `${VAR:-default}` in strings of a config, as Claude Code expands them in .mcp.json. */
-export { expandEnvRefs };
+export { expandEnvRefs, headerVarName, maskedConfig };
 
 function expandHome(p: string): string {
   return p.replace(/^~(?=$|\/)/, os.homedir());
@@ -196,7 +197,7 @@ function normalizeOAuth(v: unknown): McpOAuthConfig | undefined {
  * Turns what the user typed in the "Add server" form into configs by name: a JSON snippet ({"command": …},
  * {"type": "http", "url": …} or a whole {"mcpServers": {…}} block), a URL, or a command line.
  */
-export function parseServerSpec(name: string, spec: string, env?: Record<string, string>): Record<string, McpServerConfig> {
+export function parseServerSpec(name: string, spec: string, env?: Record<string, string>, headers?: Record<string, string>): Record<string, McpServerConfig> {
   const text = spec.trim();
   if (!text) throw new Error('Enter a command line, a URL or a JSON snippet.');
   const cleanName = name.trim();
@@ -206,7 +207,12 @@ export function parseServerSpec(name: string, spec: string, env?: Record<string,
     return cleanName;
   };
   const withEnv = (c: McpServerConfig): McpServerConfig => {
-    if (!env || !Object.keys(env).length || transportOf(c) !== 'stdio') return c;
+    if (transportOf(c) !== 'stdio') {
+      if (!headers || !Object.keys(headers).length) return c;
+      const r = c as Extract<McpServerConfig, { url: string }>;
+      return { ...r, headers: { ...(r.headers ?? {}), ...headers } };
+    }
+    if (!env || !Object.keys(env).length) return c;
     const s = c as Extract<McpServerConfig, { command: string }>;
     return { ...s, env: { ...(s.env ?? {}), ...env } };
   };
@@ -239,10 +245,48 @@ export function parseServerSpec(name: string, spec: string, env?: Record<string,
     }
     return { [needName()]: withEnv(normalizeServerConfig(obj)) };
   }
-  if (/^https?:\/\/\S+$/i.test(text)) return { [needName()]: { type: 'http', url: text } };
+  if (/^https?:\/\/\S+$/i.test(text)) return { [needName()]: withEnv({ type: 'http', url: text }) };
   const w = words(text);
   if (!w.length) throw new Error('Enter a command line, a URL or a JSON snippet.');
   return { [needName()]: withEnv({ type: 'stdio', command: w[0], args: w.length > 1 ? w.slice(1) : undefined }) };
+}
+
+/**
+ * A server added to the project from the form: what was typed under Environment (a command) or Headers (a URL) is
+ * kept as values for this Mac, and the configs get ${KEY} references instead (a header: headerVarName).
+ */
+export function projectValues(name: string, spec: string, env?: Record<string, string>, headers?: Record<string, string>): { configs: Record<string, McpServerConfig>; values: Record<string, Record<string, string>> } {
+  const configs = parseServerSpec(name, spec);
+  const values: Record<string, Record<string, string>> = {};
+  for (const [n, c] of Object.entries(configs)) {
+    const own: Record<string, string> = {};
+    if (transportOf(c) === 'stdio' && env && Object.keys(env).length) {
+      const s = c as Extract<McpServerConfig, { command: string }>;
+      const refs: Record<string, string> = { ...(s.env ?? {}) };
+      for (const [k, v] of Object.entries(env)) {
+        refs[k] = `\${${k}}`;
+        own[k] = v;
+      }
+      configs[n] = { ...s, env: refs };
+    } else if (transportOf(c) !== 'stdio' && headers && Object.keys(headers).length) {
+      const r = c as Extract<McpServerConfig, { url: string }>;
+      const refs: Record<string, string> = { ...(r.headers ?? {}) };
+      for (const [k, v] of Object.entries(headers)) {
+        const key = headerVarName(n, k);
+        refs[k] = `\${${key}}`;
+        own[key] = v;
+      }
+      configs[n] = { ...r, headers: refs };
+    }
+    if (Object.keys(own).length) values[n] = own;
+  }
+  return { configs, values };
+}
+
+/** Refuses a pasted entry for .mcp.json that holds a value the app would mask as a secret. */
+function refuseSecrets(configs: Record<string, McpServerConfig>): void {
+  const walk = (v: unknown): boolean => (typeof v === 'string' ? redactSecrets(v) !== v : Array.isArray(v) ? v.some(walk) : !!v && typeof v === 'object' && Object.values(v).some(walk));
+  if (Object.values(configs).some(walk)) throw new Error('That would put a secret in .mcp.json. Put the value under Environment instead.');
 }
 
 /** Reads a project's .mcp.json. Entries that cannot be used are returned under `invalid` with the reason. */
@@ -273,26 +317,6 @@ export function readProjectServers(cwd: string): { servers: Record<string, McpSe
     }
   }
   return { servers, invalid, fingerprints };
-}
-
-const VAR_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
-/** A value that is nothing but one ${VAR} reference */
-const ONLY_REF = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}$/;
-
-/** The variable a header's value is kept in: MCP server "files" + header "X-Api-Key" → FILES_X_API_KEY. */
-export function headerVarName(server: string, header: string): string {
-  return `${server}_${header}`.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase().replace(/^(?=\d)/, '_') || 'MCP_HEADER';
-}
-
-/**
- * A config as the window may see and copy it: every env and header value that is not already a ${VAR} reference is
- * written as one (env: its own name; a header: headerVarName), so no secret leaves the main process.
- */
-export function maskedConfig(name: string, c: McpServerConfig): McpServerConfig {
-  const copy = structuredClone(c) as McpServerConfig & { env?: Record<string, string>; headers?: Record<string, string> };
-  if (copy.env) copy.env = Object.fromEntries(Object.entries(copy.env).map(([k, v]) => [k, ONLY_REF.test(String(v)) ? String(v) : `\${${k}}`]));
-  if (copy.headers) copy.headers = Object.fromEntries(Object.entries(copy.headers).map(([k, v]) => [k, ONLY_REF.test(String(v)) ? String(v) : `\${${headerVarName(name, k)}}`]));
-  return copy;
 }
 
 /**
@@ -639,7 +663,7 @@ export class McpManager extends EventEmitter {
       tools: e.status === 'connected' ? e.tools.map((t) => ({ ...t })) : [],
       config: maskedConfig(e.name, e.config),
     };
-    const vars = configVars(e.config);
+    const vars = configVars(e.config, this.envFor(e));
     if (vars.length) info.vars = vars;
     const unset = vars.filter((x) => !x.set).map((x) => x.name);
     if (unset.length) info.unset = [...new Set(unset)];
@@ -785,7 +809,17 @@ export class McpManager extends EventEmitter {
   }
 
   private urlOf(e: Entry): string {
-    return expandEnvRefs((e.config as Extract<McpServerConfig, { url: string }>).url);
+    return expandEnvRefs((e.config as Extract<McpServerConfig, { url: string }>).url, this.envFor(e));
+  }
+
+  /**
+   * What a server's ${VAR} references expand from: the app's environment, and for a project server the values typed
+   * for it on this Mac first (they are its own, never another server's).
+   */
+  private envFor(e: Pick<Entry, 'name' | 'scope'>): NodeJS.ProcessEnv {
+    if (e.scope !== 'project') return process.env;
+    const own = this.opts.getConfig().mcpProjectValues?.[this.opts.cwd()]?.[e.name];
+    return own && typeof own === 'object' ? { ...process.env, ...own } : process.env;
   }
 
   /** OAuth applies to a remote server unless it sends its own Authorization header and has no "oauth" key. */
@@ -984,8 +1018,9 @@ export class McpManager extends EventEmitter {
     if (kind === 'stdio') return this.makeStdio(e);
     const h = c as Extract<McpServerConfig, { url: string }>;
     const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(h.headers ?? {})) headers[k] = expandEnvRefs(v);
-    const url = new URL(expandEnvRefs(h.url));
+    const vars = this.envFor(e);
+    for (const [k, v] of Object.entries(h.headers ?? {})) headers[k] = expandEnvRefs(v, vars);
+    const url = new URL(expandEnvRefs(h.url, vars));
     const authProvider = this.usesOAuth(e)
       ? new McpOAuthProvider({ key: this.authKey(e), serverUrl: this.urlOf(e), store: this.store, oauth: h.oauth, onChange: () => void this.refreshSignedIn(e) })
       : undefined;
@@ -997,14 +1032,15 @@ export class McpManager extends EventEmitter {
   private async makeStdio(e: Entry): Promise<Transport> {
     const s = e.config as Extract<McpServerConfig, { command: string }>;
     const envExtra: Record<string, string> = {};
-    for (const [k, v] of Object.entries(s.env ?? {})) envExtra[k] = expandEnvRefs(v);
+    const vars = this.envFor(e);
+    for (const [k, v] of Object.entries(s.env ?? {})) envExtra[k] = expandEnvRefs(v, vars);
     const base: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') base[k] = v;
     base.PATH = await loginPath();
-    const cwd = s.cwd ? path.resolve(this.opts.cwd(), expandHome(expandEnvRefs(s.cwd))) : this.opts.cwd();
+    const cwd = s.cwd ? path.resolve(this.opts.cwd(), expandHome(expandEnvRefs(s.cwd, vars))) : this.opts.cwd();
     const t = new StdioClientTransport({
-      command: expandHome(expandEnvRefs(s.command)),
-      args: (s.args ?? []).map((a) => expandHome(expandEnvRefs(a))),
+      command: expandHome(expandEnvRefs(s.command, vars)),
+      args: (s.args ?? []).map((a) => expandHome(expandEnvRefs(a, vars))),
       env: { ...base, ...envExtra },
       cwd: fs.existsSync(cwd) ? cwd : os.homedir(),
       stderr: 'pipe',
@@ -1244,18 +1280,26 @@ export class McpManager extends EventEmitter {
   }
 
   /** Adds servers from what the user typed, persists them and connects. Returns the new list. */
-  async add(name: string, spec: string, scope: McpScope, env?: Record<string, string>): Promise<McpServerInfo[]> {
-    const configs = parseServerSpec(name, spec, env);
+  async add(name: string, spec: string, scope: McpScope, env?: Record<string, string>, headers?: Record<string, string>): Promise<McpServerInfo[]> {
     const cfg = this.opts.getConfig();
     const cwd = this.opts.cwd();
+    // For the project, what was typed under Environment or Headers stays on this Mac: the file gets ${KEY} references
+    const project = scope === 'project' ? projectValues(name, spec, env, headers) : null;
+    const configs = project ? project.configs : parseServerSpec(name, spec, env, headers);
+    if (scope === 'project' && /^\s*\{/.test(spec)) refuseSecrets(configs);
     const existing = scope === 'user' ? Object.keys(cfg.mcpServers ?? {}) : projectKeys(cwd);
-    for (const n of Object.keys(configs)) if (existing.includes(n)) throw new Error(`A ${scope === 'user' ? 'server' : 'project server'} named "${n}" already exists. Remove it first or pick another name.`);
+    for (const n of Object.keys(configs)) if (existing.includes(n)) throw new Error(`There is already a ${scope === 'user' ? 'server' : 'project server'} named ${n}.`);
     if (scope === 'user') {
       this.opts.saveConfig({ mcpServers: { ...(cfg.mcpServers ?? {}), ...configs } });
     } else {
       writeProjectServers(cwd, (map) => {
         for (const [n, c] of Object.entries(configs)) map[n] = stripUndefined(c);
       });
+      if (project && Object.keys(project.values).length) {
+        const now = this.opts.getConfig();
+        const byServer = { ...(now.mcpProjectValues?.[cwd] ?? {}), ...project.values };
+        this.opts.saveConfig({ mcpProjectValues: { ...(now.mcpProjectValues ?? {}), [cwd]: byServer } });
+      }
       // The user added it themselves: no separate "enable" step.
       this.saveTrust(cwd, Object.keys(configs), true);
     }
@@ -1277,6 +1321,13 @@ export class McpManager extends EventEmitter {
         delete map[name];
       });
       this.saveTrust(cwd, [name], false);
+      const values = { ...(this.opts.getConfig().mcpProjectValues ?? {}) };
+      if (values[cwd]?.[name]) {
+        const rest = { ...values[cwd] };
+        delete rest[name];
+        values[cwd] = rest;
+        this.opts.saveConfig({ mcpProjectValues: values });
+      }
     }
     await this.reload();
     // Its sign-in goes with it: tokens and client registration (Claude Code does the same on remove)
