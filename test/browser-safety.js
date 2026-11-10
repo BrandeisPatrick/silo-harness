@@ -172,7 +172,7 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
     for (let i = 0; i < 400 && rt.isRunning(sid); i++) await sleep(15);
   };
   const run = async (tag, toolCalls) => {
-    state.replies.push({ content: '', toolCalls, when: (p) => JSON.stringify(p.messages[p.messages.length - 1]).includes(tag) });
+    state.replies.push({ content: '', toolCalls, when: (p) => JSON.stringify([...p.messages].reverse().find((m) => !String(m.content).startsWith('[Session context]'))).includes(tag) });
     rt.send(sid, `Step ${tag}`);
     await sleep(30);
     await idle();

@@ -66,7 +66,7 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   app.push = (ch, p) => (pushes.push([ch, p]), origPush(ch, p));
   let n = 0;
   const call = (name, args) => ({ id: `c${++n}`, name, args });
-  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user');
+  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const isDream = (p) => typeof firstUser(p)?.content === 'string' && firstUser(p).content.startsWith('[Dream]');
   const has = (m, tag) => typeof m?.content === 'string' && m.content.includes(tag);
   const reply = (tag, r) => state.replies.push({ ...r, when: (p) => has(firstUser(p), tag) });
@@ -418,6 +418,8 @@ async function waitFor(fn, ms = 10000, what = 'condition') {
   mock.close();
   const warn = console.warn;
   console.warn = (...a) => (/streaming failed/.test(String(a[0])) ? undefined : warn(...a));
+  // The model is gone: the retry loop tries six times; its waits return at once here (agent/retry.ts retryTiming)
+  require(path.join(projectDir, 'dist/main/agent/retry.js')).retryTiming.sleep = async () => {};
   svc.start('manual', proj);
   await waitFor(() => svc.state().dreams[0].status !== 'running', 15000, 'the dream to fail');
   check('10: a dream whose model call fails is failed with the reason', svc.state().dreams[0].status === 'failed' && svc.state().dreams[0].error, svc.state().dreams[0].error);

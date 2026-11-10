@@ -43,7 +43,7 @@
     "maxTurns": {
       "type": "integer",
       "minimum": 1,
-      "description": "How many tool calls one request may make before it stops and asks you to continue."
+      "description": "How many model calls one request may make before it stops and asks you to continue."
     },
     "sendScreenshotsToModel": {
       "type": "boolean",
@@ -78,7 +78,7 @@
     },
     "pruneToolResults": {
       "type": "boolean",
-      "description": "Before summarising, shorten old tool results."
+      "description": "Shorten old tool results for the model: past 48K tokens, and before summarising."
     },
     "notifications": {
       "type": "boolean",
@@ -100,7 +100,7 @@
         "all",
         "essential"
       ],
-      "description": "Which tools the model is offered."
+      "description": "Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods."
     },
     "toolActivity": {
       "type": "string",
@@ -114,6 +114,10 @@
       "type": "number",
       "minimum": 0,
       "description": "Days a deleted session stays in the trash."
+    },
+    "checkForUpdates": {
+      "type": "boolean",
+      "description": "Look for a newer release on GitHub once a day and show a quiet line when there is one."
     },
     "ollama": {
       "type": "object",
@@ -279,6 +283,31 @@
         "model": {
           "type": "string",
           "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: the session's own model. Your own settings.json only."
+        }
+      }
+    },
+    "webSearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "brave",
+            "tavily",
+            "exa",
+            "searxng"
+          ],
+          "description": "The web_search backend. duckduckgo needs no key."
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "The key for brave, tavily or exa. Not allowed in a project file."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Your SearXNG instance, e.g. http://localhost:8888 (it may be on your own network). Not allowed in a project file."
         }
       }
     },

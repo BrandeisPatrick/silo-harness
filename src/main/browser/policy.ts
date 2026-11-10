@@ -263,6 +263,33 @@ export function navigationRule(url: string, cwd: string, exempt: readonly string
   return refuse(`Not permitted: the browser opens http and https pages, local files and artifacts, not ${scheme}: URLs.`);
 }
 
+// ---------- The app's own servers ----------
+
+/** What the model reads when it reaches for the app's own remote-control or debugging server. */
+export const OWN_SERVER_REFUSAL = "Not permitted: that address is the app's own remote-control or debugging server, which the agent may not open, read or act on.";
+
+/** Whether a host is this machine: a loopback name or address, 0.0.0.0, or one of its own network addresses. */
+function isThisMachine(host: string, localAddresses: readonly string[]): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '0.0.0.0' || h === '::' || /^127\.\d+\.\d+\.\d+$/.test(h) || /^::ffff:127\./.test(h)) return true;
+  return localAddresses.some((a) => a.toLowerCase().replace(/^\[|\]$/g, '') === h);
+}
+
+/**
+ * Whether the agent may open, read or act on `url` at all, given the ports the app itself listens on (its remote-control
+ * server, a --remote-debugging-port, an --inspect port): one of those on this machine (any loopback name, or one of its
+ * own LAN addresses) is refused, whatever the path or the mode. Every other local address is left to the exemption.
+ */
+export function ownServerRule(url: string, ownPorts: readonly number[], localAddresses: readonly string[] = []): Allow | Refuse {
+  const u = parse(url);
+  if (!u) return ALLOW;
+  const scheme = schemeOf(u);
+  if (!['http', 'https', 'ws', 'wss'].includes(scheme)) return ALLOW;
+  const port = Number(u.port || (scheme === 'https' || scheme === 'wss' ? 443 : 80));
+  if (!ownPorts.includes(port) || !isThisMachine(u.hostname, localAddresses)) return ALLOW;
+  return refuse(OWN_SERVER_REFUSAL);
+}
+
 // ---------- The site decision ----------
 
 /** What a browser tool call does to the page: reads it, acts on it (clicks, types, presses), runs code in it, or opens a URL. */
@@ -283,6 +310,11 @@ export interface SiteDecisionInput {
   pageHasPasswordField?: boolean;
   /** browser_eval's code, for the guard in auto mode */
   evalCode?: string;
+  /**
+   * For a page with no site of its own (about:blank, data:): the committed origin it inherited from the page that
+   * opened or navigated it, which then decides as that site would. Empty or absent: a blank page of the user's, as before.
+   */
+  origin?: string;
 }
 
 /** Which card to show: the site's first approval with its scopes, a sensitive site's act, or a browser_eval (Allow and Deny). */
@@ -291,9 +323,10 @@ export type SiteCard = 'site' | 'sensitive' | 'eval';
 export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site: Site; note?: string; reason?: string };
 
 /**
- * Whether a browser tool call runs, asks or is refused, in this order: a page with no site (about:blank) runs; an
- * exempt page runs, every action in every mode; plan mode refuses acting and eval (reading and navigating stay, with
- * their cards); bypass mode runs everything else; a site the user has not allowed this session or always asks with
+ * Whether a browser tool call runs, asks or is refused, in this order: a page with no site (about:blank) runs unless
+ * it inherited an origin from the page that made it (`origin`), which then decides as that site; an
+ * exempt page runs, every action in every mode but plan; plan mode refuses acting and eval everywhere, exempt hosts
+ * included (reading and navigating stay, with their cards); bypass mode runs everything else; a site the user has not allowed this session or always asks with
  * the site card, whatever the action (reading included: that is where an injection enters); on an allowed site a
  * browser_eval asks in ask and acceptEdits mode, and in auto mode when the eval guard sees the code reach for site
  * data or the network (the reason goes on the card) or the site is sensitive; an act on a sensitive site (the list,
@@ -301,11 +334,15 @@ export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site:
  * as the card saves them and the exempt patterns' forms.
  */
 export function siteDecision(input: SiteDecisionInput): SiteDecision {
-  const { url, action, mode, cwd, settings, sessionAllowed } = input;
-  const site = siteOf(url);
+  const { action, mode, cwd, settings, sessionAllowed } = input;
+  const own = siteOf(input.url);
+  // A page with no site that a page made takes that page's site: typing into it is typing to that site
+  const url = own ? input.url : input.origin && siteOf(input.origin) ? input.origin : input.url;
+  const site = own ?? siteOf(url);
   if (!site) return ALLOW;
-  if (isExempt(url, settings.exempt, cwd)) return ALLOW;
+  // Plan mode is read-only everywhere, the user's own servers included
   if (mode === 'plan' && (action === 'act' || action === 'eval')) return refuse(PLAN_BROWSER_BLOCKED);
+  if (isExempt(url, settings.exempt, cwd)) return ALLOW;
   if (mode === 'bypass') return ALLOW;
   const listed = isSensitive(url, settings.sensitive);
   const page = looksLikeSignInPage({ hasPasswordField: Boolean(input.pageHasPasswordField) });
@@ -369,7 +406,19 @@ export interface ClickTarget {
   formHasCardFields: boolean;
   /** The host its form posts to, when the form has an action of its own */
   formActionHost: string | null;
+  /** The click goes into a frame from another site (over the target, or at the point): that frame's origin */
+  frameOrigin?: string | null;
+  /** The click cannot land where it should (the ref changed, something covers it): the refusal the model reads */
+  blocked?: string;
 }
+
+/** Whether two looks at what a click lands on found the same thing (the check, then the click itself). */
+export function sameClickTarget(a: ClickTarget, b: ClickTarget): boolean {
+  return oneLine(a.tag).toLowerCase() === oneLine(b.tag).toLowerCase() && oneLine(a.text) === oneLine(b.text) && oneLine(a.type) === oneLine(b.type) && (a.frameOrigin ?? null) === (b.frameOrigin ?? null);
+}
+
+/** What the model reads when the page moved something under the click between the check and the click. */
+export const CHANGED_UNDER_CLICK = 'The page changed under the click; nothing was clicked. Read the page again.';
 
 export type ClickRule = Allow | { kind: 'ask'; what: 'purchase' | 'account'; detail: string } | Refuse;
 
@@ -392,6 +441,7 @@ export function isPaymentHost(host: string): boolean {
  * and "Sign in" are clicks like any other.
  */
 export function clickRule(target: ClickTarget): ClickRule {
+  if (target.blocked) return refuse(target.blocked);
   if (target.inCaptcha) return refuse(CAPTCHA_REFUSAL);
   const tag = oneLine(target.tag).toLowerCase();
   const type = oneLine(target.type).toLowerCase();
@@ -445,6 +495,28 @@ export function typesACharacter(combo: string): boolean {
 export function keyRule(combo: string, focusedKind: CredentialKind | 'embedded' | null, exempt: boolean): TypeRule {
   if (!focusedKind || exempt) return ALLOW;
   return typesACharacter(combo) ? refuse(CREDENTIAL_REFUSAL) : ALLOW;
+}
+
+/** What the model reads when it presses a paste, copy or cut shortcut. */
+export const CLIPBOARD_REFUSAL = "Not permitted: the clipboard is the user's; type the text with browser_type.";
+
+/**
+ * Whether browser_press_key may press a combo that reaches the user's clipboard: paste (cmd/ctrl+v, cmd/ctrl+shift+v,
+ * shift+insert), copy (cmd/ctrl+c, ctrl+insert) and cut (cmd/ctrl+x) are refused, so the agent can neither read what
+ * the user copied (a password, a code) into a page nor plant something there; on an exempt host (the user's own app)
+ * they go through. cmd+a, cmd+z and every other key stay.
+ */
+export function clipboardRule(combo: string, exempt: boolean): TypeRule {
+  if (exempt) return ALLOW;
+  const raw = String(combo ?? '').trim().toLowerCase();
+  const i = raw.endsWith('+') ? raw.length - 1 : raw.lastIndexOf('+');
+  if (i < 0) return ALLOW;
+  const key = raw.slice(i + 1).trim();
+  const mods = new Set(raw.slice(0, i).split('+').map((m) => m.trim()).filter(Boolean));
+  const command = [...mods].some((m) => COMMAND_MODIFIERS.has(m));
+  if (command && (key === 'v' || key === 'c' || key === 'x' || key === 'insert')) return refuse(CLIPBOARD_REFUSAL);
+  if (mods.has('shift') && key === 'insert') return refuse(CLIPBOARD_REFUSAL);
+  return ALLOW;
 }
 
 // ---------- For the card and the tools ----------

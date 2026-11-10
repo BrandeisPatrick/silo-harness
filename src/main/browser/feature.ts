@@ -14,9 +14,11 @@ import type { BrowserConfig, BrowserListField, DownloadAction, PermissionAnswer 
 import type { App } from '../app';
 import { settingsLayer } from '../settings';
 import { installCertificateHandler } from './certificates';
+import { installChooserHandlers } from './choosers';
 import { tabEvents, type BrowserController } from './controller';
 import { DownloadManager } from './downloads';
 import { configurePermissions, fileStore, permissionsFile } from './permissions';
+import { remoteServerPorts, setRemotePorts } from './own-ports';
 import { BUILT_IN_EXEMPT, SENSITIVE_PATTERNS } from './policy';
 import { browserSession, clearBrowsingData, clearPrivateData, dismissProfileNote, prepareBrowserSession, profileNoteDue } from './session';
 
@@ -76,6 +78,8 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
   tabEvents.navigated.add((tabId, url, contentsId) => permissions.tabNavigated(tabId, url, contentsId));
   tabEvents.closed.add((tabId) => permissions.tabClosed(tabId));
 
+  // The agent never opens the app's own remote-control server (its port is read when a browser call is checked)
+  setRemotePorts(() => remoteServerPorts(app.userData, app.config().remote?.port));
   void prepareBrowserSession({ userData: app.userData, window: () => app.window() });
   const ses = browserSession();
 
@@ -85,6 +89,9 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     onError: (wc, error) => controller()?.certificateError(wc, error) ?? false,
   });
 
+  // No client certificate, Bluetooth device or HTTP sign-in is ever chosen for a page in the pane (choosers.ts)
+  installChooserHandlers(electronApp as unknown as Parameters<typeof installChooserHandlers>[0], (wc) => (wc as { session?: unknown }).session === ses);
+
   // Downloads: saved without a dialog; the agent's wait for the download bar.
   const downloads = new DownloadManager({
     userData: app.userData,
@@ -92,6 +99,7 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     defaultDir: () => electronApp.getPath('downloads'),
     stamps: () => controller()?.stamps() ?? null,
     userStarted: (url) => controller()?.userDownload(url) ?? false,
+    userInputAt: (tabId) => controller()?.userInputAt(tabId) ?? 0,
     tabOf: (wc) => controller()?.tabIdOf(wc) ?? null,
     onChange: (list) => app.push('browser:downloads', list),
     openPath: (p) => shell.openPath(p),
@@ -130,6 +138,8 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     need().blockedPopup(String(tabId), action);
   });
   app.rpc.handle('browser.devTools', () => need().toggleDevTools());
+  // Live tests only: the hidden window's views get no real input, so a test stands in for the user's key press
+  if (process.env.SILO_HARNESS_LIVE_TEST) (app.rpc.handle as unknown as (name: string, fn: () => void) => void)('browser.liveTestUserInput', () => need().liveTestUserInput());
 
   // ---------- Browser safety ----------
   app.rpc.handle('browser.permissions', () => permissions.pending());

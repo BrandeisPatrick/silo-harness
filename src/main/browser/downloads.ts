@@ -4,14 +4,17 @@
 // " (2)", " (3)" added before the extension when the name is taken. The list (the last 50, never their contents) is
 // pushed to the window's tray and kept in userData/browser/downloads.json.
 //
-// The agent's downloads ask. One that begins while a browser tool is acting, or within two seconds after (the
-// controller knows), is the agent's: it is paused at once, kept out of the downloads folder (it goes to a staging
-// folder in userData), and the download bar under the URL bar asks "The agent started a download: …" with Allow and
-// Don't allow. Allow resumes it and moves it into the folder when it is complete; Don't allow cancels it and removes
+// Downloads ask unless they are the user's: one that begins within five seconds of the user's own key press or click
+// on that tab (the controller knows; the agent's synthetic events do not count), while no browser tool is acting or
+// just ended, or from the context menu's Save Image
+// As… is the user's and starts at once. Every other one, the agent's or a page's own, is paused at once, kept out of the downloads folder (it goes to a staging
+// folder in userData), and the download bar under the URL bar asks "The agent started a download: …" (or "A page
+// started a download: …" when no browser tool was acting) with Allow and Don't allow. Allow resumes it and moves it into the folder when it is complete; Don't allow cancels it and removes
 // it, so nothing is written where the user keeps their files. The user's own downloads start at once.
 //
 // The name rules and the agent window are pure: test/browser-downloads.js.
 
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -87,6 +90,32 @@ export function startedByAgent(stamps: ActingStamps, now: number, tailMs = AGENT
   return stamps.lastEnd > 0 && now >= stamps.lastEnd && now - stamps.lastEnd <= tailMs;
 }
 
+/** A download is the user's only this soon after the user's own input on that tab (a key, a click). */
+export const USER_INPUT_MS = 5000;
+
+/**
+ * Whether a download beginning at `now` is the user's: their own input on its tab (never the agent's synthetic
+ * events) came less than `windowMs` before. Anything else, a page that starts a download by itself included, asks.
+ */
+export function startedByUser(lastUserInput: number | null | undefined, now: number, windowMs = USER_INPUT_MS): boolean {
+  const t = Number(lastUserInput) || 0;
+  return t > 0 && now >= t && now - t <= windowMs;
+}
+
+/**
+ * The com.apple.quarantine value a finished download gets, as Safari writes it: flags, the time in hex seconds, the
+ * app, an id. Electron's downloads carry none, so Gatekeeper would not check an app or script the user later opens.
+ */
+export function quarantineValue(now: number, id: string, agent = 'Silo Harness'): string {
+  return `0081;${Math.floor(now / 1000).toString(16)};${agent.replace(/;/g, ' ')};${id.toUpperCase()}`;
+}
+
+/** Marks a finished download as from the internet (macOS only; a failure is ignored: the file stays as it is). */
+export function quarantine(file: string, now = Date.now()): void {
+  if (process.platform !== 'darwin' || !file) return;
+  execFile('/usr/bin/xattr', ['-w', 'com.apple.quarantine', quarantineValue(now, randomUUID()), file], () => undefined);
+}
+
 /** "example.com" or "127.0.0.1:8080" for the list and the bar; '' when the URL has none. */
 export function downloadHost(url: string): string {
   try {
@@ -120,6 +149,7 @@ export function cleanDownloadList(raw: unknown): DownloadState[] {
       state: asking ? 'cancelled' : state === 'progressing' || state === 'paused' ? 'interrupted' : state,
       startedAt: Number(o.startedAt) || 0,
       byAgent: o.byAgent === true,
+      fromPage: o.fromPage === true,
       asking: false,
       tabId: null,
     });
@@ -141,6 +171,8 @@ export interface DownloadHost {
   stamps(): ActingStamps | null;
   /** The user asked for this address from the context menu (Save Image As…): theirs, whatever the stamps say */
   userStarted?(url: string): boolean;
+  /** When the user last pressed a key or clicked in that tab (or one of its popups), ms; 0: not lately */
+  userInputAt?(tabId: string | null): number;
   /** The tab a download's contents belong to (a popup's: the tab that opened it) */
   tabOf(wc: WebContents | null): string | null;
   onChange(list: DownloadState[]): void;
@@ -198,15 +230,19 @@ export class DownloadManager {
     const filename = sanitizeFilename(item.getFilename());
     const stamps = this.host.stamps();
     const asked = [url, ...(typeof item.getURLChain === 'function' ? item.getURLChain().slice(0, 1) : [])].some((u) => this.host.userStarted?.(u));
-    const byAgent = stamps && !asked ? startedByAgent(stamps, Date.now()) : false;
     let tabId: string | null = null;
     try {
       tabId = this.host.tabOf(wc);
     } catch {
       tabId = null;
     }
+    // The user's only right after their own input on that tab and not while (or just after) the agent acts; everything
+    // else asks as the agent's do (no window: nothing asks)
+    const now = Date.now();
+    const acting = stamps ? startedByAgent(stamps, now) : false;
+    const byAgent = stamps && !asked ? acting || !startedByUser(this.host.userInputAt?.(tabId) ?? 0, now) : false;
     const entry: Entry = {
-      state: { id, filename, path: '', url, host: downloadHost(url), received: 0, total: Math.max(0, item.getTotalBytes()), state: 'progressing', startedAt: Date.now(), byAgent, asking: byAgent, tabId },
+      state: { id, filename, path: '', url, host: downloadHost(url), received: 0, total: Math.max(0, item.getTotalBytes()), state: 'progressing', startedAt: Date.now(), byAgent, fromPage: byAgent && !acting, asking: byAgent, tabId },
       item,
       staged: '',
       done: null,
@@ -275,7 +311,10 @@ export class DownloadManager {
         e.state.state = how;
         this.discardStaged(e);
       }
-    } else e.state.state = how;
+    } else {
+      e.state.state = how;
+      if (how === 'completed') quarantine(e.state.path);
+    }
     this.changed(true);
   }
 
@@ -292,6 +331,7 @@ export class DownloadManager {
       e.state.path = target;
       e.state.filename = path.basename(target);
       e.state.state = 'completed';
+      quarantine(target);
     } catch (err) {
       console.warn('[browser] could not move a download into the folder:', err instanceof Error ? err.message : String(err));
       e.state.state = 'interrupted';

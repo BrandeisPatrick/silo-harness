@@ -16,6 +16,9 @@ const whenProps = {
   cron: { type: 'string', description: 'Run on a five-field cron rhythm in local time (minute hour day-of-month month day-of-week), e.g. "0 9 * * 1-5"' },
 };
 
+/** The same fields without their descriptions, for schedule_update: schedule_create's say what they mean. */
+const bareWhenProps = { in_minutes: { type: 'number' }, at: { type: 'string' }, every_minutes: { type: 'number' }, cron: { type: 'string' } };
+
 /** Reads the rhythm arguments; undefined when none is given. Exactly one is allowed. */
 function whenFrom(args: Record<string, unknown>, now: number): ScheduleWhen | undefined {
   const given = (['in_minutes', 'at', 'every_minutes', 'cron'] as const).filter((k) => args[k] !== undefined && args[k] !== null && args[k] !== '');
@@ -135,14 +138,14 @@ export function scheduleTools(svc: Scheduler, now: () => number): Tool[] {
   const update: Tool = {
     name: 'schedule_update',
     description:
-      'Change a schedule by id: its name, prompt, rhythm (one of in_minutes, at, every_minutes, cron), target, or enable/disable it. Every change except disabling is approved by the user.',
+      'Change a schedule by id: its name, prompt, rhythm (one of in_minutes, at, every_minutes, cron, as in schedule_create), target, or enable/disable it. Every change except disabling is approved by the user.',
     parameters: {
       type: 'object',
       properties: {
         id: { type: 'string' },
         name: { type: 'string' },
         prompt: { type: 'string' },
-        ...whenProps,
+        ...bareWhenProps,
         target: { type: 'string', enum: ['new_session', 'this_session'] },
         enabled: { type: 'boolean' },
       },

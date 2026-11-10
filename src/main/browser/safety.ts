@@ -119,7 +119,10 @@ export function typedSecretMessage(kind: string, chars: number, name: string, re
  * stay credential fields until the page goes. S.check(el) gives a field's kind or null, S.mark(el) remembers a
  * credential field, S.deepActive() finds the focused element through shadow roots and same-origin frames,
  * S.secrets() lists the values of every filled credential field, and S.exposed() the filled ones a screenshot
- * would show: focused, or drawn in clear text inside the viewport.
+ * would show: focused, or drawn in clear text inside the viewport. The outline's refs live here too (S.addRef,
+ * S.byRef: an element held weakly with the role and name it had), and S.aim decides where a click lands by hit-testing
+ * the point with this world's own DOM methods, which the page cannot replace. `globalThis` is this world's, so a
+ * page that defines its own __ocSafety changes nothing here.
  */
 export function pagePrelude(): string {
   return `const S = globalThis.__ocSafety || (globalThis.__ocSafety = (() => {
@@ -195,7 +198,190 @@ export function pagePrelude(): string {
       }
       return out;
     };
-    return { check, mark, deepActive, secrets, exposed };
+    // ---- Refs and targeting: kept here, where the page cannot read, move or fake them ----
+    const EP = Element.prototype;
+    const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+    const attr = (e, n) => EP.getAttribute.call(e, n) || '';
+    const isEditable = (el) => isField(el) || el.isContentEditable;
+    const roleOf = (el) => {
+      const tag = el.tagName.toLowerCase();
+      const type = attr(el, 'type').toLowerCase();
+      return attr(el, 'role') || (tag === 'a' ? 'link' : tag === 'button' || type === 'submit' || type === 'button' ? 'button' : tag === 'select' ? 'combobox' : type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'input' || tag === 'textarea' || el.isContentEditable ? 'textbox' : tag);
+    };
+    const named = (el) => attr(el, 'aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || attr(el, 'placeholder') || attr(el, 'title') || attr(el, 'alt');
+    /** What the agent calls an element: its role and a name (a credential field's value never) */
+    const label = (el) => ({ role: roleOf(el), name: clean(named(el) || (check(el) ? '' : el.innerText || el.textContent || el.value)).slice(0, 80) });
+    /** What a ref must still be when it is used: its role and its name, a field's value left out (typing changes it) */
+    const sigOf = (el) => roleOf(el) + '\\u0001' + clean(named(el) || attr(el, 'name') || (isEditable(el) ? '' : el.innerText || el.textContent)).slice(0, 80);
+    let refs = new Map();
+    let n = 0;
+    const resetRefs = () => { refs = new Map(); n = 0; };
+    const addRef = (el) => { const r = 'ref_' + (++n); refs.set(r, { w: new WeakRef(el), sig: sigOf(el) }); return r; };
+    /** The element a ref names: { el }, or { error: 'missing' | 'changed' } */
+    const byRef = (r) => {
+      const e = refs.get(r);
+      const el = e && e.w.deref();
+      if (!el || !el.isConnected) return { error: 'missing' };
+      return sigOf(el) === e.sig ? { el } : { error: 'changed' };
+    };
+    /** What a click on an element (or what is under the point) lands on, for the click rules */
+    const clickInfo = (hit) => {
+      const CAPTCHA = /recaptcha|h-?captcha|turnstile/i;
+      let inCaptcha = false;
+      for (let e = hit; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
+        if (e.nodeType === 1 && CAPTCHA.test([e.id, attr(e, 'class'), attr(e, 'src')].join(' '))) { inCaptcha = true; break; }
+      }
+      const el = EP.closest.call(hit, 'button, a[href], input, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"]') || hit;
+      const tag = el.tagName.toLowerCase();
+      const type = clean(attr(el, 'type')).toLowerCase();
+      const isInputButton = tag === 'input' && /^(submit|button|reset|image)$/.test(type);
+      const own = tag === 'input' ? (isInputButton && !check(el) ? el.value : '') : (el.innerText || el.textContent);
+      const text = clean(own || attr(el, 'aria-label') || attr(el, 'title') || attr(el, 'alt')).slice(0, 200);
+      const form = ((tag === 'button' || tag === 'input') && el.form) || EP.closest.call(el, 'form');
+      let formHasCardFields = false;
+      let formActionHost = null;
+      if (form) {
+        const fields = [...EP.querySelectorAll.call(form, 'input, select, textarea')];
+        if (form.id) fields.push(...el.ownerDocument.querySelectorAll('[form="' + CSS.escape(form.id) + '"]'));
+        formHasCardFields = fields.some((f) => check(f) === 'card');
+        const action = clean(attr(el, 'formaction') || attr(form, 'action'));
+        if (action) { try { formActionHost = new URL(action, el.ownerDocument.location.href).host || null; } catch (e) {} }
+      }
+      return { text, role: clean(attr(el, 'role')).toLowerCase(), tag, type, inCaptcha, formHasCardFields, formActionHost };
+    };
+    /** The element under a viewport point, through open shadow roots and frames of the same site */
+    const deepHit = (x, y) => {
+      let doc = document;
+      let hit = doc.elementFromPoint(x, y);
+      for (let i = 0; hit && i < 24; i++) {
+        if (hit.shadowRoot) {
+          const inner = hit.shadowRoot.elementFromPoint(x, y);
+          if (inner && inner !== hit) { hit = inner; continue; }
+        }
+        if (hit.tagName === 'IFRAME' || hit.tagName === 'FRAME') {
+          const d = frameDoc(hit);
+          if (!d) return { hit, crossOrigin: true };
+          const r = hit.getBoundingClientRect();
+          x -= r.left + hit.clientLeft;
+          y -= r.top + hit.clientTop;
+          const inner = d.elementFromPoint(x, y);
+          if (!inner) break;
+          doc = d;
+          hit = inner;
+          continue;
+        }
+        break;
+      }
+      return { hit, crossOrigin: false };
+    };
+    /** Whether the point's element is the target, inside it (across shadow roots) or its label */
+    const lands = (el, hit) => {
+      for (let e = hit; e; e = e.parentNode || e.host || null) if (e === el) return true;
+      for (const l of el.labels || []) for (let e = hit; e; e = e.parentNode || e.host || null) if (e === l) return true;
+      return false;
+    };
+    /**
+     * Where a click on a ref (scrolled into view) or at a point goes, decided here: { x, y, target, frame? } with what
+     * is really under the point, or { error } when the ref is gone, changed, has no box, or something else covers it.
+     * frame: the click goes into a frame from another site (its address and place, for the main process to name).
+     */
+    const aim = (t) => {
+      let el = null;
+      let x = t.x;
+      let y = t.y;
+      if (t.ref) {
+        const found = byRef(t.ref);
+        if (found.error) return { error: found.error };
+        el = found.el;
+        if (t.scroll !== false) EP.scrollIntoView.call(el, { block: 'center', inline: 'center' });
+        const r = EP.getBoundingClientRect.call(el);
+        if (!r.width || !r.height) return { error: 'hidden', ...label(el) };
+        x = r.left + r.width / 2;
+        y = r.top + r.height / 2;
+      }
+      const { hit, crossOrigin } = deepHit(x, y);
+      if (!hit) return { error: el ? 'covered' : 'nothing', ...(el ? label(el) : {}) };
+      // A frame from another site under the point (over the target, or where x and y say): a click into that site
+      if (crossOrigin) {
+        const frames = [...document.querySelectorAll('iframe, frame')];
+        return { x, y, target: clickInfo(hit), frame: { src: hit.src || '', name: hit.name || '', index: frames.indexOf(hit) } };
+      }
+      if (el && !lands(el, hit)) return { error: 'covered', ...label(el) };
+      return { x, y, target: clickInfo(hit) };
+    };
+    const flash = (el) => {
+      const r = EP.getBoundingClientRect.call(el);
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #277de2;border-radius:6px;background:rgba(39,125,226,0.16);box-shadow:0 0 0 4px rgba(39,125,226,0.22);transition:opacity 0.45s ease 0.25s;left:' + (r.left - 3) + 'px;top:' + (r.top - 3) + 'px;width:' + (r.width + 6) + 'px;height:' + (r.height + 6) + 'px;';
+      document.documentElement.appendChild(box);
+      requestAnimationFrame(() => { box.style.opacity = '0'; });
+      setTimeout(() => box.remove(), 800);
+    };
+    // ---- Text a person can see: what get_text and the outline give the agent ----
+    const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|svg|HEAD|TITLE|META|LINK)$/;
+    /**
+     * Whether an element hides itself and everything in it from a person: display none, opacity (almost) 0,
+     * aria-hidden, clipped to nothing, a 1×1 box (or none) that hides its overflow, or placed more than a viewport
+     * outside the document. Text merely below the fold is not hidden.
+     */
+    const hiddenBox = (el) => {
+      const s = getComputedStyle(el);
+      if (s.display === 'none') return true;
+      if (s.display === 'contents') return attr(el, 'aria-hidden') === 'true';
+      if (parseFloat(s.opacity) < 0.1) return true;
+      if (attr(el, 'aria-hidden') === 'true') return true;
+      if (/inset\\(\\s*(100|50)%/.test(s.clipPath)) return true;
+      if (/^rect\\(\\s*0(px)?[,\\s]+0(px)?[,\\s]+0(px)?[,\\s]+0(px)?\\s*\\)$/.test(s.clip) && s.position !== 'static') return true;
+      const r = EP.getBoundingClientRect.call(el);
+      const clips = s.overflow !== 'visible' || s.overflowX !== 'visible' || s.overflowY !== 'visible';
+      if (clips && r.width <= 1 && r.height <= 1) return true;
+      if (s.position !== 'static') {
+        const vw = innerWidth || 1;
+        const vh = innerHeight || 1;
+        const left = r.left + scrollX;
+        const top = r.top + scrollY;
+        const docW = Math.max(document.documentElement.scrollWidth, vw);
+        const docH = Math.max(document.documentElement.scrollHeight, vh);
+        if (left + r.width < -vw || top + r.height < -vh || left > docW + vw || top > docH + vh) return true;
+      }
+      return false;
+    };
+    /** A text node's own look: invisible, or smaller than 2 px */
+    const textHidden = (node) => {
+      const p = node.parentElement;
+      if (!p) return true;
+      const s = getComputedStyle(p);
+      return s.visibility === 'hidden' || s.visibility === 'collapse' || parseFloat(s.fontSize) < 2;
+    };
+    const BLOCK = /^(block|flex|grid|list-item|table|table-row|table-caption|flow-root|table-row-group|table-header-group|table-footer-group)$/;
+    /** The text a person can see under root, in reading order, with line breaks where blocks are */
+    const visibleText = (root) => {
+      const out = [];
+      const walk = (el) => {
+        for (let node = el.firstChild; node; node = node.nextSibling) {
+          if (node.nodeType === 3) {
+            if (textHidden(node)) continue;
+            const pre = /^pre/.test(getComputedStyle(node.parentElement).whiteSpace);
+            const t = pre ? node.textContent : node.textContent.replace(/\\s+/g, ' ');
+            if (t.trim() || (t && out.length && !/\\s$/.test(out[out.length - 1]))) out.push(t);
+            continue;
+          }
+          if (node.nodeType !== 1 || SKIP.test(node.tagName)) continue;
+          if (node.tagName === 'BR') { out.push('\\n'); continue; }
+          if (hiddenBox(node)) continue;
+          const d = getComputedStyle(node).display;
+          const block = BLOCK.test(d);
+          if (block) out.push('\\n');
+          if (d === 'table-cell') out.push('\\t');
+          if (node.shadowRoot) walk(node.shadowRoot);
+          walk(node);
+          if (block) out.push('\\n');
+        }
+      };
+      if (root) walk(root);
+      return out.join('').split('\\n').map((l) => l.replace(/[ \\t]+/g, (m) => (m.includes('\\t') ? '\\t' : ' ')).trim()).join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
+    };
+    return { check, mark, deepActive, secrets, exposed, label, resetRefs, addRef, byRef, clickInfo, aim, flash, clean, hiddenBox, textHidden, visibleText };
   })());`;
 }
 

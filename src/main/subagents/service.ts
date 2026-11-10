@@ -391,7 +391,7 @@ export class Subagents {
   }
 
   noteText(child: Session, ev: Extract<AgentEvent, { type: 'run_end' }>): string {
-    const reason = { done: 'done', error: 'it ended with an error', max_turns: 'it reached the turn limit', plan: 'a plan waits for approval', aborted: 'it was stopped' }[ev.reason] ?? ev.reason;
+    const reason = { done: 'done', error: 'it ended with an error', max_turns: 'it reached the turn limit', plan: 'a plan waits for approval', aborted: 'it was stopped', loop: 'it was stopped for repeating the same call' }[ev.reason] ?? ev.reason;
     const text = (ev.text ?? '').trim();
     const reply = text ? clip(text, NOTE_REPLY_CHARS) + (Array.from(text).length > NOTE_REPLY_CHARS ? ' …' : '') : '(no reply text)';
     return [

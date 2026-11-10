@@ -31,9 +31,9 @@ const LOCK = '<svg class="icon" width="14" height="14" viewBox="0 0 16 16" fill=
 
 const PERMISSION_ICONS: Record<string, IconName> = { media: 'camera', notifications: 'message', 'clipboard-read': 'clipboard', openExternal: 'external-link', 'display-capture': 'panel-right', fileSystem: 'folder' };
 
-/** "The agent started a download: report.pdf (1.2 MB) from example.com" */
-export function agentDownloadSentence(d: Pick<DownloadState, 'filename' | 'total' | 'host'>): string {
-  return `The agent started a download: ${d.filename}${d.total > 0 ? ` (${formatBytes(d.total)})` : ''}${d.host ? ` from ${d.host}` : ''}`;
+/** "The agent started a download: report.pdf (1.2 MB) from example.com"; "A page started …" when no browser tool was acting */
+export function agentDownloadSentence(d: Pick<DownloadState, 'filename' | 'total' | 'host' | 'fromPage'>): string {
+  return `${d.fromPage ? 'A page' : 'The agent'} started a download: ${d.filename}${d.total > 0 ? ` (${formatBytes(d.total)})` : ''}${d.host ? ` from ${d.host}` : ''}`;
 }
 
 /** The second line of a download in the tray. */

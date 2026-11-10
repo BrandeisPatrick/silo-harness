@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.13.0 — 2026-11-10
+
+Sessions cost a fraction of what they did, the agent can search and read the web, the browser trusts pages less, and MCP servers sign in with OAuth.
+
+### Highlights
+
+- **Sessions cost less.** The same 19-turn session costs $0.05 on Claude Haiku 5.5 instead of $0.38, and $0.24 where the provider has no prompt cache ([measurement](docs/token-bench.md)).
+  ![Cost of one 19-turn session in 0.12.0 and in 0.13.0, with and without a prompt cache](docs/releases/0.13.0/token-saving.png)
+- **Search and read the web.** `web_search` finds pages and `web_fetch` reads one as text, without opening the Browser pane and behind the same site approval.
+  ![The agent searches the web, reads RFC 9110 and answers with links to the spec](docs/releases/0.13.0/web-tools.png)
+- **A more careful browser.** What a page says reaches the agent as data, not instructions, and clicks, downloads, new tabs and the clipboard each get a check.
+  ![The Browser pane holds a download the agent started until you allow it](docs/releases/0.13.0/browser-safety.png)
+
+### New
+
+- **Claude Code skills load.** Skills in `.claude/skills` and `.agents/skills`, and commands in `.claude/commands`, load next to the app's own.
+- **A skill-writing skill.** `/create-skill` writes a skill, loads it and fixes what the check reports.
+- **Skill arguments.** A skill takes what you type after its name as `$ARGUMENTS` or `$1` to `$9`, with a hint in the slash menu.
+- **MCP sign-in.** A remote server that needs OAuth shows "Sign in" under Settings → MCP servers and opens your browser only when you click it.
+- **Server tool filters.** `enabledTools` and `disabledTools` in a server entry choose which of its tools reach the model.
+- **Search backends.** `web_search` uses DuckDuckGo, or Brave, Tavily, Exa or your own SearXNG, chosen under Settings → Browser.
+- **Update notice.** A line in the sidebar says when a newer release is out; the daily check can be switched off in Settings.
+
+### Improved
+
+- **Skill problems shown.** Settings → Skills and the skill tool say what is wrong with a skill file instead of skipping it.
+- **Instructions from every folder.** `AGENTS.md` and `CLAUDE.md` are read from the project root down to the session folder, and can pull in files with `@path`.
+- **A better mod-writing skill.** `/create-mod` covers every kind of mod and checks its work with `mod_check`.
+- **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
+- **Prompt caching on Claude.** Anthropic providers use Claude's own API, which caches the prompt and the conversation from one request to the next.
+- **Caching through gateways.** Claude through OpenRouter, Portkey, LiteLLM or Vercel asks for prompt caching, and OpenAI gets the session as its cache key.
+- **A steady system prompt.** A mode switch, a rename or a new day adds a short note to the conversation, so providers keep the prompt cached.
+- **Fewer cache rewrites.** Where the provider caches, old tool output and screenshots are set aside in batches, so the cached prompt is rewritten rarely.
+- **Cache-safe tool groups.** On Claude's own API, loading the browser or terminal tools no longer rewrites the cached prompt.
+- **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
+- **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
+- **Smaller search results.** grep cuts each line at 400 characters; grep and glob results stop at 12,000 characters and say how much is left.
+- **Cheaper safety checks.** On Claude's own API, Auto mode's check caches your instruction files instead of sending them at full price each time.
+- **Retries you can see.** A failed or dropped model call is tried up to 6 times with growing waits, shown on one status line.
+- **Cheaper page reads.** `browser_get_text` and `browser_read_page` return 12,000 characters at a time and say where to continue.
+- **Servers reconnect themselves.** A remote MCP server that drops is retried 5 times with growing waits, and a crashed local one restarts on its next call.
+- **Longer MCP calls.** A server entry can set its own `timeout`, and progress from the server keeps a call alive for up to 10 minutes.
+- **Big MCP results saved.** A result over 100,000 characters goes to a private temp file; the model gets its start, its end and the path.
+- **MCP server notes.** An MCP server's own usage notes join the prompt, quoted as the server's words and capped at 2,000 characters each.
+- **One note per setting.** Stepping through the permission modes, or folders, leaves one line in the transcript, not a stack.
+
+### Fixed
+
+- **Output keeps its end.** Long command output keeps its last lines and always shows the exit code.
+- **Edits match exactly.** `edit_file` never joins or splits words to match, says when whitespace differed, and refuses files changed since read.
+- **Dropped replies taken back.** Text from a reply that broke off mid-stream is removed before the call is tried again.
+- **Cut replies continue.** A reply cut at the output limit continues, and a tool call cut mid-arguments is not run.
+- **Repeating calls stop.** A tool call made 5 times with the same result ends the run with a notice.
+
+### Security
+
+- **Nested commands checked.** Commands inside `$(…)`, backticks, `sh -c`, `eval`, `xargs` or `find -exec` get the same checks as the command itself.
+- **Read-only means read-only.** Redirections, `VAR=` prefixes and flags such as `sed -i`, `git -c`, `rg --pre` and `sort -o` no longer pass as read-only.
+- **Secrets ask before reading.** Reading keys, `.env` files or the app's data with any tool or command asks first, Plan mode included.
+- **Protected files always ask.** Writes to `.vscode`, `.mcp.json`, `.envrc`, CI workflows, git hooks, mods or shell start-up files ask every time, except in Bypass.
+- **Home-folder scans ask first.** Searching the whole home folder, `/` or `/Users` asks first, so macOS does not raise a row of privacy prompts unasked.
+- **Screen, camera, clipboard.** Commands that capture the screen, use the camera or microphone, or read the clipboard ask first.
+- **Spotlight for finding files.** The agent finds a file anywhere on the Mac with `mdfind`, which needs no folder access.
+- **Pages are data.** What the agent reads from a page arrives in a fence named by the browser, and text you cannot see is left out.
+- **Clicks land where checked.** A click on something covered, moved or changed since the agent read the page is refused; another site's frame asks first.
+- **Artifacts stay sealed.** An HTML artifact sends nothing out, loads scripts only from cdnjs, jsDelivr or unpkg, and never leaves its page by itself.
+- **Downloads ask unless yours.** A download waits for your Allow unless it starts within five seconds of your own click or key press.
+- **The clipboard stays yours.** The agent's paste, copy and cut shortcuts in the browser are refused.
+- **Tabs named by site.** `browser_tabs` shows a tab's title and address only for sites you allowed; other tabs show their site name alone.
+- **Safer page-opened tabs.** A page cannot open a local file, `data:`, `blob:` or blank tab.
+- **App ports off-limits.** The agent's browser cannot open the remote-control server or the app's debugging port.
+- **No silent identity choices.** No client certificate or Bluetooth device is picked for a page, and HTTP sign-in prompts are cancelled.
+- **Careful MCP sign-in.** Sign-in uses PKCE, accepts only https or loopback endpoints, and keeps tokens in a file only you can read.
+- **Public sites only.** `web_fetch` refuses private and local-network addresses, re-checks every redirect, and asks for a new site as the browser does.
+- **Web text is data.** Fetched pages and search results arrive in a fence, and text imitating the fence is made harmless.
+- **Hostile pages stay cheap.** `web_fetch` turns a page built to stall it into text in bounded time and size, and hidden text stays out.
+- **Search keys stay put.** A search key is masked in Settings, never shown to the model and cannot be set by a project's settings file.
+- **Prompts that explain themselves.** Every macOS permission prompt now says in a sentence what asked for it.
+
+### For developers
+
+- **Skill format defined.** [docs/skills.md](docs/skills.md) sets out the fields, the folders and every problem message.
+- **MCP reference.** [docs/mcp.md](docs/mcp.md) covers every server key, sign-in and reconnection.
+- **Web reference.** [docs/web.md](docs/web.md) covers both web tools, their safety rules and the `webSearch` setting.
+- **Access reference.** [docs/access.md](docs/access.md) lists every folder, connection and macOS prompt the app can cause.
+
+### Known issues
+
+- **Sign-in tested locally.** MCP sign-in is tested against a local OAuth server, not yet against hosted providers.
+
 ## 0.12.0 — 2026-11-09
 
 Auto mode now works like Claude Code's, the app says much less, and sessions work in a Silo folder in Documents by default.

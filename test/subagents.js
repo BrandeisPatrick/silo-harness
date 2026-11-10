@@ -49,14 +49,16 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   const of = (sid, type) => events.filter((e) => e.sid === sid && (!type || e.ev.type === type)).map((e) => e.ev);
   let callId = 0;
   const call = (name, args) => ({ id: `c${++callId}`, name, args });
-  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user');
+  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const lastUser = (payload) => [...(payload.messages || [])].reverse().find((m) => m.role === 'user');
   const has = (m, tag) => typeof m?.content === 'string' && m.content.includes(tag);
   const reply = (tag, r) => state.replies.push({ ...r, when: (p) => has(firstUser(p), tag) });
   const replyLast = (tag, r) => state.replies.push({ ...r, when: (p) => has(lastUser(p), tag) });
   const idle = (id) => waitFor(() => !rt.isRunning(id), 15000, `session ${id} to finish`);
   const allIdle = () => waitFor(() => rt.running().length === 0, 20000, 'every session to finish');
-  const toolMsgs = (id) => rt.get(id).messages.filter((m) => m.role === 'tool').map((m) => m.content);
+  // Changed on purpose: the session tools are a tool group now, and calling one first loads the group with a load_tools
+  // call of the agent's own (tools/groups.ts), whose result is left out here
+  const toolMsgs = (id) => rt.get(id).messages.filter((m) => m.role === 'tool' && !String(m.content).startsWith('Loaded ')).map((m) => m.content);
   const tool = (name) => app.tools.list().find((t) => t.name === name);
   /** A ToolContext for calling a tool directly; approvals are recorded and answered with `answer`. */
   const ctxFor = (sessionId, answer = { ok: true }) => {

@@ -121,8 +121,10 @@ export interface DownloadState {
   state: DownloadStatus;
   /** When it began (ms since the epoch) */
   startedAt: number;
-  /** It began while a browser tool was acting (or within two seconds after): it waits, paused, for Allow or Don't allow */
+  /** Not the user's own (the agent's, or a page's by itself): it waits, paused, for Allow or Don't allow */
   byAgent: boolean;
+  /** No browser tool was acting when it began, or within two seconds before: a page started it, and the bar says so */
+  fromPage: boolean;
   /** An agent's download the user has not answered yet (the download bar asks) */
   asking: boolean;
   /** The tab it came from (a popup's: the tab that opened it); null when unknown or closed */

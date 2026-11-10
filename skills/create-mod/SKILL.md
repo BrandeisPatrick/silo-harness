@@ -1,16 +1,36 @@
 ---
 name: create-mod
-description: Write or change an Silo Harness mod (a panel, tab, composer strip, background, theme, a look for the conversation or the chat bar, or a slash command made of mod.json plus HTML or CSS). Load before touching any mod.
+description: Writes or changes a Silo Harness mod, a folder of mod.json plus HTML or CSS that adds a rail panel, side-pane tab, strip above the composer, hidden hook worker, background, theme, conversation or chat-bar look, or slash command to the app. Use when the user asks to make, change, fix or debug a mod, panel, widget, theme, background, look or custom slash command for Silo Harness.
+argument-hint: <what the mod should do>
 ---
-A mod is a folder named by its id with a `mod.json` and one or more HTML pages. The page runs in a sandboxed frame and talks to the app only through the `harness` object.
+A mod is a folder named by its id, holding `mod.json` and the files it names. A page runs in a sandboxed frame and talks to the app only through the `harness` object; CSS (themes, looks) is applied to the app's own page. Full field tables, the harness API by permission, the kit and the stable look hooks are in `reference.md` in this skill's folder. Read the part you need before writing.
 
-## Where to write
-- Something for this project only: `<project>/.silo-harness/mods/<id>/` (the working directory's `.silo-harness/mods`).
-- A personal mod for every project: `~/.silo-harness/mods/<id>/`.
-- The folder name must equal `id`: 2 to 40 lower-case letters, digits and `-`, starting with a letter.
+## 1. Pick the kind
+| The user wants | Contributes |
+| --- | --- |
+| a panel beside the chat | a view, `"seat": "rail"` |
+| a full tab next to Browser, Diff, Terminal | a view, `"seat": "tab"` (page `height: 100%`, scroll inside) |
+| one compact row above the composer | a view, `"seat": "composer"` (up to 120 px) |
+| something that reacts to tool calls or prompts, no UI | a view, `"seat": "worker"`, plus `contributes.hooks` and the `hooks` permission |
+| an animated or pictured backdrop | a view, `"seat": "background"` (takes no clicks; `pointer` event `{ x, y }`) |
+| the conversation or the chat bar to look different | `looks` with `target` `conversation` or `composer` |
+| the whole app recoloured | `styles` (a theme); prefer overriding tokens on `:root` |
+| `/something` | `commands`, usually with a view that handles it |
 
-## Complete minimal example
-`~/.silo-harness/mods/word-count/mod.json`:
+Backgrounds, looks and themes are "looks": no switch, one in use per kind. Views (other seats) and commands are behind the mod's switch. Use a look, not `styles`, when the request is only about the conversation or the chat bar. To change a built-in panel, copy its folder (from `mod_check` with its id) into the user folder under the same id: the copy replaces it.
+
+## 2. Pick the folder
+- This project only: `<project>/.silo-harness/mods/<id>/`.
+- Every project: `~/.silo-harness/mods/<id>/`.
+- Older installs still use `.open-harness` (read when `.silo-harness` does not exist), and `SILO_HARNESS_CONFIG_DIR` can move the user folder. Call `mod_check` with the new id first: for an unknown id it names the real folders.
+- `id` = folder name: 2 to 40 lower-case letters, digits and `-`, starting with a letter.
+- Each write into a mods folder asks the user, in every mode but Bypass. That is expected; do not work around it.
+
+## 3. Write mod.json
+Required: `"protocol": 1`, `id`, `name`, `version` (`major.minor.patch`). Optional: `description`, `author`, `homepage`, `license`, `icon`, `permissions`, `contributes` (`views`, `styles`, `looks`, `commands`, `settings`, `hooks`). Paths are relative to the folder, use `/`, no `..`, no names starting with `.`, and the file must exist. Ask only for the permissions the page calls; a call without one rejects with `code: 'permission'`. Field rules: `reference.md`, "mod.json".
+
+## 4. Write the page or the CSS
+Minimal rail panel, `~/.silo-harness/mods/word-count/`:
 ```json
 {
   "protocol": 1,
@@ -24,7 +44,7 @@ A mod is a folder named by its id with a `mod.json` and one or more HTML pages. 
   }
 }
 ```
-`~/.silo-harness/mods/word-count/panel.html`:
+`panel.html`:
 ```html
 <!doctype html>
 <link rel="stylesheet" href="/@harness/harness.css">
@@ -47,80 +67,43 @@ A mod is a folder named by its id with a `mod.json` and one or more HTML pages. 
   }
   harness.ready.then(load);
   harness.on('message.assistant', (m) => { words += count(m.text); show(); });
-  harness.on('session.changed', load);
+  harness.on('session.switched', load);
 </script>
 ```
-
-## mod.json fields
-Required: `protocol` (1), `id`, `name`, `version` ("0.1.0"). Optional: `description`, `author`, `icon`, `permissions`, `contributes` with:
-- `views`: `[{ "id", "title", "entry", "seat", "order"?, "maxHeight"?, "preview"? }]`. `entry` is a relative path to an HTML file in the folder; `preview` (backgrounds only, optional) a picture in the folder for its card in Settings.
-- `styles`: `["theme.css"]`, a theme: CSS applied to the app itself (override tokens like `--accent` on `:root`). One theme is in use at a time.
-- `looks`: `[{ "id", "title", "target": "conversation"|"composer", "styles": ["look.css"], "preview"? }]`, CSS for one region only (see Looks).
-- `commands`: `[{ "name": "words", "description": "…", "view": "main" }]`; the page gets a `command` event `{ name, args }`.
-- `settings`: `[{ "key", "type": "boolean"|"string"|"number"|"select", "title", "default", "options"? }]`; read with `harness.settings.get()`.
-
-## Seats
-- `rail`: a section in the right rail, sized to content (up to `maxHeight`, default 360).
-- `tab`: a full tab in the side pane next to Browser, Diff and Terminal.
-- `composer`: one compact row above the composer (up to 120 px).
-- `background`: behind the whole window, takes no clicks. The `pointer` event `{ x, y }` (fractions of the window) lets it follow the pointer. A background is a look (see Looks).
-
-## Looks
-A look restyles one region, and the user uses it in Settings → Mods → Chat bar or Conversation (one per region). Use a look, not `styles`, when the request is about how the conversation or the chat bar looks. Backgrounds and themes are looks too (tabs Background and Theme).
-- Looks have no switch. A new one is not applied: the user previews it (the card in the chat has Preview, which opens its tab with it in the preview) and then uses it (Use on the card or the tab; the first Use of a look of theirs asks for their approval once). The preview reloads as you save.
-- The preview draws a sample chat bar or exchange with the same ids and classes as the window, compiled for the preview's region, so a look written against the stable hooks previews exactly as it applies.
-- `conversation`: the app wraps the CSS in `@scope (#messages) { … }`; `composer`: in `@scope (#chatbar) { … }`. Selectors reach only that region; `:scope` is its root. Set tokens on `:scope` to retheme the region: `:scope { --accent: #2b9; }`.
-- State on the root, no script needed: `data-running="true|false"`, `data-scheme="light|dark"`, `data-mode`, and `data-set-<key>` for each of the mod's `settings` (key in lower case). Branch on them: `:scope[data-running="true"] .tool-status.spin { … }`.
-- Rely only on the stable hooks in docs/mods.md (Looks): `.msg.user .bubble`, `.msg.assistant .md`, `.tool`, `.tool-verb`, `.code-block`, `.task-list`, `#composer`, `#input`, `#send-btn`, `#model-btn`, `#mode-btn`, and so on.
-- `@keyframes` are moved out of the scope, so their names are global: prefix them with the mod id. `@import` is removed.
-- Keep the app's text size and line height; work in light and dark; animate only under `@media (prefers-reduced-motion: no-preference)`.
-- `mods/hyperspace` (glow.css, holo.css, cockpit.css) is the full example.
-
-Minimal look (`mod.json` and `look.css`):
-```json
-{ "protocol": 1, "id": "teal-chat", "name": "Teal chat", "version": "0.1.0",
-  "contributes": { "looks": [{ "id": "main", "title": "Teal", "target": "conversation", "styles": ["look.css"] }] } }
-```
+Minimal conversation look (`look.css`, listed as `"looks": [{ "id": "main", "title": "Teal", "target": "conversation", "styles": ["look.css"] }]`):
 ```css
 :scope { --look: #1a9e9e; }
 :scope[data-scheme="dark"] { --look: #46d1d1; }
 .msg.user .bubble { box-shadow: inset 3px 0 0 var(--look); }
-.md :is(h1, h2) { color: var(--look); }
+@keyframes teal-chat-pulse { 50% { opacity: 0.5; } }
 ```
 
-## Kit (`/@harness/harness.css`)
-Classes: `h-row` (label/value line), `h-label`, `h-value`, `h-muted`, `h-title`, `h-list` + `h-item` (clickable rows), `h-btn` (`.primary`, `.ghost`, `.sm`), `h-input`, `h-switch`, `h-chip`, `h-bar` + `h-bar-seg` (meter), `h-dot`, `h-empty`, `h-spin`, `h-mono`, `h-md` (put `ui.markdown()`'s html in it: chat styling, working Copy buttons and links; `.compact` for the rail).
-Tokens: `--bg-000`…`--bg-400`, `--text-100`, `--text-200`, `--text-400`, `--border`, `--border-subtle`, `--accent`, `--danger`, `--success`, `--font`, `--mono`, `--r-control`, `--r-card`. Keep panels compact: 13 px text, 8 px gaps.
+Page rules:
+- Load the kit from `/@harness/harness.css` and `/@harness/harness.js`; wait for `harness.ready`. Use its classes and tokens so the panel looks native and follows light, dark and the theme.
+- No `localStorage`, `sessionStorage`, IndexedDB or cookies: use `harness.storage` (and `harness.storage.session`).
+- No `window.open`, `alert`, submitting forms or navigating away. Open links with `harness.ui.openExternal`.
+- Offline unless the mod has `network`: no CDNs, web fonts or remote images. Put files in the folder and link them relatively.
+- Handle nothing to show (no session, empty transcript, a rejected call) with an `h-empty` line, never a blank panel.
+- Reset on `session.switched`; `session.changed` also fires when the title or run state changes.
+- Inline `<script>` and `<style>` are fine.
 
-## harness calls, by permission
-Every call returns a promise; wait for `harness.ready` first. `harness.on(event, fn)` subscribes.
-- Always: `ui.theme()`, `ui.setTitle(t)`, `ui.setBadge(v)`, `ui.toast(text, { kind })`, `ui.open(viewId)`, `ui.copy(t)`, `ui.openExternal(url)`, `ui.markdown(text)`, `storage.get(key, fallback)`, `storage.set(key, value)`, `storage.remove(key)`, `storage.keys()`, `storage.session.*` (same, per session), `settings.get()`. Events: `theme.changed`, `settings.changed`, `visibility.changed`, `command`.
-- `session:read`: `session.get()` (resolves with `{ id, title, cwd, origin, messageCount, createdAt, updatedAt, running, attention? }`), `session.transcript({ limit })`, `session.tasks()`, `session.plan()`, `session.outputs()`, `session.context()`, `session.related()`, `outputs.open({ kind, id })`. Events: `session.changed`, `run.started`, `run.ended`, `message.user`, `message.assistant`, `message.delta`, `tool.started`, `tool.ended`, `tasks.changed`, `plan.changed`, `outputs.changed`, `context.changed`.
-- `session:send`: `session.send(text)`, `composer.insert(text)`.
-- `session:control`: `session.stop()`, `session.compact(focus)`, `sessions.open(id)`, `sessions.create()`, `sessions.spawn({ title, prompt })`, `sessions.merge(id)`.
-- `sessions:read`: `sessions.list()`, `sessions.search(query, { limit })`.
-- `model`: `model.complete({ messages, system, maxTokens, context: 'session' }, onDelta)`, `model.cancel()`.
-- `skills:read`: `skills.list()`, `skills.usage({ scope: 'session' | 'all' })`; event `skills.used`.
-- `config:read`: `config.get()`; `config:write`: `config.set(patch)` (theme, autoCompact, compactThreshold, keepAwake, notifications, background only).
-- `schedules`: `schedules.list()`, `.create(input)`, `.update(id, patch)`, `.remove(id)`, `.runNow(id)`.
-- `remote`: `remote.status()`, `remote.start()`, `remote.stop()`.
-- `network`: no call; lets the page load and fetch `https:` URLs.
+Look and theme rules:
+- A look is wrapped in `@scope (#messages)` or `@scope (#chatbar)`: style `:scope` and the stable hooks in `reference.md`, nothing else. Branch on `data-running`, `data-scheme`, `data-mode`, `data-set-<key>` on `:scope`.
+- `@import` is removed. `@keyframes` names are global and the app's win: prefix them with the mod id.
+- Keep the app's text size and line height; work in light and dark; animate only under `@media (prefers-reduced-motion: no-preference)`.
+- Examples to copy: `mods/hyperspace` (background, both looks, settings), `mods/theme-midnight` and `mods/theme-paper` (token-only themes).
 
-Ask only for the permissions the page uses. A call without its permission rejects with `code: 'permission'`.
+## 5. Check with mod_check
+`mod_check` is in the `mods` tool group: load it with `load_tools` (`{ "groups": ["mods"] }`) if it is not offered yet. Call it with `{ "id": "<id>" }`. It reports the folder and scope, the state (`on`, `off`, `paused`, `invalid`), every problem in mod.json, warnings, permissions granted and still wanted, the views, looks and commands, the errors its loaded pages threw (latest five; old ones stay listed until the app restarts, so compare times), and a `Next:` line. Without an id it checks every user and project mod.
 
-## Rules that trip people up
-- No `localStorage`, `sessionStorage`, IndexedDB or cookies: use `harness.storage`.
-- Link your own files with relative URLs (`style.css`, `img/logo.svg`) and the kit with `/@harness/…`. No `..`, no absolute paths, no files starting with `.`.
-- No network without the `network` permission: no CDNs, web fonts or remote images. Inline what you need or put it in the folder.
-- No `window.open`, `alert`, forms that submit, or navigating away; the page cannot leave its own origin.
-- Handle "nothing to show": no session open, an empty transcript, a call that rejects. Show an `h-empty` line instead of a blank or broken panel.
-- Inline `<script>` and `<style>` are fine. Keep everything in one page unless it grows.
-- Adding a permission to a mod that is on pauses it until the user approves. Adding a look does not: its first Use asks.
-- A look applies only once the user uses it (Settings → Mods → Background, Chat bar, Conversation or Theme, or Use on the card in the chat); it is previewed first. Tell them so.
+Fix every problem it lists and call it again until it says `mod.json: valid`. While mod.json is invalid nothing new of the mod loads (the last valid version stays in use). A new mod shows as `off`: that is expected.
 
-## The loop
-1. Write `mod.json` and the page(s) in the right folder.
-2. Call the `mod_check` tool with the id. Fix every problem it lists and call it again until mod.json is valid.
-   A mod you just wrote shows in the installed list and in `mod_check` as off until the user turns it on (a look: until they use it); that is expected and does not mean it existed before.
-3. Tell the user the mod is ready and that they turn it on from the card in the chat or in Settings → Mods. For a look: they preview it (Preview on the card) and use it (Use). Never edit config files to turn it on or apply it yourself.
-4. Once it is on, each save reloads the page. After changes, call `mod_check` again: it also lists errors the page threw.
+## 6. Tell the user how to turn it on
+- A mod with views or commands: they turn it on from the card in the chat or in Settings → Mods.
+- A look, background or theme: they press Preview on the card (or open Settings → Mods → Background, Chat bar, Conversation or Theme), then Use. The first Use of their own look asks for approval once.
+- Never edit config files to turn a mod on or apply a look yourself.
+- Adding a permission to a mod that is on pauses it until they approve. Adding a look does not; its first Use asks.
+- Once on, every save reloads the page (a look reloads in the preview as well).
+
+## 7. Final check
+After the last edit, call `mod_check` with the id once more. Done means: `mod.json: valid`, no warnings you did not intend, `Errors its pages reported: none` (when it is on), and you followed its `Next:` line in what you tell the user.

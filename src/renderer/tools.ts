@@ -159,6 +159,8 @@ export function toolLabel(name: string, a: Args): ToolLabel {
     case 'terminal_run': return { verb: 'Terminal', arg: short(str(a, 'command').split('\n')[0], 120), title: str(a, 'command'), icon: 'terminal', mono: true };
     case 'terminal_read': return { verb: 'Read terminal', arg: tabArg(a) || 'active tab', icon: 'terminal', mono: Boolean(tabArg(a)) };
     case 'terminal_list': return { verb: 'Terminal tabs', arg: '', icon: 'list', mono: false };
+    case 'web_fetch': return { verb: 'Fetch', arg: shortUrl(str(a, 'url')), title: str(a, 'url'), icon: 'globe', mono: true };
+    case 'web_search': return { verb: 'Search the web', arg: quoted(str(a, 'query'), 80), title: str(a, 'query'), icon: 'search', mono: false };
     case 'terminal_stop': return { verb: 'Stop in terminal', arg: tabArg(a), icon: 'square', mono: true };
     case 'skill': return { verb: 'Skill', arg: '/' + str(a, 'name'), icon: 'sparkles', mono: true };
     case 'create_artifact': {
@@ -288,6 +290,8 @@ export function statusVerb(name: string): string {
   if (name === 'terminal_run') return 'Running in the terminal…';
   if (name === 'terminal_read') return 'Reading the terminal…';
   if (name === 'terminal_list') return 'Listing terminals…';
+  if (name === 'web_fetch') return 'Fetching…';
+  if (name === 'web_search') return 'Searching the web…';
   if (name === 'terminal_stop') return 'Stopping the command…';
   if (name === 'create_artifact') return 'Making the artifact…';
   if (name === 'update_tasks') return 'Updating tasks…';
@@ -306,6 +310,7 @@ const KNOWN_TOOLS = new Set([
   'terminal_run', 'terminal_read', 'terminal_list', 'terminal_stop',
   'browser_navigate', 'browser_get_text', 'browser_read_page', 'browser_find', 'browser_click',
   'browser_type', 'browser_press_key', 'browser_scroll', 'browser_screenshot', 'browser_eval', 'browser_wait_for', 'browser_tabs',
+  'web_fetch', 'web_search',
   ...AGENT_TOOLS,
 ]);
 
@@ -1032,6 +1037,7 @@ export function approvalTitle(name: string, detail: string, args?: Args, browser
   if (name === 'terminal_run') return 'Run this command in the terminal?';
   if (name === 'edit_file') return `Edit ${basename(target) || 'this file'}?`;
   if (name === 'write_file') return `Write ${basename(target) || 'this file'}?`;
+  if (name === 'read_file' || name === 'list_directory' || name === 'grep' || name === 'glob') return `Read ${basename(target) || 'this file'}?`;
   const mcp = mcpParts(name);
   if (mcp) return `Call ${mcp.tool} on ${mcp.server}?`;
   const agent = agentApproval(name, detail);

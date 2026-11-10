@@ -17,7 +17,7 @@ export function subagentTools(svc: Subagents): Tool[] {
   const spawn: Tool = {
     name: 'session_spawn',
     description:
-      'Start a sub-session: a separate agent session in the same folder that works on a piece of the job in the background, side by side with this one, and shows under this session in the sidebar. Returns at once; the sub-session reports here by itself each time it finishes a turn, so do not wait or poll. ' +
+      'Start a sub-session: a separate agent session in the same folder that works on a piece of the job in the background, side by side with this one. Returns at once; the sub-session reports here by itself each time it finishes a turn, so do not wait or poll. ' +
       'The sub-session knows nothing of this conversation: `prompt` is its whole brief. Make it self-contained: the goal, the files or area to work on, what done looks like, and what to report back. ' +
       'Use it for independent pieces of work that can run in parallel, or a side investigation that should not fill this conversation. Limits: at most 4 running and 12 in all per session; a sub-session of a sub-session cannot start more.',
     parameters: {
@@ -46,7 +46,7 @@ export function subagentTools(svc: Subagents): Tool[] {
   const send: Tool = {
     name: 'session_send',
     description:
-      'Send a message to another session, named by its id or its name (written loosely: case, quotes, punctuation, the start of the name or a small typo are fine). It starts a turn there, or waits behind the turn in progress (or, while its plan waits for the user, until the plan is decided). The receiver sees it as a request from you, not from the user. ' +
+      'Send a message to another session, named by its id or its name (written loosely is fine). It starts a turn there, or waits behind the turn in progress. The receiver sees it as a request from you, not from the user. ' +
       'Use it to answer or steer one of your sub-sessions, to tell your parent session something it needs before you finish, or to ask another session for something. Messages to your parent and your own sub-sessions go without asking; a message to any other session needs the user\'s approval. ' +
       'The reply does not come back by itself (a sub-session\'s report does): read it later with session_read.',
     parameters: {
@@ -122,7 +122,7 @@ export function subagentTools(svc: Subagents): Tool[] {
     name: 'session_merge',
     description:
       'Merge a finished sub-session or fork of this session into this one: a summary of what it did (for a fork: since it split off) comes back as the result, and it is marked merged. Merge one before relying on its result. ' +
-      'Only the conversation is merged: file changes need no merging, since all sessions work in the same folder (this is not a git merge). Refused while it is running or when it was merged already.',
+      'Only the conversation is merged: file changes need no merging, since all sessions work in the same folder (this is not a git merge).',
     parameters: { type: 'object', properties: { id: { type: 'string', description: 'The sub-session or fork, by id or name' } }, required: ['id'] },
     run: (args: { id?: unknown }, ctx: ToolContext) =>
       guarded(async () => {
@@ -143,7 +143,7 @@ export function subagentTools(svc: Subagents): Tool[] {
   const rename: Tool = {
     name: 'session_rename',
     description:
-      'Rename this session (only this one), when the user asks to call it something. The name shows in the sidebar and the title bar, generated titles no longer replace it, and other sessions can find this one by it. Needs no approval.',
+      'Rename this session (only this one), when the user asks to call it something. Generated titles no longer replace the name.',
     parameters: { type: 'object', properties: { name: { type: 'string', description: 'The new name, a few words' } }, required: ['name'] },
     // Not a change to the project: plan mode offers it too
     readOnly: true,

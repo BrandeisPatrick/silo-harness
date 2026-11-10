@@ -9,8 +9,8 @@ import type { AppConfig } from '../../shared/types';
 import type { BrowserBuiltIns, BrowserListField, SavedPermission } from '../../shared/browser';
 import { h } from '../dom.js';
 import { icon } from '../icons.js';
-import { parseSitePattern } from './model.js';
-import { actions, button, group, note, row, sectionTitle, tildePath, type Row } from './ui.js';
+import { parseSitePattern, parseText, parseUrl } from './model.js';
+import { actions, button, group, note, row, sectionTitle, tildePath, type Choice, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
 
@@ -191,6 +191,34 @@ export function browserSection(ctx: Ctx): Section {
   const builtInExempt = row({ id: 'browser-exempt-builtin', title: 'Built-in', desc: '', keywords: 'exempt localhost 127.0.0.1 local test development' });
   builtInExempt.descEl.classList.add('sp-mono-list');
 
+  // ---------- Web search (web_search's backend, AppConfig.webSearch) ----------
+
+  type SearchProvider = NonNullable<NonNullable<AppConfig['webSearch']>['provider']>;
+  const SEARCH_PROVIDERS: Choice<SearchProvider>[] = [
+    { value: 'duckduckgo', label: 'DuckDuckGo' },
+    { value: 'brave', label: 'Brave' },
+    { value: 'tavily', label: 'Tavily' },
+    { value: 'exa', label: 'Exa' },
+    { value: 'searxng', label: 'SearXNG' },
+  ];
+  const searchProvider = (cfg: AppConfig = ctx.config()): SearchProvider => cfg.webSearch?.provider ?? 'duckduckgo';
+  const searchRow = ctx.selectField<SearchProvider>({
+    id: 'webSearch-provider',
+    title: 'Web search',
+    keywords: 'web search provider duckduckgo brave tavily exa searxng web_search',
+    field: 'webSearch.provider',
+    choices: SEARCH_PROVIDERS,
+    read: (v) => (typeof v === 'string' && v ? (v as SearchProvider) : 'duckduckgo'),
+    onSaved: () => syncSearch(ctx.config()),
+  });
+  const searchKey = ctx.textField({ id: 'webSearch-apiKey', inputId: 'webSearch-apiKey', title: 'API key', keywords: 'web search key token secret brave tavily exa', field: 'webSearch.apiKey', type: 'password', placeholder: 'Key', parse: parseText });
+  const searchBase = ctx.textField({ id: 'webSearch-baseUrl', inputId: 'webSearch-baseUrl', title: 'SearXNG address', keywords: 'web search searxng url address instance', field: 'webSearch.baseUrl', placeholder: 'http://localhost:8888', mono: true, parse: parseUrl });
+  function syncSearch(cfg: AppConfig): void {
+    const p = searchProvider(cfg);
+    searchKey.el.hidden = !(p === 'brave' || p === 'tavily' || p === 'exa');
+    searchBase.el.hidden = p !== 'searxng';
+  }
+
   // ---------- Permissions ----------
 
   const permsEl = h('div', { class: 'sp-rows' });
@@ -235,6 +263,7 @@ export function browserSection(ctx: Ctx): Section {
 
   el.append(
     group(null, keepCookies, clearRow, dirRow, chatLinks),
+    group(null, searchRow, searchKey, searchBase),
     group(allowed.title, allowed.rowsEl, allowed.addRow),
     group(sensitive.title, sensitiveFold, sensitive.rowsEl, sensitive.addRow),
     group(exempt.title, builtInExempt, exempt.rowsEl, exempt.addRow),
@@ -268,6 +297,7 @@ export function browserSection(ctx: Ctx): Section {
 
   function sync(cfg: AppConfig): void {
     renderDir(cfg);
+    syncSearch(cfg);
     allowed.render(cfg);
     sensitive.render(cfg);
     exempt.render(cfg);

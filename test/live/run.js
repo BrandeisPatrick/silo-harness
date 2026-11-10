@@ -33,11 +33,14 @@ const SCRIPTS = [
   { name: 'history' },
   { name: 'carry-over', shots: 'none' },
   { name: 'compaction', needsApi: true },
+  { name: 'prompt-cache', needsApi: true, shots: 'none' },
+  { name: 'deferred-groups', needsApi: true, shots: 'none' },
   { name: 'subagents' },
   { name: 'session-messages' },
   { name: 'names' },
   { name: 'tool-rows' },
   { name: 'quiet' },
+  { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },
   { name: 'mods-look', shots: 'env' },
   { name: 'type-scale' },
@@ -61,6 +64,7 @@ const SCRIPTS = [
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
   { name: 'browser-polish' },
+  { name: 'browser-hardening' },
   { name: 'chat-cards' },
 ];
 

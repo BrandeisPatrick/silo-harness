@@ -4,8 +4,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { splitCommands, words } from '../guard';
-import { configDir } from '../paths';
+import { allSimpleCommands, commandArgv } from '../guard';
 
 /** Blocks in a row, and in all, after which Auto mode pauses for the session (the approval cards come back). */
 export const PAUSE_IN_A_ROW = 3;
@@ -74,25 +73,18 @@ export function criticalTarget(target: string, cwd: string): boolean {
   return SYSTEM_DIRS.includes(abs);
 }
 
-const WRAPPERS = new Set(['env', 'nohup', 'time', 'nice', 'exec', 'command', 'builtin', 'caffeinate']);
-
 /**
  * Why a command asks the user even in Auto mode, whatever the safety check would say: it uses sudo, or it deletes a
  * critical folder (rm or rmdir of the home folder, /, the working directory itself, a system folder). Null otherwise.
+ * Commands inside substitutions, sh -c and eval strings, and what xargs or find -exec runs, count too.
  */
 export function alwaysAskReason(command: string, cwd: string): string | null {
-  for (const simple of splitCommands(command.trim())) {
-    const w = words(simple);
-    let i = 0;
-    while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
-    while (i < w.length && WRAPPERS.has(w[i])) {
-      i++;
-      while (i < w.length && w[i].startsWith('-')) i++;
-    }
-    const prog = path.basename(w[i] ?? '');
+  for (const simple of allSimpleCommands(command)) {
+    const argv = commandArgv(simple);
+    const prog = path.basename(argv[0] ?? '');
     if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
     if (prog === 'rm' || prog === 'rmdir') {
-      const args = w.slice(i + 1);
+      const args = argv.slice(1);
       const dash = args.indexOf('--');
       const targets = dash >= 0 ? [...args.slice(0, dash).filter((a) => !a.startsWith('-')), ...args.slice(dash + 1)] : args.filter((a) => !a.startsWith('-'));
       if (targets.some((t) => criticalTarget(t, cwd))) return 'deletes a critical folder';
@@ -101,33 +93,11 @@ export function alwaysAskReason(command: string, cwd: string): string | null {
   return null;
 }
 
-/** Folders inside the working directory that configure git, editors, the app or another agent */
-const PROTECTED_IN_PROJECT = new Set(['.git', '.silo-harness', '.open-harness', '.claude', '.vscode', '.idea']);
-const PROTECTED_FILES_IN_PROJECT = new Set(['.mcp.json']);
-/** Under the home folder: shell start-up files, keys and credentials, launch agents */
-const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.profile', '.gitconfig', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
-/** The app's own data: sessions, config.json, settings */
-const APP_DATA = ['Library/Application Support/Silo Harness', 'Library/Application Support/Open Harness'];
-
 /**
- * Why a write to `abs` is protected (an allow rule does not skip the safety check for it), or null. Inside the
- * working directory: .git, the app's and other tools' project folders, .mcp.json. Anywhere: shell start-up files,
- * keys and credentials, launch agents, and the app's own data and settings.
+ * Why a write to `abs` is protected (it asks in every mode but Bypass, and no allow rule covers it), or null. The
+ * rules are in guard.ts, where the shell guard uses them too.
  */
-export function protectedWrite(abs: string, cwd: string): string | null {
-  const file = path.resolve(expandHome(abs));
-  const root = path.resolve(cwd);
-  if (holds(root, file) && file !== root) {
-    const rel = path.relative(root, file);
-    const first = rel.split(path.sep)[0];
-    if (first === '.git') return 'modifies the .git directory';
-    if (PROTECTED_IN_PROJECT.has(first) || PROTECTED_FILES_IN_PROJECT.has(rel)) return 'writes a protected file';
-  }
-  const h = home();
-  for (const p of [...PROTECTED_IN_HOME, ...APP_DATA]) if (holds(path.join(h, p), file)) return 'writes a protected file';
-  if (holds(configDir(), file)) return 'writes a protected file';
-  return null;
-}
+export { protectedWrite, PROTECTED_REASONS } from '../guard';
 
 /** The key a once-allowed action is found by when the agent tries it again: the tool and what its approval showed. */
 export function actionKey(name: string, detail: string): string {

@@ -217,6 +217,10 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         else thinking.set(id, { text: ev.text, started: now() });
         return;
       }
+      case 'reply_discarded':
+        // A failed model call's thinking is not logged as the reply's
+        thinking.delete(id);
+        return;
       case 'thinking_done': {
         const th = thinking.get(id);
         thinking.delete(id);
@@ -230,7 +234,13 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         write(id, 'tool.end', { id: ev.id, name: ev.name, ok: ev.ok, durationMs: ev.durationMs, chars: ev.result?.length ?? 0 });
         return;
       case 'usage':
-        write(id, 'usage', { promptTokens: ev.promptTokens, completionTokens: ev.completionTokens });
+        // The cache counts only when the provider reported them (the token bench reads them from here)
+        write(id, 'usage', {
+          promptTokens: ev.promptTokens,
+          completionTokens: ev.completionTokens,
+          ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+          ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
+        });
         return;
       case 'approval_request':
         write(id, 'approval.request', ev.reason ? { id: ev.id, name: ev.name, detail: ev.detail, reason: ev.reason } : { id: ev.id, name: ev.name, detail: ev.detail });

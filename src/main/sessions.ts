@@ -5,11 +5,12 @@ import type OpenAI from 'openai';
 import type { CompactionInfo, MessageOrigin, PlanInfo, SessionMeta, SessionOrigin, TaskItem, TranscriptItem, ArtifactInfo } from '../shared/types';
 import type { ImageInfo } from '../shared/images';
 import type { Snapshot } from './changes';
-import { FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
+import { CONTEXT_NOTE_PREFIX, FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
 import { actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
+import { LOAD_TOOLS } from './tools/groups';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -45,7 +46,9 @@ export interface Session {
   /** Compactions in order; each keeps the messages it folded so the transcript can still show them */
   compactions?: StoredCompaction[];
   /** Size of the last request the model saw (prompt + reply), and the message index it covered; drives the context meter */
-  lastPrompt?: { tokens: number; at: number };
+  lastPrompt?: { tokens: number; at: number; cacheRead?: number };
+  /** Tool results set aside to save context: the model gets only their start and end (agent/context-view.ts); kept whole here */
+  prunedResults?: string[];
   /** One checkpoint per user message of the live conversation, for rewinding (see rewindSession) */
   turns?: Turn[];
   /** The agent's task list (update_tasks) */
@@ -55,6 +58,11 @@ export interface Session {
    * reading and proposing, nothing that changes a file). Unset: the usual tools.
    */
   tools?: string[];
+  /**
+   * The tool groups this session has loaded (tools/groups.ts): their tools are offered from then on, for the rest of
+   * the session, compactions included. Unset: none yet.
+   */
+  toolGroups?: string[];
   /** Set on a dream's session: the dream, and how many of its proposals wait for the user (see dreaming/) */
   dream?: { id: string; waiting?: number };
 }
@@ -285,7 +293,7 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
     if (m.role === 'user') {
       if (isCompactPreamble(m)) return;
       const text = displayText(m.content);
-      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX)) return;
+      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX) || text.startsWith(CONTEXT_NOTE_PREFIX)) return;
       const images = imageUrls(m.content);
       const mentions = mentionedPaths(rawText(m.content));
       const item: Extract<TranscriptItem, { role: 'user' }> = { role: 'user', text };
@@ -306,6 +314,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
       if (text) items.push({ role: 'assistant', text });
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
+        // Loading a tool group is the agent's own business: the tools it loaded show their rows when they are used
+        if (call.function.name === LOAD_TOOLS) continue;
         if (inFlight && !results.has(call)) continue;
         const result = results.get(call) ?? '(no result)';
         const ok = !FAILED_RESULT.test(result);
@@ -500,8 +510,10 @@ export class SessionStore {
       changes: src.changes ? structuredClone(src.changes) : undefined,
       compactions: src.compactions ? structuredClone(src.compactions) : undefined,
       lastPrompt: src.lastPrompt ? { ...src.lastPrompt } : undefined,
+      prunedResults: src.prunedResults ? [...src.prunedResults] : undefined,
       turns: src.turns ? structuredClone(src.turns) : undefined,
       tasks: src.tasks ? structuredClone(src.tasks) : undefined,
+      toolGroups: src.toolGroups ? [...src.toolGroups] : undefined,
       seedLength: src.messages.length,
     };
     this.sessions.set(s.id, s);

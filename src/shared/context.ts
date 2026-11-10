@@ -34,6 +34,8 @@ export interface ContextBreakdown {
   /** Whether compacting now could free anything (false while a run is going or when the conversation is too short) */
   compactable: boolean;
   compactions: number;
+  /** Of the last request's input, the share the provider read from its prompt cache (only when it reports it) */
+  cached?: number;
   lastCompaction?: { at: number; reason: 'auto' | 'manual'; tokensBefore: number; tokensAfter: number };
   updatedAt: number;
 }

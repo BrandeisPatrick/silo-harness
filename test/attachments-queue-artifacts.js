@@ -69,7 +69,9 @@ server.listen(0, async () => {
   const agent = new Agent(() => config, browser, store, () => loadSkills(tmp, projectDir), (ev) => events.push(ev), undefined, artifacts);
   let id = 0;
   const call = (name, args) => ({ id: `c${++id}`, name, args });
-  const lastUser = (payload) => [...payload.messages].reverse().find((m) => m.role === 'user');
+  // The last message from the user (the app's context notes left out)
+  const isNote = (m) => typeof m.content === 'string' && m.content.startsWith('[Session context]');
+  const lastUser = (payload) => [...payload.messages].reverse().find((m) => m.role === 'user' && !isNote(m));
 
   // ---- A: attachments become image parts ----
   events = []; requests.length = 0;
@@ -85,7 +87,7 @@ server.listen(0, async () => {
   u = lastUser(requests[1].payload);
   check('A: images without text are sent as image parts only', Array.isArray(u.content) && u.content.length === 2 && u.content.every((p) => p.type === 'image_url'));
   const om = toOllamaMessages(agent.session.messages);
-  const ou = om.filter((m) => m.role === 'user');
+  const ou = om.filter((m) => m.role === 'user' && !isNote(m));
   check('A: Ollama mapping strips the data URL prefix into images[]', ou[0].content === 'What is in this image?' && ou[0].images.length === 1 && ou[0].images[0] === PNG.split(',')[1] && ou[1].images.length === 2, JSON.stringify(ou[1]).slice(0, 120));
 
   // ---- B: queue ----
@@ -127,7 +129,8 @@ server.listen(0, async () => {
   events = []; requests.length = 0; delayMs = 1500;
   replies.push({ content: 'slow' });
   const run4 = agent.run('slow one');
-  await sleep(100);
+  // Stop once the mock holds the request: one still on the wire would take the next reply
+  for (let i = 0; i < 400 && !requests.length; i++) await sleep(5);
   const q4 = agent.enqueue('dropped?');
   agent.stop();
   await run4;
@@ -200,7 +203,7 @@ server.listen(0, async () => {
   events = []; requests.length = 0;
   await agent.run('describe', [img('o-1')]);
   const oreq = requests.find((r) => r.url === '/api/chat' && r.payload.stream !== false); // a long session may compact first (non-streaming summary request)
-  const olast = oreq && [...oreq.payload.messages].reverse().find((m) => m.role === 'user');
+  const olast = oreq && [...oreq.payload.messages].reverse().find((m) => m.role === 'user' && !isNote(m));
   check('Ollama: /api/chat request carries images[] on the user message', olast && olast.content === 'describe' && Array.isArray(olast.images) && olast.images[0] === PNG.split(',')[1], olast && Object.keys(olast));
   check('Ollama: reply received', events.some((e) => e.type === 'text_delta' && /I see the image/.test(e.text)));
 

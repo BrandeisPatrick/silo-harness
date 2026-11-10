@@ -64,6 +64,42 @@ export interface TabHooks {
 /** The events after which the state is read again. */
 const STATE_EVENTS = ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading', 'did-fail-load'] as const;
 
+/**
+ * The device APIs a page in the pane does not get at all (their permissions are refused anyway): without them a page,
+ * or the agent clicking on one, cannot start a Bluetooth scan or a device enumeration that brings up a macOS prompt.
+ */
+export const NO_DEVICE_APIS = 'WebBluetooth,WebHID,WebUSB,Serial';
+
+/** A host on this Mac or its local network: an address in a private range, link-local, loopback, or a .local name. */
+export function isLocalNetworkHost(host: string): boolean {
+  const h = String(host ?? '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h) return false;
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h === '0.0.0.0' || h === '::' || h === '::1') return true;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || a === 0;
+  }
+  return /^(fc|fd)[0-9a-f]{2}:|^fe[89ab][0-9a-f]:/.test(h);
+}
+
+/**
+ * Whether the main process may fetch a page's icon: a data: icon, or one on the web. An icon on this Mac or the local
+ * network is fetched only for a page on that same host: a page must not make the app reach into the network (and so
+ * bring up macOS's Local Network prompt) with an icon address alone.
+ */
+export function faviconAllowed(icon: string, pageUrl: string): boolean {
+  if (/^data:image\//i.test(icon)) return true;
+  try {
+    const u = new URL(icon);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (!isLocalNetworkHost(u.hostname)) return true;
+    return new URL(pageUrl).hostname.toLowerCase() === u.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 /** Favicons are kept as data: URLs; one bigger than this is left out (the globe shows instead). */
 const FAVICON_MAX_BYTES = 64 * 1024;
 const faviconCache = new Map<string, string | null>();
@@ -112,7 +148,7 @@ export class BrowserTab {
 
   constructor(private readonly hooks: TabHooks) {
     this.view = new WebContentsView({
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: BROWSER_PARTITION },
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: BROWSER_PARTITION, disableBlinkFeatures: NO_DEVICE_APIS },
     });
     const wc = this.view.webContents;
     wc.setUserAgent(cleanUserAgent(wc.getUserAgent()));
@@ -168,6 +204,7 @@ export class BrowserTab {
     const url = favicons.find((f) => /^(https?|data):/i.test(f));
     if (!url || wc.isDestroyed()) return;
     const page = wc.getURL();
+    if (!faviconAllowed(url, page)) return;
     const icon = await fetchFavicon(url);
     if (this.disposed || wc.isDestroyed() || wc.getURL() !== page) return;
     this.favicon = icon;

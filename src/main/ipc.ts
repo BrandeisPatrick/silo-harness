@@ -5,7 +5,8 @@
 import { app as electronApp, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
+import { fileURLToPath } from 'node:url';
+import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
 import type { AppHost } from './app';
 import { ARTIFACT_SCHEME } from './artifacts';
 import type { BrowserController } from './browser';
@@ -94,6 +95,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         portkey: { ...current.portkey, ...next.portkey },
         dreaming: { ...current.dreaming, ...next.dreaming },
         browser: { ...current.browser, ...next.browser },
+        webSearch: { ...current.webSearch, ...next.webSearch },
         // Named providers change through the files, the command line and providers.setModel only.
         providers: current.providers,
         mcpServers: current.mcpServers,
@@ -157,6 +159,15 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   ipcMain.handle('mcp:remove', (_e, name: string, scope: McpScope) => requireMcp().remove(String(name), scope === 'project' ? 'project' : 'user'));
   ipcMain.handle('mcp:set-enabled', (_e, name: string, scope: McpScope, enabled: boolean) => requireMcp().setEnabled(String(name), scope === 'project' ? 'project' : 'user', Boolean(enabled)));
   ipcMain.handle('mcp:reconnect', (_e, name: string, scope: McpScope) => requireMcp().reconnect(String(name), scope === 'project' ? 'project' : 'user'));
+  // Sign-in waits for the browser: the handler returns at once (status "authorizing") and the list follows by push.
+  ipcMain.handle('mcp:sign-in', (_e, name: string, scope: McpScope) => {
+    const mcp = requireMcp();
+    const done = mcp.signIn(String(name), scope === 'project' ? 'project' : 'user');
+    done.catch(() => undefined);
+    return Promise.race([done, new Promise<McpServerInfo[]>((r) => setImmediate(() => r(mcp.list())))]);
+  });
+  ipcMain.handle('mcp:cancel-sign-in', (_e, name: string, scope: McpScope) => requireMcp().cancelSignIn(String(name), scope === 'project' ? 'project' : 'user'));
+  ipcMain.handle('mcp:sign-out', (_e, name: string, scope: McpScope) => requireMcp().signOut(String(name), scope === 'project' ? 'project' : 'user'));
 
   // ---------- Sessions: switching, creating and deleting no longer wait for runs; a running session is not forked, deleted or rewound ----------
 
@@ -342,8 +353,17 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
       if (file) await shell.openPath(file).catch((err: unknown) => console.warn('[artifact] openPath failed:', err));
       return;
     }
-    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
-      console.warn('[browser] only http, https and file URLs open externally, not', parsed.protocol);
+    // A local file is shown in the Finder, never opened: a page-made file: tab plus one click must not run anything
+    if (parsed.protocol === 'file:') {
+      try {
+        shell.showItemInFolder(fileURLToPath(parsed.href));
+      } catch (err) {
+        console.warn('[browser] cannot show that file:', err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      console.warn('[browser] only http and https URLs open externally, not', parsed.protocol);
       return;
     }
     await shell.openExternal(parsed.href).catch((err: unknown) => console.warn('[browser] openExternal failed:', err));

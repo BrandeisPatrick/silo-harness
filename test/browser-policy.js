@@ -204,8 +204,11 @@ const decide = (url, action, mode, extra = {}) => siteDecision({ url, action, mo
 const allowed = new Set(['example.com', 'accounts.google.com', 'www.paypal.com', 'login.example.com']);
 for (const mode of modes) {
   t(`8: ${mode}: about:blank is allowed for every action`, actions.every((a) => decide('about:blank', a, mode).kind === 'allow'));
-  t(`8: ${mode}: an exempt site allows everything: eval, a password field, a sign-in name`, actions.every((a) => decide('http://localhost:3000/login', a, mode, { evalCode: 'document.cookie', pageHasPasswordField: true }).kind === 'allow') && decide('http://login.localhost/', 'act', mode).kind === 'allow');
-  t(`8: ${mode}: a user-exempt host too`, decide('https://dev.example.com/', 'act', mode, { settings: { ...settings, exempt: ['dev.example.com'] } }).kind === 'allow');
+  // Plan mode stays read-only on exempt hosts too (browser hardening): there they read and navigate, nothing more
+  const exemptActions = mode === 'plan' ? ['read', 'navigate'] : actions;
+  t(`8: ${mode}: an exempt site allows ${mode === 'plan' ? 'reading and navigating' : 'everything: eval, a password field, a sign-in name'}`, exemptActions.every((a) => decide('http://localhost:3000/login', a, mode, { evalCode: 'document.cookie', pageHasPasswordField: true }).kind === 'allow') && (mode === 'plan' || decide('http://login.localhost/', 'act', mode).kind === 'allow'));
+  t(`8: ${mode}: a user-exempt host too`, decide('https://dev.example.com/', mode === 'plan' ? 'read' : 'act', mode, { settings: { ...settings, exempt: ['dev.example.com'] } }).kind === 'allow');
+  if (mode === 'plan') t('8: plan: acting and eval on an exempt host are refused', ['act', 'eval'].every((a) => decide('http://localhost:9999/', a, 'plan').kind === 'refuse' && decide('artifact://view/s1/a1', a, 'plan').kind === 'refuse'));
 }
 for (const mode of ['ask', 'acceptEdits', 'auto']) {
   for (const action of actions) {
@@ -253,7 +256,7 @@ t('8: a file inside the working directory is exempt', ['read', 'act'].every((a) 
 const fileCard = decide('file:///Users/ada/.ssh/config', 'read', 'ask');
 t('8: a file outside asks with the site card keyed by its path', fileCard.kind === 'ask' && fileCard.card === 'site' && fileCard.site.key === 'file:/Users/ada/.ssh/config', fileCard);
 t('8: … and the session approval of that key reads it', decide('file:///Users/ada/.ssh/config', 'read', 'ask', { sessionAllowed: new Set(['file:/Users/ada/.ssh/config']) }).kind === 'allow' && decide('file:///Users/ada/.ssh/config', 'read', 'ask', always(['file:/Users/ada/.ssh/config'])).kind === 'allow');
-t('8: an artifact page is exempt in every mode', modes.every((m) => decide('artifact://view/s1/a1', 'act', m).kind === 'allow'));
+t('8: an artifact page is exempt in every mode (plan mode: for reading)', modes.every((m) => decide('artifact://view/s1/a1', m === 'plan' ? 'read' : 'act', m).kind === 'allow'));
 
 // ---------- 9. For the card and the tools ----------
 t('9: the read-only tools', [...READ_ONLY_BROWSER_TOOLS].sort().join(',') === 'browser_find,browser_get_text,browser_navigate,browser_read_page,browser_screenshot,browser_scroll,browser_tabs,browser_wait_for' && !READ_ONLY_BROWSER_TOOLS.has('browser_click') && !READ_ONLY_BROWSER_TOOLS.has('browser_eval'));

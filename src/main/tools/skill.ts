@@ -1,21 +1,42 @@
+import { findSkill, rescanSkill, supportingFiles, withSkillDir, type Skill } from '../skills';
 import type { Tool } from './types';
+
+/** What the skill tool returns for a skill: its body, its folder and files, and any problems with it. */
+export function skillToolResult(skill: Skill): string {
+  const parts = [`<skill name="${skill.name}">\n${withSkillDir(skill.body, skill.dir)}\n</skill>`];
+  const lines = [`Base directory: ${skill.dir}`, 'Relative paths in this skill are relative to that folder.'];
+  const { files, total } = supportingFiles(skill);
+  if (files.length) lines.push(`Files: ${files.join(', ')}${total > files.length ? ` (and ${total - files.length} more)` : ''}`);
+  parts.push(lines.join('\n'));
+  if (skill.problems.length) parts.push(`Problems with this skill (see docs/skills.md):\n${skill.problems.map((p) => `- ${p}`).join('\n')}`);
+  parts.push("Follow these instructions for the user's request now.");
+  return parts.join('\n\n');
+}
 
 export const skillTool: Tool = {
   name: 'skill',
   description:
-    'Load a skill by name and follow its instructions. Skills are reusable procedures listed in the system prompt (for example "test" or "review"). Call this before starting a task that matches a skill.',
+    'Load a skill by name and follow its instructions. Skills are reusable procedures listed in the system prompt. Call this before starting a task that matches a skill. A skill written during this session can be loaded too; the result lists any problems with it.',
   parameters: {
     type: 'object',
     properties: { name: { type: 'string', description: 'Skill name exactly as listed' } },
     required: ['name'],
   },
   async run(args, ctx) {
-    const name = String(args.name ?? '').toLowerCase().replace(/^\//, '');
-    const skill = ctx.skills.find((s) => s.name === name);
+    const name = String(args.name ?? '').trim().replace(/^\//, '');
+    let skill = findSkill(ctx.skills, name);
+    // A skill written since the list was read: look again. The run's own list stays as it is, so the system prompt
+    // (and the provider's cache of it) does not change until the next message.
+    skill ??= rescanSkill(ctx.cwd, name);
     if (!skill) {
-      const available = ctx.skills.map((s) => s.name).join(', ') || '(none)';
+      const available = ctx.skills.filter((s) => s.modelInvocable).map((s) => s.name).join(', ') || '(none)';
       throw new Error(`Unknown skill "${name}". Available skills: ${available}`);
     }
-    return { content: `<skill name="${skill.name}">\n${skill.body}\n</skill>\n\nFollow these instructions for the user's request now.` };
+    if (!skill.modelInvocable) {
+      const problems = skill.problems.length ? ` Problems: ${skill.problems.join('; ')}.` : ' It has no problems.';
+      throw new Error(`"${skill.name}" is run by the user only, with /${skill.name}.${problems}`);
+    }
+    if (!skill.body) throw new Error(`Skill "${skill.name}" has no instructions. Problems: ${skill.problems.join('; ')}`);
+    return { content: skillToolResult(skill) };
   },
 };

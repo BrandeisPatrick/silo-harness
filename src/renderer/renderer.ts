@@ -950,7 +950,13 @@ async function sendComposer(): Promise<void> {
     const list = await oc.skills.list();
     addNoticeCard(
       list.length
-        ? `**Skills**\n\n${list.map((sk) => `- \`/${sk.name}\` ${sk.description || 'No description'} *(${sk.source})*`).join('\n')}`
+        ? `**Skills**\n\n${list
+            // A skill with `user-invocable: false` has no slash command: its name shows bare, marked as the agent's
+            .map((sk) => {
+              const typed = sk.userInvocable !== false;
+              return `- \`${typed ? '/' : ''}${sk.name}\` ${sk.description || 'No description'} *(${sk.source}${typed ? '' : ', agent only'})*`;
+            })
+            .join('\n')}`
         : 'No skills yet. Add one under `.silo-harness/skills`.',
     );
     return;
@@ -1075,6 +1081,12 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       break;
     case 'thinking_done':
       finishThinking();
+      // The model call completed: what it streamed is the reply
+      transcript.keepReply();
+      break;
+    case 'reply_discarded':
+      // The call failed after it began to stream and is tried again: its text and thinking go
+      transcript.discardReply();
       break;
     case 'text_delta':
       setStatusText(currentMode() === 'plan' ? 'Planning…' : 'Responding…');
@@ -1134,7 +1146,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       statusLine.reportUsage(Number(ev.promptTokens) || 0, Number(ev.completionTokens) || 0);
       break;
     case 'hook_status':
-      // A hook's statusMessage while it runs (one line; the status text never wraps)
+    case 'retry_status':
+      // A hook's statusMessage while it runs, or the wait before a model call is tried again (one line; the status
+      // text never wraps)
       setStatusText(typeof ev.text === 'string' && ev.text.trim() ? ev.text.replace(/\s+/g, ' ').trim().slice(0, 120) : baseVerb());
       break;
     case 'approval_request':
@@ -1213,6 +1227,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     case 'run_end':
       finishThinking();
       endAssistant();
+      transcript.keepReply();
       approvals.interrupt();
       // An auto-compaction belongs to the run; its compact_end (if one still comes) only adds the divider or error.
       statusLine.dropRunCompaction();
@@ -1672,7 +1687,7 @@ const connection = createConnection({
   focusComposer: () => inputEl.focus(),
   showError: showInlineError,
   cleanError,
-  notice: (text) => void addSystemMessage(text, 'notice'),
+  notice: (text, group) => void addSystemMessage(text, 'notice', group),
   applyConfigToUi,
   refreshContext,
   syncSpin,
@@ -2178,6 +2193,10 @@ setupImageView({ messages: messagesEl, openLightbox, showError: showInlineError 
 // [feature:auto-blocked]
 import { setupAutoBlocked } from './auto-blocked.js';
 setupAutoBlocked({ messages: messagesEl });
+
+// [feature:updates]
+import { setupUpdateLine } from './update-line.js';
+setupUpdateLine($('sidebar'));
 
 // [feature:history]
 

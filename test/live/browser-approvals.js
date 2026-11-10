@@ -120,18 +120,18 @@ const describe = (i) => `(() => {
     check('… and the model\'s reason under it, in grey', reasonLine && reasonLine.color === c1.grey, { texts: c1.texts, grey: c1.grey });
     check('… Deny, Allow once and the ⌄ for the wider answers', c1.buttons.includes('Deny') && c1.buttons.includes('Allow once') && c1.more, c1.buttons);
     check('… whose menu has the site\'s two answers, with their keys', c1.menu && c1.menu[0].label === `Allow fixture.example:${P} for this session` && c1.menu[0].hint === 'A' && c1.menu[1].label === `Always allow fixture.example:${P}` && c1.menu[1].hint === 'P', c1.menu);
-    check('allowed for the session: the page opened', /^Now at http:\/\/fixture\.example:\d+\/landing\.html — "Landing"/.test(r.result ?? '') && !String(r.result).includes(why), r.result);
+    check('allowed for the session: the page opened', /^Now at <page_content site="fixture\.example:\d+">http:\/\/fixture\.example:\d+\/landing\.html — "Landing"/.test(r.result ?? '') && !String(r.result).includes(why), r.result);
     check('… and the row says so, naming the site', (await decision('browser_navigate')) === `Allowed fixture.example:${P} for this session`, await decision('browser_navigate'));
 
     r = await call('browser_read_page', {});
-    check('browser_read_page on that site runs without a card', r.cards.length === 0 && (r.result ?? '').startsWith(`URL: ${A}/landing.html`), r.result);
+    check('browser_read_page on that site runs without a card', r.cards.length === 0 && (r.result ?? '').startsWith(`<page_content site="fixture.example:${P}">URL: ${A}/landing.html`), r.result);
 
     // ---------- A redirect to another site asks again ----------
     r = await call('browser_navigate', { url: `${A}/redirect-named.html` });
-    check('a navigation on the allowed site runs, and the redirect lands on the second port', r.cards.length === 0 && (r.result ?? '').startsWith(`Now at ${B}/other.html`), r.result);
+    check('a navigation on the allowed site runs, and the redirect lands on the second port', r.cards.length === 0 && (r.result ?? '').startsWith(`Now at <page_content site="fixture.example:${Q}">${B}/other.html`), r.result);
     r = await call('browser_read_page', {}, ['session-key']);
     check('the next read asks again: the second port is another site', r.cards.length === 1 && r.card.title === `Let the agent use fixture.example:${Q}?` && r.card.action === `Read fixture.example:${Q}`, r.card);
-    check('… the A key allows it for the session', (r.result ?? '').startsWith(`URL: ${B}/other.html`) && (await decision('browser_read_page')) === `Allowed fixture.example:${Q} for this session`, r.result);
+    check('… the A key allows it for the session', (r.result ?? '').startsWith(`<page_content site="fixture.example:${Q}">URL: ${B}/other.html`) && (await decision('browser_read_page')) === `Allowed fixture.example:${Q} for this session`, r.result);
 
     // ---------- A local file outside the project ----------
     r = await call('browser_navigate', { url: `file://${outsideFile}` }, ['shot']);
@@ -176,7 +176,7 @@ const describe = (i) => `(() => {
     const cfg = await app.evaluate('oc.getConfig()');
     check('"Always allow" puts the site into the config', Array.isArray(cfg.browser?.alwaysAllowed) && cfg.browser.alwaysAllowed.includes(`always.fixture.example:${P}`), cfg.browser);
     check('… not into the project\'s rules', !Object.keys(cfg.allowRules || {}).length, cfg.allowRules);
-    check('… and the page opened', /^Now at http:\/\/always\.fixture\.example:\d+\/landing\.html/.test(r.result ?? '') && (await decision('browser_navigate')) === `Always allowed always.fixture.example:${P}`, r.result);
+    check('… and the page opened', /^Now at <page_content site="always\.fixture\.example:\d+">http:\/\/always\.fixture\.example:\d+\/landing\.html/.test(r.result ?? '') && (await decision('browser_navigate')) === `Always allowed always.fixture.example:${P}`, r.result);
     const saved = JSON.parse(fs.readFileSync(path.join(app.profile, 'config.json'), 'utf8'));
     check('… saved on disk', saved.browser?.alwaysAllowed?.includes(`always.fixture.example:${P}`), saved.browser);
 
@@ -189,7 +189,9 @@ const describe = (i) => `(() => {
     await app.evaluate(WATCH);
     r = await call('browser_navigate', { url: `${A}/shop.html` }, ['once']);
     check('plan mode: a navigation to a new site asks with the site card', r.cards.length === 1 && r.card.title === `Let the agent use fixture.example:${P}?` && /"Shop"/.test(r.result ?? ''), r.card);
-    const offered = (app.mock.state.requests.find((q) => q.payload?.stream)?.payload.tools ?? []).map((t) => t.function.name);
+    // Changed on purpose: the browser tools are a tool group now, offered once the session loaded it (here by the
+    // navigation), so the request to look at is the latest one, not the first
+    const offered = ([...app.mock.state.requests].reverse().find((q) => q.payload?.stream)?.payload.tools ?? []).map((t) => t.function.name);
     check('plan mode offers the reading browser tools, not browser_click', offered.includes('browser_read_page') && !offered.includes('browser_click') && !offered.includes('browser_type') && !offered.includes('browser_eval'), offered.filter((n) => n.startsWith('browser_')));
     r = await call('browser_click', { text: 'Pay now' });
     const planShop = await app.pageTarget(`${A}/shop.html`);

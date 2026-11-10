@@ -1,12 +1,12 @@
 // The scripts the controller runs inside pages: the outline with refs that browser_read_page returns, the element
-// lookups behind browser_click and browser_type, the flash on an element the agent is about to touch, and the
-// polling behind browser_wait_for. Those that look at form fields run in the safety world (see safety.ts), so a
-// credential field's value never comes back.
+// lookups and the hit test behind browser_click and browser_type, the flash on an element the agent is about to
+// touch, the page's text, and the polling behind browser_wait_for. Every one runs in the safety world (see
+// safety.ts): the page can neither see the refs nor replace the DOM methods these scripts call, and a credential
+// field's value never comes back.
 
 import { inSafetyWorld, maskedState } from './safety';
 
-/** The attribute the outline marks interactive elements with; refs look like ref_12. */
-export const REF_ATTR = 'data-oc-ref';
+/** Refs look like ref_12; the safety world keeps which element each one names (S.addRef, S.byRef). */
 export const REF_RE = /^ref_\d+$/;
 
 /**
@@ -15,10 +15,10 @@ export const REF_RE = /^ref_\d+$/;
  */
 export function readPageScript(mode: 'interactive' | 'all', maxChars: number): string {
   return inSafetyWorld(`
-    const REF = ${JSON.stringify(REF_ATTR)};
     const MODE = ${JSON.stringify(mode)};
     const MAX = ${maxChars};
-    if (!document.body) return { text: '(empty page)', count: 0, truncated: false, title: document.title, url: location.href };
+    S.resetRefs();
+    if (!document.body) return { text: '(empty page)', count: 0, truncated: false };
     const INTERACTIVE = 'a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="tab"],[role="menuitem"],[role="checkbox"],[role="radio"],[role="textbox"],[role="combobox"],[role="option"],[role="switch"],[contenteditable="true"]';
     const visible = (el) => {
       const r = el.getBoundingClientRect();
@@ -26,12 +26,11 @@ export function readPageScript(mode: 'interactive' | 'all', maxChars: number): s
       const s = getComputedStyle(el);
       return s.visibility !== 'hidden' && s.display !== 'none';
     };
-    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const clean = S.clean;
     const label = (el, secret) => clean(
       el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
       (secret ? '' : ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.value : '') || el.innerText || el.textContent)
     ).slice(0, 120);
-    document.querySelectorAll('[' + REF + ']').forEach((e) => e.removeAttribute(REF));
     const lines = []; let n = 0; let size = 0;
     const push = (line) => { lines.push(line); size += line.length + 1; };
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
@@ -39,8 +38,8 @@ export function readPageScript(mode: 'interactive' | 'all', maxChars: number): s
         if (node.nodeType === Node.ELEMENT_NODE) {
           const tag = node.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE' || tag === 'svg') return NodeFilter.FILTER_REJECT;
-          if (!visible(node)) return NodeFilter.FILTER_REJECT;
-        }
+          if (!visible(node) || S.hiddenBox(node)) return NodeFilter.FILTER_REJECT;
+        } else if (S.textHidden(node)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -50,8 +49,8 @@ export function readPageScript(mode: 'interactive' | 'all', maxChars: number): s
       if (node.nodeType === Node.ELEMENT_NODE) {
         const el = node;
         if (el.matches(INTERACTIVE)) {
-          const ref = 'ref_' + (++n);
-          el.setAttribute(REF, ref);
+          const ref = S.addRef(el);
+          n++;
           const tag = el.tagName.toLowerCase();
           const type = el.getAttribute('type');
           const secret = S.check(el);
@@ -72,33 +71,22 @@ export function readPageScript(mode: 'interactive' | 'all', maxChars: number): s
         push(t.slice(0, 300));
       }
     }
-    return { text: lines.join('\\n'), count: n, truncated: size > MAX, title: document.title, url: location.href };
+    return { text: lines.join('\\n'), count: n, truncated: size > MAX };
   `);
 }
 
-export function rectScript(ref: string): string {
-  return `(() => {
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center', inline: 'center' });
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, tag: el.tagName.toLowerCase() };
-  })()`;
+/**
+ * Runs inside the page (in the safety world): where a click on the ref'd element (scrolled into view) or at a viewport
+ * point lands, by the hit test of S.aim. The page is only scrolled.
+ */
+export function aimScript(target: { ref: string; scroll?: boolean } | { x: number; y: number }): string {
+  const t = 'ref' in target ? { ref: target.ref, scroll: target.scroll !== false } : { x: Number(target.x) || 0, y: Number(target.y) || 0 };
+  return inSafetyWorld(`return S.aim(${JSON.stringify(t)});`);
 }
 
-/** Runs inside the page (in the safety world): a human-readable description of a ref'd element. */
+/** Runs inside the page (in the safety world): a human-readable description of a ref'd element, or null. */
 export function describeScript(ref: string): string {
-  return inSafetyWorld(`
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return null;
-    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-    const tag = el.tagName.toLowerCase();
-    const type = (el.getAttribute('type') || '').toLowerCase();
-    const role = el.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'button' || type === 'submit' || type === 'button' ? 'button' : tag === 'select' ? 'combobox' : type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'input' || tag === 'textarea' || el.isContentEditable ? 'textbox' : tag);
-    const secret = S.check(el);
-    const name = clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || (secret ? '' : el.innerText || el.textContent || el.value)).slice(0, 80);
-    return { role, name };
-  `);
+  return inSafetyWorld(`const f = S.byRef(${JSON.stringify(ref)}); return f.el ? S.label(f.el) : null;`);
 }
 
 /**
@@ -110,7 +98,8 @@ export function describeScript(ref: string): string {
  */
 export function targetScript(ref: string | undefined, active: boolean): string {
   return inSafetyWorld(`
-    const el = ${ref ? `document.querySelector('[${REF_ATTR}="${ref}"]')` : 'null'};
+    const found = ${ref ? `S.byRef(${JSON.stringify(ref)})` : '{}'};
+    const el = found.el || null;
     const FIELDS = 'input, textarea, select';
     const inner = el && !el.matches(FIELDS) ? el.control || el.querySelector(FIELDS) || (el.shadowRoot && el.shadowRoot.querySelector(FIELDS)) || null : null;
     const act = ${active ? 'S.deepActive()' : '{ el: null, crossOrigin: false }'};
@@ -142,47 +131,6 @@ export function fieldKindScript(field: string): string {
 }
 
 /**
- * Runs inside the page (in the safety world), changing nothing: what a click on the ref'd element, or at a viewport
- * point, lands on, for the click rules (policy.ts clickRule). A span inside a button counts as the button. inCaptcha:
- * the element or an ancestor (across shadow roots) has an id, class or src naming reCAPTCHA, hCaptcha or Turnstile,
- * which covers a click on such a frame. formHasCardFields: a card field in its form (fields tied to it by form= too);
- * formActionHost: the host its form (or the button's formaction) posts to, when one is set. Built-ins are called from
- * the prototypes, so a form field named "action" or "querySelectorAll" cannot hide what the form holds. null: nothing there.
- */
-export function clickTargetScript(target: { ref: string } | { x: number; y: number }): string {
-  const find = 'ref' in target ? `document.querySelector(${JSON.stringify(`[${REF_ATTR}="${target.ref}"]`)})` : `document.elementFromPoint(${Number(target.x) || 0}, ${Number(target.y) || 0})`;
-  return inSafetyWorld(`
-    const hit = ${find};
-    if (!hit) return null;
-    const E = Element.prototype;
-    const attr = (e, n) => E.getAttribute.call(e, n) || '';
-    const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
-    const CAPTCHA = /recaptcha|h-?captcha|turnstile/i;
-    let inCaptcha = false;
-    for (let e = hit; e; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
-      if (e.nodeType === 1 && CAPTCHA.test([e.id, attr(e, 'class'), attr(e, 'src')].join(' '))) { inCaptcha = true; break; }
-    }
-    const el = E.closest.call(hit, 'button, a[href], input, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"]') || hit;
-    const tag = el.tagName.toLowerCase();
-    const type = clean(attr(el, 'type')).toLowerCase();
-    const isInputButton = tag === 'input' && /^(submit|button|reset|image)$/.test(type);
-    const own = tag === 'input' ? (isInputButton && !S.check(el) ? el.value : '') : (el.innerText || el.textContent);
-    const text = clean(own || attr(el, 'aria-label') || attr(el, 'title') || attr(el, 'alt')).slice(0, 200);
-    const form = ((tag === 'button' || tag === 'input') && el.form) || E.closest.call(el, 'form');
-    let formHasCardFields = false;
-    let formActionHost = null;
-    if (form) {
-      const fields = [...E.querySelectorAll.call(form, 'input, select, textarea')];
-      if (form.id) fields.push(...document.querySelectorAll('[form="' + CSS.escape(form.id) + '"]'));
-      formHasCardFields = fields.some((f) => S.check(f) === 'card');
-      const action = clean(attr(el, 'formaction') || attr(form, 'action'));
-      if (action) { try { formActionHost = new URL(action, location.href).host || null; } catch (e) {} }
-    }
-    return { text, role: clean(attr(el, 'role')).toLowerCase(), tag, type, inCaptcha, formHasCardFields, formActionHost };
-  `);
-}
-
-/**
  * Runs inside the page (in the safety world), changing nothing: whether it shows a password field (S.check, so a
  * field typed into as one counts after "Show password"), in the document or an open shadow root. The sign-in page signal.
  */
@@ -195,42 +143,37 @@ export function passwordFieldScript(): string {
   `);
 }
 
-/** Runs inside the page: briefly outlines the element the agent is about to act on, so the user can follow along. */
+/** Runs inside the page (in the safety world): briefly outlines the element the agent is about to act on, so the user can follow along. */
 export function flashScript(ref: string): string {
-  return `(() => {
-    const el = document.querySelector('[${REF_ATTR}="${ref}"]');
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    const box = document.createElement('div');
-    box.setAttribute('data-oc-flash', '1');
-    box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #277de2;border-radius:6px;background:rgba(39,125,226,0.16);box-shadow:0 0 0 4px rgba(39,125,226,0.22);transition:opacity 0.45s ease 0.25s;left:' + (r.left - 3) + 'px;top:' + (r.top - 3) + 'px;width:' + (r.width + 6) + 'px;height:' + (r.height + 6) + 'px;';
-    document.documentElement.appendChild(box);
-    requestAnimationFrame(() => { box.style.opacity = '0'; });
-    setTimeout(() => box.remove(), 800);
-    return true;
-  })()`;
+  return inSafetyWorld(`const f = S.byRef(${JSON.stringify(ref)}); if (!f.el) return false; S.flash(f.el); return true;`);
 }
 
+/** Runs inside the page (in the safety world): the first line holding `text`, or the element matching `selector`. */
 export function waitScript(text: string | undefined, selector: string | undefined): string {
-  return `(() => {
+  return inSafetyWorld(`
     const text = ${JSON.stringify(text ?? '')}.toLowerCase();
     const selector = ${JSON.stringify(selector ?? '')};
     if (selector) { try { const el = document.querySelector(selector); if (el) return { line: (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200) }; } catch (e) { return 'bad-selector'; } }
     if (text && document.body) {
-      const lines = document.body.innerText.split('\\n');
+      const lines = S.visibleText(document.body).split('\\n');
       const hit = lines.find((l) => l.toLowerCase().includes(text));
       if (hit !== undefined) return { line: hit.replace(/\\s+/g, ' ').trim().slice(0, 200) };
     }
     return false;
-  })()`;
+  `);
 }
 
-/** The visible text of the page, main content first. */
-export const GET_TEXT_SCRIPT = `(() => { const m = document.querySelector('main, article, [role="main"]'); const el = (m && m.innerText && m.innerText.length > 200) ? m : document.body; return el ? el.innerText : ''; })()`;
+/** Runs inside the page (in the safety world): the text a person can see on the page (S.visibleText), main content first. */
+export function getTextScript(): string {
+  return inSafetyWorld(`const m = document.querySelector('main, article, [role="main"]'); const main = m ? S.visibleText(m) : ''; return main.length > 200 ? main : S.visibleText(document.body);`);
+}
 
-/** Selects what the focused field holds, so typing replaces it. */
-export const SELECT_ALL_SCRIPT = `(() => { const el = document.activeElement; if (!el) return; if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.select(); else if (el.isContentEditable) { const s = getSelection(); s.selectAllChildren(el); } })()`;
+/** Runs inside the page (in the safety world): selects what the focused field holds, so typing replaces it. */
+export function selectAllScript(): string {
+  return inSafetyWorld(`const el = S.deepActive().el; if (!el) return; if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.select(); else if (el.isContentEditable) { const s = getSelection(); s.selectAllChildren(el); }`);
+}
 
+/** Runs inside the page (in the safety world): scrolls by (dx, dy) and says where the page is. */
 export function scrollScript(dx: number, dy: number): string {
-  return `(() => { window.scrollBy({ left: ${dx}, top: ${dy}, behavior: 'instant' }); return { x: scrollX, y: scrollY, h: document.documentElement.scrollHeight, vh: innerHeight }; })()`;
+  return inSafetyWorld(`window.scrollBy({ left: ${Number(dx) || 0}, top: ${Number(dy) || 0}, behavior: 'instant' }); return { x: scrollX, y: scrollY, h: document.documentElement.scrollHeight, vh: innerHeight };`);
 }

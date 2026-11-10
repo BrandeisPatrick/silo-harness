@@ -1,0 +1,23 @@
+{
+  "query": "electron browserwindow",
+  "follow_up_questions": null,
+  "answer": null,
+  "images": [],
+  "results": [
+    {
+      "title": "BrowserWindow | Electron",
+      "url": "https://www.electronjs.org/docs/latest/api/browser-window",
+      "content": "Create and control browser windows. Process: Main This module cannot be used until the ready event of the app module is emitted.",
+      "score": 0.91,
+      "raw_content": null
+    },
+    {
+      "title": "Window Customization | Electron",
+      "url": "https://www.electronjs.org/docs/latest/tutorial/window-customization",
+      "content": "The BrowserWindow module is the foundation of your Electron application, and it exposes many APIs that let you customize the look and behavior of your app's windows.",
+      "score": 0.84,
+      "raw_content": null
+    }
+  ],
+  "response_time": 1.21
+}

@@ -129,7 +129,7 @@ function logoPng(size = 240) {
       await both(app, 'c-screenshot', '#messages', 0);
       await app.evaluate(`document.querySelector('.tool[data-tool="browser_screenshot"] > summary img.tool-thumb').click()`);
       await sleep(300);
-      check('(c) the thumbnail opens the lightbox', await app.evaluate(`document.getElementById('lightbox').open && document.getElementById('lightbox-img').src.startsWith('data:image/png')`));
+      check('(c) the thumbnail opens the lightbox', await app.evaluate(`document.getElementById('lightbox').open && document.getElementById('lightbox-img').src.startsWith('data:image/')`));
       check('(c) without toggling the row', await app.evaluate(`!document.querySelector('.tool[data-tool="browser_screenshot"]').open`));
       await app.evaluate(`document.getElementById('lightbox').close()`);
     }

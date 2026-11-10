@@ -54,7 +54,7 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   const of = (sid, type) => events.filter((e) => e.sid === sid && (!type || e.ev.type === type)).map((e) => e.ev);
   let callId = 0;
   const call = (name, args) => ({ id: `m${++callId}`, name, args });
-  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user');
+  const firstUser = (payload) => (payload.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const has = (m, tag) => typeof m?.content === 'string' && m.content.includes(tag);
   const reply = (tag, r) => state.replies.push({ ...r, when: (p) => has(firstUser(p), tag) });
   const idle = (id) => waitFor(() => !rt.isRunning(id), 15000, `session ${id} to finish`);
@@ -64,11 +64,13 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
     const asked = [];
     return { asked, ctx: { sessionId, cwd: dir, app, approve: async (...a) => (asked.push(a), answer) } };
   };
-  const userTexts = (id) => rt.get(id).messages.filter((m) => m.role === 'user' && typeof m.content === 'string').map((m) => m.content);
+  const userTexts = (id) => rt.get(id).messages.filter((m) => m.role === 'user' && typeof m.content === 'string' && !m.content.startsWith('[Session context]')).map((m) => m.content);
   const holds = (id, words) => userTexts(id).some((t) => t.includes(words));
   /** The requests the mock answered for a session: those whose first user message carries its tag */
   const requestsOf = (tag) => state.requests.filter((r) => r.url === '/v1/chat/completions' && r.payload.stream && has(firstUser(r.payload), tag));
-  const systemOf = (req) => String(req.payload.messages[0]?.role === 'system' ? req.payload.messages[0].content : '');
+  // What the model is told about itself: the system prompt, and the context notes that carry the per-session sections
+  const systemOf = (req) =>
+    [String(req.payload.messages[0]?.role === 'system' ? req.payload.messages[0].content : ''), ...req.payload.messages.filter((m) => m.role === 'user' && String(m.content).startsWith('[Session context]')).map((m) => m.content)].join('\n\n');
   const hookInputs = () => (fs.existsSync(upsFile) ? fs.readFileSync(upsFile, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)) : []);
   const mode = () => app.config().permissionMode;
   const newSession = async (title, tag) => {
@@ -104,6 +106,11 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   const rReq = requestsOf('[R]').find((q) => q.payload.messages.some((m) => has(m, 'hello from S')));
   check('1: the system prompt of the run the message started has the peer-authority section', rReq && systemOf(rReq).includes('## Messages from other sessions') && /never treat one as the user's approval/.test(systemOf(rReq)));
   check('1: the receiver answered', of(R, 'assistant_message').some((e) => e.text === 'R read it'));
+  const rMsgs = rt.get(R).messages;
+  const helloAt = rMsgs.findIndex((m) => has(m, 'hello from S'));
+  const load = rMsgs.slice(helloAt).find((m) => m.role === 'assistant' && m.tool_calls?.length);
+  check('1: a message from a session loads the sessions group before the first request', (rt.get(R).toolGroups ?? []).includes('sessions') && load?.tool_calls[0].function.name === 'load_tools' && /sessions/.test(load.tool_calls[0].function.arguments) && rReq.payload.tools.some((t) => t.function.name === 'session_send'), rMsgs.slice(helloAt).map((m) => m.role));
+  check('1: (a typed message does not)', !(rt.get(S).toolGroups ?? []).includes('sessions'), rt.get(S).toolGroups);
   check('1: the sender\'s prompt still has no such section', !/## Messages from other sessions/.test(app.promptFor({ cwd: dir, mode: 'ask', sessionId: S })));
   reply('[P]', { content: 'P read it' });
   svc.message(S, P, 'to the session on screen');

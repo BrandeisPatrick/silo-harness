@@ -37,7 +37,7 @@ export interface RuntimeOptions {
    */
   updateConfig?: (change: (current: AppConfig) => AppConfig) => AppConfig;
   /** Registered prompt sections (app.prompt), joined */
-  prompt?: (info: { cwd: string; mode: AppConfig['permissionMode']; sessionId: string; essential?: boolean; restricted?: boolean }) => string;
+  prompt?: (info: { cwd: string; mode: AppConfig['permissionMode']; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[]; onlyGroup?: string }) => string;
 }
 
 /**
@@ -439,6 +439,11 @@ export class SessionRuntime {
         break;
       case 'thinking_delta':
         l.thinking += ev.text;
+        break;
+      case 'reply_discarded':
+        // A failed model call's text and thinking are not the answer: a window that switches here does not see them
+        l.text = '';
+        l.thinking = '';
         break;
       case 'thinking_done':
         // Emitted once the model call is complete: its text is about to become a message (assistant_message) or be

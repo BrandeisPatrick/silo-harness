@@ -3,9 +3,9 @@ import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
-import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
+import { isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
-import { contextLimit, essentialToolsOnly } from './context-window';
+import { allGroupsUpFront, contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
 import {
   PRUNE_HARD,
@@ -25,7 +25,9 @@ import {
   formatTokens,
   isCompactPreamble,
   isContextLengthError,
+  isContextNote,
   isSyntheticUser,
+  lastContextNote,
   lastUserIndex,
   pruneMessages,
   scaleTo,
@@ -36,6 +38,7 @@ import {
 } from './compact';
 import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
+import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isToolGroup, loadToolsTool, requestedGroups, type ToolGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
@@ -51,16 +54,19 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
-import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage } from './agent/prompt';
+import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
+import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
+import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
+import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
-export { contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW } from './context-window';
+export { contextLimit, essentialToolsOnly } from './context-window';
 
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
@@ -141,10 +147,24 @@ export interface AgentOptions {
   foreground?: () => boolean;
   /** Extra tools offered next to the built-in and MCP ones (app.tools) */
   tools?: () => Tool[];
-  /** Extra system-prompt text (app.prompt sections, already joined) */
-  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean }) => string;
+  /** Extra system-prompt text (app.prompt sections, already joined): those every session shares, or (part 'session') this session's own */
+  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[]; onlyGroup?: string }) => string;
   /** The hook engine (default: the app's 'hooks' service; none in bare tests) */
   hooks?: HookEngine | null;
+  /** The clock for the cache bookkeeping (default Date.now; tests pass their own) */
+  now?: () => number;
+}
+
+/**
+ * What a session has seen of the provider's prompt cache, in memory only (a reloaded session starts from the provider
+ * type's assumption). `lastAt` is when the last main model call answered; `storedAt` the stored session's last activity
+ * when this process first ran it.
+ */
+interface CacheSeen {
+  caching: boolean;
+  misses: number;
+  lastAt?: number;
+  storedAt?: number;
 }
 
 /** A hook's block reason for a notice: without the "<Event> hook error: [<command>]: " prefix the model reads. */
@@ -195,6 +215,10 @@ export class Agent {
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
   private lastUsage: Usage | null = null;
+  /** Per session: whether its provider was seen caching (cachesPrefix, noteCache) */
+  private cacheSeen = new Map<string, CacheSeen>();
+  /** When the current main model call was sent */
+  private requestAt = 0;
   /**
    * Reported over estimated size of the last request: models count tool schemas and the like differently than four
    * characters per token, so an estimate (after a prune or a fold, before the next reply) is scaled by it.
@@ -272,21 +296,53 @@ export class Agent {
     return Array.isArray(own) ? own.filter((n) => typeof n === 'string') : undefined;
   }
 
-  private promptExtra(cfg: AppConfig): string {
-    if (!this.opts.prompt) return '';
+  /**
+   * The app's prompt sections: those every session shares, and this session's own (its name, its parent), which go at
+   * the end of the prompt so that its start stays the same from session to session.
+   */
+  private promptExtra(cfg: AppConfig): PromptExtra {
+    if (!this.opts.prompt) return { shared: '', session: '' };
     try {
-      if (this.ownTools()) return this.opts.prompt({ cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id, restricted: true });
-      const essential = essentialToolsOnly(cfg);
-      const text = this.opts.prompt({ cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id, essential });
-      return essential ? `${text}${text ? '\n\n' : ''}${ESSENTIAL_NOTE}` : text;
+      const base = { cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id };
+      const restricted = Boolean(this.ownTools());
+      const essential = !restricted && essentialToolsOnly(cfg);
+      // A tool group's sections come with its load, not in the system prompt (unless every group is offered up front)
+      const groups = allGroupsUpFront(cfg) ? {} : { groups: [] };
+      const info = restricted ? { ...base, restricted } : { ...base, essential, ...groups };
+      const text = this.opts.prompt({ ...info, part: 'shared' });
+      const session = this.opts.prompt({ ...info, part: 'session' });
+      const shared = essential ? `${text}${text ? '\n\n' : ''}${ESSENTIAL_NOTE}` : text;
+      // A prompt function that does not know parts returns everything both times: keep it once
+      return { shared, session: session === text ? '' : session };
     } catch (err) {
       console.warn('[agent] a prompt section failed:', errorMessage(err));
-      return '';
+      return { shared: '', session: '' };
     }
   }
 
   private prompt(cfg: AppConfig, skills: Skill[]): string {
-    return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg));
+    return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
+  }
+
+  /** What this session's context note says now (agent/prompt.ts sessionContext). */
+  private contextState(cfg: AppConfig): string {
+    return sessionContext(cfg, this.promptExtra(cfg), Boolean(this.ownTools()));
+  }
+
+  /**
+   * Before a model call: appends a context note when what it says (the mode, folder, date, the session's name and
+   * parent) differs from the newest one in the conversation, which is the case on the first call, after a change, and
+   * after a compaction or a rewind took the last one away. Earlier notes stay as they are, so the prefix does too.
+   */
+  private addContextNote(cfg: AppConfig): void {
+    const note = contextNote(this.contextState(cfg), lastContextNote(this.session.messages));
+    if (note) this.store.append(this.session, { role: 'user', content: note });
+  }
+
+  /** The groups the prompt names as loadable (undefined: every group is offered up front, or none is a group here). */
+  private promptGroups(cfg: AppConfig): ToolGroup[] | undefined {
+    if (this.ownTools() || allGroupsUpFront(cfg)) return undefined;
+    return this.loadableGroups(cfg);
   }
 
   /** The names of the tools a session with a tool set of its own really has (those it names that exist). */
@@ -295,11 +351,12 @@ export class Agent {
   }
 
   /**
-   * The tools a run in this mode offers: built-in, registered and MCP ones (plan mode: the read-only ones). A session
-   * with a tool set of its own gets exactly the built-in and registered tools it names, in every mode, and never an
-   * MCP tool; scoped tools are offered to no other session.
+   * The tools a run in this mode may use: built-in, registered and MCP ones (plan mode: the read-only ones), without
+   * the optional ones when the tool set is trimmed. A session with a tool set of its own gets exactly the built-in and
+   * registered tools it names, in every mode, and never an MCP tool; scoped tools are offered to no other session.
+   * Of these, a request offers those of the tool groups the session has loaded (toolsFor).
    */
-  private toolsFor(cfg: AppConfig): Tool[] {
+  private toolPool(cfg: AppConfig): Tool[] {
     const registered = this.opts.tools?.() ?? [];
     const own = this.ownTools();
     if (own) {
@@ -316,6 +373,158 @@ export class Agent {
     const essential = essentialToolsOnly(cfg);
     const extraTools = registered.filter((t) => !t.scoped && !(essential && t.optional));
     return [...allTools(cfg.permissionMode), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+  }
+
+  /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
+  private loadedGroups(): ToolGroup[] {
+    return cleanGroups(this.session.toolGroups ?? []);
+  }
+
+  /**
+   * The groups this session loads when it needs them, loaded yet or not: those with tools in the pool, in their fixed
+   * order. None when every group is offered up front (AppConfig.toolSet 'all') or the session has a tool set of its own.
+   */
+  private loadableGroups(cfg: AppConfig, pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+    if (this.ownTools() || allGroupsUpFront(cfg)) return [];
+    return TOOL_GROUPS.filter((g) => pool.some((t) => t.group === g));
+  }
+
+  /**
+   * The tools a request offers, append-only for prompt caching: the core tools of the pool with load_tools after the
+   * built-in ones (its definition the same all session long), then each loaded group's tools in the order the session
+   * loaded them. A load adds at the end; nothing else changes the list. On Anthropic's native path every loadable
+   * group's tools come after load_tools from the first request, in the groups' fixed order, loaded or not: that path
+   * sends them deferred and a load references them (agent/anthropic.ts), so the list never changes at all.
+   */
+  private toolsFor(cfg: AppConfig): Tool[] {
+    const pool = this.toolPool(cfg);
+    const loadable = this.loadableGroups(cfg, pool);
+    if (!loadable.length) return pool;
+    const offered = pool.filter((t) => !t.group);
+    const builtIn = new Set(allTools(cfg.permissionMode));
+    let at = 0;
+    offered.forEach((t, i) => {
+      if (builtIn.has(t)) at = i + 1;
+    });
+    offered.splice(at, 0, loadToolsTool(loadable));
+    const groups = this.defersGroups(cfg) ? loadable : this.loadedGroups().filter((g) => loadable.includes(g));
+    for (const g of groups) offered.push(...pool.filter((t) => t.group === g));
+    return offered;
+  }
+
+  /** Anthropic's native path, which sends the groups' tools deferred from the first request (see toolsFor). */
+  private defersGroups(cfg: AppConfig): boolean {
+    try {
+      return isNativeAnthropic(resolveProvider(cfg));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Loads tool groups into this session: their tools are offered from the next request on, for the rest of the
+   * session (saved with it), after those it had. Returns those that were not loaded before; groups the session cannot
+   * use are left out.
+   */
+  private loadGroups(cfg: AppConfig, groups: readonly ToolGroup[], pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+    const loadable = this.loadableGroups(cfg, pool);
+    const loaded = this.loadedGroups();
+    const fresh = cleanGroups(groups).filter((g) => loadable.includes(g) && !loaded.includes(g));
+    if (fresh.length) this.session.toolGroups = [...loaded, ...fresh];
+    return fresh;
+  }
+
+  /**
+   * What a group's load tells the model: its tools, and what it needs to know about them (the browser's rules, the
+   * registered prompt sections of the group), which a system prompt that never changes cannot carry.
+   */
+  private groupLoadText(cfg: AppConfig, group: ToolGroup, pool: Tool[]): string {
+    const names = pool.filter((t) => t.group === group).map((t) => t.name);
+    const parts = [`Loaded ${group}: ${names.join(', ')}.`];
+    if (GROUP_GUIDANCE[group]) parts.push(GROUP_GUIDANCE[group]!);
+    if (this.opts.prompt) {
+      try {
+        const own = this.opts.prompt({ cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id, essential: essentialToolsOnly(cfg), onlyGroup: group });
+        if (own.trim()) parts.push(own.trim());
+      } catch (err) {
+        console.warn('[agent] a prompt section failed:', errorMessage(err));
+      }
+    }
+    return parts.join('\n');
+  }
+
+  /** A load_tools call the agent makes itself, for a load the model did not ask for (see loadForCalls, run). */
+  private syntheticLoad(groups: ToolGroup[]): ToolCall {
+    return { id: `call_load_${randomUUID().slice(0, 8)}`, type: 'function', function: { name: LOAD_TOOLS, arguments: JSON.stringify({ groups }) } };
+  }
+
+  /**
+   * Before a reply's calls run: loads the groups they ask for (load_tools) and those they need (a tool called by name
+   * before its group was loaded: an old session, a model that knows the name), which then runs as usual. Returns
+   * load_tools' results by call id, and the groups loaded for calls by name, which get a load_tools call of the
+   * agent's own (so their result, like every load's, is in the conversation). The run loop stores the results
+   * without a tool row, an approval or hooks.
+   */
+  private loadForCalls(calls: ToolCall[], cfg: AppConfig): { results: Map<string, string>; implied: ToolGroup[] } {
+    const results = new Map<string, string>();
+    const implied: ToolGroup[] = [];
+    if (this.ownTools()) return { results, implied };
+    const pool = this.toolPool(cfg);
+    for (const call of calls) {
+      if (call.function.name !== LOAD_TOOLS) continue;
+      let args: unknown = call.function.arguments;
+      try {
+        args = JSON.parse(call.function.arguments || '{}');
+      } catch {
+        /* a bare list of names is read as it is */
+      }
+      results.set(call.id, this.loadToolsResult(cfg, pool, requestedGroups(args)));
+    }
+    for (const call of calls) {
+      const group = call.function.name === LOAD_TOOLS ? undefined : pool.find((t) => t.name === call.function.name)?.group;
+      if (group) implied.push(...this.loadGroups(cfg, [group], pool));
+    }
+    return { results, implied };
+  }
+
+  /** What a load_tools call gets back: each group it loaded with its tools and guidance, and any it could not load. */
+  private loadToolsResult(cfg: AppConfig, pool: Tool[], asked: string[]): string {
+    const known = this.loadableGroups(cfg, pool);
+    if (!asked.length) return `Error: name the groups to load (${known.join(', ') || 'none here'}).`;
+    const out: string[] = [];
+    const had: string[] = [];
+    const missing: string[] = [];
+    for (const name of asked) {
+      if (!isToolGroup(name) || !known.includes(name)) missing.push(name);
+      else if (this.loadGroups(cfg, [name], pool).length) out.push(this.groupLoadText(cfg, name, pool));
+      else had.push(name);
+    }
+    if (had.length) out.push(`Already loaded: ${had.join(', ')}.`);
+    if (missing.length) out.push(`${out.length ? 'Not' : 'Error: not'} a tool group here: ${missing.join(', ')}. The groups are ${known.join(', ') || 'none'}.`);
+    return out.join('\n\n');
+  }
+
+  /**
+   * For a compaction brief: what the loads of the groups still loaded told the model, when those loads are in the
+   * part being folded (their results would be lost with it, the tools would not).
+   */
+  private foldedGroupsText(cfg: AppConfig, kept: Msg[]): string {
+    if (this.ownTools()) return '';
+    const inKept = new Set<string>();
+    for (const m of kept) {
+      if (m.role !== 'assistant') continue;
+      for (const c of m.tool_calls ?? []) {
+        if (c.type !== 'function' || c.function.name !== LOAD_TOOLS) continue;
+        try {
+          for (const g of requestedGroups(JSON.parse(c.function.arguments || '{}'))) inKept.add(g);
+        } catch {
+          /* not a list: nothing kept */
+        }
+      }
+    }
+    const pool = this.toolPool(cfg);
+    const groups = this.loadedGroups().filter((g) => !inKept.has(g) && pool.some((t) => t.group === g));
+    return groups.length ? `${FOLDED_GROUPS_HEADING}\n${groups.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n')}` : '';
   }
 
   /** True while the approval card `id` is waiting for this agent. */
@@ -778,8 +987,9 @@ export class Agent {
     // A session from before folders were per session adopts the app's folder the first time it runs.
     if (!this.session.cwd) this.session.cwd = this.getConfig().workingDirectory;
     this.runCwd = this.session.cwd;
+    this.cacheState(); // before the run touches the session, so a reloaded one keeps its last activity time
     const cfg = this.sessionConfig();
-    let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' = 'done';
+    let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
 
     const skills = this.getSkills(cfg.workingDirectory);
@@ -820,15 +1030,30 @@ export class Agent {
     this.emit({ type: 'session_changed', session: toMeta(this.session) });
 
     try {
-      const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
+      const { client, model, maxOutput, native } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined, native: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
-      const tools = this.toolsFor(cfg);
-      const specs = tools.map(toSpec);
+      // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
+      // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
+      // A message from another session is answered with session_send, so it loads the sessions group.
+      const wanted = groupsForMessage(userText);
+      if (origin === 'session' && !wanted.includes('sessions')) wanted.push('sessions');
+      const early = this.ownTools() ? [] : this.loadGroups(cfg, wanted);
+      if (early.length) {
+        // The note first, so it sits with the message (the model gets it before the message) and not after the load
+        this.addContextNote(cfg);
+        const load = this.syntheticLoad(early);
+        const pool = this.toolPool(cfg);
+        this.store.append(this.session, { role: 'assistant', content: '', tool_calls: [load] });
+        this.store.append(this.session, { role: 'tool', tool_call_id: load.id, content: early.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n') });
+      }
+      let tools = this.toolsFor(cfg);
+      let specs = tools.map(toSpec);
       this.specTokens = estimateSpecTokens(specs);
       this.emitContext();
+      const groupsKey = () => (this.session.toolGroups ?? []).join(',');
       // A model that cannot take tools (e.g. a vision-only Ollama model) still works as a plain chat.
-      let activeSpecs = specs;
+      let toolless = false;
       if (!client) {
         const key = `${ollamaOf(cfg).baseURL}|${model}`;
         if (!this.toolSupport.has(key)) {
@@ -836,7 +1061,7 @@ export class Agent {
           if (caps && caps.tools !== null) this.toolSupport.set(key, caps.tools);
         }
         if (this.toolSupport.get(key) === false) {
-          activeSpecs = [];
+          toolless = true;
           this.emit({ type: 'error', kind: 'notice', message: noToolsNotice(model) });
         }
       }
@@ -867,6 +1092,10 @@ export class Agent {
       let nudged = false;
       /** Times a Stop hook sent this run back to work */
       let stopContinues = 0;
+      /** Replies cut at the output limit that the model was asked to continue, since the last user message */
+      let continuations = 0;
+      /** The newest tool calls, to stop one made again and again with the same result */
+      const repeats = new RepeatWatch();
       for (let turn = 0; ; turn++) {
         if (turn >= cfg.maxTurns) {
           reason = 'max_turns';
@@ -877,17 +1106,20 @@ export class Agent {
           break;
         }
         this.flushAutoNotes();
-        if (this.queued.length) await this.drainQueue(skills);
+        if (this.queued.length && (await this.drainQueue(skills))) continuations = 0;
         await this.autoCompactIfNeeded(cfg, client, model, signal);
         if (signal.aborted) {
           reason = 'aborted';
           break;
         }
-        const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages];
+        this.addContextNote(cfg);
+        const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
+        const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
-        let reply: { text: string; toolCalls: ToolCall[] };
+        this.requestAt = this.now();
+        let reply: Reply;
         try {
-          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn, native);
         } catch (err) {
           // The provider says the request does not fit: compact and try this call once more instead of ending the run.
           if (signal.aborted || cfg.autoCompact === false || !isContextLengthError(err)) throw err;
@@ -897,14 +1129,33 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
-          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.session.messages], activeSpecs, signal, turn);
+          this.requestAt = this.now();
+          this.addContextNote(cfg);
+          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn, native);
         }
+        // Also where the provider reports no usage (noteCache never runs): a pause is measured from this reply
+        this.cacheState().lastAt = this.now();
         const { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
         const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
         this.emit({ type: 'thinking_done' });
 
-        if (!text.trim() && !toolCalls.length) {
+        // The model declined (Anthropic stop_reason "refusal"): what it wrote stays, one notice, and the run ends
+        if (reply.refused) {
+          if (text.trim()) {
+            const said: Msg = { role: 'assistant', content: text };
+            if (reply.thinking?.length) (said as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
+            this.store.append(this.session, said);
+            lastText = text;
+            this.markPrompt();
+            this.emit({ type: 'text_done' });
+          }
+          this.emit({ type: 'assistant_message', text, toolCalls: 0 });
+          this.emit({ type: 'error', kind: 'notice', message: REFUSAL_NOTICE });
+          break;
+        }
+
+        if (!text.trim() && !toolCalls.length && !reply.cut) {
           // Small models sometimes return nothing after a tool result. Nudge once, then give up.
           if (!nudged) {
             nudged = true;
@@ -912,16 +1163,42 @@ export class Agent {
             continue;
           }
         }
+        // Tool groups the calls load (load_tools) or need (a tool of a group not loaded yet): offered from here on
+        const groupsBefore = groupsKey();
+        const loads = this.loadForCalls(toolCalls, cfg);
+        if (groupsKey() !== groupsBefore) {
+          tools = this.toolsFor(cfg);
+          specs = tools.map(toSpec);
+          this.specTokens = estimateSpecTokens(specs);
+        }
+        // A group loaded for a call by name gets a load_tools call of the agent's own, first in the reply
+        const implied = loads.implied.length ? this.syntheticLoad(loads.implied) : null;
+        if (implied) {
+          const pool = this.toolPool(cfg);
+          loads.results.set(implied.id, loads.implied.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n'));
+        }
         const assistant: Msg = { role: 'assistant', content: text };
-        if (toolCalls.length) assistant.tool_calls = await this.storedCalls(toolCalls, tools, ctx);
+        // The native Anthropic path's thinking goes back with the reply, on that path only (agent/anthropic.ts)
+        if (reply.thinking?.length) (assistant as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
+        if (toolCalls.length) assistant.tool_calls = [...(implied ? [implied] : []), ...(await this.storedCalls(toolCalls, tools, ctx))];
         this.store.append(this.session, assistant);
+        if (implied) this.store.append(this.session, { role: 'tool', tool_call_id: implied.id, content: loads.results.get(implied.id)! });
         if (text.trim()) lastText = text;
         this.markPrompt();
         if (text) this.emit({ type: 'text_done' });
         this.emit({ type: 'assistant_message', text, toolCalls: toolCalls.length });
+        // Cut at the output limit with no call: asked once to go on (twice at most per user message)
+        if (!toolCalls.length && reply.cut && continuations < MAX_CONTINUATIONS && !signal.aborted && !this.hookStop) {
+          continuations++;
+          this.store.append(this.session, { role: 'user', content: CONTINUE_TEXT });
+          continue;
+        }
         if (!toolCalls.length) {
           // A message queued during the run keeps it going instead of ending it.
-          if (this.queued.length && (await this.drainQueue(skills))) continue;
+          if (this.queued.length && (await this.drainQueue(skills))) {
+            continuations = 0;
+            continue;
+          }
           if (this.hookStop || signal.aborted) break;
           // Stop hooks may send the model back to work with a reason.
           const more = await this.stopHooks(lastText, stopContinues);
@@ -933,9 +1210,27 @@ export class Agent {
           break;
         }
 
+        let looping = false;
         for (const call of toolCalls) {
           if (signal.aborted || this.hookStop) break;
+          // load_tools was run above: its result goes in quietly, without a tool row, an approval or hooks
+          const loaded = loads.results.get(call.id);
+          if (loaded !== undefined) {
+            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: loaded });
+            continue;
+          }
+          // Arguments cut off at the output limit: not run; the result says how to send it instead
+          if (reply.cut && !isCompleteJson(call.function.arguments)) {
+            this.emit({ type: 'tool_start', id: call.id, name: call.function.name, args: call.function.arguments });
+            this.emit({ type: 'tool_end', id: call.id, name: call.function.name, result: CUT_CALL_TEXT, ok: false, durationMs: 0 });
+            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: CUT_CALL_TEXT });
+            continue;
+          }
           const result = await this.execTool(call, tools, ctx);
+          // The same call with the same result again and again: a line on the result, then the run ends
+          const same = repeats.add(call.function.name, call.function.arguments, result.content);
+          if (same >= REPEAT_WARN) result.content = `${result.content}\n${REPEAT_WARNING}`;
+          looping = same >= REPEAT_STOP;
           this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
           const used = tools.find((t) => t.name === call.function.name);
           if (CHANGING_TOOLS.has(call.function.name) || (used?.mcp && !used.mcp.readOnly)) this.notifyChanges();
@@ -948,6 +1243,12 @@ export class Agent {
               ],
             });
           }
+          if (looping) break;
+        }
+        if (looping) {
+          reason = 'loop';
+          this.emit({ type: 'error', kind: 'notice', message: REPEAT_STOP_NOTICE });
+          break;
         }
         if (this.planSubmitted) {
           reason = 'plan';
@@ -974,7 +1275,7 @@ export class Agent {
       this.emit({ type: 'session_changed', session: toMeta(this.session) });
       this.emit(lastText ? { type: 'run_end', reason, text: lastText } : { type: 'run_end', reason });
       if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
-      if (reason === 'done' || reason === 'max_turns' || reason === 'plan') {
+      if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
         this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
       }
     }
@@ -989,8 +1290,10 @@ export class Agent {
     const s = this.session;
     const mark = s.lastPrompt;
     let tokens: number;
-    if (mark && mark.at <= s.messages.length) tokens = mark.tokens + estimateTokens(s.messages.slice(mark.at));
-    else tokens = Math.round((estimateTokens([{ role: 'system', content: this.prompt(cfg, this.getSkills(cfg.workingDirectory)) }, ...s.messages]) + this.specTokens) * this.estimateScale);
+    // What the model is sent (agent/context-view.ts), which can be less than the session keeps
+    const sent = this.modelView();
+    if (mark && mark.at <= s.messages.length) tokens = mark.tokens + estimateTokens(sent.slice(mark.at));
+    else tokens = Math.round((estimateTokens([{ role: 'system', content: this.prompt(cfg, this.getSkills(cfg.workingDirectory)) }, ...sent]) + this.specTokens) * this.estimateScale);
     return { tokens, limit, threshold: compactThreshold(cfg), autoCompact: cfg.autoCompact !== false };
   }
 
@@ -1008,16 +1311,21 @@ export class Agent {
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
     const chars = (t: string) => (t ? Math.ceil(t.length / 4) : 0);
-    const parts = systemPromptParts(cfg, this.getSkills(cfg.workingDirectory), this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg));
+    const parts = systemPromptParts(cfg, this.getSkills(cfg.workingDirectory), this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
     const noTools = isOllama(cfg) && this.toolSupport.get(`${ollamaOf(cfg).baseURL}|${ollamaOf(cfg).model}`) === false;
-    const tools = noTools ? [] : this.toolsFor(cfg);
+    // The groups' tools the native path sends deferred take no room until a load brings them in
+    const loaded = new Set(this.loadedGroups());
+    const tools = noTools ? [] : this.toolsFor(cfg).filter((t) => !t.group || loaded.has(t.group) || allGroupsUpFront(cfg) || !!this.ownTools());
     const byServer = new Map<string, Tool[]>();
     for (const t of tools) if (t.mcp) byServer.set(t.mcp.server, [...(byServer.get(t.mcp.server) ?? []), t]);
     let summary = 0;
     let said = 0;
     let toolTokens = 0;
+    // The context notes carry what used to be the end of the system prompt, and are counted with it
+    let notes = 0;
     for (const m of s.messages) {
-      if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
+      if (isContextNote(m)) notes += estimateMessageTokens(m);
+      else if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
       else if (m.role === 'tool' || isSyntheticUser(m)) toolTokens += estimateMessageTokens(m);
       else if (m.role === 'assistant' && m.tool_calls?.length) {
         const total = estimateMessageTokens(m);
@@ -1030,7 +1338,7 @@ export class Agent {
     const mcpItems = [...byServer].map(([server, list]) => ({ label: server, tokens: estimateSpecTokens(list.map(toSpec)) }));
     const skillItems = parts.skills ? [{ label: 'Skills list', tokens: chars(parts.skills) }] : [];
     const used: ContextSlice[] = [
-      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.mcp + parts.mode + parts.userExtra + parts.sections) + 2 },
+      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra) + 2 + (notes || chars(this.contextState(cfg))) },
       { key: 'instructions', label: 'Instructions files', tokens: instr.reduce((a, b) => a + b.tokens, 0), items: instr },
       { key: 'skills', label: 'Skills', tokens: chars(parts.skills), items: skillItems },
       { key: 'tools', label: 'Tool definitions', tokens: estimateSpecTokens(tools.filter((t) => !t.mcp).map(toSpec)) },
@@ -1075,6 +1383,8 @@ export class Agent {
       updatedAt: Date.now(),
     };
     const last = s.compactions?.[s.compactions.length - 1];
+    // The share of the last request's input its provider read from the prompt cache, when it said
+    if (reported && mark.cacheRead !== undefined && mark.tokens > 0) out.cached = Math.min(1, mark.cacheRead / mark.tokens);
     if (last) out.lastCompaction = { at: last.createdAt, reason: last.reason, tokensBefore: last.tokensBefore, tokensAfter: last.tokensAfter };
     return out;
   }
@@ -1085,13 +1395,16 @@ export class Agent {
     if (!u || !u.promptTokens) return;
     const s = this.session;
     s.lastPrompt = { tokens: u.promptTokens + u.completionTokens, at: s.messages.length };
-    const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(s.messages);
+    // What the provider read from its prompt cache, for the meter's detail (only when it reports it)
+    if (u.cacheReadTokens !== undefined) s.lastPrompt.cacheRead = Math.min(u.cacheReadTokens, u.promptTokens);
+    const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(this.modelView());
     if (estimated > 0) this.estimateScale = Math.min(2, Math.max(0.67, s.lastPrompt.tokens / estimated));
     this.emitContext();
   }
 
   private reportUsage(usage: Usage): void {
     this.lastUsage = usage;
+    this.noteCache(usage);
     this.emit({ type: 'usage', ...usage });
   }
 
@@ -1103,7 +1416,17 @@ export class Agent {
       noStreamUsage: this.noStreamUsage,
       toolSupport: this.toolSupport,
       maxOutput: () => this.maxOutput,
+      thinking: this.sessionThinking(),
+      cacheKey: this.session.id,
     };
+  }
+
+  /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
+  private nativeThinking = new Map<string, { stripBefore: number }>();
+  private sessionThinking(): { stripBefore: number } {
+    let t = this.nativeThinking.get(this.session.id);
+    if (!t) this.nativeThinking.set(this.session.id, (t = { stripBefore: 0 }));
+    return t;
   }
 
   /** What every request costs before any conversation: the system prompt and the tool definitions. */
@@ -1120,7 +1443,14 @@ export class Agent {
     if (cfg.autoCompact === false || s.messages.length < MIN_COMPACT_MESSAGES) return;
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
-    if (this.contextInfo().tokens >= limit * PRUNE_THRESHOLD && cfg.pruneToolResults !== false) this.prune(PRUNE_NORMAL, true);
+    const tokens = this.contextInfo().tokens;
+    // Where the provider caches the prefix, old output is set aside in batches (a change to it is paid for); elsewhere
+    // as before: a little more past PRUNE_BUDGET, and in the stored messages past 60% of the window
+    if (cfg.pruneToolResults !== false) {
+      if (this.cachesPrefix(cfg)) this.pruneInBatches(limit);
+      else if (tokens >= limit * PRUNE_THRESHOLD) this.prune(PRUNE_NORMAL, true);
+      else if (tokens >= PRUNE_BUDGET) this.pruneForModel();
+    }
     if (this.contextInfo().tokens < limit * threshold) return;
     const base = this.baseTokens(cfg);
     if (base >= limit * threshold) {
@@ -1180,6 +1510,101 @@ export class Agent {
     return r.saved;
   }
 
+  /** The stored conversation as the model is sent it (agent/context-view.ts): long output cut, old screenshots left out. */
+  private modelView(): Msg[] {
+    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []), { batchShots: this.cachesPrefix(this.sessionConfig()) });
+  }
+
+  /**
+   * Whether the provider in use caches a request's prefix, so that changing an earlier message costs a cache write of
+   * everything after it: every provider but Ollama and a local LM Studio (which keep the old way of pruning), unless
+   * this session has seen it not cache (noteCache).
+   */
+  private cachesPrefix(cfg: AppConfig): boolean {
+    try {
+      const type = resolveProvider(cfg).type;
+      return type !== 'ollama' && type !== 'lmstudio' && this.cacheState().caching;
+    } catch {
+      return false;
+    }
+  }
+
+  private now(): number {
+    return this.opts.now?.() ?? Date.now();
+  }
+
+  private cacheState(): CacheSeen {
+    let st = this.cacheSeen.get(this.session.id);
+    if (!st) {
+      st = { caching: true, misses: 0, storedAt: this.session.messages.length ? this.session.updatedAt : undefined };
+      this.cacheSeen.set(this.session.id, st);
+    }
+    return st;
+  }
+
+  /**
+   * After each main model call: a reported cache read or write means the provider caches. A request that should have
+   * read the cache (sent within CACHE_TTL_MS of the last reply, a prompt of CACHE_EXPECT_MIN_TOKENS or more) and reports
+   * neither is a miss; CACHE_MISSES_TO_FALLBACK in a row and the session prunes the uncached way until a read or write.
+   */
+  private noteCache(usage: Usage): void {
+    const st = this.cacheState();
+    const warm = st.lastAt !== undefined && this.requestAt - st.lastAt < CACHE_TTL_MS && usage.promptTokens >= CACHE_EXPECT_MIN_TOKENS;
+    if ((usage.cacheReadTokens ?? 0) > 0 || (usage.cacheWriteTokens ?? 0) > 0) {
+      st.caching = true;
+      st.misses = 0;
+    } else if (warm && ++st.misses >= CACHE_MISSES_TO_FALLBACK) st.caching = false;
+    st.lastAt = this.now();
+  }
+
+  /**
+   * Where the prefix is cached: nothing until the view reaches the high-water mark, then old output set aside, oldest
+   * first, until it is down to the low-water mark (context-view.ts batchMarks). Between batches the view, and so the
+   * cached prefix, stays the same. After a pause longer than the cache lasts, the next request writes the whole
+   * conversation anyway, so a batch then starts at COLD_BATCH_FROM of the way from the low mark to the high one.
+   */
+  private pruneInBatches(limit: number): void {
+    const { high, low } = batchMarks(limit, PRUNE_THRESHOLD);
+    let tokens = this.contextInfo().tokens;
+    const st = this.cacheState();
+    const last = st.lastAt ?? st.storedAt;
+    const cold = last !== undefined && this.now() - last > CACHE_TTL_MS;
+    if (tokens < (cold ? low + (high - low) * COLD_BATCH_FROM : high)) return;
+    const s = this.session;
+    const already = new Set(s.prunedResults ?? []);
+    // resultsToPrune lists the newest first
+    const candidates = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m)).reverse();
+    const byId = new Map<string, Msg>();
+    for (const m of s.messages) if (m.role === 'tool') byId.set(m.tool_call_id, m);
+    const chosen: string[] = [];
+    for (const id of candidates) {
+      if (tokens <= low) break;
+      chosen.push(id);
+      tokens -= pruneSaving(byId.get(id)?.content) * this.estimateScale;
+    }
+    this.pruneForModel(chosen);
+  }
+
+  /**
+   * Past PRUNE_BUDGET tokens, long before a large window would prune, old tool output is set aside in what the model is
+   * sent (only its start and end go with each later request). The session keeps it whole, so the tool rows still show
+   * all of it, and an output once set aside stays so: the requests keep the same prefix until the next time.
+   */
+  private pruneForModel(chosen?: string[]): void {
+    const s = this.session;
+    const already = new Set(s.prunedResults ?? []);
+    const ids = chosen ?? resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
+    if (!ids.length) return;
+    const before = estimateTokens(this.modelView());
+    s.prunedResults = [...already, ...ids];
+    const after = estimateTokens(this.modelView());
+    // The reported size of the last request covered the output now set aside.
+    const mark = s.lastPrompt;
+    if (mark) mark.tokens = Math.max(0, Math.round(mark.tokens - (before - after) * this.estimateScale));
+    this.store.save(s, false);
+    this.emitContext();
+  }
+
   /**
    * The compaction pipeline: prune, then summarise everything before a verbatim tail. When the summary fails or is
    * not smaller, and the session is over the threshold (or `force`: the provider said the request is too long),
@@ -1237,7 +1662,7 @@ export class Agent {
         const folded = s.messages.slice(0, cut);
         const summary = await this.summarize(cfg, client, model, folded, instructions, signal);
         if (signal.aborted) throw new Error('Compaction was stopped.');
-        const brief = compactedPreamble(summary, filesTouched(folded), this.requestToCarry(folded));
+        const brief = compactedPreamble(summary, filesTouched(folded), this.requestToCarry(folded), this.foldedGroupsText(cfg, s.messages.slice(cut)));
         if (estimateMessageTokens({ role: 'user', content: brief }) >= estimateTokens(folded)) throw new Error('The summary was not smaller than the messages.');
         const info = this.fold(cut, brief, summary, { reason, before, pruned, stage: 'summary' });
         await this.fireHook('PostCompact', { trigger: reason, compact_summary: summary }, { match: [reason] });
@@ -1263,8 +1688,8 @@ export class Agent {
     let dropAt = this.cutFor(tail, limit);
     if (!dropAt) dropAt = findCut(s.messages, tail, { insideTurn: true });
     const dropped = s.messages.slice(0, dropAt);
-    const count = dropped.filter((m) => !isCompactPreamble(m)).length;
-    const note = droppedPreamble(count, filesTouched(dropped), this.requestToCarry(dropped));
+    const count = dropped.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length;
+    const note = droppedPreamble(count, filesTouched(dropped), this.requestToCarry(dropped), this.foldedGroupsText(cfg, s.messages.slice(dropAt)));
     if (!dropAt || estimateMessageTokens({ role: 'user', content: note }) >= estimateTokens(dropped)) {
       // Told once until the conversation has grown: every turn of the run would end up here again.
       if (this.stuckAt < 0 || s.messages.length >= this.stuckAt + 4) {
@@ -1333,7 +1758,7 @@ export class Agent {
       tokensBefore: o.before,
       tokensAfter: this.contextInfo().tokens,
       summary,
-      messages: folded.filter((m) => !isCompactPreamble(m)).length,
+      messages: folded.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length,
       kept: kept.length,
       stage: o.stage,
     };

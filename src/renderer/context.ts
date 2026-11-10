@@ -83,7 +83,8 @@ export function breakdownList(b: ContextBreakdown | null): string {
       return `<div class="ctx-slice${muted}"${tip}><span class="ctx-slice-dot" data-key="${escapeHtml(String(sl.key))}"></span><span class="ctx-slice-label">${escapeHtml(sl.label)}</span><span class="ctx-slice-tokens">${escapeHtml(formatCount(Math.round(sl.tokens)))}</span></div>`;
     })
     .join('');
-  const basis = b.basis === 'reported' ? 'Based on the last request' : 'Estimated';
+  const cached = b.basis === 'reported' && typeof b.cached === 'number' ? ` · ${Math.round(b.cached * 100)}% cached` : '';
+  const basis = b.basis === 'reported' ? `Based on the last request${cached}` : 'Estimated';
   return `<div class="ctx-slices" role="list">${rows}</div><div class="ctx-basis">${escapeHtml(basis)}</div>`;
 }
 

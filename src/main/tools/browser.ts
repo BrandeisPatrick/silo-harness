@@ -3,10 +3,13 @@ import {
   actionLine,
   actionOf,
   clickRule,
+  clipboardRule,
   CREDENTIAL_REFUSAL,
   isExempt,
+  isSensitive,
   keyRule,
   navigationRule,
+  ownServerRule,
   signInPageKey,
   siteDecision,
   siteOf,
@@ -16,6 +19,9 @@ import {
   type ClickTarget,
   type Site,
 } from '../browser/policy';
+import { fencePage } from '../browser/fence';
+import { localAddresses, ownPorts } from '../browser/own-ports';
+import { DEFAULT_READ } from '../browser/paging';
 import { looksLikeCredentialLabel, MASK, scrubSecrets, type CredentialKind } from '../browser/safety';
 import type { Tool, ToolContext, ToolResult } from './types';
 
@@ -88,6 +94,8 @@ async function credentialCheck(name: string, args: Record<string, unknown>, ctx:
   if (isExempt(activeUrl(ctx), lists(ctx).exempt, ctx.cwd)) return null;
   if (name === 'browser_press_key') {
     const combo = String(args.key ?? '');
+    const clip = clipboardRule(combo, false);
+    if (clip.kind === 'refuse') return clip.message;
     // Enter, Tab, the arrows and shortcuts go through whatever has the focus: the page is asked only for a character
     if (!typesACharacter(combo)) return null;
     const focused = (await askPage(() => ctx.browser.credentialTarget(), null)) as CredentialKind | 'embedded' | null;
@@ -125,12 +133,17 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
     url = dest;
     if (nav.kind === 'ask') line = opensTab ? `${nav.detail}, in a new tab` : nav.detail;
   }
+  // The app's own remote-control and debugging servers are never the agent's, whatever the mode or the exemption
+  const own = ownServerRule(url, ownPorts(), localAddresses());
+  if (own.kind === 'refuse') return own.message;
   const page = signInPageKey(url);
   // The sign-in page signal, asked for an act until the user allowed one on that page
   const signIn = action === 'act' && page !== null && ctx.mode !== 'bypass' && !ctx.signInPagesAllowed?.().has(page) && !isExempt(url, settings.exempt, ctx.cwd);
   const pageHasPasswordField = signIn ? await askPage(() => ctx.browser.pageHasPasswordField(), false) : false;
   const code = name === 'browser_eval' ? String(args.code ?? '') : undefined;
-  const decision = siteDecision({ url, action, mode: ctx.mode, cwd: ctx.cwd, settings, sessionAllowed: ctx.sitesAllowed?.() ?? new Set(), pageHasPasswordField, evalCode: code });
+  // A blank or data: page a page made is that page's site (its committed origin)
+  const origin = !siteOf(url) && action !== 'navigate' ? await askPage(async () => ctx.browser.pageOrigin(), '') : '';
+  const decision = siteDecision({ url, action, mode: ctx.mode, cwd: ctx.cwd, settings, sessionAllowed: ctx.sitesAllowed?.() ?? new Set(), pageHasPasswordField, evalCode: code, origin });
   if (decision.kind === 'allow') return null;
   if (decision.kind === 'refuse') return decision.message;
   const detail = cardDetail(line ?? actionLine(name, args, decision.site), args, code);
@@ -140,22 +153,61 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
 /**
  * browser_click, once the element is known: a click inside a CAPTCHA is refused; one that buys something or makes an
  * account asks with a card of its own (Allow and Deny, in every mode, Bypass included), except on an exempt host,
- * which is the user's own app under development.
+ * which is the user's own app under development. What decides is what is really under the click point (hit-tested in
+ * the safety world): a ref covered by something else, or changed since the outline, is refused; a click that lands in
+ * a frame from another site asks with that site named (in every mode), and is refused when that site is a sensitive
+ * one. `target` is what the rules saw, which the click checks again at the moment it clicks.
  */
-async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<string | null> {
+async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<{ stop: string | null; target: ClickTarget | null }> {
   const target = await askPage<ClickTarget | null>(() => ctx.browser.describeTarget(at), null);
-  if (!target) return null;
+  if (!target) return { stop: null, target: null };
   const rule = clickRule(target);
-  if (rule.kind === 'allow') return null;
-  if (rule.kind === 'refuse') return rule.message;
+  if (rule.kind === 'refuse') return { stop: rule.message, target };
   const url = activeUrl(ctx);
-  if (isExempt(url, lists(ctx).exempt, ctx.cwd)) return null;
+  const exempt = isExempt(url, lists(ctx).exempt, ctx.cwd);
   const site = siteOf(url);
-  return askCard(ctx, 'browser_click', cardDetail(actionLine('browser_click', args, site), args), rule.what, site ?? NO_SITE, { reason: rule.detail });
+  if (target.frameOrigin && !exempt) {
+    const frame = siteOf(target.frameOrigin);
+    const name = frame?.display ?? target.frameOrigin;
+    const sensitive = isSensitive(target.frameOrigin, lists(ctx).sensitive);
+    if (sensitive.sensitive) return { stop: `Not permitted: this click lands in a frame from ${name} (${sensitive.note.replace(/^This/, 'this')}). Ask the user to click it in the Browser pane.`, target };
+    const stop = await askCard(ctx, 'browser_click', cardDetail(`Click inside a frame from ${name} on ${(site ?? NO_SITE).display}`, args), 'sensitive', frame ?? site ?? NO_SITE, { note: `This click goes into a frame from ${name}, another site` });
+    if (stop) return { stop, target };
+  }
+  if (rule.kind === 'allow' || exempt) return { stop: null, target };
+  return { stop: await askCard(ctx, 'browser_click', cardDetail(actionLine('browser_click', args, site), args), rule.what, site ?? NO_SITE, { reason: rule.detail }), target };
 }
 
 /** The optional `reason` of the tools that may need the user's approval: shown on the card, under the action. */
 const REASON = { reason: { type: 'string', description: 'Why, in one sentence (shown if approval is needed)' } };
+
+/** The tools that return what a page says, which must come from the page that was checked. */
+const READS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_wait_for']);
+
+/** The active tab and its page's site key ('' when the browser cannot say). */
+function pageNow(ctx: ToolContext): { tabId: string; url: string; key: string } {
+  try {
+    const s = ctx.browser.state();
+    const url = String(s.url ?? '');
+    return { tabId: String(s.activeId ?? ''), url, key: siteOf(url)?.key ?? url };
+  } catch {
+    return { tabId: '', url: '', key: '' };
+  }
+}
+
+/**
+ * The refusal when the page moved between the site check (and its card) and the action or the read: another tab in
+ * front, or (`sameSite`) another site in the tab. null: the same page.
+ */
+function pageChanged(checked: { tabId: string; key: string }, now: { tabId: string; url: string; key: string }, sameSite: boolean): string | null {
+  const where = siteOf(now.url)?.display ?? (now.url || 'a blank page');
+  if (checked.tabId !== now.tabId) return `The active tab changed to ${now.tabId} (${where}); call again.`;
+  if (sameSite && checked.key !== now.key) return `The page changed to ${where}; call again.`;
+  return null;
+}
+
+/** The tools whose whole result is the page's text (the others fence the page's words inside their own sentence). */
+const PAGE_RESULTS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_eval']);
 
 /**
  * Every browser tool's call passes the credential and site checks first (a refusal or a denial is its result), and
@@ -166,14 +218,26 @@ function guarded(tool: Tool): Tool {
   const run = tool.run;
   return {
     ...tool,
+    group: 'browser',
     run: async (args, ctx): Promise<ToolResult> => {
       const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>;
+      // The page the check is about: the call acts on that one, and reads from it, or not at all
+      const checked = pageNow(ctx);
       const stop = (await credentialCheck(tool.name, a, ctx)) ?? (await siteCheck(tool.name, a, ctx));
       if (stop) return { content: stop };
+      const tabsOnly = tool.name === 'browser_tabs' && a.action !== 'new';
+      const opens = tool.name === 'browser_navigate' || tool.name === 'browser_tabs';
+      const moved = tabsOnly ? null : pageChanged(checked, pageNow(ctx), !opens);
+      if (moved) return { content: moved };
       const before = await secrets(ctx);
       try {
         const r = await run(args, ctx);
-        return { ...r, content: scrubSecrets(r.content, [...before, ...(await secrets(ctx))]) };
+        const content = scrubSecrets(r.content, [...before, ...(await secrets(ctx))]);
+        // A read that came back from another page than the one checked (a redirect, another tab in front) is not returned
+        const after = READS.has(tool.name) ? pageChanged(checked, pageNow(ctx), true) : null;
+        if (after) return { content: after };
+        // What the page says is data from the site: fenced, the site named by the browser
+        return { ...r, content: PAGE_RESULTS.has(tool.name) ? fencePage(activeUrl(ctx), content) : content };
       } catch (err) {
         throw new Error(scrubSecrets(err instanceof Error ? err.message : String(err), [...before, ...(await secrets(ctx))]));
       }
@@ -181,11 +245,30 @@ function guarded(tool: Tool): Tool {
   };
 }
 
+/** Whether the agent may read this page without a card, as siteDecision decides a read. */
+function readable(url: string, ctx: ToolContext): boolean {
+  try {
+    return siteDecision({ url, action: 'read', mode: ctx.mode, cwd: ctx.cwd, settings: lists(ctx), sessionAllowed: ctx.sitesAllowed?.() ?? new Set() }).kind === 'allow';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the tab tools say of a tab. Its title and URL are the page's own words (and a URL can carry a token), so they
+ * are fenced under the tab's site, and shown only when the agent may read that site: otherwise the site's name alone,
+ * as the card would name it. Listing tabs is not a way to read a page the user has not allowed.
+ */
+function tabLabel(t: { title: string; url: string }, ctx: ToolContext): string {
+  const url = t.url || 'about:blank';
+  if (!readable(url, ctx)) return `${(siteOf(url) ?? NO_SITE).display}  (not allowed yet: reading it asks the user)`;
+  const title = String(t.title ?? '').replace(/\s+/g, ' ').trim();
+  return fencePage(url, `${title ? `"${title}"  ` : ''}${url}`);
+}
+
 /** One line per tab for browser_tabs list: the active one marked. */
-function tabLines(tabs: { id: string; title: string; url: string; loading: boolean }[], activeId: string): string {
-  return tabs
-    .map((t) => `${t.id === activeId ? '*' : ' '} ${t.id}  ${t.title ? `"${t.title}"  ` : ''}${t.url || 'about:blank'}${t.loading ? '  (loading)' : ''}${t.id === activeId ? '  (active)' : ''}`)
-    .join('\n');
+function tabLines(tabs: { id: string; title: string; url: string; loading: boolean }[], activeId: string, ctx: ToolContext): string {
+  return tabs.map((t) => `${t.id === activeId ? '*' : ' '} ${t.id}  ${tabLabel(t, ctx)}${t.loading ? '  (loading)' : ''}${t.id === activeId ? '  (active)' : ''}`).join('\n');
 }
 
 const tools: Tool[] = [
@@ -210,7 +293,7 @@ const tools: Tool[] = [
       const action = String(args.action ?? 'list');
       const list = () => {
         const s = b.state();
-        return `${s.tabs.length} tab${s.tabs.length === 1 ? '' : 's'}:\n${tabLines(s.tabs, s.activeId)}`;
+        return `${s.tabs.length} tab${s.tabs.length === 1 ? '' : 's'}:\n${tabLines(s.tabs, s.activeId, ctx)}`;
       };
       if (action === 'list') return { content: list() };
       if (action === 'new') {
@@ -225,7 +308,7 @@ const tools: Tool[] = [
         if (!args.tab_id) throw new Error('select needs tab_id (see list).');
         b.activate(String(args.tab_id));
         const s = b.state();
-        return { content: `Now on ${s.activeId}: ${s.url}${s.title ? ` — "${s.title}"` : ''}` };
+        return { content: `Now on ${s.activeId}: ${tabLabel(s, ctx)}` };
       }
       if (action === 'close') {
         const id = args.tab_id ? String(args.tab_id) : b.state().activeId;
@@ -243,23 +326,30 @@ const tools: Tool[] = [
   },
   {
     name: 'browser_get_text',
-    description: 'Return the visible text of the current page (main content first). Best for reading articles and docs.',
-    parameters: { type: 'object', properties: { max_chars: { type: 'integer', description: 'Maximum characters to return (default 50000)' } } },
-    run: async (args, ctx) => ({ content: await ctx.browser.getText(Number(args.max_chars) || 50_000) }),
+    description: 'Return the visible text of the current page (main content first), 12,000 characters at a time; a cut result says the start to call again with. Best for reading articles and docs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        start: { type: 'integer', description: 'Character offset to start from (default 0)' },
+        max_chars: { type: 'integer', description: 'Maximum characters to return (default 12000)' },
+      },
+    },
+    run: async (args, ctx) => ({ content: await ctx.browser.getText(Number(args.max_chars) || DEFAULT_READ, Number(args.start) || 0) }),
   },
   {
     name: 'browser_read_page',
     description:
-      'Outline the current page as a list of visible interactive elements, each tagged with a ref id like [ref_3] that browser_click and browser_type accept. filter="all" also includes headings and text. Password, one-time code and card fields never show their value: a filled one reads = "•••", an empty one (empty).',
+      'Outline the current page as a list of visible interactive elements, each tagged with a ref id like [ref_3] that browser_click and browser_type accept; 12,000 characters at a time (start continues). filter="all" also includes headings and text. Password, one-time code and card fields never show their value: a filled one reads = "•••", an empty one (empty).',
     parameters: {
       type: 'object',
       properties: {
         filter: { type: 'string', enum: ['interactive', 'all'], description: 'interactive (default) or all' },
-        max_chars: { type: 'integer', description: 'Maximum characters to return (default 40000)' },
+        start: { type: 'integer', description: 'Character offset to start from (default 0)' },
+        max_chars: { type: 'integer', description: 'Maximum characters to return (default 12000)' },
       },
     },
     run: async (args, ctx) => ({
-      content: await ctx.browser.readPage(args.filter === 'all' ? 'all' : 'interactive', Number(args.max_chars) || 40_000),
+      content: await ctx.browser.readPage(args.filter === 'all' ? 'all' : 'interactive', Number(args.max_chars) || DEFAULT_READ, Number(args.start) || 0),
     }),
   },
   {
@@ -289,12 +379,10 @@ const tools: Tool[] = [
       const point = !ref && typeof args.x === 'number' && typeof args.y === 'number' ? { x: args.x, y: args.y } : null;
       if (!ref && !point) throw new Error('Provide text, a ref, or x and y.');
       // What the click lands on decides first: a CAPTCHA is refused, a purchase or a new account asks.
-      const stop = await clickCheck(args, ctx, ref ? { ref } : point!);
+      const { stop, target } = await clickCheck(args, ctx, ref ? { ref } : point!);
       if (stop) return { content: stop };
-      if (ref) return { content: await ctx.browser.click(ref, button, Boolean(args.double)) };
-      ctx.browser.clickAt(point!.x, point!.y, button, args.double ? 2 : 1);
-      await new Promise((r) => setTimeout(r, 400));
-      return { content: `Clicked at (${point!.x}, ${point!.y}).` };
+      if (ref) return { content: await ctx.browser.click(ref, button, Boolean(args.double), target) };
+      return { content: await ctx.browser.clickPoint(point!.x, point!.y, button, args.double ? 2 : 1, target) };
     },
   },
   {
@@ -353,7 +441,7 @@ const tools: Tool[] = [
   },
   {
     name: 'browser_press_key',
-    description: 'Press a key or shortcut in the page, e.g. "Enter", "Escape", "Tab", "ArrowDown", "cmd+a".',
+    description: 'Press a key or shortcut in the page, e.g. "Enter", "Escape", "Tab", "ArrowDown", "cmd+a". Paste, copy and cut are refused: the clipboard is the user\'s.',
     parameters: { type: 'object', properties: { key: { type: 'string' }, ...REASON }, required: ['key'] },
     run: async (args, ctx) => ({ content: await ctx.browser.pressKey(String(args.key)) }),
   },
@@ -373,7 +461,7 @@ const tools: Tool[] = [
   {
     name: 'browser_screenshot',
     description:
-      'Capture the browser pane as a PNG, shown to the user and saved to disk (sent to the model only when Settings allows). Refused while a filled credential field has the focus or shows its value on screen.',
+      'Capture the browser pane: saved to disk as a full PNG, shown to the user (and sent to the model only when Settings allows) as a smaller JPEG. Refused while a filled credential field has the focus or shows its value on screen.',
     parameters: { type: 'object', properties: {} },
     run: async (_args, ctx) => {
       const shot = await ctx.browser.screenshot();

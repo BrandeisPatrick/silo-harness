@@ -11,6 +11,9 @@ import { tilde } from './home.js';
 export const MCP_STATUS_LABEL: Record<McpStatus, string> = {
   connected: 'Connected',
   connecting: 'Connecting…',
+  reconnecting: 'Reconnecting',
+  'needs-auth': 'Sign in needed',
+  authorizing: 'Waiting for browser…',
   error: 'Failed to connect',
   disabled: 'Disabled',
   blocked: 'Not enabled for this project',
@@ -33,6 +36,7 @@ export function cleanServers(list: unknown): McpServerInfo[] {
       status: STATUSES.has(s.status) ? s.status : 'error',
       target: typeof s.target === 'string' ? s.target : '',
       tools: Array.isArray(s.tools) ? s.tools.filter((t) => t && typeof t.name === 'string') : [],
+      hiddenTools: Array.isArray(s.hiddenTools) ? s.hiddenTools.filter((t) => typeof t === 'string') : undefined,
     }));
 }
 
@@ -40,7 +44,7 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' 
 
 /** "Connected · 12 tools", "Connecting…", "Failed to connect", … */
 export function mcpStatusText(s: McpServerInfo): string {
-  if (s.status === 'connected') return `Connected · ${s.tools.length ? plural(s.tools.length, 'tool') : 'no tools'}`;
+  if (s.status === 'connected') return `Connected · ${s.tools.length ? plural(s.tools.length, 'tool') : 'no tools'}${s.hiddenTools?.length ? ` · ${s.hiddenTools.length} off` : ''}`;
   return MCP_STATUS_LABEL[s.status] ?? s.status;
 }
 
@@ -186,11 +190,19 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     el.dataset.status = s.status;
 
     let state = '';
+    const hidden = s.hiddenTools?.length ? `<span class="mcp-state" title="${escapeHtml(`Off: ${s.hiddenTools.join(', ')}`)}">${s.hiddenTools.length} off</span>` : '';
+    const authBtn = (cls: string, label: string) => `<button type="button" class="mcp-auth-btn ${cls}" data-focus-key="${escapeHtml(key)}|${cls}">${label}</button>`;
     if (s.status === 'connected') {
-      state = tools.length
-        ? `<button type="button" class="mcp-tools-toggle" aria-expanded="${open}" aria-controls="${toolsId}" data-focus-key="${escapeHtml(key)}|tools"><span>${plural(tools.length, 'tool')}</span>${icon('chevron-down', 14)}</button>`
-        : '<span class="mcp-state">No tools</span>';
+      state =
+        (s.signedIn ? authBtn('sign-out', 'Sign out') : '') +
+        hidden +
+        (tools.length
+          ? `<button type="button" class="mcp-tools-toggle" aria-expanded="${open}" aria-controls="${toolsId}" data-focus-key="${escapeHtml(key)}|tools"><span>${plural(tools.length, 'tool')}</span>${icon('chevron-down', 14)}</button>`
+          : '<span class="mcp-state">No tools</span>');
     } else if (s.status === 'connecting') state = '<span class="mcp-state">Connecting…</span>';
+    else if (s.status === 'reconnecting') state = '<span class="mcp-state">Reconnecting</span>';
+    else if (s.status === 'needs-auth') state = authBtn('sign-in primary', 'Sign in');
+    else if (s.status === 'authorizing') state = '<span class="mcp-state">Waiting for browser…</span>' + authBtn('cancel-sign-in', 'Cancel');
     else if (s.status === 'error') state = '<span class="mcp-state err">Failed</span>';
     else if (s.status === 'disabled') state = '<span class="mcp-state">Disabled</span>';
 
@@ -211,7 +223,7 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       `<button type="button" class="icon-btn sm mcp-remove" aria-label="${escapeHtml(`Remove ${name}`)}" title="Remove" data-focus-key="${escapeHtml(key)}|remove">${icon('trash', 14)}</button>` +
       `</div>`;
 
-    if (s.status === 'error') {
+    if (s.status === 'error' || ((s.status === 'needs-auth' || s.status === 'reconnecting') && s.error?.trim())) {
       el.insertAdjacentHTML('beforeend', `<div class="mcp-error">${icon('circle-alert', 14)}<span>${escapeHtml(s.error?.trim() || 'Could not connect to the server.')}</span></div>`);
     } else if (s.status === 'blocked') {
       const why = s.error?.trim() || "This server comes from the project's .mcp.json. Turn it on to trust it for this project; it starts then.";
@@ -243,6 +255,13 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       void act(s, enabled ? 'enable' : 'disable', (api) => api.setEnabled(name, s.scope, enabled), enabled);
     });
     reconnect.onclick = () => void act(s, 'reconnect', (api) => api.reconnect(name, s.scope));
+    const authAction = (sel: string, action: 'sign in' | 'cancel sign-in for' | 'sign out of', run: (api: McpApi) => Promise<McpServerInfo[]>) => {
+      const b = el.querySelector<HTMLButtonElement>(sel);
+      if (b) b.onclick = () => void act(s, action, run);
+    };
+    authAction('.mcp-auth-btn.sign-in', 'sign in', (api) => api.signIn(name, s.scope));
+    authAction('.mcp-auth-btn.cancel-sign-in', 'cancel sign-in for', (api) => api.cancelSignIn(name, s.scope));
+    authAction('.mcp-auth-btn.sign-out', 'sign out of', (api) => api.signOut(name, s.scope));
     remove.onclick = async () => {
       if (busy.has(key)) return;
       const dir = opts.projectDir();
@@ -271,9 +290,9 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     return el;
   };
 
-  const VERBS: Record<string, string> = { enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove' };
+  const VERBS: Record<string, string> = { enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove', 'sign in': 'sign in to', 'cancel sign-in for': 'cancel sign-in for', 'sign out of': 'sign out of' };
 
-  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
+  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove' | 'sign in' | 'cancel sign-in for' | 'sign out of', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
     const key = mcpKey(s);
     if (busy.has(key)) return;
     const api = opts.source();
@@ -508,7 +527,7 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
           const block = obj.mcpServers;
           if (!block || typeof block !== 'object') throw new Error('The mcpServers block is empty.');
           for (const [n, c] of Object.entries(block as Record<string, McpServerConfig>)) entries.push([n, c]);
-        } else entries.push([name, obj as McpServerConfig]);
+        } else entries.push([name, obj as unknown as McpServerConfig]);
       } else if (kind === 'url') entries.push([name, { type: 'http', url: spec.trim() }]);
       else {
         const [command, ...args] = spec.trim().split(/\s+/);
@@ -542,6 +561,28 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
     },
     async reconnect(name: string, scope: McpScope) {
       connect(find(name, scope));
+      return done();
+    },
+    async signIn(name: string, scope: McpScope) {
+      const s = find(name, scope);
+      s.status = 'authorizing';
+      later(() => {
+        if (s.status !== 'authorizing') return;
+        s.signedIn = true;
+        connect(s);
+        emit();
+      }, 1500);
+      return done();
+    },
+    async cancelSignIn(name: string, scope: McpScope) {
+      const s = find(name, scope);
+      if (s.status === 'authorizing') s.status = 'needs-auth';
+      return done();
+    },
+    async signOut(name: string, scope: McpScope) {
+      const s = find(name, scope);
+      delete s.signedIn;
+      s.status = 'needs-auth';
       return done();
     },
     onServers(cb: (servers: McpServerInfo[]) => void) {

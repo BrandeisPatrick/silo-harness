@@ -1,0 +1,32 @@
+{
+  "type": "search",
+  "query": { "original": "electron browserwindow", "more_results_available": true },
+  "mixed": { "type": "mixed", "main": [{ "type": "web", "index": 0, "all": false }] },
+  "web": {
+    "type": "search",
+    "family_friendly": true,
+    "results": [
+      {
+        "title": "BrowserWindow | Electron",
+        "url": "https://www.electronjs.org/docs/latest/api/browser-window",
+        "is_source_local": false,
+        "description": "Create and control <strong>browser</strong> windows. Process: Main. This module cannot be used until the &#x27;ready&#x27; event of the app module is emitted.",
+        "page_age": "2026-10-01T00:00:00",
+        "profile": { "name": "Electronjs", "url": "https://www.electronjs.org/docs/latest/api/browser-window", "long_name": "electronjs.org" },
+        "language": "en",
+        "family_friendly": true,
+        "type": "search_result",
+        "subtype": "generic",
+        "meta_url": { "scheme": "https", "netloc": "electronjs.org", "hostname": "www.electronjs.org", "path": "› docs › latest › api › browser-window" }
+      },
+      {
+        "title": "electron/docs/api/browser-window.md at main",
+        "url": "https://github.com/electron/electron/blob/main/docs/api/browser-window.md",
+        "description": "",
+        "extra_snippets": ["The BrowserWindow class exposes various ways to modify the look and behavior of your app's windows."],
+        "type": "search_result"
+      },
+      { "title": "Not a web link", "url": "javascript:alert(1)", "description": "dropped" }
+    ]
+  }
+}

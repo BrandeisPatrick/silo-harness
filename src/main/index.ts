@@ -2,12 +2,12 @@
 // Features never edit this file; they get `app` in their setup function (see docs/architecture.md).
 // First: carry over the folders of the app's older names, before any other module reads them.
 import './carry-over';
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, webContents } from 'electron';
-import { pathToFileURL } from 'node:url';
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
 import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
-import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
+import { FileTokenStore } from './mcp-auth';
+import { ARTIFACT_SCHEME, ArtifactStore, serveArtifactRequest } from './artifacts';
 import { loadConfig, saveConfig } from './config';
 import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
 import { TerminalManager } from './terminal';
@@ -27,6 +27,7 @@ import { setupRemote } from './remote';
 import { setupPower } from './power';
 import { setupDreaming } from './dreaming';
 import { setupProviders } from './providers-service';
+import { setupUpdates } from './updates';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -174,7 +175,7 @@ function notify(a: AppHost, sessionId: string, ev: AgentEvent): void {
   let body: string;
   if (ev.type === 'run_end') {
     if (ev.reason === 'aborted') return;
-    title = ev.reason === 'error' ? `${APP_NAME} hit an error` : ev.reason === 'plan' ? `${APP_NAME} has a plan for you` : ev.reason === 'max_turns' ? `${APP_NAME} stopped at the turn limit` : `${APP_NAME} finished`;
+    title = ev.reason === 'error' ? `${APP_NAME} hit an error` : ev.reason === 'plan' ? `${APP_NAME} has a plan for you` : ev.reason === 'max_turns' ? `${APP_NAME} stopped at the turn limit` : ev.reason === 'loop' ? `${APP_NAME} stopped a repeating call` : `${APP_NAME} finished`;
     body = name;
   } else if (ev.type === 'approval_request') {
     title = `${APP_NAME} needs your approval`;
@@ -216,6 +217,8 @@ function buildApp(): AppHost {
         saveConfig: (patch) => void self.updateConfig(patch),
         cwd: () => self.config().workingDirectory,
         version: app.getVersion(),
+        // OAuth for remote servers: tokens in a 0600 file in the data folder (not the keychain: no system prompt).
+        auth: { store: new FileTokenStore(path.join(userData, 'mcp-auth.json')), openExternal: (url) => shell.openExternal(url) },
       }),
   });
   a.events.on((sessionId, ev) => notify(a, sessionId, ev));
@@ -263,12 +266,8 @@ app.whenReady().then(() => {
   applyBranding();
   host = buildApp();
   const a = host;
-  const serveArtifact = async (req: Request): Promise<Response> => {
-    const r = a.artifacts?.resolve(req.url);
-    if (!r) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-    if (r.kind === 'page') return new Response(r.html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-    return net.fetch(pathToFileURL(r.path).href);
-  };
+  // Every artifact: response carries the artifact CSP (artifacts.ts): an HTML artifact sends nothing anywhere.
+  const serveArtifact = (req: Request): Promise<Response> => serveArtifactRequest(req.url, a.artifacts, (url) => net.fetch(url));
   protocol.handle(ARTIFACT_SCHEME, serveArtifact);
   // The Browser pane has a session of its own (persist:browser): artifacts must be served there too.
   browserSession().protocol.handle(ARTIFACT_SCHEME, serveArtifact);
@@ -290,6 +289,7 @@ app.whenReady().then(() => {
   setupProviders(a);
   setupBrowser(a, () => browser);
   setupChatCards(a, () => browser);
+  setupUpdates(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

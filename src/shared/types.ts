@@ -134,8 +134,29 @@ export interface PortkeyConfig {
  * { "mcpServers": { "name": { "command": "npx", "args": ["-y", "@scope/server"], "env": { "KEY": "${KEY}" } } } }
  */
 export type McpServerConfig =
-  | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string>; cwd?: string; disabled?: boolean }
-  | { type: 'http' | 'sse'; url: string; headers?: Record<string, string>; disabled?: boolean };
+  | ({ type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string>; cwd?: string } & McpServerOptions)
+  | ({ type: 'http' | 'sse'; url: string; headers?: Record<string, string>; oauth?: McpOAuthConfig } & McpServerOptions);
+
+/** Keys every server entry may have, whatever its transport. */
+export interface McpServerOptions {
+  disabled?: boolean;
+  /** Milliseconds a tool call may take (default 120 000); progress from the server restarts it, up to 10 minutes in all */
+  timeout?: number;
+  /** Only these tools (exact names) are offered to the model */
+  enabledTools?: string[];
+  /** These tools are never offered (wins over enabledTools) */
+  disabledTools?: string[];
+}
+
+/** OAuth sign-in for a remote server (Claude Code's keys). */
+export interface McpOAuthConfig {
+  /** A client id registered with the authorization server beforehand; without it the app registers itself */
+  clientId?: string;
+  /** A fixed port for the 127.0.0.1 callback (some pre-registered clients need it); default: a free one */
+  callbackPort?: number;
+  /** Scopes to ask for; default: what the server advertises */
+  scopes?: string[];
+}
 
 /** user: stored in the app's settings; project: <workingDirectory>/.mcp.json */
 export type McpScope = 'user' | 'project';
@@ -152,8 +173,12 @@ export interface McpToolInfo {
   destructive: boolean;
 }
 
-/** blocked: a project server that the user has not enabled for this working directory yet (it never starts until then) */
-export type McpStatus = 'connecting' | 'connected' | 'error' | 'disabled' | 'blocked';
+/**
+ * blocked: a project server that the user has not enabled for this working directory yet (it never starts until then).
+ * reconnecting: a remote server lost its connection and is being reconnected. needs-auth: a remote server answered
+ * 401 and waits for the user to sign in. authorizing: sign-in is waiting for the browser.
+ */
+export type McpStatus = 'connecting' | 'connected' | 'reconnecting' | 'needs-auth' | 'authorizing' | 'error' | 'disabled' | 'blocked';
 
 export interface McpServerInfo {
   name: string;
@@ -169,6 +194,10 @@ export interface McpServerInfo {
   /** The server's own name and version from the handshake */
   serverInfo?: { name: string; version: string };
   config: McpServerConfig;
+  /** Tools the server offers that enabledTools/disabledTools keep from the model */
+  hiddenTools?: string[];
+  /** A remote server with OAuth tokens stored */
+  signedIn?: boolean;
 }
 
 export interface McpApi {
@@ -185,6 +214,11 @@ export interface McpApi {
   /** User servers: the disabled flag. Project servers: enabled=true trusts the server for this working directory (status blocked → connecting). */
   setEnabled(name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]>;
   reconnect(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Starts OAuth sign-in for a remote server (opens the browser); returns at once with status authorizing */
+  signIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Deletes the server's tokens and client registration */
+  signOut(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** The full list whenever a server's status or tools change */
   onServers(cb: (servers: McpServerInfo[]) => void): () => void;
 }
@@ -257,12 +291,13 @@ export interface AppConfig {
   keepAwake: 'off' | 'running' | 'always';
   /** Fraction of the context window at which a run compacts on its own (0.5 to 0.95) */
   compactThreshold: number;
-  /** Before summarising, shorten old tool results the model no longer needs word for word */
+  /** Shorten old tool results the model no longer needs word for word: in what it is sent past 48K tokens, and before summarising */
   pruneToolResults: boolean;
   /**
-   * Which tools the model is offered. Every tool's definition is sent with every request, so a small context window
-   * cannot afford them all. essential: files, shell, browser, terminal, tasks, artifacts, images. all: also scheduled
-   * tasks, sub-sessions and mod authoring. auto: all when the window is at least 32k tokens, essential below that.
+   * Which tools the model is offered. Every offered tool's definition is sent with every request, so the browser,
+   * terminal, sub-session, schedule and mod tools are groups a session loads when it needs them (tools/groups.ts).
+   * auto: every group, each when needed. all: every group from the first request. essential: groups when needed, but
+   * never the scheduled tasks, sub-sessions or mod authoring.
    */
   toolSet: 'auto' | 'all' | 'essential';
   /** The tool calls in the conversation: summary folds each run of two or more into one line, all shows every call as its own row */
@@ -281,6 +316,17 @@ export interface AppConfig {
   browser: BrowserConfig;
   /** Auto mode's safety check: what it is told about this Mac, the user's own allow rules, and its model */
   autoMode?: AutoModeConfig;
+  /** web_search's backend (docs/web.md); absent: DuckDuckGo */
+  webSearch?: WebSearchConfig;
+  /** Look for a newer release on GitHub once a day (absent: on) */
+  checkForUpdates?: boolean;
+}
+
+/** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
+export interface WebSearchConfig {
+  provider?: 'duckduckgo' | 'brave' | 'tavily' | 'exa' | 'searxng';
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 /**
@@ -400,8 +446,11 @@ export type AgentEvent =
   | { type: 'thinking_done' }
   | { type: 'tool_start'; id: string; name: string; args: unknown }
   | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }
-  /** Token usage of one model call (prompt = input incl. history, completion = generated). Emitted after each call. */
-  | { type: 'usage'; promptTokens: number; completionTokens: number }
+  /**
+   * Token usage of one model call (prompt = input incl. history and cached tokens, completion = generated). Emitted
+   * after each call. The cache counts, of the prompt, only when the provider reports them.
+   */
+  | { type: 'usage'; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
   /**
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text
@@ -447,14 +496,27 @@ export type AgentEvent =
   /** A hook with a statusMessage is running (text), or it finished (null): the status line says so meanwhile */
   | { type: 'hook_status'; text: string | null }
   /**
+   * A model call failed and waits to be tried again (text: "Connection lost. Retrying in 4 s (2 of 6)."), or the wait
+   * is over (null: the reply started, or the call ended). One status line that replaces itself, like hook_status.
+   */
+  | { type: 'retry_status'; text: string | null }
+  /**
+   * The model call that streamed the text and thinking since the last thinking_done failed and is tried again: what it
+   * showed is not the answer and goes (the window, the phone and the history log drop it).
+   */
+  | { type: 'reply_discarded' }
+  /**
    * Auto mode's safety check blocked the call `block.id` (sent before its tool_end): the agent got the reason as the
    * call's result and goes on; the window shows one quiet line with Allow instead of the call's row.
    */
   | { type: 'auto_blocked'; block: AutoBlock }
   /** The user allowed the blocked call `id` (here, in Settings or on the phone): it runs once when the agent retries it */
   | { type: 'auto_allowed'; id: string }
-  /** `text` is the last assistant text of the run, when it had any */
-  | { type: 'run_end'; reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan'; text?: string };
+  /** `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times. */
+  | { type: 'run_end'; reason: RunEndReason; text?: string };
+
+/** Why a run ended */
+export type RunEndReason = 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop';
 
 /** Where a user-role message came from. */
 export type MessageOrigin = 'user' | 'queue' | 'schedule' | 'session' | 'remote' | 'mod' | 'command' | 'dream';
@@ -788,8 +850,17 @@ export interface SessionMeta {
 export interface SkillInfo {
   name: string;
   description: string;
+  /** The SKILL.md (or command file) */
   path: string;
   source: 'project' | 'user' | 'bundled';
+  /** The skill's folder */
+  dir?: string;
+  /** Shown after /name in the slash menu (`argument-hint`) */
+  argumentHint?: string;
+  /** False when `user-invocable: false`: left out of the slash menu */
+  userInvocable?: boolean;
+  /** What is wrong with the file, one short line each (docs/skills.md) */
+  problems?: string[];
 }
 
 export type TranscriptItem =

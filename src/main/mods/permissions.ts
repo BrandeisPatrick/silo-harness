@@ -124,6 +124,7 @@ export const MOD_EVENT_PERMISSIONS: Record<string, ModPermission | null> = {
   'message.user': 'session:read',
   'message.assistant': 'session:read',
   'message.delta': 'session:read',
+  'message.discarded': 'session:read',
   'tool.started': 'session:read',
   'tool.ended': 'session:read',
   'tasks.changed': 'session:read',

@@ -9,9 +9,11 @@ import { app, clipboard, dialog, webContents as allContents, type BrowserWindow,
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from '../../shared/browser';
-import { clickTargetScript, describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, passwordFieldScript, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
-import { CREDENTIAL_REFUSAL, type ClickTarget } from './policy';
-import { PopupManager } from './popups';
+import { aimScript, describeScript, fieldKindScript, flashScript, getTextScript, passwordFieldScript, readPageScript, REF_RE, scrollScript, selectAllScript, targetScript, waitScript } from './page-scripts';
+import { CHANGED_UNDER_CLICK, CREDENTIAL_REFUSAL, sameClickTarget, type ClickTarget } from './policy';
+import { fencePage } from './fence';
+import { DEFAULT_READ, readPiece } from './paging';
+import { leavesArtifact, opensInTab, PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
 // Polish: the right click, find in page and zoom per site
@@ -24,6 +26,11 @@ import { sanitizeFilename, startedByAgent, type ActingStamps } from './downloads
 import { ownerTabId } from './permissions';
 
 export const MAX_TABS = 12;
+/** The outline is built up to this many characters (refs for every element in it); a read returns a piece of it. */
+const OUTLINE_MAX = 400_000;
+/** A screenshot for the model: JPEG at this quality, its longest side at most MODEL_SHOT_MAX CSS pixels. */
+const MODEL_SHOT_QUALITY = 70;
+const MODEL_SHOT_MAX = 1280;
 export const TOO_MANY_TABS = `Close a tab first: the browser keeps at most ${MAX_TABS}`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -108,6 +115,10 @@ export class BrowserController {
   /** The agent's actions running now, and when the last one ended (ms) */
   private actingCount = 0;
   private lastActEnd = 0;
+  /** When the user last pressed a key or clicked in each tab (or its popups), ms */
+  private readonly userInput = new Map<string, number>();
+  /** Input events until this time (ms) are the controller's own sendInputEvent calls, not the user's */
+  private syntheticUntil = 0;
   /** Addresses the user asked to save from the context menu, and until when that counts (ms) */
   private readonly userDownloads = new Map<string, number>();
 
@@ -150,6 +161,13 @@ export class BrowserController {
       },
     });
     tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
+    tab.webContents.on('input-event', (_e, input) => this.noteInput(tab.id, input.type));
+    // An artifact never takes its tab anywhere else by itself (a link, location, a meta refresh): the strip offers it.
+    tab.webContents.on('will-frame-navigate', (details) => {
+      if (tab.webContents.isDestroyed() || !leavesArtifact(tab.webContents.getURL(), details.url)) return;
+      details.preventDefault();
+      tab.blockedPopup(details.url);
+    });
     // Tabs sit below the popup cards: at the index of the last tab, never at the end of the window's views.
     this.win.contentView.addChildView(tab.view, this.tabs.length);
     this.tabs.push(tab);
@@ -185,6 +203,7 @@ export class BrowserController {
 
   /** A link or window.open from a page: a tab (the active one when the cap is reached, as a plain navigation). */
   private openFromPage(url: string, background: boolean): void {
+    if (!opensInTab(url)) return;
     try {
       this.newTab(url, { background });
     } catch {
@@ -531,7 +550,70 @@ export class BrowserController {
    */
   async describeTarget(target: { ref: string } | { x: number; y: number }): Promise<ClickTarget | null> {
     if ('ref' in target && !REF_RE.test(target.ref)) return null;
-    return ((await this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: clickTargetScript(target) }]).catch(() => null)) as ClickTarget | null) ?? null;
+    const a = await this.aim(target);
+    if (!a || ('refusal' in a && a.missing)) return null;
+    return 'refusal' in a ? { text: '', role: '', tag: '', type: '', inCaptcha: false, formHasCardFields: false, formActionHost: null, blocked: a.refusal } : a.target;
+  }
+
+  /** Runs a script made with inSafetyWorld (page-scripts.ts) in the active page's safety world. */
+  private world<T>(code: string): Promise<T> {
+    return this.wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code }]) as Promise<T>;
+  }
+
+  /**
+   * Where a click on `ref` (scrolled into view unless `scroll` is false) or at a viewport point lands, decided in the
+   * safety world by a hit test of the point: the point and what is really there (a frame from another site named by
+   * its committed origin), or the refusal the model reads (missing: the ref is gone). null: the page cannot be asked.
+   */
+  private async aim(target: { ref: string; scroll?: boolean } | { x: number; y: number }): Promise<{ x: number; y: number; target: ClickTarget } | { refusal: string; missing?: boolean } | null> {
+    type Raw = { x: number; y: number; target: ClickTarget; frame?: { src: string; name: string; index: number } } | { error: string; role?: string; name?: string };
+    const r = (await this.world<Raw | null>(aimScript(target)).catch(() => null)) ?? null;
+    if (!r) return null;
+    if ('error' in r) {
+      const ref = 'ref' in target ? target.ref : '';
+      const what = `${r.role ?? 'element'}${r.name ? ` '${r.name}'` : ''} (${ref})`;
+      if (r.error === 'missing') return { refusal: `No element with ${ref} on the current page (refs change after navigation). Read the page again, or pass the element's visible text instead.`, missing: true };
+      if (r.error === 'changed') return { refusal: `${ref} changed; read the page again.` };
+      if (r.error === 'hidden') return { refusal: `${what} has no size on the page, so there is nothing to click; read the page again.` };
+      if (r.error === 'nothing') return { refusal: `Nothing on the page is at (${'x' in target ? target.x : 0}, ${'y' in target ? target.y : 0}).` };
+      return { refusal: `Something else covers ${what}; read the page again.` };
+    }
+    return { x: r.x, y: r.y, target: { ...r.target, frameOrigin: r.frame ? this.frameOrigin(r.frame) : null } };
+  }
+
+  /**
+   * The committed origin of the frame from another site a click would go into: the child frame with that name, else
+   * the one at that address, else the one in the same place among the page's frames; failing all, the origin of its src.
+   */
+  private frameOrigin(f: { src: string; name: string; index: number }): string {
+    let kids: Electron.WebFrameMain[] = [];
+    try {
+      kids = this.wc.mainFrame.frames;
+    } catch {
+      kids = [];
+    }
+    const pick = (list: Electron.WebFrameMain[]) => (list.length === 1 ? list[0] : null);
+    const frame = (f.name ? pick(kids.filter((k) => k.name === f.name)) : null) ?? pick(kids.filter((k) => k.url === f.src)) ?? (f.index >= 0 && f.index < kids.length ? kids[f.index] : null);
+    const origin = frame && frame.origin && frame.origin !== 'null' ? frame.origin : '';
+    if (origin) return origin;
+    try {
+      return new URL(f.src).origin;
+    } catch {
+      return 'another site';
+    }
+  }
+
+  /**
+   * The committed origin of the active page's main frame: for a page with no address of its own (about:blank, data:)
+   * that a page opened or navigated to, the origin it inherited; '' when it is opaque ("null") or cannot be read.
+   */
+  pageOrigin(): string {
+    try {
+      const o = this.wc.mainFrame.origin;
+      return o && o !== 'null' ? o : '';
+    } catch {
+      return '';
+    }
   }
 
   /** Whether the active page shows a password field: the sign-in page signal (policy.ts looksLikeSignInPage). False when it cannot say. */
@@ -591,7 +673,7 @@ export class BrowserController {
     }
     if (tab.certError) return certificateSentence(tab.certError);
     const s = tab.state();
-    return `Now at ${s.url}${s.title ? ` — "${s.title}"` : ''}`;
+    return `Now at ${fencePage(s.url, `${s.url}${s.title ? ` — "${s.title}"` : ''}`)}`;
   }
 
   reload(): Promise<void> {
@@ -605,28 +687,23 @@ export class BrowserController {
     await wait;
   }
 
-  async getText(maxChars = 50_000): Promise<string> {
-    const text = (await this.wc.executeJavaScript(GET_TEXT_SCRIPT, true)) as string;
+  /** browser_get_text: the text a person can see, from `start`, at most `maxChars` characters (paging.ts). */
+  async getText(maxChars = DEFAULT_READ, start = 0): Promise<string> {
+    const text = ((await this.world<string>(getTextScript())) ?? '') as string;
     const s = this.state();
-    const body = text.length > maxChars ? text.slice(0, maxChars) + `\n…[truncated ${text.length - maxChars} characters]` : text;
-    return `URL: ${s.url}\nTitle: ${s.title}\n\n${body || '(no visible text)'}`;
+    return `URL: ${s.url}\nTitle: ${s.title}\n\n${text ? readPiece(text, start, maxChars) : '(no visible text)'}`;
   }
 
-  async readPage(mode: 'interactive' | 'all' = 'interactive', maxChars = 40_000): Promise<string> {
-    const r = (await this.wc.executeJavaScript(readPageScript(mode, maxChars), true)) as {
-      text: string;
-      count: number;
-      truncated: boolean;
-      title: string;
-      url: string;
-    };
-    let out = `URL: ${r.url}\nTitle: ${r.title}\n${r.count} interactive element${r.count === 1 ? '' : 's'}\n\n${r.text || '(nothing visible)'}`;
-    if (r.truncated) out += '\n…[page outline truncated; use browser_find to locate specific elements]';
-    return out;
+  /** browser_read_page: the outline with refs (every element numbered), from `start`, at most `maxChars` characters. */
+  async readPage(mode: 'interactive' | 'all' = 'interactive', maxChars = DEFAULT_READ, start = 0): Promise<string> {
+    const r = await this.world<{ text: string; count: number; truncated: boolean }>(readPageScript(mode, OUTLINE_MAX));
+    // The address and the title are the browser's, never what a script in the page says they are
+    const s = this.state();
+    return `URL: ${s.url}\nTitle: ${s.title}\n${r.count} interactive element${r.count === 1 ? '' : 's'}\n\n${r.text ? readPiece(r.text, start, maxChars, r.truncated) : '(nothing visible)'}`;
   }
 
   async find(query: string): Promise<string> {
-    const r = (await this.wc.executeJavaScript(readPageScript('all', 400_000), true)) as { text: string };
+    const r = await this.world<{ text: string }>(readPageScript('all', OUTLINE_MAX));
     const q = query.toLowerCase();
     const hits = r.text.split('\n').filter((l) => l.toLowerCase().includes(q)).slice(0, 25);
     return hits.length ? hits.join('\n') : `No visible element or text matched "${query}".`;
@@ -634,7 +711,7 @@ export class BrowserController {
 
   /** Outline lines of the visible interactive elements; refs are refreshed as a side effect. */
   private async outlineLines(): Promise<string[]> {
-    const r = (await this.wc.executeJavaScript(readPageScript('interactive', 400_000), true)) as { text: string };
+    const r = await this.world<{ text: string }>(readPageScript('interactive', OUTLINE_MAX));
     return r.text ? r.text.split('\n') : [];
   }
 
@@ -670,24 +747,35 @@ export class BrowserController {
     return scored[0].p.ref;
   }
 
-  private async rectOf(ref: string): Promise<{ x: number; y: number; tag: string }> {
+  /**
+   * Where the agent's click or typing at `ref` goes, checked twice: once with the element scrolled into view (the flash
+   * then shows it), and again at the moment of the click without scrolling, which must find the same thing there. A
+   * string is the refusal the model reads; a ref that is gone throws with the elements there are now.
+   */
+  private async aimAt(ref: string): Promise<{ x: number; y: number; target: ClickTarget } | string> {
     if (!REF_RE.test(ref)) throw new Error(`Invalid ref "${ref}". Refs look like ref_12 and come from browser_read_page, or pass text instead.`);
-    const pt = (await this.wc.executeJavaScript(rectScript(ref), true)) as { x: number; y: number; tag: string } | null;
-    if (!pt) {
-      const lines = await this.outlineLines();
+    const a = await this.aim({ ref });
+    if (!a) throw new Error('The page could not be asked where the element is; read the page again.');
+    if ('refusal' in a) {
+      if (!a.missing) return a.refusal;
+      const lines = await this.outlineLines().catch(() => [] as string[]);
       throw new Error(`No element with ${ref} on the current page (refs change after navigation). The elements now are:\n${lines.slice(0, 30).join('\n') || '(none)'}\nUse one of these refs, or pass the element's visible text instead.`);
     }
-    await sleep(50);
-    return pt;
+    this.flash(ref);
+    await sleep(120);
+    const b = await this.aim({ ref, scroll: false });
+    if (!b) throw new Error('The page could not be asked where the element is; read the page again.');
+    if ('refusal' in b) return b.refusal;
+    return sameClickTarget(a.target, b.target) ? b : CHANGED_UNDER_CLICK;
   }
 
   private async describe(ref: string): Promise<{ role: string; name: string }> {
-    const d = (await this.wc.executeJavaScript(describeScript(ref), true).catch(() => null)) as { role: string; name: string } | null;
+    const d = (await this.world<{ role: string; name: string } | null>(describeScript(ref)).catch(() => null)) ?? null;
     return d ?? { role: 'element', name: '' };
   }
 
   private flash(ref: string): void {
-    this.wc.executeJavaScript(flashScript(ref), true).catch(() => undefined);
+    this.world(flashScript(ref)).catch(() => undefined);
   }
 
   /** Lets an action land: a short pause, the rest of any navigation it started, then "Now at …" when the page changed. */
@@ -696,7 +784,7 @@ export class BrowserController {
     if (this.wc.isLoading()) await this.waitForLoad(this.wc, 5000);
     if (this.activeTab.certError) return ` ${certificateSentence(this.activeTab.certError)}`;
     const after = this.state();
-    if (after.url !== before.url || after.title !== before.title) return ` Now at: ${after.title ? `${after.title} — ` : ''}${after.url}`;
+    if (after.url !== before.url || after.title !== before.title) return ` Now at: ${fencePage(after.url, `${after.title ? `${after.title} — ` : ''}${after.url}`)}`;
     return '';
   }
 
@@ -706,9 +794,9 @@ export class BrowserController {
     if (!what) throw new Error('Give text and/or selector to wait for.');
     const deadline = Date.now() + Math.min(Math.max(500, timeoutMs), 60_000);
     for (;;) {
-      const found = (await this.wc.executeJavaScript(waitScript(text, selector), true).catch(() => false)) as false | string | { line: string };
+      const found = (await this.world<false | string | { line: string }>(waitScript(text, selector)).catch(() => false)) ?? false;
       if (found === 'bad-selector') throw new Error(`"${selector}" is not a valid CSS selector.`);
-      if (found && typeof found === 'object') return `Found ${what}.${found.line ? ` The page says: "${found.line}"` : ''}`;
+      if (found && typeof found === 'object') return `Found ${what}.${found.line ? ` The page says: ${fencePage(this.state().url, found.line)}` : ''}`;
       if (Date.now() >= deadline) return `Timed out after ${timeoutMs} ms waiting for ${what}. The page may still be loading or the text may differ.`;
       await sleep(200);
     }
@@ -718,6 +806,7 @@ export class BrowserController {
     const wc = this.wc;
     const px = Math.round(x);
     const py = Math.round(y);
+    this.synthetic();
     wc.sendInputEvent({ type: 'mouseMove', x: px, y: py });
     wc.sendInputEvent({ type: 'mouseDown', x: px, y: py, button, clickCount });
     wc.sendInputEvent({ type: 'mouseUp', x: px, y: py, button, clickCount });
@@ -725,17 +814,40 @@ export class BrowserController {
     this.lastActEnd = Date.now();
   }
 
-  click(ref: string, button: 'left' | 'right' | 'middle' = 'left', double = false): Promise<string> {
+  /**
+   * Clicks the ref'd element where it really is: the point is hit-tested in the safety world just before the click, and
+   * a page that covers the element, changed it, or moved something else under the point gets no click (the refusal is
+   * the result). `expect`: what the click rules saw there (browser.ts clickCheck), which must still be what is there.
+   */
+  click(ref: string, button: 'left' | 'right' | 'middle' = 'left', double = false, expect?: ClickTarget | null): Promise<string> {
     return this.stamp(async () => {
-      const pt = await this.rectOf(ref);
       const what = await this.describe(ref);
       const before = this.state();
-      this.flash(ref);
-      await sleep(120);
+      const at = await this.aimAt(ref);
+      if (typeof at === 'string') return at;
+      if (expect && !sameClickTarget(expect, at.target)) return CHANGED_UNDER_CLICK;
       this.wc.focus();
-      this.clickAt(pt.x, pt.y, button, double ? 2 : 1);
+      this.clickAt(at.x, at.y, button, double ? 2 : 1);
       const suffix = await this.settle(before);
       return `Clicked ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}).${suffix}`;
+    });
+  }
+
+  /**
+   * browser_click at viewport coordinates: what is under the point is looked at again just before the click and must be
+   * what the click rules saw (`expect`), else nothing is clicked.
+   */
+  clickPoint(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left', clickCount = 1, expect?: ClickTarget | null): Promise<string> {
+    return this.stamp(async () => {
+      const before = this.state();
+      const a = await this.aim({ x, y });
+      if (!a) return `The page could not be asked what is at (${x}, ${y}); nothing was clicked.`;
+      if ('refusal' in a) return a.refusal;
+      if (expect && !sameClickTarget(expect, a.target)) return CHANGED_UNDER_CLICK;
+      this.wc.focus();
+      this.clickAt(x, y, button, clickCount);
+      const suffix = await this.settle(before);
+      return `Clicked at (${x}, ${y}).${suffix}`;
     });
   }
 
@@ -753,18 +865,20 @@ export class BrowserController {
     const before = this.state();
     let what = { role: 'the focused element', name: '' };
     if (ref) {
-      const pt = await this.rectOf(ref);
       what = await this.describe(ref);
-      this.flash(ref);
+      const at = await this.aimAt(ref);
+      if (typeof at === 'string') return { content: at, secret: false };
+      // A frame from another site over the field: the text would go to that site
+      if (at.target.frameOrigin) return { content: `Something else covers ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}): a frame from ${at.target.frameOrigin}; read the page again.`, secret: false };
       this.wc.focus();
-      this.clickAt(pt.x, pt.y);
+      this.clickAt(at.x, at.y);
       await sleep(120);
     }
     // Where the focus is now decides, before a key reaches the page. A credential field's text is never echoed: the
     // result says how much was typed, not what.
     const secret = await this.targetKind(ref, true);
     if (secret && !allowSecret) throw new Error(CREDENTIAL_REFUSAL);
-    if (ref && clear) await this.wc.executeJavaScript(SELECT_ALL_SCRIPT, true);
+    if (ref && clear) await this.world(selectAllScript());
     await this.wc.insertText(text);
     if (submit) {
       await sleep(100);
@@ -785,6 +899,7 @@ export class BrowserController {
     const modifiers = parts.map((m) => m.toLowerCase()).map((m) => (m === 'cmd' || m === 'command' || m === 'meta' ? 'cmd' : m === 'ctrl' || m === 'control' ? 'control' : m === 'option' ? 'alt' : m));
     const keyCode = KEY_MAP[keyName.toLowerCase()] ?? keyName;
     const wc = this.wc;
+    this.synthetic();
     wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers: modifiers as never });
     if (keyCode.length === 1 || keyCode === 'Return' || keyCode === 'Space' || keyCode === 'Tab') {
       wc.sendInputEvent({ type: 'char', keyCode, modifiers: modifiers as never });
@@ -797,7 +912,7 @@ export class BrowserController {
   async scroll(direction: 'up' | 'down' | 'left' | 'right', amount = 600): Promise<string> {
     const dx = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
     const dy = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
-    const pos = (await this.wc.executeJavaScript(scrollScript(dx, dy), true)) as { x: number; y: number; h: number; vh: number };
+    const pos = await this.world<{ x: number; y: number; h: number; vh: number }>(scrollScript(dx, dy));
     await sleep(150);
     return `Scrolled ${direction}. Now at y=${Math.round(pos.y)} of ${pos.h} (viewport ${pos.vh}).`;
   }
@@ -832,14 +947,23 @@ export class BrowserController {
           : `Screenshot refused: ${what} on screen shows a filled-in credential in clear text. Scroll it out of view, or ask the user to look, instead.`,
       );
     }
-    const image = await this.wc.capturePage();
+    // A hidden view's first capture can fail (UnknownVizError): one more try after a moment
+    const image = await this.wc.capturePage().catch(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return this.wc.capturePage();
+    });
+    // The user's copy on disk keeps every pixel; what goes into the conversation (and to the model, when Settings
+    // allow) is a JPEG at CSS scale, its longest side at most 1280 px: a fraction of the image tokens.
     const png = image.toPNG();
     const dir = path.join(app.getPath('temp'), 'silo-harness-screenshots');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `shot-${Date.now()}.png`);
     fs.writeFileSync(file, png);
     const { width, height } = image.getSize();
-    return { path: file, dataUrl: `data:image/png;base64,${png.toString('base64')}`, width, height };
+    const css = { width: Math.max(1, Math.round(this.bounds.width) || width), height: Math.max(1, Math.round(this.bounds.height) || height) };
+    const fit = Math.min(1, MODEL_SHOT_MAX / Math.max(css.width, css.height));
+    const small = image.resize({ width: Math.max(1, Math.round(css.width * fit)), height: Math.max(1, Math.round(css.height * fit)), quality: 'good' });
+    return { path: file, dataUrl: `data:image/jpeg;base64,${small.toJPEG(MODEL_SHOT_QUALITY).toString('base64')}`, width, height };
   }
 
   evaluate(code: string): Promise<string> {
@@ -847,7 +971,8 @@ export class BrowserController {
   }
 
   private async evaluateNow(code: string): Promise<string> {
-    const result = await this.wc.executeJavaScript(code, true);
+    // No user gesture: the agent's code cannot open windows, go full screen or start what a click would allow
+    const result = await this.wc.executeJavaScript(code, false);
     if (result === undefined) return 'undefined';
     try {
       const s = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
@@ -873,6 +998,30 @@ export class BrowserController {
     }
   }
 
+  /** A key press or click reached a tab's page (or its popup): the user's, unless it is one the controller sent. */
+  private noteInput(tabId: string, type: string): void {
+    if (Date.now() < this.syntheticUntil) return;
+    if (/^(mouseDown|rawKeyDown|keyDown|char|touchStart|gestureTap|gestureTapDown)$/.test(type)) this.userInput.set(tabId, Date.now());
+  }
+
+  /** When the user last pressed a key or clicked in that tab (downloads.ts startedByUser); 0: never. */
+  userInputAt(tabId: string | null): number {
+    return tabId ? this.userInput.get(tabId) ?? 0 : 0;
+  }
+
+  /**
+   * Live tests only (feature.ts registers it with SILO_HARNESS_LIVE_TEST): the hidden test window's views receive no
+   * input at all, so a test says "the user just pressed a key in the active tab" this way.
+   */
+  liveTestUserInput(): void {
+    this.userInput.set(this.activeTab.id, Date.now());
+  }
+
+  /** The next input events are the agent's (clickAt, pressKey): they never count as the user's. */
+  private synthetic(): void {
+    this.syntheticUntil = Date.now() + 500;
+  }
+
   stamps(): ActingStamps {
     return { inFlight: this.actingCount, lastEnd: this.lastActEnd };
   }
@@ -894,6 +1043,7 @@ export class BrowserController {
           const wc = make(options);
           const id = wc.id;
           this.popupOwners.set(id, tab.id);
+          wc.on('input-event', (_e, input) => this.noteInput(tab.id, input.type));
           wc.once('destroyed', () => this.popupOwners.delete(id));
           return wc;
         },

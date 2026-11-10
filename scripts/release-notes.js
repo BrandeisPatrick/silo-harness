@@ -4,10 +4,11 @@
 //   node scripts/release-notes.js <version> [out]  default: prints the notes
 //
 // The notes are the "## <version> — <date>" section of the changelog (its format is in docs/releasing.md) with four
-// changes: links to files in the repository point at the current commit, so they work in a draft before the tag
-// exists; a release with Highlights gets the README's hero screenshot under its summary line; an Install section
-// gives the size and SHA-256 of both downloads; and a Full changelog line links the comparison with the version
-// before. The "Not notarized" line under Known issues is left out because Install says it.
+// changes: links to files in the repository point at the current commit, and its images are served from that commit,
+// so both work in a draft before the tag exists; a release with Highlights and no image of its own gets the README's
+// hero screenshot under its summary line; an Install section gives the size and SHA-256 of both downloads; and a Full
+// changelog line links the comparison with the version before. The "Not notarized" line under Known issues is left
+// out because Install says it.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -38,6 +39,21 @@ let body = changelog.slice(start + found[0].length, next < 0 ? undefined : next)
 // The version before, for the Full changelog link: the next "## x.y.z" heading down the file
 const prev = next < 0 ? null : /^## (\d+\.\d+\.\d+)/.exec(changelog.slice(next + 1))?.[1] ?? null;
 
+// The section's own images (a figure under a highlight), served raw from the commit. They must be committed: a file
+// that is only in the working tree would show here and be missing on the release page.
+const raw = `https://raw.githubusercontent.com/${slug}/${sha}/`;
+let ownImages = 0;
+body = body.replace(/!\[([^\]]*)\]\((?!https?:)([^)\s]+)\)/g, (_, alt, rel) => {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${sha}:${rel}`], { cwd: root, stdio: 'ignore' });
+  } catch {
+    throw new Error(`the notes show an image that is not in the commit: ${rel}`);
+  }
+  if (!alt.trim()) throw new Error(`the image ${rel} needs alt text saying what it shows`);
+  ownImages++;
+  return `![${alt}](${raw}${rel})`;
+});
+
 // Links to files in the repository, pinned to the commit
 const blob = `https://github.com/${slug}/blob/${sha}/`;
 body = body.replace(/\]\((?!https?:|#)([^)\s]+)\)/g, (_, rel) => `](${blob}${rel})`);
@@ -49,12 +65,13 @@ for (const [, url] of body.matchAll(/\]\((https:\/\/github\.com\/[^)]+)\)/g)) {
 
 body = body.replace(/\n- Not notarized:[^\n]*/, '');
 
-// A release with Highlights (a minor one) shows the screenshot under its summary line; a fixes-only one does not
-if (/^### Highlights$/m.test(body)) {
+// A release with Highlights (a minor one) and no image of its own shows the screenshot under its summary line; a
+// fixes-only one shows none
+if (/^### Highlights$/m.test(body) && !ownImages) {
   const hero = 'docs/screenshots/hero.png';
   if (!fs.existsSync(path.join(root, hero))) throw new Error(`missing ${hero}`);
   const firstBreak = body.indexOf('\n\n');
-  const image = `![${pkg.build?.productName ?? 'Silo Harness'}](https://raw.githubusercontent.com/${slug}/${sha}/${hero})`;
+  const image = `![${pkg.build?.productName ?? 'Silo Harness'}](${raw}${hero})`;
   body = firstBreak < 0 ? `${body}\n\n${image}` : `${body.slice(0, firstBreak)}\n\n${image}${body.slice(firstBreak)}`;
 }
 

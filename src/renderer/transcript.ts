@@ -205,11 +205,24 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     return el;
   }
 
-  function addSystemMessage(text: string, kind: 'info' | 'error' | 'notice' = 'info'): HTMLElement {
+  /**
+   * `group` names the setting a note reports (the permission mode, the working directory). A new note takes the place
+   * of its group's earlier ones when only notes came between: stepping through the modes leaves one line.
+   */
+  function addSystemMessage(text: string, kind: 'info' | 'error' | 'notice' = 'info', group?: string): HTMLElement {
     const el = document.createElement('div');
     el.className = `msg system${kind === 'info' ? '' : ` ${kind}`}`;
     // Line breaks kept: /sessions, /merge and a name that fits several sessions answer with one session per line
     el.innerHTML = `${icon(kind === 'error' ? 'circle-alert' : 'info', kind === 'error' ? 16 : 14)}<span>${escapeHtml(text).replace(/\n/g, '<br>')}</span>`;
+    if (group) {
+      el.dataset.group = group;
+      let prev = messagesEl.lastElementChild as HTMLElement | null;
+      while (prev?.classList.contains('system')) {
+        const before = prev.previousElementSibling as HTMLElement | null;
+        if (prev.dataset.group === group) prev.remove();
+        prev = before;
+      }
+    }
     addNode(el);
     return el;
   }
@@ -239,6 +252,8 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
   }
   let currentAssistant: { el: HTMLElement; md: HTMLElement; raw: string } | null = null;
   let renderQueued = false;
+  /** The reply and thinking nodes of the model call in flight: a failed attempt's go (discardReply) */
+  let attemptNodes: HTMLElement[] = [];
 
   function ensureAssistant(): { el: HTMLElement; md: HTMLElement; raw: string } {
     if (!currentAssistant) {
@@ -251,6 +266,7 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
       actions.innerHTML = `<button type="button" class="icon-btn sm msg-copy" aria-label="Copy message" data-tip="Copy">${icon('copy', 14)}</button>`;
       el.append(md, actions);
       currentAssistant = { el, md, raw: '' };
+      attemptNodes.push(el);
       addNode(el);
     }
     return currentAssistant;
@@ -361,6 +377,7 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
         `<summary><span class="tool-chevron">${icon('chevron-right')}</span><span class="think-icon">${icon('lightbulb')}</span>` +
         `<span class="think-label">Thinking<span class="ellipsis"><i>.</i><i>.</i><i>.</i></span></span></summary><div class="body"></div>`;
       currentThinking = { el, label: el.querySelector('.think-label')!, body: el.querySelector('.body')!, raw: '', startedAt: Date.now() };
+      attemptNodes.push(el);
       addNode(el);
     }
     currentThinking.raw += delta;
@@ -403,6 +420,23 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     currentThinking = null;
   }
 
+  /** The model call completed (thinking_done) or the run ended: what it streamed stays. */
+  function keepReply(): void {
+    attemptNodes = [];
+  }
+
+  /** The model call failed and is tried again (reply_discarded): what it streamed is taken off the transcript. */
+  function discardReply(): void {
+    for (const el of attemptNodes) {
+      rawByMessage.delete(el);
+      el.remove();
+    }
+    attemptNodes = [];
+    currentAssistant = null;
+    currentThinking = null;
+    thinkPending = '';
+  }
+
   return {
     scrollToBottom,
     showJump,
@@ -422,12 +456,15 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     endAssistant,
     appendThinking,
     finishThinking,
+    keepReply,
+    discardReply,
     /** The user is at the bottom: the view follows new content */
     atBottom: () => stick,
     /** The transcript was cleared: nothing streams, and the view follows again */
     reset: () => {
       currentAssistant = null;
       currentThinking = null;
+      attemptNodes = [];
       thinkPending = '';
       stick = true;
     },

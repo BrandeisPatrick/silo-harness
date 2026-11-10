@@ -31,8 +31,8 @@ export interface ConnectionDeps {
   focusComposer(): void;
   showError(anchor: HTMLElement, message: string): void;
   cleanError(err: unknown): string;
-  /** A quiet notice in the transcript */
-  notice(text: string): void;
+  /** A quiet notice in the transcript; one of a `group` replaces the group's last */
+  notice(text: string, group?: string): void;
   /** The config changed here: the top bar, the strip and the folder row follow */
   applyConfigToUi(): void;
   refreshContext(): Promise<void>;
@@ -236,7 +236,7 @@ export function createConnection({ config, setConfig, api, emptyState, cwdBtn, m
    */
   function folderChanged(dir: string): void {
     applyConfigToUi();
-    if (emptyState.hidden) notice(`Working directory set to ${dir}`);
+    if (emptyState.hidden) notice(`Working directory set to ${dir}`, 'cwd');
   }
 
   /** The working-directory picker (the top bar's folder and the folder row's "Choose another folder…"). */

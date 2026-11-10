@@ -26,8 +26,12 @@ const { check, done } = checker();
   const staging = path.join(profile, 'browser', 'pending-downloads');
   const stagedFiles = () => (fs.existsSync(staging) ? fs.readdirSync(staging, { recursive: true }).filter((f) => fs.statSync(path.join(staging, f)).isFile()) : []);
   const waitList = (fn, what) => app.waitFor(`(async () => { const l = await oc.rpc('browser.downloads'); return (${fn})(l); })()`, 15_000, what);
-  // The user's click, run in the page over CDP with a user gesture (synthetic mouse events do not reach a hidden window's view)
-  const userClick = (ws, id) => evalAt(ws, `(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+  // The user's click: their input on the tab (the hidden window's views receive no real input, so the app's live-test
+  // hook stands in for the key press), then the click run in the page over CDP with a user gesture
+  const userClick = async (ws, id) => {
+    await app.evaluate(`oc.rpc('browser.liveTestUserInput')`);
+    return evalAt(ws, `(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+  };
   const barAnswer = (label) => app.evaluate(`(() => { const b = [...document.querySelectorAll('#browser-bars .browser-ask.download button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
 
   try {
@@ -67,7 +71,7 @@ const { check, done } = checker();
     await app.waitFor(`window.__oc_debug.mods.browser().safety.bars.some((b) => b.kind === 'download')`, 10_000, 'the download bar');
     l = await list();
     const agent = l.find((x) => x.url.endsWith('/files/agent-report.txt'));
-    check("the agent's download is the agent's, paused and asking", agent && agent.byAgent && agent.asking && agent.state === 'paused' && agent.path === '', agent);
+    check("the agent's download is the agent's, paused and asking", agent && agent.byAgent && !agent.fromPage && agent.asking && agent.state === 'paused' && agent.path === '', agent);
     check('… nothing of it is in the folder', !files().some((f) => f.startsWith('agent-report')), files());
     let bar = (await dbg()).safety.bars.find((b) => b.kind === 'download');
     check('the download bar asks, naming the file, its size and the site', bar && bar.text === `The agent started a download: agent-report.txt (28 B) from ${site.host}` && JSON.stringify(bar.buttons) === JSON.stringify(['Allow', "Don't allow"]), bar);

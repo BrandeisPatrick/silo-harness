@@ -25,7 +25,7 @@ const REPLY_B = 'README.md has 7 lines.';
   const nothingRuns = `(async () => (await oc.sessions.list()).every((m) => !m.status?.running))()`;
   const last = (p) => p.messages?.[p.messages.length - 1];
   const text = (m) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
-  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user');
+  const firstUser = (p) => (p.messages || []).find((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]'));
   const shot = async (name, selector, margin = 24) => {
     for (const theme of ['light', 'dark']) {
       await app.evaluate(`document.documentElement.dataset.theme = ${q(theme)}`);

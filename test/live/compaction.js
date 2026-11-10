@@ -1,4 +1,4 @@
-// Live compaction check: a small context window (12k), a task that needs several tool calls and remembers something
+// Live compaction check: a small context window (10k), a task that needs several tool calls and remembers something
 // across them, then /compact by hand and a follow-up that depends on the earlier conversation. Screenshots of the
 // divider (collapsed and expanded) and of the context meter's popover, in light and dark.
 // Run: npm run build && ANTHROPIC_API_KEY=… node test/live/compaction.js [screenshot-dir]
@@ -19,13 +19,15 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
     process.exit(0);
   }
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-compaction-project-'));
-  WORDS.forEach((w, i) => fs.writeFileSync(path.join(project, `${'abcde'[i]}.txt`), `${w} ${FILLER.repeat(22)}\nEnd of file ${'abcde'[i]}.txt.\n`));
+  // Changed on purpose: with tool groups loaded when needed, a request's fixed part is about 4k tokens instead of 10k,
+  // so the window is smaller (was 12k) and the files longer (were 22 fillers) for the reads to fill it as before.
+  WORDS.forEach((w, i) => fs.writeFileSync(path.join(project, `${'abcde'[i]}.txt`), `${w} ${FILLER.repeat(40)}\nEnd of file ${'abcde'[i]}.txt.\n`));
   const app = await launch({
     mode: 'bypass',
     project,
     config: {
       // The whole portkey block: the rig's config option replaces sections instead of merging them.
-      portkey: { baseURL: 'https://api.anthropic.com/v1', apiKey: '', model: LIVE_MODEL, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12000 },
+      portkey: { baseURL: 'https://api.anthropic.com/v1', apiKey: '', model: LIVE_MODEL, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 10000 },
       autoCompact: true,
       compactThreshold: 0.8,
       pruneToolResults: true,
@@ -86,7 +88,7 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
     check('the meter popover lists the breakdown', rows.length >= 4 && rows.some((r) => /^(Free|Reserved for compaction) \d/.test(r)) && rows.some((r) => /^System prompt/.test(r)), rows);
     await shoot('dark');
     const breakdown = await app.evaluate(`window.oc.rpc('context.breakdown')`);
-    check('context.breakdown adds up to the window', breakdown && breakdown.slices.reduce((a, s) => a + s.tokens, 0) === breakdown.limit && breakdown.limit === 12000, breakdown && { basis: breakdown.basis, tokens: breakdown.tokens });
+    check('context.breakdown adds up to the window', breakdown && breakdown.slices.reduce((a, s) => a + s.tokens, 0) === breakdown.limit && breakdown.limit === 10000, breakdown && { basis: breakdown.basis, tokens: breakdown.tokens });
     const rendererErrors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', rendererErrors.length === 0, rendererErrors.slice(0, 3));
     console.log(`screenshots: ${shots}`);

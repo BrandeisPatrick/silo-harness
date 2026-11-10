@@ -19,6 +19,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.11.0 | Cards in the chat for pull requests (from gh), documents and artifacts, as in Claude Code; messages between sessions as one quiet line in each conversation, with no user authority; the README opens with a demo | released 2026-11-09 |
 | 0.11.1 | Fix: tool-call ids unique within a session, results paired with their own call (Ollama reused ids across runs) | released 2026-11-09 |
 | 0.12.0 | Auto mode with a safety-check model (blocks as a quiet line with Allow, pause after repeated blocks, fail closed), much less text across the app, the ~/Documents/Silo default folder and a folder menu on the welcome screen | released 2026-11-09 |
+| 0.13.0 | Cheaper sessions (prompt caching on Claude and through gateways, tools sent when needed, smaller tool results), `web_search` and `web_fetch`, a browser that treats pages as data and checks clicks, downloads, tabs and the clipboard, MCP sign-in with OAuth and reconnection, retries, `/create-skill` and `/create-mod`, and no macOS prompt the user did not cause | released 2026-11-10 |
 
 ## Done in earlier rounds
 
@@ -50,7 +51,7 @@ MCP servers · context meter, auto-compaction and `/compact` · project instruct
 | 17 | **History**: append-only log, crash recovery, trash, export | Nothing said in a session should be lost | done (0.2) |
 | 18 | **Compaction** that prunes first and keeps the recent turn | Long sessions on small windows | done (0.2) |
 | 19 | **Scheduled tasks** the agent can create, **remote control** from a phone, **keep awake** | Work that goes on while you are away | done (0.2) |
-| 20 | **Tools loaded on demand**: the model asks for a tool family (schedules, sessions, mods) when it needs it | Today a small window simply goes without them (`toolSet`) | next |
+| 20 | **Tools loaded on demand**: the model asks for a tool family (schedules, sessions, mods) when it needs it | Today a small window simply goes without them (`toolSet`) | done: tool groups (browser, terminal, sessions, schedules, mods) loaded with `load_tools`, see [reference.md](reference.md#tools) |
 | 21 | **Per-session project context**: MCP servers and the project settings file follow each session's folder, not the one on screen | Background sessions in another project | next |
 | 22 | **Mod protocol 2**: tools a mod provides to the model, a background page per mod, seats in the transcript and the status line | Mods that extend the agent, not only the window | next |
 | 23 | **History, further**: thinking blocks restored on reload; search over messages a rewind removed | The log already holds both | later |

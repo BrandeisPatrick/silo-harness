@@ -12,9 +12,8 @@ export type { SubagentsOptions } from './subagents/service';
 
 const PROMPT_SECTION = [
   '## Sub-sessions',
-  'You can start sub-sessions with session_spawn: real sessions in the same folder that run in the background, side by side with this one. They fit independent pieces of work that can run in parallel, or a side investigation that would otherwise fill this conversation; a small step you can do right away is quicker done yourself.',
-  'A sub-session knows nothing of this conversation: its prompt is its whole brief. Make it self-contained: the goal, the files or area, what done looks like, and what to report.',
-  'Each one reports here by itself when it finishes a turn, so do not poll it; end your turn if there is nothing else to do meanwhile. session_read shows what it did, session_send answers or steers it, session_list shows related sessions. Merge a finished one with session_merge before you use its result.',
+  'session_spawn starts a sub-session: a real session in the same folder that works in the background, for independent work that can run in parallel or a side investigation that would fill this conversation; a small step is quicker done yourself.',
+  'Each one reports here by itself when it finishes a turn, so do not poll it; end your turn if there is nothing else to do meanwhile. Merge a finished one with session_merge before you use its result.',
   'The user may name any other session by its name ("the session called deploy fix"): session_send and session_read take a name as well as an id, and session_list with a query finds it among all sessions. session_rename renames this session when the user asks.',
 ].join('\n');
 
@@ -52,15 +51,18 @@ export function setupSubagents(app: App, opts: SubagentsOptions = {}): Subagents
   app.rpc.handle('sessions.related', (id) => svc.related(String(id)));
   app.rpc.handle('sessions.message', (fromId, toId, text) => svc.message(String(fromId), String(toId), String(text ?? '')));
 
-  for (const tool of subagentTools(svc)) app.tools.register({ ...tool, optional: true });
-  // How to use the session tools: left out with them when the tool set is trimmed for a small window.
+  for (const tool of subagentTools(svc)) app.tools.register({ ...tool, optional: true, group: 'sessions' });
+  // How to use the session tools: comes with them (once the session loads the group, and not on a trimmed tool set).
+  app.prompt.add('sessions', () => PROMPT_SECTION, { optional: true, group: 'sessions' });
+  // This session's name changes when it gets a title: at the end of the prompt, after what every session shares; it is
+  // for the session tools, so it comes with them
   app.prompt.add(
-    'sessions',
+    'session-name',
     ({ sessionId }) => {
       const me = app.store.get(sessionId);
-      return me ? `${PROMPT_SECTION}\nThis session is named "${me.title}" (id ${me.id}).` : PROMPT_SECTION;
+      return me ? `This session is named "${me.title}" (id ${me.id}).` : '';
     },
-    { optional: true },
+    { optional: true, perSession: true, group: 'sessions' },
   );
   // What a sub-session must know about itself, whatever tools it has (the user can start one with /spawn).
   app.prompt.add('sub-session', ({ sessionId }) => {
@@ -72,14 +74,14 @@ export function setupSubagents(app: App, opts: SubagentsOptions = {}): Subagents
     ];
     if (svc.depth(me.id) >= MAX_DEPTH) lines.push('It is nested as deep as allowed, so it cannot start sub-sessions of its own.');
     return lines.join('\n');
-  });
+  }, { perSession: true });
   // The rules for messages from other sessions, once this session has one in its conversation (or reports to a parent)
   app.prompt.add('session-messages', ({ sessionId }) => {
     const me = app.store.get(sessionId);
     if (!me) return '';
     const sub = me.origin === 'spawn' && !!me.parentId;
     return sub || (me.turns ?? []).some((t) => t.origin === 'session') ? MESSAGES_SECTION : '';
-  });
+  }, { perSession: true });
   for (const cmd of subagentCommands(svc)) app.commands.register(cmd);
   return svc;
 }
