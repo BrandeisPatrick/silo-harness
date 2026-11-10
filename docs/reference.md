@@ -5,9 +5,9 @@
 | Mode | Behaviour |
 | --- | --- |
 | Ask | Commands, writes and edits show an approval card (default) |
-| Accept edits | Edits inside the project run; commands ask |
+| Accept edits | Edits inside the project run, except to a [protected path](#protected-paths); commands ask |
 | Auto | Actions run without a card; a safety check (a second model call) blocks the risky ones, and the agent reads why. See [Auto mode](#auto-mode) |
-| Plan | Read-only exploration ending in a plan card you approve |
+| Plan | Read-only exploration ending in a plan card you approve; a read-only command the guard flags ("reads secrets") asks |
 | Bypass | Everything runs |
 
 ## Approval cards
@@ -22,12 +22,18 @@ Saved rules: Settings → Permissions. One thing asks in every mode, Bypass incl
 
 Auto mode works like Claude Code's: rules settle most actions, and a safety check, a second model call, decides the rest.
 
-1. **Rules first.** A PreToolUse hook that denies blocks in every mode. Read-only commands and edits inside the working directory run without the check. What your saved rules or "for this session" answers allow runs (a program rule covers neither a command the guard flags, such as a force push, nor an interpreter such as `python`), except a write to a protected path (`.git`, `.silo-harness`, `.claude`, `.vscode`, `.idea` and `.mcp.json` in the project; shell start-up files, `~/.ssh`, `~/.aws`, launch agents and the app's own data anywhere), which still goes to the check.
+1. **Rules first.** A PreToolUse hook that denies blocks in every mode. Read-only commands and edits inside the working directory run without the check. What your saved rules or "for this session" answers allow runs (a program rule covers neither a command the guard flags, such as a force push, nor an interpreter such as `python`), except a write to a [protected path](#protected-paths), which still goes to the check.
 2. **The check.** Everything else, MCP calls that are not read-only included, goes to the check: the session's own model, or `autoMode.model`. It reads your messages in the session, the agent's tool calls so far (never their results), the project's instructions files, your `autoMode` notes and the action, and answers allow or block with a reason that names a category: "[Destructive Git] force-pushes over remote history". It blocks by default piping a download into a shell, sending secrets or private data out, printing live credentials, production deploys and migrations, force pushes, `git reset --hard`, `git clean -fd`, deleting outside the working directory, destructive infrastructure changes, merging pull requests you did not approve, writing to the app's own files and publishing. It allows by default local work in the working directory, installing dependencies, read-only commands of any CLI (`aws sts get-caller-identity`, `kubectl get`), read-only HTTP and pushing to a branch that is not the default one. A message of yours approves a risky action only when it names the action and its risk ("force-push the feature branch"); a boundary you stated ("don't push") blocks.
 3. **A block.** The action does not run. The agent reads "Blocked by Auto mode: [Category] reason. Do not try to get around it; continue with other work, or ask the user." and goes on. The chat shows one line, "Auto mode blocked git push --force · Allow", with the reason as its tooltip. **Allow** lets that exact action run once, without the check, when the agent tries it again, and tells the agent it may. The phone has the same line and Allow, and Settings → Permissions → Recently blocked lists the blocks since the app started.
 4. **Pauses.** After 3 blocks in a row or 20 in a session, Auto mode pauses for that session: what needs the check shows the approval card again, with a one-line notice.
 5. **Fails closed.** An error, a timeout or an answer that is neither allow nor block blocks the action ("[Unavailable] the safety check could not run"). When no model can run the check (none set, a provider without its key), or its model cannot be reached before it ever answered, Auto mode asks as it used to: risky commands and writes outside the project show the card, the rest runs.
-6. **Always asks.** `ask_user` questions, the browser's cards, `sudo`, and `rm` or `rmdir` of the home folder, `/`, the working directory or a folder above it, or a system folder. A tool's own question (a sub-session, a message to another session) keeps its card too.
+6. **Always asks.** `ask_user` questions, the browser's cards, `sudo`, and `rm` or `rmdir` of the home folder, `/`, the working directory or a folder above it, or a system folder, also inside `$(…)`, backticks, `sh -c '…'`, `eval`, `xargs` and `find -exec`. A tool's own question (a sub-session, a message to another session) keeps its card too.
+
+**Read-only commands** (what Plan mode runs, and Auto mode runs without the check): `ls`, `cat`, `grep`, `rg`, `find`, `sed -n`, `awk`, `git status/log/diff/show …`, `npm ls` and the like, with no substitution (`$(…)`, backticks, `<(…)`), no redirection into a file (`2>/dev/null` and `2>&1` are fine), no leading `VAR=value`, and no flag that writes or runs something (`sed -i`, `sort -o`, `find -exec`, `rg --pre`, `git -c`, `git diff --output`, `npm config set` …). `less`, `more`, `make`, `eslint` and `prettier` are not on the list. The guard reads the command's text; it is a heuristic, not a sandbox.
+
+### Protected paths
+
+In the project: `.git`, `.silo-harness`, `.open-harness`, `.claude`, `.vscode`, `.idea`, `.husky`, `.github/workflows`, `.envrc`, `.gitmodules` and `.mcp.json`, but not the `skills`, `commands`, `agents` and `worktrees` folders in `.claude` nor `skills` in `.silo-harness`. Anywhere: shell start-up files, `~/.gitconfig`, `~/.config/git`, `~/.ripgreprc`, `~/.ssh`, `~/.aws`, launch agents, the app's own data and `~/.silo-harness` (but its skills and `SILOHARNESS.md`). A write to one, by `write_file`, `edit_file` or a command (a redirection, `cp`, `mv`, `tee`, `ln`, `rsync`, `install`, `sed -i`, `rm`), asks in every mode but Bypass, with Allow and Deny only: no saved rule or "for this session" answer covers it. In Auto mode with the check it goes to the check. The command side reads the command's text: a heuristic, not a sandbox.
 
 Tell the check about your setup in your own settings.json: `autoMode.environment`, `autoMode.allow` and `autoMode.model` (see [configure.md](configure.md#auto-mode)).
 
@@ -61,9 +67,9 @@ A message starting with `#` is added to the project's instructions file after a 
 
 | Tool | Purpose |
 | --- | --- |
-| `read_file` `write_file` `edit_file` `list_directory` `glob` `grep` | Files |
-| `bash` | Shell command in the session's folder, with an optional short description of what it does (shown on its approval card); stopping the run stops the command and what it started |
-| `terminal_run` `terminal_read` `terminal_list` `terminal_stop` | Terminal pane tabs |
+| `read_file` `write_file` `edit_file` `list_directory` `glob` `grep` | Files. Reading a secret path (`~/.ssh`, `~/.aws`, `.env` but not `.env.example`, `*.pem`, the app's own data) asks "reads secrets" in every mode but Bypass, or goes to Auto mode's check; `grep` and `glob` over a folder leave secret files out. `edit_file` falls back to a match that treats runs of whitespace (and curly quotes, long dashes) as equal, and says so; with no match it shows the closest lines; it refuses a file that changed on disk since the session read it. `grep` uses ripgrep when it is installed (`.gitignore` honoured), else grep, and stops after 30 s; `glob` lists the newest-modified files first |
+| `bash` | Shell command in the session's folder, with an optional short description of what it does (shown on its approval card); stopping the run stops the command and what it started. Long output keeps its first 12K and last 18K characters, and the exit code always |
+| `terminal_run` `terminal_read` `terminal_list` `terminal_stop` | Terminal pane tabs; long output keeps its start and its end |
 | `browser_*` | Built-in browser, on the active tab: navigate, click and type by visible text, read, find, wait, scroll, press a key, screenshot, eval (see Browser) |
 | `browser_tabs` | The pane's tabs: `list`, `new` (with `url`; `background` keeps the current tab in front), `select` and `close` (`tab_id`) |
 | `show_image` | Put an image (a screenshot, a chart, a picture in the project) inline in the reply |

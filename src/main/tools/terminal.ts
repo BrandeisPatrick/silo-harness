@@ -5,7 +5,10 @@
 import type { TerminalTabInfo } from '../../shared/types';
 import { describeTabs, tilde, type TerminalManager } from '../terminal';
 import type { Tool } from './types';
-import { truncate } from './types';
+import { truncateMiddle } from './types';
+
+/** What a result keeps of a tab's output: its start and its end, as bash's */
+const OUTPUT_BUDGET = 30_000;
 
 const MAX_TIMEOUT = 120_000;
 const DEFAULT_LINES = 100;
@@ -72,7 +75,8 @@ export const terminalRun: Tool = {
     else if (r.finished) tail = `[exit code: ${r.exitCode ?? 'unknown'}]`;
     else if (r.integration) tail = `[still running after ${seconds(r.elapsedMs)} — terminal_read ${tabId} shows what it prints next; terminal_stop ${tabId} interrupts it]`;
     else tail = `[output stopped; exit code unknown (no shell integration for ${t?.shell ?? 'this shell'})]`;
-    return { content: truncate(`${head}\n${r.output}${r.output ? '\n' : ''}${tail}`) };
+    const output = truncateMiddle(r.output, OUTPUT_BUDGET);
+    return { content: `${head}\n${output}${output ? '\n' : ''}${tail}` };
   },
 };
 
@@ -96,7 +100,7 @@ export const terminalRead: Tool = {
     const wait = clampInt(args.wait_ms, 0, 60_000, 0);
     const text = await tm.read(tab.id, lines, wait);
     const t = tm.get(tab.id) ?? tab;
-    return { content: truncate(`[terminal ${t.id} (${t.shell}) · ${state(t)} · cwd ${tilde(t.cwd)}]\n${text || '(the screen is empty)'}`) };
+    return { content: `[terminal ${t.id} (${t.shell}) · ${state(t)} · cwd ${tilde(t.cwd)}]\n${truncateMiddle(text, OUTPUT_BUDGET, 0.2) || '(the screen is empty)'}` };
   },
 };
 
