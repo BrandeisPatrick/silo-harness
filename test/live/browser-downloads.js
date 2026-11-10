@@ -26,8 +26,12 @@ const { check, done } = checker();
   const staging = path.join(profile, 'browser', 'pending-downloads');
   const stagedFiles = () => (fs.existsSync(staging) ? fs.readdirSync(staging, { recursive: true }).filter((f) => fs.statSync(path.join(staging, f)).isFile()) : []);
   const waitList = (fn, what) => app.waitFor(`(async () => { const l = await oc.rpc('browser.downloads'); return (${fn})(l); })()`, 15_000, what);
-  // The user's click, run in the page over CDP with a user gesture (synthetic mouse events do not reach a hidden window's view)
-  const userClick = (ws, id) => evalAt(ws, `(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+  // The user's click: their input on the tab (the hidden window's views receive no real input, so the app's live-test
+  // hook stands in for the key press), then the click run in the page over CDP with a user gesture
+  const userClick = async (ws, id) => {
+    await app.evaluate(`oc.rpc('browser.liveTestUserInput')`);
+    return evalAt(ws, `(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+  };
   const barAnswer = (label) => app.evaluate(`(() => { const b = [...document.querySelectorAll('#browser-bars .browser-ask.download button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
 
   try {

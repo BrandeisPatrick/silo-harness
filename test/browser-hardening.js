@@ -14,6 +14,7 @@ const { pagePrelude } = dist('browser/safety.js');
 const { fencePage, stripFence, pageSite } = dist('browser/fence.js');
 const { BROWSER_RULES } = dist('tools/groups.js');
 const { browserTools } = dist('tools/browser.js');
+const { startedByUser, USER_INPUT_MS, quarantineValue } = dist('browser/downloads.js');
 const { check, done } = require('./support/check.js');
 
 /**
@@ -156,6 +157,13 @@ const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim(
   const p6b = { ...p6, url: 'http://localhost:3000/', keys: [], cards: [] };
   r = await standIn(p6b)('browser_press_key', { key: 'cmd+v' });
   check('… on localhost (exempt) cmd+v is pressed', r === 'Pressed cmd+v.', r);
+
+  // ---------- 7. Downloads belong to the user only after the user's own input ----------
+  const now = 1_700_000_000_000;
+  check('a download right after the user pressed a key or clicked on that tab is the user\'s', startedByUser(now - 1000, now) && startedByUser(now - USER_INPUT_MS, now));
+  check('… one with no input on the tab, or older than 5 s, is not (it asks)', !startedByUser(0, now) && !startedByUser(undefined, now) && !startedByUser(now - USER_INPUT_MS - 1, now) && USER_INPUT_MS === 5000);
+  check('… nor one "before" the input (a clock that went back)', !startedByUser(now + 10, now));
+  check('the quarantine value is the one Safari writes: flags;hex time;app;id', /^0081;[0-9a-f]+;Silo Harness;[0-9A-F-]+$/.test(quarantineValue(now, 'ab-12')) && quarantineValue(now, 'x').split(';')[1] === Math.floor(now / 1000).toString(16));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();

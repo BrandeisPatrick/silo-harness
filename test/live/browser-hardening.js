@@ -59,6 +59,11 @@ function fixtures(P) {
 <div style="height:4000px"></div><p>Visible text below the fold.</p><button>Below the fold button</button>`),
     // 4. A page that opens a local file, data: and about:blank in new tabs (window.open and target=_blank)
     '/opener.html': page('Opener', `<h1>Opener</h1><a id="file" href="file:///etc/hosts" target="_blank">hosts</a> <a id="web" href="/landing.html" target="_blank">landing</a>`),
+    // 7. A page that starts a download by itself, 3 s after it loads; and a link the user clicks
+    '/autodl.html': page('Auto download', `<h1>Thanks</h1><a id="get" href="/files/user.txt">Get it</a><script>setTimeout(() => { location.href = '/files/auto.txt'; }, 3000);</script>`),
+    '/userdl.html': page('Get', `<h1>Get</h1><a id="get" href="/files/user.txt">Get it</a>`),
+    '/files/auto.txt': { body: 'Dropped by the page.\n', headers: { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename="auto.txt"' } },
+    '/files/user.txt': { body: 'The user asked for this.\n', headers: { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename="user.txt"' } },
     // 2. A page that fakes the safety helper and moves the old ref attribute around
     '/fake-safety.html': page('Fake safety', `<h1>Account</h1>
 <p><label>Password <input id="pw" type="password"></label></p>
@@ -92,7 +97,8 @@ function fixtures(P) {
   const LOCAL = `http://127.0.0.1:${P}`;
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-browser-hardening-'));
-  const app = await launch({ profile, mode: 'ask', mock: true, args: HOSTS, config: { browser: { alwaysAllowed: [`shop.example:${P}`, `other.example:${P}`] } } });
+  const downloadsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-hardening-dl-')));
+  const app = await launch({ profile, mode: 'ask', mock: true, args: HOSTS, config: { browser: { downloadsDir, alwaysAllowed: [`shop.example:${P}`, `other.example:${P}`] } } });
   const dbg = () => app.evaluate('window.__oc_debug.mods.browser()');
   const activeTab = async () => {
     const d = await dbg();
@@ -213,11 +219,33 @@ function fixtures(P) {
     await evalAt(opener, `document.getElementById('web').click()`);
     await app.waitFor(`window.__oc_debug.mods.browser().tabs.some((t) => t.url === ${JSON.stringify(`${SHOP}/landing.html`)})`, 10_000, 'the web link in a new tab');
     check('… a web link with target=_blank still opens a tab', true);
+
+    // ---------- 7. Downloads are the user's only after the user's own input ----------
+    const downloads = () => app.evaluate(`oc.rpc('browser.downloads')`);
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/autodl.html` });
+    await app.waitFor(`(async () => (await oc.rpc('browser.downloads')).some((d) => d.filename === 'auto.txt'))()`, 15_000, 'the page\'s own download');
+    const auto = (await downloads()).find((x) => x.filename === 'auto.txt');
+    check('a download a page starts by itself 3 s after loading, with no input, asks on the download bar', auto && auto.asking && auto.state === 'paused' && !fs.existsSync(path.join(downloadsDir, 'auto.txt')), auto);
+    await app.waitFor(`window.__oc_debug.mods.browser().safety.bars.some((b) => b.kind === 'download')`, 10_000, 'the download bar');
+    await app.evaluate(`(() => { const b = [...document.querySelectorAll('#browser-bars .browser-ask.download button')].find((x) => x.textContent === "Don't allow"); b.click(); return true; })()`);
+    await sleep(500);
+    r = await app.callTool('browser_navigate', { url: `${SHOP}/userdl.html` });
+    await sleep(2500); // past the agent's own navigation
+    await app.evaluate(`oc.rpc('browser.liveTestUserInput')`);
+    await evalAt(await pane(`${SHOP}/userdl.html`), `(document.getElementById('get').click(), true)`);
+    await app.waitFor(`(async () => (await oc.rpc('browser.downloads')).some((d) => d.filename === 'user.txt' && d.state === 'completed'))()`, 15_000, 'the user\'s download');
+    const userFile = path.join(downloadsDir, 'user.txt');
+    check("the user's own click (input on the tab a moment before) saves at once", fs.existsSync(userFile));
+    await sleep(400);
+    const q = require('node:child_process').spawnSync('xattr', ['-p', 'com.apple.quarantine', userFile], { encoding: 'utf8' });
+    console.log('   com.apple.quarantine on the finished download:', JSON.stringify(q.stdout.trim() || q.stderr.trim()));
+    check('… and the finished file carries com.apple.quarantine', q.status === 0 && /;/.test(q.stdout), q.stdout || q.stderr);
   } finally {
     await app.close();
     server.close();
   }
   fs.rmSync(profile, { recursive: true, force: true });
+  fs.rmSync(downloadsDir, { recursive: true, force: true });
   process.exit(done() ? 1 : 0);
 })().catch((err) => {
   console.error('CRASH', err);

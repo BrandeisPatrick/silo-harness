@@ -92,6 +92,7 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     defaultDir: () => electronApp.getPath('downloads'),
     stamps: () => controller()?.stamps() ?? null,
     userStarted: (url) => controller()?.userDownload(url) ?? false,
+    userInputAt: (tabId) => controller()?.userInputAt(tabId) ?? 0,
     tabOf: (wc) => controller()?.tabIdOf(wc) ?? null,
     onChange: (list) => app.push('browser:downloads', list),
     openPath: (p) => shell.openPath(p),
@@ -130,6 +131,8 @@ export function setupBrowser(app: App, controller: () => BrowserController | nul
     need().blockedPopup(String(tabId), action);
   });
   app.rpc.handle('browser.devTools', () => need().toggleDevTools());
+  // Live tests only: the hidden window's views get no real input, so a test stands in for the user's key press
+  if (process.env.SILO_HARNESS_LIVE_TEST) (app.rpc.handle as unknown as (name: string, fn: () => void) => void)('browser.liveTestUserInput', () => need().liveTestUserInput());
 
   // ---------- Browser safety ----------
   app.rpc.handle('browser.permissions', () => permissions.pending());

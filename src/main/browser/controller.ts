@@ -109,6 +109,10 @@ export class BrowserController {
   /** The agent's actions running now, and when the last one ended (ms) */
   private actingCount = 0;
   private lastActEnd = 0;
+  /** When the user last pressed a key or clicked in each tab (or its popups), ms */
+  private readonly userInput = new Map<string, number>();
+  /** Input events until this time (ms) are the controller's own sendInputEvent calls, not the user's */
+  private syntheticUntil = 0;
   /** Addresses the user asked to save from the context menu, and until when that counts (ms) */
   private readonly userDownloads = new Map<string, number>();
 
@@ -151,6 +155,7 @@ export class BrowserController {
       },
     });
     tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
+    tab.webContents.on('input-event', (_e, input) => this.noteInput(tab.id, input.type));
     // An artifact never takes its tab anywhere else by itself (a link, location, a meta refresh): the strip offers it.
     tab.webContents.on('will-frame-navigate', (details) => {
       if (tab.webContents.isDestroyed() || !leavesArtifact(tab.webContents.getURL(), details.url)) return;
@@ -796,6 +801,7 @@ export class BrowserController {
     const wc = this.wc;
     const px = Math.round(x);
     const py = Math.round(y);
+    this.synthetic();
     wc.sendInputEvent({ type: 'mouseMove', x: px, y: py });
     wc.sendInputEvent({ type: 'mouseDown', x: px, y: py, button, clickCount });
     wc.sendInputEvent({ type: 'mouseUp', x: px, y: py, button, clickCount });
@@ -888,6 +894,7 @@ export class BrowserController {
     const modifiers = parts.map((m) => m.toLowerCase()).map((m) => (m === 'cmd' || m === 'command' || m === 'meta' ? 'cmd' : m === 'ctrl' || m === 'control' ? 'control' : m === 'option' ? 'alt' : m));
     const keyCode = KEY_MAP[keyName.toLowerCase()] ?? keyName;
     const wc = this.wc;
+    this.synthetic();
     wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers: modifiers as never });
     if (keyCode.length === 1 || keyCode === 'Return' || keyCode === 'Space' || keyCode === 'Tab') {
       wc.sendInputEvent({ type: 'char', keyCode, modifiers: modifiers as never });
@@ -976,6 +983,30 @@ export class BrowserController {
     }
   }
 
+  /** A key press or click reached a tab's page (or its popup): the user's, unless it is one the controller sent. */
+  private noteInput(tabId: string, type: string): void {
+    if (Date.now() < this.syntheticUntil) return;
+    if (/^(mouseDown|rawKeyDown|keyDown|char|touchStart|gestureTap|gestureTapDown)$/.test(type)) this.userInput.set(tabId, Date.now());
+  }
+
+  /** When the user last pressed a key or clicked in that tab (downloads.ts startedByUser); 0: never. */
+  userInputAt(tabId: string | null): number {
+    return tabId ? this.userInput.get(tabId) ?? 0 : 0;
+  }
+
+  /**
+   * Live tests only (feature.ts registers it with SILO_HARNESS_LIVE_TEST): the hidden test window's views receive no
+   * input at all, so a test says "the user just pressed a key in the active tab" this way.
+   */
+  liveTestUserInput(): void {
+    this.userInput.set(this.activeTab.id, Date.now());
+  }
+
+  /** The next input events are the agent's (clickAt, pressKey): they never count as the user's. */
+  private synthetic(): void {
+    this.syntheticUntil = Date.now() + 500;
+  }
+
   stamps(): ActingStamps {
     return { inFlight: this.actingCount, lastEnd: this.lastActEnd };
   }
@@ -997,6 +1028,7 @@ export class BrowserController {
           const wc = make(options);
           const id = wc.id;
           this.popupOwners.set(id, tab.id);
+          wc.on('input-event', (_e, input) => this.noteInput(tab.id, input.type));
           wc.once('destroyed', () => this.popupOwners.delete(id));
           return wc;
         },
