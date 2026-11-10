@@ -224,7 +224,8 @@ function cleanCut(msgs, cut) {
   const baseConfig = {
     provider: 'portkey',
     ollama: { baseURL: `http://127.0.0.1:${model.port}/v1`, model: 'mock', numCtx: 4096, think: 'auto' },
-    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12000 },
+    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12150 },
+    // 12,000 until the system prompt's guidance on reads, searches and evidence (about 120 tokens) came in
     workingDirectory: cwd, permissionMode: 'bypass', autoApprove: true, maxTurns: 30, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
     mcpServers: {}, mcpTrusted: {}, autoCompact: true, compactThreshold: 0.8, pruneToolResults: true, notifications: false, allowRules: {}, recentDirs: [],
     // Changed on purpose: the window sizes below were chosen with every tool offered from the first request; tool
