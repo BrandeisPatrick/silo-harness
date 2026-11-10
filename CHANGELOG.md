@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1 — 2026-11-10
+
+Fixes clicks not reaching a page in the Browser pane after a site marked the tab as a window-drag area.
+
+### Fixed
+
+- **Clicks reach every page.** A site can no longer make its tab a window-drag area, which stopped clicks on the Microsoft sign-in page after Teams.
+
 ## 0.13.0 — 2026-11-10
 
 Sessions cost a fraction of what they did, the agent can search and read the web, the browser trusts pages less, and MCP servers sign in with OAuth.
@@ -44,6 +52,7 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Longer MCP calls.** A server entry can set its own `timeout`, and progress from the server keeps a call alive for up to 10 minutes.
 - **Big MCP results saved.** A result over 100,000 characters goes to a private temp file; the model gets its start, its end and the path.
 - **MCP server notes.** An MCP server's own usage notes join the prompt, quoted as the server's words and capped at 2,000 characters each.
+- **One note per setting.** Stepping through the permission modes, or folders, leaves one line in the transcript, not a stack.
 
 ### Fixed
 

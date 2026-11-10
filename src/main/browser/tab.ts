@@ -7,6 +7,7 @@
 import { WebContentsView, type ContextMenuParams, type WebContents } from 'electron';
 import type { CertErrorState, FindResultState, TabState } from '../../shared/browser';
 import { pageSecurity } from './certificates';
+import { noPageDragRegions } from './drag-regions';
 import { PageFinder } from './find';
 import { inSafetyWorld, SAFETY_WORLD } from './safety';
 import { browserSession, BROWSER_PARTITION, cleanUserAgent } from './session';
@@ -152,6 +153,7 @@ export class BrowserTab {
     });
     const wc = this.view.webContents;
     wc.setUserAgent(cleanUserAgent(wc.getUserAgent()));
+    noPageDragRegions(wc);
     this.finder = new PageFinder(wc, (r) => {
       if (!this.disposed) this.hooks.onFound?.(this, r);
     });

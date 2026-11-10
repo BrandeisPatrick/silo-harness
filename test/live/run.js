@@ -66,6 +66,7 @@ const SCRIPTS = [
   { name: 'browser-approvals' },
   { name: 'browser-polish' },
   { name: 'browser-hardening' },
+  { name: 'browser-drag-regions', shots: 'none' },
   { name: 'chat-cards' },
 ];
 
