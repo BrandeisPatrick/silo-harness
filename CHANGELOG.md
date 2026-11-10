@@ -5,6 +5,19 @@
 ### Improved
 
 - **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
+- **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
+
+### Fixed
+
+- **Long output keeps its end.** Long command output keeps its last lines and always shows the exit code.
+- **Edits match what was asked.** `edit_file` never joins or splits words to match, says when whitespace differed, and refuses files changed since read.
+
+### Security
+
+- **Hidden commands no longer slip through.** Commands inside `$(…)`, backticks, `sh -c`, `eval`, `xargs` or `find -exec` get the same checks as the command itself.
+- **Read-only means read-only.** Redirections, `VAR=` prefixes and flags such as `sed -i`, `git -c`, `rg --pre` and `sort -o` no longer pass as read-only.
+- **Secrets ask before reading.** Reading keys, `.env` files or the app's data with any tool or command asks first, Plan mode included.
+- **Protected files always ask.** Writes to `.vscode`, `.mcp.json`, `.envrc`, CI workflows, git hooks, mods or shell start-up files ask every time, except in Bypass.
 
 ## 0.12.0 — 2026-11-09
 
