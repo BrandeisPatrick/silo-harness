@@ -5,7 +5,6 @@
 import os from 'node:os';
 import path from 'node:path';
 import { allSimpleCommands, commandArgv } from '../guard';
-import { configDir } from '../paths';
 
 /** Blocks in a row, and in all, after which Auto mode pauses for the session (the approval cards come back). */
 export const PAUSE_IN_A_ROW = 3;
@@ -94,33 +93,11 @@ export function alwaysAskReason(command: string, cwd: string): string | null {
   return null;
 }
 
-/** Folders inside the working directory that configure git, editors, the app or another agent */
-const PROTECTED_IN_PROJECT = new Set(['.git', '.silo-harness', '.open-harness', '.claude', '.vscode', '.idea']);
-const PROTECTED_FILES_IN_PROJECT = new Set(['.mcp.json']);
-/** Under the home folder: shell start-up files, keys and credentials, launch agents */
-const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.profile', '.gitconfig', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
-/** The app's own data: sessions, config.json, settings */
-const APP_DATA = ['Library/Application Support/Silo Harness', 'Library/Application Support/Open Harness'];
-
 /**
- * Why a write to `abs` is protected (an allow rule does not skip the safety check for it), or null. Inside the
- * working directory: .git, the app's and other tools' project folders, .mcp.json. Anywhere: shell start-up files,
- * keys and credentials, launch agents, and the app's own data and settings.
+ * Why a write to `abs` is protected (it asks in every mode but Bypass, and no allow rule covers it), or null. The
+ * rules are in guard.ts, where the shell guard uses them too.
  */
-export function protectedWrite(abs: string, cwd: string): string | null {
-  const file = path.resolve(expandHome(abs));
-  const root = path.resolve(cwd);
-  if (holds(root, file) && file !== root) {
-    const rel = path.relative(root, file);
-    const first = rel.split(path.sep)[0];
-    if (first === '.git') return 'modifies the .git directory';
-    if (PROTECTED_IN_PROJECT.has(first) || PROTECTED_FILES_IN_PROJECT.has(rel)) return 'writes a protected file';
-  }
-  const h = home();
-  for (const p of [...PROTECTED_IN_HOME, ...APP_DATA]) if (holds(path.join(h, p), file)) return 'writes a protected file';
-  if (holds(configDir(), file)) return 'writes a protected file';
-  return null;
-}
+export { protectedWrite, PROTECTED_REASONS } from '../guard';
 
 /** The key a once-allowed action is found by when the agent tries it again: the tool and what its approval showed. */
 export function actionKey(name: string, detail: string): string {

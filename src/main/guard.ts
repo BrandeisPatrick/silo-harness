@@ -520,6 +520,62 @@ export function isSecretPath(p: string, cwd = '/'): boolean {
   return false;
 }
 
+/** Inside the working directory: what configures git, editors, CI, direnv, the app or another agent */
+const PROTECTED_IN_PROJECT = ['.git', '.silo-harness', '.open-harness', '.claude', '.vscode', '.idea', '.husky', '.github/workflows', '.mcp.json', '.envrc', '.gitmodules'];
+/** …except the folders in them that hold skills, commands, agents or worktrees, no executable configuration */
+const OPEN_IN_PROJECT = ['.claude/skills', '.claude/commands', '.claude/agents', '.claude/worktrees', '.silo-harness/skills', '.open-harness/skills'];
+/** Under the home folder: shell start-up files, git and ripgrep config, keys and credentials, launch agents */
+const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.bash_login', '.profile', '.gitconfig', '.config/git', '.ripgreprc', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
+/** In the user's config folder (~/.silo-harness): skills and the instructions file hold no executable configuration */
+const OPEN_IN_CONFIG = ['skills', 'SILOHARNESS.md', 'OPENHARNESS.md'];
+/** The reasons no allow rule or "for this session" answer covers */
+export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protected file', 'modifies the .git directory']);
+
+/**
+ * Why a write to `abs` (resolved from `cwd`) is protected, or null. Inside the working directory: .git, the app's and
+ * other tools' project folders (not their skills, commands, agents or worktrees), .github/workflows, .husky, .envrc,
+ * .gitmodules, .mcp.json. Anywhere: shell start-up files, git config, keys and credentials, launch agents, the app's
+ * own data and the user's config folder (not its skills and instructions).
+ */
+export function protectedWrite(abs: string, cwd: string): string | null {
+  const file = path.resolve(cwd, expandHome(abs));
+  const root = path.resolve(cwd);
+  if (holds(root, file) && file !== root) {
+    if (path.relative(root, file).split(path.sep)[0] === '.git') return 'modifies the .git directory';
+    const under = (list: string[]) => list.some((p) => holds(path.join(root, p), file));
+    if (under(PROTECTED_IN_PROJECT) && !under(OPEN_IN_PROJECT)) return 'writes a protected file';
+  }
+  const h = os.homedir();
+  for (const dir of new Set([configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')])) {
+    // (a session that works inside the config folder itself edits it freely: the tests' default folder is there)
+    if (holds(dir, file) && !holds(dir, root) && !OPEN_IN_CONFIG.some((p) => holds(path.join(dir, p), file))) return 'writes a protected file';
+  }
+  for (const p of [...PROTECTED_IN_HOME, ...APP_DATA]) if (holds(path.join(h, p), file)) return 'writes a protected file';
+  return null;
+}
+
+/** Programs whose last operand (or -t dir) is where they write: the destination, and the source's name inside it */
+const COPY_PROGRAMS = new Set(['cp', 'mv', 'ln', 'rsync', 'install']);
+
+/** The paths a simple command writes as far as its words show: redirections, cp/mv/ln/rsync/install destinations, tee, sed -i and rm operands. */
+function writtenPaths(prog: string, args: string[], lexed: Lexed): string[] {
+  const out = [...lexed.writes];
+  const targets = args.filter((a) => !a.startsWith('-'));
+  if (COPY_PROGRAMS.has(prog)) {
+    const t = args.findIndex((a) => a === '-t' || a.startsWith('--target-directory'));
+    const dest = t >= 0 ? (args[t].includes('=') ? args[t].split('=').slice(1).join('=') : args[t + 1]) : targets[targets.length - 1];
+    const sources = t >= 0 ? targets.filter((x) => x !== dest) : targets.slice(0, -1);
+    if (dest) {
+      out.push(dest);
+      for (const src of sources) out.push(path.join(dest, path.basename(src)));
+    }
+    if (prog === 'mv') out.push(...sources);
+  }
+  if (prog === 'tee' || prog === 'rm' || prog === 'rmdir' || prog === 'truncate') out.push(...targets);
+  if (prog === 'sed' && args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) out.push(...targets);
+  return out;
+}
+
 /** The paths an argument may name: itself, and what follows `@` or `=` (curl -d @file, -F key=@file, --file=x). */
 function pathsIn(arg: string): string[] {
   const out = [arg];
@@ -554,6 +610,12 @@ export function guardCommand(command: string, cwd: string): string | null {
     const args = argv.slice(1);
     const flags = args.filter((a) => a.startsWith('-'));
     const targets = args.filter((a) => !a.startsWith('-'));
+    // a protected file written by a redirection, cp, mv, tee, sed -i, rm …
+    for (const p of writtenPaths(prog, args, lexed)) {
+      if (!p || NULL_DEVICES.has(p)) continue;
+      const why = protectedWrite(p, cwd);
+      if (why) return why;
+    }
     // redirections: > path, 2> path, &> path, >| path (not 2>&1, >&2, /dev/null)
     if (pathArgsOutsideCwd(lexed.writes, cwd).length) return 'writes outside the working directory';
     if (lexed.reads.some((t) => isSecretPath(t, cwd))) return 'reads secrets';

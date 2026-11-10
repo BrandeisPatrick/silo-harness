@@ -6,7 +6,7 @@ import { siteCardLabels, type Site } from '../browser/policy';
 import { guardCommand, guardWrite, isReadOnlyCommand, programsOf } from '../guard';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
-import { alwaysAskReason, protectedWrite } from './auto-rules';
+import { alwaysAskReason, protectedWrite, PROTECTED_REASONS } from './auto-rules';
 
 /** What the model is told when the user denies a card */
 export const DENIED = 'Not permitted: the user denied this action. Do not retry it; explain what you would have done and continue or stop.';
@@ -59,8 +59,8 @@ export interface ApprovalContext {
  * Decides, per permission mode, whether an action runs, asks, or is refused. A browser card asks: the browser policy
  * (browser/policy.ts siteDecision, clickRule) already weighed the mode, the site and the user's lists, and a purchase
  * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
- * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a guard
- * reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
+ * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a protected
+ * path asks every time (Allow and Deny only), a guard reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
  * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') sends what its rules (the
  * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
  */
@@ -73,7 +73,7 @@ export function decideApproval(name: string, detail: string, target: string | un
   const ask = (reason: string | null, programs: string[], custom = false): ApprovalDecision => ({ kind: 'ask', reason, programs, custom });
   const checked = mode === 'auto' && (ctx.auto === 'check' || ctx.auto === 'paused');
   // What the check would decide: an approval card instead while Auto mode is paused
-  const check = (reason: string | null, programs: string[]): ApprovalDecision => (ctx.auto === 'paused' ? ask(reason, programs) : { kind: 'classify', reason, programs });
+  const check = (reason: string | null, programs: string[]): ApprovalDecision => (ctx.auto === 'paused' ? ask(reason, programs, !!reason && PROTECTED_REASONS.has(reason)) : { kind: 'classify', reason, programs });
   // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
   if (opts.browser) return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
   if (opts.custom) {
@@ -92,7 +92,8 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (mode === 'auto') return ref.destructive ? ask('destructive MCP tool', [ref.server]) : allow;
     return ask(null, [ref.server]);
   }
-  const reasonAllowed = (r: string) => ctx.allowed.reason(r) || !!rules?.reasons?.includes(r);
+  // A protected path's reason ("writes a protected file", "modifies the .git directory") is never covered by a rule
+  const reasonAllowed = (r: string) => !PROTECTED_REASONS.has(r) && (ctx.allowed.reason(r) || !!rules?.reasons?.includes(r));
   if (mode === 'plan') {
     if (isEdit) return refuse(PLAN_EDIT_BLOCKED);
     if (isCmd) {
@@ -127,6 +128,10 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (!guarded && reason && reasonAllowed(reason)) return allow;
     return check(guarded ?? reason, []);
   }
+  // A protected path (.vscode/tasks.json, .mcp.json, .git, ~/.zshrc …) asks every time, Allow and Deny only, whatever
+  // the mode (but Bypass), the saved rules or the session allowed
+  const guarded = isEdit && target ? protectedWrite(target, cwd) : reason && PROTECTED_REASONS.has(reason) ? reason : null;
+  if (guarded) return ask(guarded, programs, true);
   if (reason && !reasonAllowed(reason)) return ask(reason, programs);
   if (mode === 'auto') return allow;
   if (isEdit && (mode === 'acceptEdits' || rules?.edits)) return allow;

@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { isReadOnlyCommand, guardCommand, programsOf, splitCommands, isSecretPath } = require(path.join(projectDir, 'dist/main/guard.js'));
-const { alwaysAskReason } = require(path.join(projectDir, 'dist/main/agent/auto-rules.js'));
+const { alwaysAskReason, protectedWrite } = require(path.join(projectDir, 'dist/main/agent/auto-rules.js'));
 const { decideApproval } = require(path.join(projectDir, 'dist/main/agent/permissions.js'));
 const { check, done } = require('./support/check.js');
 
@@ -206,6 +206,49 @@ d = decideApproval('bash', 'cat ~/.ssh/id_rsa', undefined, {}, ctx({ allowed: { 
 check('plan: … unless that reason is allowed for the session', d.kind === 'allow', d);
 check('plan: a plain read-only command runs', decideApproval('bash', 'git status', undefined, {}, ctx()).kind === 'allow');
 check('plan: echo $(rm -rf ~) is refused', decideApproval('bash', 'echo $(rm -rf ~)', undefined, {}, ctx()).kind === 'refuse');
+
+// Protected paths: every mode but Bypass asks, Allow and Deny only, whatever is allowed
+const home = os.homedir();
+const noneAllowed = { mcp: () => false, reason: () => false, program: () => false, custom: () => false };
+const allAllowed = { mcp: () => true, reason: () => true, program: () => true, custom: () => true };
+const mode = (m, over = {}) => ctx({ mode: m, auto: 'guard', ...over });
+const write = (file, c) => decideApproval('write_file', file, file, {}, c);
+const tasks = path.join(cwd, '.vscode/tasks.json');
+d = write(tasks, mode('acceptEdits'));
+check('protected: .vscode/tasks.json asks in Accept edits, Allow and Deny only', d.kind === 'ask' && d.custom === true && d.reason === 'writes a protected file', d);
+d = write(tasks, mode('ask', { rules: { edits: true, reasons: ['writes a protected file'] } }));
+check('protected: … with a saved edits rule and the reason saved too', d.kind === 'ask' && d.custom === true, d);
+d = write(tasks, mode('auto', { allowed: allAllowed }));
+check('protected: … in Auto without the check, everything allowed for the session', d.kind === 'ask' && d.custom === true, d);
+check('protected: Bypass allows', write(tasks, mode('bypass')).kind === 'allow');
+check('protected: .claude/skills/x/SKILL.md runs in Accept edits', write(path.join(cwd, '.claude/skills/x/SKILL.md'), mode('acceptEdits')).kind === 'allow');
+check('protected: a normal file runs in Accept edits', write(path.join(cwd, 'src/a.ts'), mode('acceptEdits')).kind === 'allow');
+d = write(path.join(cwd, '.git/hooks/pre-commit'), mode('acceptEdits', { rules: { reasons: ['modifies the .git directory'] } }));
+check('protected: .git asks with its own reason, no rule covers it', d.kind === 'ask' && d.custom && d.reason === 'modifies the .git directory', d);
+d = write(path.join(cwd, '.git/x'), mode('auto', { auto: 'check', rules: { edits: true } }));
+check('protected: with the check, it goes to the check', d.kind === 'classify' && d.reason === 'modifies the .git directory', d);
+for (const rel of ['.envrc', '.husky/pre-commit', '.github/workflows/ci.yml', '.gitmodules', '.mcp.json', '.claude/settings.json', '.silo-harness/settings.json', '.silo-harness/hooks/x.js']) {
+  check(`protectedWrite: ${rel}`, protectedWrite(path.join(cwd, rel), cwd) !== null);
+}
+for (const rel of ['.claude/commands/x.md', '.claude/agents/a.md', '.claude/worktrees/w/src/a.ts', '.silo-harness/skills/s/SKILL.md', '.github/ISSUE_TEMPLATE.md', '.gitattributes', 'src/.env.ts']) {
+  check(`protectedWrite: not ${rel}`, protectedWrite(path.join(cwd, rel), cwd) === null);
+}
+for (const rel of ['.ripgreprc', '.bash_login', '.config/git/config', '.gitconfig', '.zshrc']) {
+  check(`protectedWrite: ~/${rel}`, protectedWrite(path.join(home, rel), cwd) === 'writes a protected file');
+}
+// The shell guard: writes into protected paths
+for (const cmd of ['echo x > .vscode/tasks.json', 'cp evil.json .vscode/tasks.json', 'cp tasks.json .vscode/', 'mv x .envrc', 'echo x | tee -a .github/workflows/ci.yml', 'ln -s x .husky/pre-commit', 'rsync x .mcp.json', 'install x .claude/settings.json', "sed -i '' s/a/b/ .envrc", 'rm .mcp.json', 'echo x >> ~/.zshrc', 'cp zshrc-new ~/.zshrc', 'cp .zshrc ~', 'echo $(echo x > .envrc)']) {
+  check(`guard: ${cmd} writes a protected file`, guardCommand(cmd, cwd) === 'writes a protected file', guardCommand(cmd, cwd));
+}
+check('guard: echo x > .git/hooks/pre-push modifies .git', guardCommand('echo x > .git/hooks/pre-push', cwd) === 'modifies the .git directory');
+check('guard: cp .vscode/settings.json backup.json only reads it', guardCommand('cp .vscode/settings.json backup.json', cwd) === null);
+check('guard: writing a skill is fine', guardCommand('echo x > .claude/skills/s/SKILL.md', cwd) === null);
+const sh = (cmd, c) => decideApproval('bash', cmd, undefined, {}, c);
+d = sh('echo x > .vscode/tasks.json', mode('ask', { rules: { programs: ['echo'], reasons: ['writes a protected file'] } }));
+check('protected shell write: asks, Allow and Deny only, whatever the rules', d.kind === 'ask' && d.custom === true && d.reason === 'writes a protected file', d);
+d = sh('echo x > .vscode/tasks.json', mode('auto', { auto: 'check', rules: { programs: ['echo'], reasons: ['writes a protected file'] } }));
+check('protected shell write: with the check, goes to the check', d.kind === 'classify' && d.reason === 'writes a protected file', d);
+check('protected shell write: Bypass allows', sh('echo x > .vscode/tasks.json', mode('bypass')).kind === 'allow');
 
 fs.rmSync(cwd, { recursive: true, force: true });
 done();
