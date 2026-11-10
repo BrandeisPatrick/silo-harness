@@ -5,6 +5,7 @@
 ### Improved
 
 - **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
+- **A system prompt that stays put.** A mode switch, a rename or a new day adds a short note to the conversation, so providers keep the prompt cached.
 
 ## 0.12.0 — 2026-11-09
 

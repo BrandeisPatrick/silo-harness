@@ -25,7 +25,9 @@ import {
   formatTokens,
   isCompactPreamble,
   isContextLengthError,
+  isContextNote,
   isSyntheticUser,
+  lastContextNote,
   lastUserIndex,
   pruneMessages,
   scaleTo,
@@ -52,7 +54,7 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
-import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
+import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
 import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
@@ -300,6 +302,21 @@ export class Agent {
 
   private prompt(cfg: AppConfig, skills: Skill[]): string {
     return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
+  }
+
+  /** What this session's context note says now (agent/prompt.ts sessionContext). */
+  private contextState(cfg: AppConfig): string {
+    return sessionContext(cfg, this.promptExtra(cfg), Boolean(this.ownTools()));
+  }
+
+  /**
+   * Before a model call: appends a context note when what it says (the mode, folder, date, the session's name and
+   * parent) differs from the newest one in the conversation, which is the case on the first call, after a change, and
+   * after a compaction or a rewind took the last one away. Earlier notes stay as they are, so the prefix does too.
+   */
+  private addContextNote(cfg: AppConfig): void {
+    const note = contextNote(this.contextState(cfg), lastContextNote(this.session.messages));
+    if (note) this.store.append(this.session, { role: 'user', content: note });
   }
 
   /** The groups the prompt names as loadable (undefined: every group is offered up front, or none is a group here). */
@@ -1054,6 +1071,7 @@ export class Agent {
           reason = 'aborted';
           break;
         }
+        this.addContextNote(cfg);
         const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
         const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
@@ -1069,6 +1087,7 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
+          this.addContextNote(cfg);
           reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn);
         }
         const { text } = reply;
@@ -1211,8 +1230,11 @@ export class Agent {
     let summary = 0;
     let said = 0;
     let toolTokens = 0;
+    // The context notes carry what used to be the end of the system prompt, and are counted with it
+    let notes = 0;
     for (const m of s.messages) {
-      if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
+      if (isContextNote(m)) notes += estimateMessageTokens(m);
+      else if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
       else if (m.role === 'tool' || isSyntheticUser(m)) toolTokens += estimateMessageTokens(m);
       else if (m.role === 'assistant' && m.tool_calls?.length) {
         const total = estimateMessageTokens(m);
@@ -1225,7 +1247,7 @@ export class Agent {
     const mcpItems = [...byServer].map(([server, list]) => ({ label: server, tokens: estimateSpecTokens(list.map(toSpec)) }));
     const skillItems = parts.skills ? [{ label: 'Skills list', tokens: chars(parts.skills) }] : [];
     const used: ContextSlice[] = [
-      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra + parts.mode + parts.env + parts.sessionSections) + 2 },
+      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra) + 2 + (notes || chars(this.contextState(cfg))) },
       { key: 'instructions', label: 'Instructions files', tokens: instr.reduce((a, b) => a + b.tokens, 0), items: instr },
       { key: 'skills', label: 'Skills', tokens: chars(parts.skills), items: skillItems },
       { key: 'tools', label: 'Tool definitions', tokens: estimateSpecTokens(tools.filter((t) => !t.mcp).map(toSpec)) },
@@ -1485,7 +1507,7 @@ export class Agent {
     let dropAt = this.cutFor(tail, limit);
     if (!dropAt) dropAt = findCut(s.messages, tail, { insideTurn: true });
     const dropped = s.messages.slice(0, dropAt);
-    const count = dropped.filter((m) => !isCompactPreamble(m)).length;
+    const count = dropped.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length;
     const note = droppedPreamble(count, filesTouched(dropped), this.requestToCarry(dropped), this.foldedGroupsText(cfg, s.messages.slice(dropAt)));
     if (!dropAt || estimateMessageTokens({ role: 'user', content: note }) >= estimateTokens(dropped)) {
       // Told once until the conversation has grown: every turn of the run would end up here again.
@@ -1555,7 +1577,7 @@ export class Agent {
       tokensBefore: o.before,
       tokensAfter: this.contextInfo().tokens,
       summary,
-      messages: folded.filter((m) => !isCompactPreamble(m)).length,
+      messages: folded.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length,
       kept: kept.length,
       stage: o.stage,
     };

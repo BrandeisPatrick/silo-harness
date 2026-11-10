@@ -1,8 +1,11 @@
-// The system prompt: what the agent is told about itself, its tools, the mode, the skills, MCP servers and the
-// project's instructions files, in pieces the context breakdown can count separately. Pure functions of the config.
+// The system prompt: what the agent is told about itself, its tools, the skills, MCP servers and the project's
+// instructions files, in pieces the context breakdown can count separately; and the context note, which carries what
+// changes during a session (the mode, the folder and date, the session's own sections) in the conversation instead,
+// so the system prompt stays byte for byte the same and a provider's prompt cache keeps it. Pure functions.
 
 import type OpenAI from 'openai';
 import type { AppConfig, ImageAttachment } from '../../shared/types';
+import { CONTEXT_NOTE_PREFIX } from '../compact';
 import { instructionsPrompt, loadInstructions } from '../instructions';
 import type { McpManager } from '../mcp';
 import type { Msg } from '../sessions';
@@ -22,8 +25,9 @@ export interface PromptExtra {
 /**
  * The system prompt in the pieces the context breakdown counts separately. Joined, they are the prompt in this order:
  * what is the same for every session first (base, sections, skills, MCP servers, the user's extra text), then what is
- * the project's (instructions files), the mode, the environment (working directory, date) and last the session's own
- * sections, so that providers that cache a request's prefix can reuse the start of it across turns and sessions.
+ * the project's (instructions files), so that providers that cache a request's prefix can reuse the start of it across
+ * turns and sessions. Nothing in it changes while a session runs: the mode, the date and the session's name are in
+ * its context note (contextNote).
  */
 export interface PromptParts {
   base: string;
@@ -34,16 +38,11 @@ export interface PromptParts {
   userExtra: string;
   /** One chunk per instructions file */
   instructions: { label: string; text: string }[];
-  mode: string;
-  /** The working directory and today's date */
-  env: string;
-  /** The app's sections for this session alone */
-  sessionSections: string;
 }
 
 /** The parts joined in prompt order. */
 export function joinPrompt(p: PromptParts): string {
-  return p.base + p.sections + p.skills + p.mcp + p.userExtra + p.instructions.map((i) => i.text).join('') + p.mode + p.env + p.sessionSections;
+  return p.base + p.sections + p.skills + p.mcp + p.userExtra + p.instructions.map((i) => i.text).join('');
 }
 
 /**
@@ -60,9 +59,58 @@ export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | 
 
 const block = (text: string): string => (text.trim() ? `\n\n${text.trim()}` : '');
 
-/** Where the session works and when: near the end of the prompt, since it differs per project and per day. */
+/** Where the session works and when (its context note: it differs per project and per day). */
 function envText(cfg: AppConfig): string {
-  return `\n\nWorking directory: ${cfg.workingDirectory}\nToday: ${new Date().toISOString().slice(0, 10)}`;
+  return `Working directory: ${cfg.workingDirectory}\nToday: ${new Date().toISOString().slice(0, 10)}`;
+}
+
+/** What the model is told of the permission mode, for the modes that change how it works ('' for the others). */
+export function modeText(mode: AppConfig['permissionMode']): string {
+  if (mode === 'plan') {
+    return `PLAN MODE: you are planning, not building. Explore with read_file, glob, grep, list_directory, read-only shell commands (ls, cat, git status/log/diff …) and the browser. Do not change files and do not run commands that change anything; write_file and edit_file are unavailable. When you understand the task, call submit_plan exactly once with a concise Markdown plan: the goal, numbered steps naming the files to touch, how to verify, and open questions. Then stop; the user decides whether to build it.`;
+  }
+  if (mode === 'auto') {
+    return `AUTO MODE: actions run without asking the user. A safety check reviews the ones that could do harm (destructive git, deleting outside the working directory, deploys, publishing, sending data out, …). When it blocks one, the result starts with "Blocked by Auto mode" and gives the reason: do not try to get around it with another command, tool or script; continue with other work, or ask the user. sudo and deleting critical folders always ask the user.`;
+  }
+  return '';
+}
+
+/** The first line of every context note. */
+const NOTE_HEAD = `${CONTEXT_NOTE_PREFIX} Set by the app, not typed by the user. The newest note like this one holds.`;
+/** What a note says when the session leaves a mode, or the model keeps obeying the note before */
+export const PLAN_ENDED = 'Plan mode is over: you may change files and run commands again, as the permission mode allows.';
+export const AUTO_ENDED = 'Auto mode is over: actions that need approval ask the user again.';
+
+/**
+ * What the session's context note says: the working directory and date, the session's own sections (its name, its
+ * parent), and the mode. `own`: a session with a tool set of its own, which has no mode to follow.
+ */
+export function sessionContext(cfg: AppConfig, extra: string | PromptExtra = '', own = false): string {
+  const parts = [envText(cfg), extraParts(extra).session.trim(), own ? '' : modeText(cfg.permissionMode)];
+  return parts.filter(Boolean).join('\n\n');
+}
+
+/** The state a context note carries (what sessionContext gave), without its first line and its "is over" lines. */
+export function contextNoteState(note: string): string {
+  let body = note.startsWith(NOTE_HEAD) ? note.slice(NOTE_HEAD.length) : note.slice(CONTEXT_NOTE_PREFIX.length);
+  body = body.replace(/^\s+/, '');
+  for (const ended of [PLAN_ENDED, AUTO_ENDED]) if (body.startsWith(ended)) body = body.slice(ended.length).replace(/^\s+/, '');
+  return body;
+}
+
+/**
+ * The context note to append before a model call, or null when `previous` (the newest one in the conversation) already
+ * says the same. A note is never rewritten or moved: a change (a mode switch, a rename, a new day) appends a new one,
+ * and leaving plan or Auto mode is said in so many words.
+ */
+export function contextNote(state: string, previous?: string): string | null {
+  const before = previous === undefined ? null : contextNoteState(previous);
+  if (before === state) return null;
+  const left: string[] = [];
+  const has = (text: string, mark: string) => new RegExp(`^${mark}: `, 'm').test(text);
+  if (before !== null && has(before, 'PLAN MODE') && !has(state, 'PLAN MODE')) left.push(PLAN_ENDED);
+  if (before !== null && has(before, 'AUTO MODE') && !has(state, 'AUTO MODE')) left.push(AUTO_ENDED);
+  return [NOTE_HEAD, ...left, state].join('\n\n');
 }
 
 function extraParts(extra: string | PromptExtra): PromptExtra {
@@ -79,7 +127,7 @@ function ownToolsPromptParts(cfg: AppConfig, extra: PromptExtra, own: string[]):
 
 In this session you have only these tools: ${own.join(', ')}. You cannot run commands, change files, browse or start other sessions; do not say that you did.`;
   const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
-  return { base, sections: block(extra.shared), skills: '', mcp: '', userExtra, instructions: [], mode: '', env: envText(cfg), sessionSections: block(extra.session) };
+  return { base, sections: block(extra.shared), skills: '', mcp: '', userExtra, instructions: [] };
 }
 
 export function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extraIn: string | PromptExtra = '', own?: string[], groups?: readonly ToolGroup[]): PromptParts {
@@ -103,19 +151,13 @@ How to work:
   const skillList = skills.length
     ? `\n\nAvailable skills:\n${skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}`).join('\n')}`
     : '';
-  let modeText = '';
-  if (cfg.permissionMode === 'plan') {
-    modeText = `\n\nPLAN MODE: you are planning, not building. Explore with read_file, glob, grep, list_directory, read-only shell commands (ls, cat, git status/log/diff …) and the browser. Do not change files and do not run commands that change anything; write_file and edit_file are unavailable. When you understand the task, call submit_plan exactly once with a concise Markdown plan: the goal, numbered steps naming the files to touch, how to verify, and open questions. Then stop; the user decides whether to build it.`;
-  } else if (cfg.permissionMode === 'auto') {
-    modeText = `\n\nAUTO MODE: actions run without asking the user. A safety check reviews the ones that could do harm (destructive git, deleting outside the working directory, deploys, publishing, sending data out, …). When it blocks one, the result starts with "Blocked by Auto mode" and gives the reason: do not try to get around it with another command, tool or script; continue with other work, or ask the user. sudo and deleting critical folders always ask the user.`;
-  }
   const servers = mcp?.describe() ?? '';
   const mcpText = servers
     ? `\n\nMCP servers provide extra tools named mcp__<server>__<tool> (their descriptions say what they do). Use them when they fit the task; the user approves calls that can change something.\n${servers}`
     : '';
   const userExtra = cfg.systemPromptExtra ? `\n\n${cfg.systemPromptExtra}` : '';
   const instructions = loadInstructions(cfg.workingDirectory).map((f) => ({ label: f.label, text: instructionsPrompt([f]) }));
-  return { base, sections: block(extra.shared), skills: skillList, mcp: mcpText, userExtra, instructions, mode: modeText, env: envText(cfg), sessionSections: block(extra.session) };
+  return { base, sections: block(extra.shared), skills: skillList, mcp: mcpText, userExtra, instructions };
 }
 
 /** A user message: plain text, or text plus image parts when images are attached. */

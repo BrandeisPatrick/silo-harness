@@ -222,8 +222,9 @@ async function waitFor(fn, ms = 5000, what = 'condition') {
   const pwd = of(C, 'tool_end')[0]?.result || '';
   check('8: a tool in C runs in C\'s folder while A is on screen', fs.realpathSync(pwd.trim().split('\n')[0]) === fs.realpathSync(dirB), pwd);
   check('8: the app folder stayed on A', app.config().workingDirectory === dirA);
-  const sysC = state.requests.filter((q) => forTag('[C1]')(q.payload)).pop().payload.messages[0].content;
-  check('8: C\'s system prompt names its folder', sysC.includes(`Working directory: ${dirB}`));
+  const reqC = state.requests.filter((q) => forTag('[C1]')(q.payload)).pop().payload.messages;
+  const noteC = reqC.filter((m) => m.role === 'user' && String(m.content).startsWith('[Session context]')).pop()?.content ?? '';
+  check('8: C\'s context note names its folder, and its system prompt does not change with it', noteC.includes(`Working directory: ${dirB}`) && !reqC[0].content.includes('Working directory:'));
   // A folder change from the UI moves the on-screen session
   app.updateConfig({ workingDirectory: dirB });
   check('8: changing the folder moves the session on screen', rt.get(A).cwd === dirB);

@@ -20,6 +20,7 @@
     "schema": "node scripts/settings-schema.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@xterm/headless": "^6.0.0",
     "node-pty": "^1.1.0",

@@ -153,7 +153,7 @@ function fakeBrowser(page) {
   async function step(name, args, answers = []) {
     const marker = `[S${++n}]`;
     const id = `call_${n}`;
-    state.replies.push({ content: '', toolCalls: [{ id, name, args }], when: (p) => JSON.stringify(p.messages[p.messages.length - 1]).includes(marker) });
+    state.replies.push({ content: '', toolCalls: [{ id, name, args }], when: (p) => JSON.stringify([...p.messages].reverse().find((m) => !String(m.content).startsWith('[Session context]'))).includes(marker) });
     const from = events.length;
     rt.send(sid, `Step ${marker}`);
     const cards = [];

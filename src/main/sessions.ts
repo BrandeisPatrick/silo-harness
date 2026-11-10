@@ -5,7 +5,7 @@ import type OpenAI from 'openai';
 import type { CompactionInfo, MessageOrigin, PlanInfo, SessionMeta, SessionOrigin, TaskItem, TranscriptItem, ArtifactInfo } from '../shared/types';
 import type { ImageInfo } from '../shared/images';
 import type { Snapshot } from './changes';
-import { FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
+import { CONTEXT_NOTE_PREFIX, FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
@@ -293,7 +293,7 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
     if (m.role === 'user') {
       if (isCompactPreamble(m)) return;
       const text = displayText(m.content);
-      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX)) return;
+      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX) || text.startsWith(CONTEXT_NOTE_PREFIX)) return;
       const images = imageUrls(m.content);
       const mentions = mentionedPaths(rawText(m.content));
       const item: Extract<TranscriptItem, { role: 'user' }> = { role: 'user', text };

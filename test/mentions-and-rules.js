@@ -118,7 +118,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   reset();
   state.replies.push({ content: 'ok' });
   await agent.run('summarise @README.md for me');
-  const sent = state.requests[0].payload.messages.filter((m) => m.role === 'user').pop().content;
+  const sent = state.requests[0].payload.messages.filter((m) => m.role === 'user' && !String(m.content).startsWith('[Session context]')).pop().content;
   check('run: mention inlined for the model', /<file path="README.md">\n# Readme\nhello\n<\/file>/.test(sent) && sent.startsWith('summarise @README.md for me'));
   check('run: system prompt explains @ mentions', /when the user writes @path/.test(state.requests[0].payload.messages[0].content));
   const items = toTranscript(agent.session);

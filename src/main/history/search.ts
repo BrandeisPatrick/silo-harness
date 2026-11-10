@@ -4,7 +4,7 @@
 
 import type { SearchHit } from '../../shared/history';
 import { displayText, type Msg, type Session } from '../sessions';
-import { isCompactPreamble } from '../compact';
+import { isCompactPreamble, isContextNote } from '../compact';
 
 type Role = 'user' | 'assistant' | 'tool';
 
@@ -25,7 +25,7 @@ function entriesOf(messages: Msg[], archived: boolean, out: Entry[]): void {
   };
   for (const m of messages) {
     if (m.role === 'user') {
-      if (isCompactPreamble(m)) continue; // the summary stands in for messages that are searched themselves
+      if (isCompactPreamble(m) || isContextNote(m)) continue; // the summary stands in for messages that are searched themselves
       add('user', displayText(m.content));
     } else if (m.role === 'assistant') {
       if (typeof m.content === 'string') add('assistant', m.content);

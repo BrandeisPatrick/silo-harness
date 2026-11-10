@@ -84,7 +84,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   let recs = recordsOf(h, A);
   const expected = [
     'session.created',
-    'message.append', 'run.start', 'snapshot', 'usage', 'message.append', 'tool.start', 'approval.request', 'approval.resolved', 'tool.end', 'message.append', 'usage', 'message.append', 'snapshot', 'run.end',
+    // the user's message, then (the first time) the session's context note before the model call
+    'message.append', 'run.start', 'snapshot', 'message.append', 'usage', 'message.append', 'tool.start', 'approval.request', 'approval.resolved', 'tool.end', 'message.append', 'usage', 'message.append', 'snapshot', 'run.end',
     'message.append', 'run.start', 'snapshot', 'usage', 'message.append', 'snapshot', 'run.end',
   ];
   check('1: the record types of two runs (tool call with approval) are exactly as expected', same(typesOf(recs), expected), typesOf(recs).join(' '));
@@ -92,7 +93,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const runStart = recs.find((r) => r.type === 'run.start');
   check('1: run.start carries the origin', runStart.data.origin === 'user', runStart.data);
   const toolEnd = recs.find((r) => r.type === 'tool.end');
-  check('1: tool.end has ok, durationMs and the result length, not the text', toolEnd.data.ok === true && typeof toolEnd.data.durationMs === 'number' && toolEnd.data.chars === h.store.get(A).messages[2].content.length && !('result' in toolEnd.data), toolEnd.data);
+  check('1: tool.end has ok, durationMs and the result length, not the text', toolEnd.data.ok === true && typeof toolEnd.data.durationMs === 'number' && toolEnd.data.chars === h.store.get(A).messages[3].content.length && !('result' in toolEnd.data), toolEnd.data);
   check('1: approval records', recs.find((r) => r.type === 'approval.request').data.name === 'bash' && recs.find((r) => r.type === 'approval.resolved').data.ok === true);
   check('1: run.end has the reason and the text', same(recs.filter((r) => r.type === 'run.end').map((r) => r.data), [{ reason: 'done', text: 'It printed logged.' }, { reason: 'done', text: 'Second answer.' }]));
   check('1: the log replays to the session exactly', same(replayConversation(recs).messages, h.store.get(A).messages));
@@ -137,7 +138,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const before = structuredClone(h.store.get(B).messages);
   rewindSession(h.store.get(B), project, 2, h.store); // back to before "question 3"
   h.store.save(h.store.get(B), false);
-  check('2: the rewind cut the session', h.store.get(B).messages.length === 4);
+  check('2: the rewind cut the session', h.store.get(B).messages.length === 5);
   state.summary = '## Request\nSUMMARY OF Q1 Q2, a brief that is long enough to be used.';
   const r2 = await h.rt.agentFor(B).compactNow();
   check('2: the compaction ran', r2.ok, r2);
@@ -145,11 +146,11 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const appended = recs.filter((r) => r.type === 'message.append').map((r) => r.data.message);
   check('2: every original message is still in the log after rewind + compaction', before.every((m) => appended.some((a) => same(a, m))));
   const trunc = recs.find((r) => r.type === 'messages.truncate');
-  check('2: the truncate record holds the length and the count removed', trunc && trunc.data.length === 4 && trunc.data.removed === 4, trunc && trunc.data);
+  check('2: the truncate record holds the length and the count removed', trunc && trunc.data.length === 5 && trunc.data.removed === 4, trunc && trunc.data);
   const repl = recs.find((r) => r.type === 'messages.replace');
   // A compaction folds the older part into a brief and keeps the last request onward word for word.
   const kept = repl ? repl.data.messages.slice(1) : [];
-  check('2: the replace record holds the reason, the new messages (the brief, then the kept tail) and the count removed', repl && repl.data.reason === 'compaction' && repl.data.removed === 4 && String(repl.data.messages[0].content).startsWith('[Context compacted]') && kept.length >= 1 && kept.every((m) => before.some((b) => same(b, m))), repl && { ...repl.data, messages: repl.data.messages.length });
+  check('2: the replace record holds the reason, the new messages (the brief, then the kept tail) and the count removed', repl && repl.data.reason === 'compaction' && repl.data.removed === 5 && String(repl.data.messages[0].content).startsWith('[Context compacted]') && kept.length >= 1 && kept.every((m) => before.some((b) => same(b, m))), repl && { ...repl.data, messages: repl.data.messages.length });
   check('2: replaying the log from nothing reproduces the current messages exactly', same(replayConversation(recs).messages, h.store.get(B).messages));
   // A replace with any other reason (the compaction engineer's 'prune') is logged and replayed the same way
   const pruned = h.store.get(B).messages.map((m) => ({ ...m }));

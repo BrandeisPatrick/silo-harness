@@ -16,7 +16,7 @@ const { decideApproval } = require(path.join(projectDir, 'dist/main/agent/permis
 const { alwaysAskReason, protectedWrite, blockedResult, blockedReason, actionLine, UNAVAILABLE_REASON } = require(path.join(projectDir, 'dist/main/agent/auto-rules.js'));
 const { parseVerdict, classifierTarget, CLASSIFIER_INSTRUCTIONS } = require(path.join(projectDir, 'dist/main/agent/classifier.js'));
 const { checkSetting, settingsSchema, SettingsLayer } = require(path.join(projectDir, 'dist/main/settings.js'));
-const { systemPrompt } = require(path.join(projectDir, 'dist/main/agent/prompt.js'));
+const { sessionContext } = require(path.join(projectDir, 'dist/main/agent/prompt.js'));
 const { startMock, classifierReply, isClassifierRequest } = require('./support/mock-model.js');
 
 let failures = 0;
@@ -335,8 +335,8 @@ console.warn = (...a) => {
   await slow;
   check('stop during the check: interrupted, no block', !of('auto_blocked').length && /interrupted/.test(toolEnd('c_slow')?.result ?? ''), toolEnd('c_slow'));
 
-  // 4o. the system prompt tells the agent how blocks work
-  check('system prompt: the Auto mode paragraph', /Blocked by Auto mode/.test(systemPrompt({ ...config, permissionMode: 'auto' }, [], null)));
+  // 4o. the session's context note tells the agent how blocks work
+  check('context note: the Auto mode paragraph', /Blocked by Auto mode/.test(sessionContext({ ...config, permissionMode: 'auto' })));
 
   // ---------- 5. The runtime: Allow by session ----------
   const rtStore = new SessionStore(path.join(cwd, '..', `oh-auto-rt-${process.pid}`));

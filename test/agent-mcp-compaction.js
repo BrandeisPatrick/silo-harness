@@ -153,13 +153,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('G: summary request has no tools and thinking off', summaryReq && !summaryReq.payload.tools && summaryReq.payload.think === false && summaryReq.payload.options.num_ctx === 16384);
   const after = chat[chat.length - 1].payload;
   // Changed on purpose: brief + kept tail (user, call, result) instead of the brief alone.
-  check('G: the next model call sees the system prompt, the brief and the kept tail', after.stream === true && after.messages.map((m) => m.role).join(',') === 'system,user,user,assistant,tool' && after.messages[1].content.startsWith('[Context compacted]') && /Build the widget; it is blue\./.test(after.messages[1].content) && after.messages[2].content === 'Build the widget please', after.messages.map((m) => m.role));
+  // The context note went with the folded turn, so it comes again before the call
+  check('G: the next model call sees the system prompt, the brief, the kept tail and the context note again', after.stream === true && after.messages.map((m) => m.role).join(',') === 'system,user,user,assistant,tool,user' && after.messages[5].content.startsWith('[Session context]') && after.messages[1].content.startsWith('[Context compacted]') && /Build the widget; it is blue\./.test(after.messages[1].content) && after.messages[2].content === 'Build the widget please', after.messages.map((m) => m.role));
   const cs = events.filter((e) => e.type === 'compact_start');
   const ce = events.filter((e) => e.type === 'compact_end');
   // The size after is mostly the floor every request pays, the system prompt and the tool definitions (about 10.5k tokens
   // with browser_tabs), so the ratio leaves room for that floor to grow with the tools.
   check('G: compact events', cs.length === 1 && cs[0].reason === 'auto' && ce.length === 1 && ce[0].compaction && ce[0].compaction.reason === 'auto' && ce[0].compaction.messages === 2 && ce[0].compaction.kept === 3 && ce[0].compaction.stage === 'summary' && ce[0].compaction.tokensBefore >= 14000 && ce[0].compaction.tokensAfter < ce[0].compaction.tokensBefore * 0.8, ce[0]);
-  check('G: session stores the compaction with folded messages', agent.session.compactions.length === 1 && agent.session.compactions[0].folded.length === 2 && agent.session.messages.length === 5 && toMeta(agent.session).compactions === 1);
+  check('G: session stores the compaction with folded messages', agent.session.compactions.length === 1 && agent.session.compactions[0].folded.length === 3 && agent.session.messages.length === 6 && toMeta(agent.session).compactions === 1);
   const items = toTranscript(agent.session);
   check('G: transcript: folded turn, divider, then the kept turn and the reply', items.map((i) => i.role).join(',') === 'user,assistant,compaction,user,tool,assistant' && items[2].compaction.summary === state.summary && !items[2].compaction.folded, items.map((i) => i.role));
   check('G: the kept user message can still be rewound to', items[3].turn === 0 && agent.session.turns.length === 1 && agent.session.turns[0].at === 1, items[3]);
@@ -171,7 +172,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('G: context event right after compaction shows a smaller context, under the threshold', ctxAfterCompact && ctxAfterCompact.context.tokens < 16384 * 0.8 && ctxAfterCompact.context.tokens < ce[0].compaction.tokensBefore && ctxAfterCompact.context.limit === 16384, ctxAfterCompact && ctxAfterCompact.context);
   check('G: title prompt uses the folded first message', /Remember: the widget is blue/.test(titlePrompt(agent.session)));
   const forked = store.fork(agent.session.id);
-  check('G: fork copies compactions', forked.compactions.length === 1 && forked.messages.length === 5);
+  check('G: fork copies compactions', forked.compactions.length === 1 && forked.messages.length === 6);
 
   // ---- H: manual /compact, errors and abort ----
   reset();
@@ -193,7 +194,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   reset();
   state.summaryFails = true;
   r = await agent.compactNow();
-  check('H: a failed summary leaves the conversation alone', !r.ok && /summary failed|HTTP 500/.test(r.error) && agent.session.messages.length === 4 && events.some((e) => e.type === 'compact_end' && e.error));
+  check('H: a failed summary leaves the conversation alone', !r.ok && /summary failed|HTTP 500/.test(r.error) && agent.session.messages.length === 5 && events.some((e) => e.type === 'compact_end' && e.error));
   // a failed auto compaction does not retry every turn
   reset();
   state.ollamaPromptTokens = 15000;
@@ -215,6 +216,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // abort a manual compaction
   reset();
   state.ollamaPromptTokens = 100;
+  // A session of its own: how far the one above was folded depends on the sizes of the runs before
+  agent.session = store.create();
+  state.replies.push({ content: 'hi' });
+  await agent.run('one');
   state.replies.push({ content: 'hi' });
   await agent.run('one more');
   const compactionsBefore = (agent.session.compactions ?? []).length;
