@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
-import { isSecretPath } from '../guard';
+import { isHomeScanRoot, isSecretPath } from '../guard';
 import type { Tool, ToolContext } from './types';
 import { truncate } from './types';
 
@@ -15,11 +15,12 @@ export function resolvePath(cwd: string, p: string): string {
 }
 
 /**
- * A read of a secret path (keys, credentials, .env, the app's own data) asks first: the rules decide (Bypass runs it,
- * Auto mode's check or a card with "reads secrets" otherwise). Null when it may go on, else the message for the model.
+ * A read of a secret path (keys, credentials, .env, the app's own data), or a walk (`walks`: grep, glob) rooted at the
+ * home folder, ~/Library, /, /Users or /Volumes, asks first: the rules decide (Bypass runs it, Auto mode's check or a
+ * card with "reads secrets" or "scans the home folder" otherwise). Null when it may go on, else the message for the model.
  */
-async function approveSecretRead(ctx: ToolContext, name: string, target: string): Promise<string | null> {
-  if (!isSecretPath(target, ctx.cwd)) return null;
+async function approveRead(ctx: ToolContext, name: string, target: string, walks = false): Promise<string | null> {
+  if (!isSecretPath(target, ctx.cwd) && !(walks && isHomeScanRoot(target, ctx.cwd))) return null;
   const approval = await ctx.approve(name, target, target);
   return approval.ok ? null : approval.message;
 }
@@ -75,7 +76,7 @@ export const readFile: Tool = {
   },
   async run(args, ctx) {
     const file = resolvePath(ctx.cwd, String(args.path));
-    const refused = await approveSecretRead(ctx, 'read_file', file);
+    const refused = await approveRead(ctx, 'read_file', file);
     if (refused) return { content: refused };
     const data = await fs.readFile(file, 'utf8');
     await remember(ctx.sessionId, file);
@@ -312,7 +313,7 @@ export const listDirectory: Tool = {
   },
   async run(args, ctx) {
     const dir = resolvePath(ctx.cwd, String(args.path ?? '.'));
-    const refused = await approveSecretRead(ctx, 'list_directory', dir);
+    const refused = await approveRead(ctx, 'list_directory', dir);
     if (refused) return { content: refused };
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const names = entries
@@ -370,7 +371,7 @@ export const glob: Tool = {
   },
   async run(args, ctx) {
     const root = resolvePath(ctx.cwd, String(args.path ?? '.'));
-    const refused = await approveSecretRead(ctx, 'glob', root);
+    const refused = await approveRead(ctx, 'glob', root, true);
     if (refused) return { content: refused };
     // Inside a search root that is not secret itself, secret files are left out (not asked about)
     const skipSecrets = !isSecretPath(root, ctx.cwd);
@@ -424,7 +425,7 @@ export const grep: Tool = {
   },
   async run(args, ctx) {
     const target = resolvePath(ctx.cwd, String(args.path ?? '.'));
-    const refused = await approveSecretRead(ctx, 'grep', target);
+    const refused = await approveRead(ctx, 'grep', target, true);
     if (refused) return { content: refused };
     const skipSecrets = !isSecretPath(target, ctx.cwd);
     const { out, timedOut } = await search(target, String(args.pattern), !!args.ignore_case, args.include ? String(args.include) : undefined);

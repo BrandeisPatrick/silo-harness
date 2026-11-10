@@ -520,6 +520,149 @@ export function isSecretPath(p: string, cwd = '/'): boolean {
   return false;
 }
 
+/** Why a walk of the home folder, /, /Users or /Volumes asks: macOS raises a row of privacy prompts in the app's name */
+export const SCAN_REASON = 'scans the home folder';
+
+/** True for a folder whose walk reaches the folders macOS guards: the home folder (any /Users/<name>), ~/Library, /, /Users, /Volumes. */
+function isScanRoot(abs: string): boolean {
+  const h = os.homedir();
+  return abs === '/' || abs === '/Users' || abs === '/Volumes' || abs === h || abs === path.join(h, 'Library') || path.dirname(abs) === '/Users';
+}
+
+/**
+ * True when walking `p` (from `cwd`) walks the home folder, ~/Library, /, /Users or /Volumes, or every child of one
+ * (`~/*`, `*` in the home folder). A named folder in it (~/Desktop, ~/projects) is not: macOS's own prompt names it.
+ */
+export function isHomeScanRoot(p: string, cwd: string): boolean {
+  const e = expandHome(p);
+  const base = e === '*' ? '.' : e.endsWith('/*') ? e.slice(0, -2) || '/' : e;
+  return isScanRoot(path.resolve(cwd, base));
+}
+
+/**
+ * A command's operands and option values: short clusters (-rn) and `--long=value` read, a value taken from the rest of
+ * the cluster or the next word for the letters in `shortValue` and the names in `longValue`; after `--` all are operands.
+ */
+function operands(args: string[], shortValue: string, longValue: string[] = []): { ops: string[]; values: Map<string, string[]> } {
+  const ops: string[] = [];
+  const values = new Map<string, string[]>();
+  const put = (k: string, v: string | undefined) => values.set(k, [...(values.get(k) ?? []), v ?? '']);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') {
+      ops.push(...args.slice(i + 1));
+      break;
+    }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      const name = eq > 0 ? a.slice(0, eq) : a;
+      if (eq > 0) put(name, a.slice(eq + 1));
+      else if (longValue.includes(name)) put(name, args[++i]);
+      else put(name, '');
+      continue;
+    }
+    if (a.startsWith('-') && a.length > 1) {
+      for (let j = 1; j < a.length; j++) {
+        const c = a[j];
+        if (!shortValue.includes(c)) {
+          put('-' + c, '');
+          continue;
+        }
+        put('-' + c, j + 1 < a.length ? a.slice(j + 1) : args[++i]);
+        break;
+      }
+      continue;
+    }
+    ops.push(a);
+  }
+  return { ops, values };
+}
+
+/** A depth option's value (fd -d 1, tree -L 1, find -maxdepth 1) is 1 or less */
+const shallow = (v: string[] | undefined): boolean => !!v && v.some((x) => /^\d+$/.test(x) && Number(x) <= 1);
+
+/**
+ * True when a simple command walks a folder recursively whose root is the home folder, /, /Users, /Volumes or
+ * ~/Library (isHomeScanRoot): find, fd, grep -r, rg, ag, ack, tree and du, ls -R. With no folder named it walks the
+ * working directory. A depth limit of 1 (find -maxdepth 1, fd -d 1, tree -L 1) lists one level only; du always walks.
+ */
+function scansHome(prog: string, args: string[], cwd: string): boolean {
+  let roots: string[];
+  switch (prog) {
+    case 'find': {
+      // options (-H -L -P -E -X -s -x, -f path), then the starting points, then the expression
+      let i = 0;
+      const starts: string[] = [];
+      while (i < args.length && /^-[HLPEXsxd]+$/.test(args[i])) i++;
+      for (; i < args.length; i++) {
+        if (args[i] === '-f') starts.push(args[++i] ?? '');
+        else if (args[i].startsWith('-') || args[i] === '(' || args[i] === '!') break;
+        else starts.push(args[i]);
+      }
+      const max = args.indexOf('-maxdepth');
+      if (max >= 0 && shallow([args[max + 1]])) return false;
+      roots = starts.length ? starts : ['.'];
+      break;
+    }
+    case 'fd':
+    case 'fdfind': {
+      const { ops, values } = operands(args, 'edtEcjSoxX', ['--extension', '--type', '--exclude', '--max-depth', '--min-depth', '--exact-depth', '--color', '--threads', '--size', '--changed-within', '--changed-before', '--owner', '--base-directory', '--search-path', '--path-separator', '--max-results', '--ignore-file', '--exec', '--exec-batch', '--batch-size', '--format']);
+      if (shallow(values.get('-d')) || shallow(values.get('--max-depth')) || shallow(values.get('--exact-depth'))) return false;
+      roots = [...ops.slice(1), ...(values.get('--search-path') ?? []), ...(values.get('--base-directory') ?? [])];
+      break;
+    }
+    case 'grep':
+    case 'egrep':
+    case 'fgrep':
+    case 'rg':
+    case 'ag':
+    case 'ack': {
+      const isGrep = prog.endsWith('grep');
+      const { ops, values } = isGrep
+        ? operands(args, 'efmABCdD', ['--regexp', '--file', '--max-count', '--context', '--after-context', '--before-context', '--directories', '--devices', '--include', '--exclude', '--exclude-dir', '--label', '--color', '--colour'])
+        : operands(args, prog === 'rg' ? 'ABCefgmMtTjEdr' : 'ABCGgmp', ['--regexp', '--file', '--glob', '--iglob', '--type', '--type-not', '--max-count', '--max-columns', '--threads', '--encoding', '--replace', '--max-depth', '--maxdepth', '--depth', '--context', '--after-context', '--before-context', '--color', '--colors', '--sort', '--sortr', '--type-add', '--path-to-ignore', '--ignore', '--ignore-dir', '--file-search-regex']);
+      if (isGrep && !(values.has('-r') || values.has('-R') || values.has('--recursive') || values.has('--dereference-recursive') || (values.get('-d') ?? values.get('--directories') ?? []).includes('recurse'))) return false;
+      if ((prog === 'rg' && shallow(values.get('-d'))) || shallow(values.get('--max-depth')) || shallow(values.get('--maxdepth')) || shallow(values.get('--depth'))) return false;
+      // the pattern comes first unless -e/-f gave it (rg --files lists, it takes no pattern)
+      const given = values.has('-e') || values.has('-f') || values.has('--regexp') || values.has('--file') || values.has('--files') || (!isGrep && prog !== 'rg' && values.has('-g'));
+      roots = given ? ops : ops.slice(1);
+      break;
+    }
+    case 'tree': {
+      const { ops, values } = operands(args, 'LPIoHT', ['--filelimit', '--charset', '--timefmt', '--sort']);
+      if (shallow(values.get('-L'))) return false;
+      roots = ops;
+      break;
+    }
+    case 'du':
+      roots = operands(args, 'BdIt', ['--max-depth', '--threshold', '--exclude', '--block-size']).ops;
+      break;
+    case 'ls': {
+      const { ops, values } = operands(args, '', []);
+      if (values.has('-R') || values.has('--recursive')) {
+        roots = ops;
+        break;
+      }
+      // ls ~/* lists what is inside every folder in home (Desktop, Documents …); ls -d names them only
+      return !values.has('-d') && !values.has('--directory') && ops.some((o) => o.endsWith('*') && isHomeScanRoot(o, cwd));
+    }
+    default:
+      return false;
+  }
+  if (!roots.length) roots = ['.'];
+  return roots.some((r) => isHomeScanRoot(r, cwd));
+}
+
+/** What a simple command does that raises a macOS privacy prompt (screen, camera, microphone, clipboard), or null */
+function privacyReason(prog: string, args: string[]): string | null {
+  if (prog === 'screencapture') return 'records the screen';
+  if (prog === 'imagesnap' || prog === 'rec') return 'uses the camera or microphone';
+  if (['ffmpeg', 'ffplay', 'ffprobe'].includes(prog) && args.some((a) => a.includes('avfoundation'))) return 'uses the camera or microphone';
+  if (prog === 'sox' && args.some((a) => a === '-d' || a === '--default-device')) return 'uses the camera or microphone';
+  if (prog === 'pbpaste') return 'reads the clipboard';
+  return null;
+}
+
 /** Inside the working directory: what configures git, editors, CI, direnv, the app or another agent */
 const PROTECTED_IN_PROJECT = ['.git', '.silo-harness', '.open-harness', '.claude', '.vscode', '.idea', '.husky', '.github/workflows', '.mcp.json', '.envrc', '.gitmodules'];
 /** …except the folders in them that hold skills, commands, agents or worktrees, no executable configuration */
@@ -604,6 +747,9 @@ export function guardCommand(command: string, cwd: string): string | null {
   if (/\b(sh|bash|zsh)\s+-c\s+["']?\$\(\s*(curl|wget)\b/.test(raw)) return 'pipes a download into a shell';
   if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(raw)) return 'fork bomb';
 
+  // A walk of the home folder or a privacy prompt (screen, camera, clipboard): kept until the whole line is read, so
+  // a stronger reason anywhere in it (reads secrets, sudo, deletes …) comes first
+  let soft: string | null = null;
   for (const simple of allSimpleCommands(raw)) {
     const { argv, lexed } = argvOf(simple);
     const prog = path.basename(argv[0] ?? '');
@@ -640,6 +786,7 @@ export function guardCommand(command: string, cwd: string): string | null {
     }
     if (['mkfs', 'dd', 'diskutil', 'fdisk', 'parted', 'newfs_hfs', 'newfs_apfs'].includes(prog) || /^mkfs\./.test(prog)) return 'disk operation';
     if (['shutdown', 'reboot', 'halt', 'launchctl', 'systemctl', 'killall', 'pkill'].includes(prog)) return 'system control';
+    if (prog === 'crontab' && !(args.length === 1 && args[0] === '-l')) return 'system control';
     if (prog === 'kill' && flags.includes('-9') && targets.includes('-1')) return 'system control';
     if ((prog === 'chmod' || prog === 'chown' || prog === 'chgrp') && flags.some((f) => /^-[a-zA-Z]*R/.test(f) || f === '--recursive')) {
       if (targets.some((t) => BROAD_TARGETS.has(t)) || pathArgsOutsideCwd(targets, cwd).length) return 'broad permission change';
@@ -659,7 +806,7 @@ export function guardCommand(command: string, cwd: string): string | null {
       const sub = targets[0] ?? '';
       if ((sub === 'system' && targets[1] === 'prune') || sub === 'rmi' || (sub === 'volume' && (targets[1] === 'rm' || targets[1] === 'prune')) || (sub === 'rm' && flags.some((f) => /^-[a-zA-Z]*f/.test(f) || f === '--force'))) return 'cloud or infrastructure change';
     }
-    if ((prog === 'defaults' && targets[0] === 'write') || ['csrutil', 'spctl', 'nvram', 'tmutil', 'pmset', 'networksetup', 'scutil', 'dscl'].includes(prog)) return 'changes macOS settings';
+    if ((prog === 'defaults' && targets[0] === 'write') || ['csrutil', 'spctl', 'tccutil', 'nvram', 'tmutil', 'pmset', 'networksetup', 'scutil', 'dscl'].includes(prog)) return 'changes macOS settings';
     if (prog === 'security' && targets.some((t) => /^(find|dump|export|delete|add)-/.test(t))) return 'reads or changes the keychain';
     if (prog === 'printenv' && !targets.length) return 'reads secrets';
     if (prog === 'env' && !targets.length && !flags.length) return 'reads secrets';
@@ -667,8 +814,9 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'sed' && flags.some((f) => /^-[a-zA-Z]*i/.test(f) || f === '--in-place') && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (WRITE_PROGRAMS.has(prog) && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (prog === 'tee' && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
+    soft ??= privacyReason(prog, args) ?? (scansHome(prog, args, cwd) ? SCAN_REASON : null);
   }
-  return null;
+  return soft;
 }
 
 /** Why a file write should pause for the user, or null when the file is inside the working directory. */
@@ -684,7 +832,7 @@ const READ_ONLY_PROGRAMS = new Set([
   'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'find', 'fd', 'pwd', 'which', 'whereis', 'type', 'echo', 'printf', 'tree', 'du', 'df', 'stat', 'file',
   'date', 'uname', 'sw_vers', 'hostname', 'whoami', 'id', 'true', 'false', 'test', '[', 'sort', 'uniq', 'cut', 'awk', 'tr', 'diff', 'cmp', 'md5', 'shasum', 'jq', 'yq',
   'basename', 'dirname', 'realpath', 'readlink', 'column', 'nl', 'bat', 'sed', 'git', 'npm', 'pnpm', 'yarn', 'node', 'python3', 'python', 'pip', 'pip3',
-  'cargo', 'go', 'rustc', 'java', 'ruby', 'php', 'perl', 'swift', 'xcodebuild', 'cmake', 'tsc',
+  'cargo', 'go', 'rustc', 'java', 'ruby', 'php', 'perl', 'swift', 'xcodebuild', 'cmake', 'tsc', 'mdfind',
 ]);
 const GIT_READ_ONLY = new Set(['status', 'log', 'diff', 'show', 'blame', 'rev-parse', 'ls-files', 'ls-tree', 'describe', 'shortlog', 'reflog', 'cat-file', 'grep', 'remote', 'config', 'rev-list', 'count-objects', 'branch', 'tag', 'stash', 'worktree', 'help', 'version']);
 const PKG_READ_ONLY = new Set(['ls', 'list', 'view', 'info', 'outdated', 'audit', 'why', 'explain', 'show', 'search', 'help', 'version', '-v', '--version', 'config']);
@@ -820,6 +968,8 @@ function readOnlyArgs(prog: string, argv: string[]): boolean {
       return !flags.some((f) => shortHas(f, 'C') || longIs(f, '--compile'));
     case 'hostname':
       return targets.length === 0;
+    case 'mdfind':
+      return !args.includes('-live');
     case 'rg':
       return !flags.some((f) => longIs(f, '--pre', '--pre-glob', '--hostname-bin'));
     case 'tsc':
