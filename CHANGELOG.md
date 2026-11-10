@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1 — 2026-11-10
+
+Fixes clicks not reaching a page in the Browser pane after a site marked the tab as a window-drag area.
+
+### Fixed
+
+- **Clicks reach every page.** A site can no longer make its tab a window-drag area, which stopped clicks on the Microsoft sign-in page after Teams.
+
 ## 0.13.0 — 2026-11-10
 
 Sessions cost a fraction of what they did, the agent can search and read the web, the browser trusts pages less, and MCP servers sign in with OAuth.
