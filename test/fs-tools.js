@@ -5,7 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const { readFile, listDirectory, grep, glob } = require(path.join(projectDir, 'dist/main/tools/fs.js'));
+const { readFile, listDirectory, grep, glob, findRipgrep, setRipgrep } = require(path.join(projectDir, 'dist/main/tools/fs.js'));
 const { check, done } = require('./support/check.js');
 
 (async () => {
@@ -50,6 +50,42 @@ const { check, done } = require('./support/check.js');
   check('glob over the tree does not ask and leaves secret files out', calls.length === 0 && out.includes('a.txt') && out.includes('.env.example') && !/(^|\n)\.env(\n|$)/.test(out) && !out.includes('id_rsa'), out);
   out = await run(glob, { pattern: '*', path: '.ssh' });
   check('glob rooted at .ssh asks', calls.length === 1 && calls[0][0] === 'glob', calls);
+
+  // glob: newest-modified first
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-glob-'));
+  const gctx = { ...ctx, cwd: g };
+  const now = Date.now() / 1000;
+  ['old.ts', 'mid.ts', 'new.ts'].forEach((n, i) => {
+    fs.writeFileSync(path.join(g, n), 'x');
+    fs.utimesSync(path.join(g, n), now - 300 + i * 100, now - 300 + i * 100);
+  });
+  out = (await glob.run({ pattern: '*.ts' }, gctx)).content;
+  check('glob: newest first', out === 'new.ts\nmid.ts\nold.ts', out);
+
+  // grep: ripgrep when installed (.gitignore honoured), grep otherwise; the same output shape
+  fs.mkdirSync(path.join(g, 'ignored'));
+  fs.mkdirSync(path.join(g, 'src'));
+  fs.writeFileSync(path.join(g, '.gitignore'), 'ignored/\n');
+  fs.writeFileSync(path.join(g, 'ignored', 'x.txt'), 'NEEDLE in ignored\n');
+  fs.writeFileSync(path.join(g, 'src', 'y.txt'), 'NEEDLE in src\n');
+  fs.writeFileSync(path.join(g, '.hidden.txt'), 'NEEDLE hidden\n');
+  const rg = findRipgrep();
+  setRipgrep(null);
+  out = (await grep.run({ pattern: 'NEEDLE' }, gctx)).content;
+  check('grep (grep): path:line:text, hidden files searched', /^src\/y\.txt:1:NEEDLE in src$/m.test(out) && out.includes('.hidden.txt:1:'), out);
+  out = (await grep.run({ pattern: 'needle', ignore_case: true, include: '*.txt', path: 'src' }, gctx)).content;
+  check('grep (grep): ignore_case and include', /src\/y\.txt:1:NEEDLE in src/.test(out), out);
+  if (rg) {
+    setRipgrep(rg);
+    out = (await grep.run({ pattern: 'NEEDLE' }, gctx)).content;
+    check('grep (rg): .gitignore honoured, hidden files searched, same shape', /^src\/y\.txt:1:NEEDLE in src$/m.test(out) && out.includes('.hidden.txt:1:') && !out.includes('ignored'), out);
+    out = (await grep.run({ pattern: 'needle', ignore_case: true, include: '*.txt', path: 'src' }, gctx)).content;
+    check('grep (rg): ignore_case and include', /src\/y\.txt:1:NEEDLE in src/.test(out), out);
+    out = (await grep.run({ pattern: 'TOKEN' }, ctx)).content;
+    check('grep (rg): secret files left out', out.includes('a.txt') && !out.includes('secret-value'), out);
+  } else console.log('skip grep (rg): ripgrep is not installed');
+  setRipgrep(undefined);
+  fs.rmSync(g, { recursive: true, force: true });
 
   fs.rmSync(tmp, { recursive: true, force: true });
   done();

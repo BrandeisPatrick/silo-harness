@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
@@ -398,6 +399,10 @@ export const glob: Tool = {
     }
     await walk(root, '');
     if (!results.length) return { content: `No files matched ${args.pattern} under ${root}` };
+    // Newest-modified first
+    const times = new Map<string, number>();
+    await Promise.all(results.map(async (r) => times.set(r, (await stat(path.join(root, r)))?.mtimeMs ?? 0)));
+    results.sort((a, b) => (times.get(b) ?? 0) - (times.get(a) ?? 0) || a.localeCompare(b));
     let out = results.join('\n');
     if (results.length >= MAX) out += `\n…(stopped at ${MAX} results)`;
     return { content: out };
@@ -422,17 +427,9 @@ export const grep: Tool = {
     const refused = await approveSecretRead(ctx, 'grep', target);
     if (refused) return { content: refused };
     const skipSecrets = !isSecretPath(target, ctx.cwd);
-    const flags = ['-rnIE'];
-    if (args.ignore_case) flags.push('-i');
-    for (const d of IGNORED_DIRS) flags.push(`--exclude-dir=${d}`);
-    if (args.include) flags.push(`--include=${String(args.include)}`);
-    const out = await new Promise<string>((resolve, reject) => {
-      execFile('grep', [...flags, '-e', String(args.pattern), target], { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
-        if (err && Number((err as { code?: unknown }).code) === 1) return resolve('');
-        if (err && !stdout) return reject(err);
-        resolve(stdout);
-      });
-    });
+    const { out, timedOut } = await search(target, String(args.pattern), !!args.ignore_case, args.include ? String(args.include) : undefined);
+    const stopped = timedOut ? `\n…(the search stopped after ${GREP_TIMEOUT / 1000} s; narrow the pattern or path)` : '';
+    if (!out.trim()) return { content: timedOut ? `No matches before the search stopped after ${GREP_TIMEOUT / 1000} s; narrow the pattern or path.` : 'No matches.' };
     if (!out.trim()) return { content: 'No matches.' };
     // Inside a search root that is not secret itself, matches in secret files are left out
     const lines = out.split('\n').filter((l) => l && !(skipSecrets && isSecretPath(/^(.*?):\d+:/.exec(l)?.[1] ?? '')));
@@ -440,6 +437,70 @@ export const grep: Tool = {
     const shown = lines.slice(0, 300).map((l) => (l.startsWith(ctx.cwd + '/') ? l.slice(ctx.cwd.length + 1) : l));
     let text = shown.join('\n');
     if (lines.length > shown.length) text += `\n…(${lines.length - shown.length} more matches; narrow the pattern or path)`;
-    return { content: truncate(text) };
+    return { content: truncate(text) + stopped };
   },
 };
+
+/** How long a grep search may run */
+export const GREP_TIMEOUT = 30_000;
+const SEARCH_BUFFER = 20 * 1024 * 1024;
+const RG_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', `${os.homedir()}/.cargo/bin`, '/usr/bin', '/bin'];
+let rgPath: string | null | undefined;
+
+/** ripgrep's path when it is installed (on PATH, or where Homebrew and cargo put it), else null. Looked up once. */
+export function findRipgrep(): string | null {
+  if (rgPath !== undefined) return rgPath;
+  rgPath = null;
+  for (const dir of [...(process.env.PATH ?? '').split(':').filter(Boolean), ...RG_DIRS]) {
+    const p = path.join(dir, 'rg');
+    try {
+      fsSync.accessSync(p, fsSync.constants.X_OK);
+      if (fsSync.statSync(p).isFile()) {
+        rgPath = p;
+        break;
+      }
+    } catch {
+      /* not here */
+    }
+  }
+  return rgPath;
+}
+
+/** For the tests: forget the ripgrep lookup, or set it (null: use grep) */
+export function setRipgrep(p: string | null | undefined): void {
+  rgPath = p;
+}
+
+/**
+ * Runs the search: ripgrep when it is installed (hidden files searched, .gitignore honoured, the fixed folders left
+ * out), else grep -rnIE. Lines come as path:line:text either way. Stops after GREP_TIMEOUT with what it found so far.
+ */
+function search(target: string, pattern: string, ignoreCase: boolean, include?: string): Promise<{ out: string; timedOut: boolean }> {
+  const rg = findRipgrep();
+  let file: string;
+  let argv: string[];
+  if (rg) {
+    file = rg;
+    argv = ['--no-heading', '--with-filename', '-n', '--hidden', '--no-require-git', '--color', 'never', '--no-messages'];
+    if (ignoreCase) argv.push('-i');
+    for (const d of IGNORED_DIRS) argv.push('--glob', `!${d}`);
+    if (include) argv.push('--glob', include);
+    argv.push('-e', pattern, target);
+  } else {
+    file = 'grep';
+    argv = ['-rnIE'];
+    if (ignoreCase) argv.push('-i');
+    for (const d of IGNORED_DIRS) argv.push(`--exclude-dir=${d}`);
+    if (include) argv.push(`--include=${include}`);
+    argv.push('-e', pattern, target);
+  }
+  return new Promise((resolve, reject) => {
+    execFile(file, argv, { maxBuffer: SEARCH_BUFFER, timeout: GREP_TIMEOUT, killSignal: 'SIGKILL' }, (err, stdout) => {
+      const e = err as (Error & { code?: unknown; killed?: boolean; signal?: string }) | null;
+      if (e?.killed || (e && e.signal === 'SIGKILL')) return resolve({ out: stdout ?? '', timedOut: true });
+      if (e && Number(e.code) === 1) return resolve({ out: '', timedOut: false });
+      if (e && !stdout) return reject(e);
+      resolve({ out: stdout, timedOut: false });
+    });
+  });
+}
