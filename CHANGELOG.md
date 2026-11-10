@@ -31,6 +31,7 @@
 - **Servers reconnect themselves.** A remote MCP server that drops is retried 5 times with growing waits, and a crashed local one restarts on its next call.
 - **Longer MCP calls.** A server entry can set its own `timeout`, and progress from the server keeps a call alive for up to 10 minutes.
 - **Big MCP results saved.** A result over 100,000 characters goes to a private temp file; the model gets its start, its end and the path.
+- **Server notes reach the model.** An MCP server's own usage notes join the prompt, quoted as the server's words and capped at 2,000 characters each.
 
 ### Fixed
 
@@ -61,12 +62,14 @@
 - **Public sites only.** `web_fetch` refuses private and local-network addresses, re-checks every redirect, and asks for a new site as the browser does.
 - **Web text is data.** Fetched pages and search results arrive in a fence, and text imitating the fence is made harmless.
 - **Search keys stay put.** A search key is masked in Settings, never shown to the model and cannot be set by a project's settings file.
+- **Prompts that explain themselves.** Every macOS permission prompt now says in a sentence what asked for it.
 
 ### For developers
 
 - **Skill format defined.** [docs/skills.md](docs/skills.md) sets out the fields, the folders and every problem message.
 - **MCP reference.** [docs/mcp.md](docs/mcp.md) covers every server key, sign-in and reconnection.
 - **Web reference.** [docs/web.md](docs/web.md) covers both web tools, their safety rules and the `webSearch` setting.
+- **Access reference.** [docs/access.md](docs/access.md) lists every folder, connection and macOS prompt the app can cause.
 
 ## 0.12.0 — 2026-11-09
 

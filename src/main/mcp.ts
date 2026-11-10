@@ -547,12 +547,12 @@ export class McpManager extends EventEmitter {
   }
 
   /**
-   * Each connected server's `instructions` (what it tells a client about using it), at most MAX_INSTRUCTIONS
-   * characters. Untrusted text from the server: quote it as such if it goes into a prompt.
+   * The `instructions` of each connected server that has tools to offer (what it tells a client about using it), at
+   * most MAX_INSTRUCTIONS characters. Untrusted text from the server: the system prompt quotes it as such.
    */
   serverInstructions(): { server: string; scope: McpScope; instructions: string }[] {
     return [...this.entries.values()]
-      .filter((e) => e.status === 'connected' && e.instructions)
+      .filter((e) => e.status === 'connected' && e.instructions && e.tools.length > 0)
       .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === 'project' ? -1 : 1))
       .map((e) => ({ server: e.name, scope: e.scope, instructions: e.instructions! }));
   }
