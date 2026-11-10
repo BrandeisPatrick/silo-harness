@@ -392,6 +392,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       writeMod(userMods, 'backdrop', { name: 'Backdrop', contributes: { views: [{ id: 'main', title: 'Backdrop', entry: 'bg.html', seat: 'background' }] } }, {
         'bg.html': `<!doctype html><style>html,body{margin:0;height:100%}body{background:radial-gradient(circle at 20% 30%,#f2a65a,transparent 50%),radial-gradient(circle at 80% 70%,#5a8df2,transparent 55%),linear-gradient(135deg,#2d1b4e,#1b4e3d)}</style><script src="/@harness/harness.js"></script>`,
       });
+      // A theme of yours from before themes were removed: it loads, its CSS is never applied
       writeMod(userMods, 'tint', { name: 'Tint', contributes: { styles: ['theme.css'] } }, { 'theme.css': ':root { --accent: #2b6cb0; }' });
       await sleep(1200);
       // The background is a look: approved at its first Use, not turned on (used once here, so its chat card is
@@ -430,16 +431,20 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       const sv = await view(app, 'stripy/main');
       check('composer mod: sits directly above the composer, sized to content', sv && sv.hello && sv.height > 10 && sv.height <= 120 && (await app.evaluate(`document.querySelector('#mod-strip').nextElementSibling.id === 'chatbar' && document.querySelector('#chatbar').firstElementChild.id === 'composer' && !document.querySelector('#mod-strip').hidden`)), sv);
       await app.screenshotOf(path.join(SHOTS, 'seat-composer-light.png'), '.composer-wrap', 8);
-      // Styles: the token reaches the app and, through theme.changed, every mod page
-      await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#2b6cb0'`, 5000, 'the tint').catch(() => {});
-      check('styles mod: <style data-mod> injected and the token applies', await app.evaluate(`Boolean(document.querySelector('style[data-mod="tint"]')) && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#2b6cb0'`));
-      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #2b6cb0'`, 5000, 'the token in the tab page').catch(() => {});
-      check("styles mod: the token reaches a mod page's own CSS", (await view(app, 'tabby/main')).title === 'Tabby #2b6cb0', (await view(app, 'tabby/main')).title);
-      check('styles mod: theme.changed reached the bundled views', (await dbg(app, 'log()')).some((e) => e.kind === 'event' && e.method === 'theme.changed' && e.view === 'tasks/main'));
-      await shot(app, 'styles-tint-light');
+      // An old theme (contributes.styles): listed with a note, never applied
+      const tint = (await dbg(app, 'list()')).find((m) => m.key === 'tint');
+      check('an old theme loads with a note, and its CSS never reaches the window', tint && tint.state !== 'invalid' && tint.problems.some((p) => p.warning && /Themes were removed/.test(p.message)) && (await app.evaluate(`!document.querySelector('style[data-mod]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`)), tint && tint.problems);
       await rpc(app, 'mods.setEnabled', 'tint', false);
+      // The scheme: the app's tokens reach every mod page through theme.changed
+      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #1f66c4'`, 5000, 'the accent in the tab page').catch(() => {});
+      check("the app's accent reaches a mod page's own CSS", (await view(app, 'tabby/main')).title === 'Tabby #1f66c4', (await view(app, 'tabby/main')).title);
+      await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'dark'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'dark'; })()`);
       await sleep(800);
-      check('styles mod off: its style is removed', await app.evaluate(`!document.querySelector('style[data-mod="tint"]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`));
+      const darkAccent = await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
+      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === ${JSON.stringify('Tabby ' + darkAccent)}`, 5000, 'the dark accent in the tab page').catch(() => {});
+      check('dark: theme.changed reached the bundled views and the tab page has the dark accent', (await dbg(app, 'log()')).some((e) => e.kind === 'event' && e.method === 'theme.changed' && e.view === 'tasks/main') && (await view(app, 'tabby/main')).title === `Tabby ${darkAccent}`, { darkAccent, title: (await view(app, 'tabby/main')).title });
+      await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'light'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'light'; })()`);
+      await sleep(800);
       // Background
       await app.evaluate(`document.activeElement.blur()`);
       await sleep(300);

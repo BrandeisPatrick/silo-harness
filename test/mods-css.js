@@ -4,7 +4,8 @@
 const path = require('node:path');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { check, done } = require('./support/check.js');
-const { splitCss, scopeCss, scopeTheme, cleanCss, modUrlRewriter, LOOK_ROOTS, LOOK_LAYER, PREVIEW_ROOTS } = require(path.join(projectDir, 'dist', 'main', 'mods', 'css.js'));
+const css = require(path.join(projectDir, 'dist', 'main', 'mods', 'css.js'));
+const { splitCss, scopeCss, modUrlRewriter, LOOK_ROOTS, LOOK_LAYER, PREVIEW_ROOTS } = css;
 
 const texts = (css, opts) => splitCss(css, opts).map((s) => s.text);
 /** Whether the text before a "(" ends with the identifier url (escapes resolved, as CSS reads it) */
@@ -95,7 +96,6 @@ check('an unclosed url( is closed', texts('a { b: url(x')[0] === 'a { b: url(x)}
   check('without a prefix, no @property or @font-face survives', !/@property|@font-face/.test(none), none);
   check('@property inside @media is checked too', !scopeCss('@media (x) { @property --bg-100 { syntax: "*"; inherits: false } }', '#messages', { prefix: 'holo' }).includes('--bg-100'));
   check('a look\'s @keyframes spin stays a layered rule (the app\'s unlayered spin wins)', /^@layer mod-looks \{\n@keyframes spin/.test(scopeCss('@keyframes spin { to { opacity: 0 } }', '#messages')));
-  check('themes keep @property and @font-face', cleanCss('@property --bg-100 { syntax: "<color>"; inherits: true; initial-value: red } @font-face { font-family: X; src: local(Y) }').includes('@property --bg-100') );
 }
 check('a sheet of only hoisted rules has no empty scope', !scopeCss('@keyframes k {}', '#messages').includes('@scope'));
 check('an empty sheet is empty', scopeCss('/* nothing */', '#messages') === '');
@@ -143,22 +143,15 @@ for (const css of escapes) {
   check('20000 random sheets: always balanced, the scope always closed by the app, no @import left', !bad, bad);
 }
 
-// --- themes (contributes.styles) ---
-check('a theme keeps its rules unscoped', cleanCss(':root { --accent: red }') === ':root { --accent: red }');
-check('a theme loses its @import', cleanCss('@import url(x.css); :root{a:b}') === ':root{a:b}');
-
-// --- previews in Settings: a look and a theme compiled for the preview's own root ---
+// --- previews in Settings: a look compiled for the preview's own root ---
 {
-  check('the preview roots: a miniature window with its own transcript and chat bar', PREVIEW_ROOTS.theme === '.lp-root' && PREVIEW_ROOTS.body === '.lp-body' && PREVIEW_ROOTS.conversation === '.lp-root #messages' && PREVIEW_ROOTS.composer === '.lp-root #chatbar');
+  check('the preview roots: a miniature window with its own transcript and chat bar; nothing for a theme', PREVIEW_ROOTS.conversation === '.lp-root #messages' && PREVIEW_ROOTS.composer === '.lp-root #chatbar' && Object.keys(PREVIEW_ROOTS).join() === 'conversation,composer');
   const look = scopeCss('.msg.user .bubble { color: red } :scope { --x: 1 }', PREVIEW_ROOTS.conversation, { prefix: 'teal' });
   check('a look for a preview is scoped to the preview\'s region, not the window\'s', look.startsWith('@scope (.lp-root #messages) {') && !/@scope \(#messages\)/.test(look), look);
-  const t = scopeTheme(':root { --accent: red } @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: blue } } :root[data-theme="dark"] { --accent: blue } html { background: black } body { background: transparent } :root.mod-bg .main, .sidebar, body > .x { color: red }', PREVIEW_ROOTS.theme, { body: PREVIEW_ROOTS.body });
-  check('a theme for a preview: inside @scope (.lp-root), :root and html as :scope, body as .lp-body', t.startsWith('@scope (.lp-root) {') && /:scope \{ --accent: red \}/.test(t) && /:scope:not\(\[data-theme="light"\]\)/.test(t) && /:scope\[data-theme="dark"\]/.test(t) && /:scope \{ background: black \}/.test(t) && /\.lp-body \{ background: transparent \}/.test(t) && /:scope\.mod-bg \.main, \.sidebar, \.lp-body > \.x/.test(t) && !/:root|(?<![\w.-])html\b|(?<![\w-])body\b/.test(t), t);
-  const kept = scopeTheme('@keyframes glow { to { opacity: 1 } } @font-face { font-family: Brand; src: url(b.woff2) } @import url(x.css); a[title="html body :root"] { b: c } .htmlish, #body { d: e }', '.lp-root', { body: '.lp-body' });
-  check('a theme keeps its @keyframes and @font-face (in front of the scope), loses @import, and leaves strings and names alone', kept.indexOf('@keyframes glow') < kept.indexOf('@scope') && kept.indexOf('@font-face') < kept.indexOf('@scope') && !/@import/.test(kept) && /a\[title="html body :root"\]/.test(kept) && /\.htmlish, #body/.test(kept), kept);
-  const evil = scopeTheme('} } :root { --a: 1 } } .x { y: z }', '.lp-root');
-  check('a stray } cannot close the preview\'s scope early', (evil.match(/\{/g) || []).length === (evil.match(/\}/g) || []).length && evil.trim().endsWith('}') && evil.startsWith('@scope (.lp-root) {'), evil);
 }
+
+// --- themes were removed: nothing compiles a mod's CSS for the whole page any more ---
+check('no theme compilers are left', css.scopeTheme === undefined && css.cleanCss === undefined);
 
 // --- url() ---
 {
@@ -171,7 +164,6 @@ check('a theme loses its @import', cleanCss('@import url(x.css); :root{a:b}') ==
   check('a stylesheet at the mod root', top('b c.png') === 'mod://x.user/b%20c.png');
   const out = scopeCss('a { background: url(img/a.png), url("b.png"), url(https://x/y.png) }', '#messages', { url: u });
   check('scopeCss rewrites url()s it finds', out.includes('url("mod://hyperspace.bundled/looks/img/a.png")') && out.includes('url("mod://hyperspace.bundled/looks/b.png")') && out.includes('url(https://x/y.png)'), out);
-  check('cleanCss rewrites them too', cleanCss('a{b:url(c.png)}', { url: top }) === 'a{b:url("mod://x.user/c.png")}');
 }
 
 done();

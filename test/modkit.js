@@ -684,9 +684,6 @@ async function readyPage(hello = HELLO) {
     'side-chat': { seat: 'tab', permissions: ['model', 'session:read', 'session:send'] },
     scheduled: { seat: 'tab', permissions: ['schedules', 'session:control'] },
     backgrounds: { seat: 'background', views: ['aurora', 'constellation', 'grid', 'dusk'], permissions: [] },
-    'theme-midnight': { styles: ['theme.css'], permissions: [] },
-    'theme-paper': { styles: ['theme.css'], permissions: [] },
-    'theme-glass': { styles: ['theme.css'], permissions: [] },
     hyperspace: { seat: 'background', views: ['starfield'], looks: { holo: 'conversation', cockpit: 'composer' }, permissions: ['session:read'] },
   };
   const mods = listMods(path.join(ROOT, 'mods'));
@@ -697,8 +694,8 @@ async function readyPage(hello = HELLO) {
     check(`${m.folder}: mod.json has no problems`, m.valid && m.problems.length === 0, m.problems);
     check(`${m.folder}: metadata`, man.version === '1.0.0' && man.author === 'Silo Harness' && man.license === 'MIT' && typeof man.description === 'string' && man.description.length > 10 && typeof man.icon === 'string');
     const views = (man.contributes && man.contributes.views) || [];
-    if (exp.styles) check(`${m.folder}: styles only, no views`, views.length === 0 && same(man.contributes.styles, exp.styles) && exp.styles.every((f) => fs.existsSync(path.join(m.dir, f))), man.contributes);
-    else if (exp.seat === 'background') check(`${m.folder}: background views ${exp.views.join(', ')}, with no rail-only fields`, same(views.map((v) => v.id), exp.views) && views.every((v) => v.seat === 'background' && v.order === undefined && v.maxHeight === undefined), views);
+    check(`${m.folder}: no contributes.styles (themes were removed)`, !man.contributes || !('styles' in man.contributes));
+    if (exp.seat === 'background') check(`${m.folder}: background views ${exp.views.join(', ')}, with no rail-only fields`, same(views.map((v) => v.id), exp.views) && views.every((v) => v.seat === 'background' && v.order === undefined && v.maxHeight === undefined), views);
     else if (exp.seat === 'tab') check(`${m.folder}: one tab view, with no rail-only fields`, views.length === 1 && views[0].seat === 'tab' && views[0].order === undefined && views[0].maxHeight === undefined, views);
     else check(`${m.folder}: one rail view at order ${exp.order}`, views.length === 1 && views[0].seat === 'rail' && views[0].order === exp.order, views);
     check(`${m.folder}: permissions`, same((man.permissions || []).slice().sort(), (exp.permissions || []).slice().sort()), man.permissions);
@@ -775,7 +772,7 @@ async function readyPage(hello = HELLO) {
     check('scheduled: a local time becomes ISO with an offset that means the same moment', at && /^2026-11-06T09:00:00[+-]\d\d:\d\d$/.test(at) && new Date(Date.parse(at)).getHours() === 9, at);
   }
 
-  // --- The look mods: backgrounds and the Midnight theme ------------------------------------------------------
+  // --- The look mods: backgrounds, and the app's own palette ------------------------------------------------
   {
     const read = (f) => fs.readFileSync(path.join(ROOT, 'mods', f), 'utf8');
     const noComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -795,7 +792,7 @@ async function readyPage(hello = HELLO) {
     check('backgrounds: settings intensity (subtle, medium, vivid) and speed (slow, normal)', same(settings.intensity && settings.intensity.options, ['subtle', 'medium', 'vivid']) && same(settings.speed && settings.speed.options, ['slow', 'normal']));
     check('backgrounds: asks for no permissions', same(man.permissions, []));
 
-    // The app's own palette, Midnight and Paper: tokens only, the app's three selectors, and contrast measured from the files
+    // The app's own palette: contrast measured from the file
     const appCss = fs.readFileSync(path.join(ROOT, 'src/renderer/styles.css'), 'utf8');
     const tokenBlocks = (css) => rules(css).filter((r) => /^:root/.test(r[0])).map(([sel, body]) => [sel, Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]))]);
     const appBlocks = tokenBlocks(appCss.slice(0, appCss.indexOf('/* ---------- Base')));
@@ -804,7 +801,7 @@ async function readyPage(hello = HELLO) {
     const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
     const lum = (hex) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b); };
     const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-    // A token's value in a scheme: the theme's own declaration, else the app's for that scheme (var() followed)
+    // A token's value in a scheme: the declaration given, else the app's for that scheme (var() followed)
     const resolve = (d, name, base) => { const get = (n) => (n in d ? d[n] : base[n]); let v = get(name); for (let i = 0; i < 6 && v && /^var\(/.test(v); i++) v = get(/var\((--[\w-]+)/.exec(v)[1]); return v; };
     const contrast = (label, d, base, opts) => {
       const low = [];
@@ -831,75 +828,6 @@ async function readyPage(hello = HELLO) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(fill.slice(i, i + 2), 16));
       check(`the app ${label}: the confirming button's fill is a grey`, r === g && g === b, fill);
     }
-    for (const [mod, opts] of [
-      ['theme-midnight', { light: { surfaces: ['--bg-000', '--bg-100', '--bg-200', '--bg-300'], text: [['--text-100', 4.5], ['--text-200', 4.5], ['--text-400', 3], ['--accent', 4.5], ['--danger', 4.5], ['--success', 4.5]], button: 4.5 } }],
-      // Paper is 0.4.0's palette as it was: its terracotta is 3:1 under white labels and as link text, and its syntax,
-      // red and green colours are 0.4.0's too; only the text tokens are held to the line here
-      ['theme-paper', { light: { surfaces: ['--bg-000', '--bg-100', '--bg-200', '--bg-300'], text: [['--text-100', 4.5], ['--text-200', 4.5], ['--text-400', 3]], button: 3, syntax: false } }],
-    ]) {
-      const theme = read(`${mod}/theme.css`);
-      const themeRules = rules(theme);
-      check(`${mod}: only the three selectors the app declares its tokens with`, same(themeRules.map((r) => r[0]), [':root', ':root:not([data-theme="light"])', ':root[data-theme="dark"]']) && /@media \(prefers-color-scheme: dark\)/.test(theme), themeRules.map((r) => r[0]));
-      const decls = themeRules.map(([, body]) => Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()])));
-      check(`${mod}: sets nothing but custom properties`, decls.every((d) => Object.keys(d).every((k) => k.startsWith('--'))));
-      check(`${mod}: the two dark blocks are the same`, same(decls[1], decls[2]));
-      check(`${mod}: sets every dark token the app sets (git and diff colours aside)`, appDarkNames.every((n) => n in decls[2]), appDarkNames.filter((n) => !(n in decls[2])));
-      const lightNames = Object.keys(appLight).filter((n) => n.startsWith('--') && !/^--(git|diff|fs|lh|font|mono|r|sidebar|col|shadow|backdrop)(-|$)/.test(n));
-      check(`${mod}: sets every colour token the app sets in light`, lightNames.every((n) => n in decls[0]), lightNames.filter((n) => !(n in decls[0])));
-      contrast(`${mod} light`, decls[0], appLight, opts.light);
-      contrast(`${mod} dark`, { ...decls[0], ...decls[2] }, { ...appLight, ...appDarkDecls }, opts.light);
-    }
-  }
-
-  // --- Glass: materials, not colours ------------------------------------------------------------------------
-  // Its tokens come first, with the app's three selectors and the same dark values twice, and are only its own
-  // --glass-… ones plus the shadows, the backdrop and three radii (no colour of text or surface changes, so the
-  // app's contrast holds); with Reduce transparency on, every tint is an app surface and the blur is 0. The rules
-  // after them give the sidebar, the side pane and the rail, the chat bar, the cards, menus and dialogs a tint and a
-  // backdrop filter; the reading column is the page colour; nothing touches the transcript's text.
-  {
-    const css = fs.readFileSync(path.join(ROOT, 'mods/theme-glass/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-    /** Top-level statements: { prelude, body } */
-    const statements = (text) => {
-      const out = [];
-      let depth = 0;
-      let start = 0;
-      let open = -1;
-      for (let i = 0; i < text.length; i++) {
-        if (text[i] === '{') {
-          if (depth++ === 0) open = i;
-        } else if (text[i] === '}' && --depth === 0) {
-          out.push({ prelude: text.slice(start, open).trim(), body: text.slice(open + 1, i) });
-          start = i + 1;
-        }
-      }
-      return out;
-    };
-    const decls = (body) => Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]));
-    /** Every rule, with @media and @supports opened: [prelude, declarations] */
-    const flat = (text) => statements(text).flatMap((s) => (/^@(media|supports)/.test(s.prelude) ? flat(s.body) : [[s.prelude, decls(s.body)]]));
-    const top = statements(css);
-    const darkMedia = top[1] && /^@media \(prefers-color-scheme: dark\)$/.test(top[1].prelude) ? statements(top[1].body) : [];
-    check('glass: its tokens come first, with the three selectors the app declares its tokens with', top[0].prelude === ':root' && darkMedia.length === 1 && darkMedia[0].prelude === ':root:not([data-theme="light"])' && top[2].prelude === ':root[data-theme="dark"]', top.slice(0, 3).map((s) => s.prelude));
-    const [light, darkA, darkB] = [decls(top[0].body), decls(darkMedia[0]?.body || ''), decls(top[2].body)];
-    check('glass: the two dark blocks are the same, and set what the light one sets', same(darkA, darkB) && same(Object.keys(light).sort(), Object.keys(darkB).sort()), Object.keys(light).filter((k) => !(k in darkB)));
-    const allowed = /^--(glass-[\w-]+|shadow-(sm|bar|pop|dialog)|backdrop|r-(composer|pop|card-lg))$/;
-    const names = [...new Set([...Object.keys(light), ...Object.keys(darkB)])];
-    check('glass: changes no colour of text or surface: only its own --glass-… tokens, the shadows, the backdrop and three radii', names.length > 20 && names.every((n) => allowed.test(n)), names.filter((n) => !allowed.test(n)));
-    check('glass: the reading column is the page colour in both schemes', light['--glass-page'] === 'var(--bg-100)' && darkB['--glass-page'] === 'var(--bg-100)');
-    const reduced = top.find((s) => /^@media \(prefers-reduced-transparency: reduce\)$/.test(s.prelude));
-    const reducedDecls = reduced ? decls(statements(reduced.body)[0].body) : {};
-    check('glass: with Reduce transparency on, every tint is an app surface and the blur is 0', reduced && statements(reduced.body)[0].prelude === ':root, :root:not([data-theme="light"]), :root[data-theme="dark"]' && reducedDecls['--glass-blur'] === '0px' && Object.entries(reducedDecls).every(([k, v]) => k === '--glass-blur' || /^var\(--(bg-\d{3}|field-bg|surface-hover|bubble)\)$/.test(v)), reducedDecls);
-    const tokenSelectors = [':root', ':root:not([data-theme="light"])', ':root[data-theme="dark"]', ':root, :root:not([data-theme="light"]), :root[data-theme="dark"]'];
-    const rules = flat(css).filter(([sel]) => !tokenSelectors.includes(sel));
-    const has = (part, prop) => rules.some(([sel, d]) => sel.split(',').some((s) => s.trim() === part) && prop in d);
-    const material = (part) => has(part, 'background') && has(part, 'backdrop-filter') && has(part, '-webkit-backdrop-filter');
-    check('glass: the sidebar, the side pane, the rail, the chat bar, the approval card, menus and dialogs are tinted and blurred', ['.sidebar', '.side-pane', '.mod-rail', '.composer', '.approval', '.popover', 'dialog.dialog'].every(material), ['.sidebar', '.side-pane', '.mod-rail', '.composer', '.approval', '.popover', 'dialog.dialog'].filter((p) => !material(p)));
-    check('glass: the canvas is the theme\'s, the window\'s own surface is clear, the reading column is the veil', has('html', 'background') && has('body', 'background') && rules.some(([sel, d]) => sel === '.main' && d.background === 'transparent') && rules.some(([sel, d]) => sel === '.transcript-wrap' && d.background === 'var(--glass-page)'));
-    check('glass: with a background mod the reading column lets it through and the panes keep their tint', rules.some(([sel, d]) => sel === ':root.mod-bg .transcript-wrap' && d.background === 'transparent') && rules.some(([sel]) => sel === ':root.mod-bg .sidebar'));
-    const text = rules.map(([sel]) => sel).filter((sel) => /\.md\b|\.msg\.assistant|\.code-block|\.thinking|\.tool\b|\.tool-group|\.diff\b|\.transcript >|#messages/.test(sel));
-    check('glass: nothing touches the transcript\'s text', text.length === 0, text);
-    check('glass: every backdrop filter has its -webkit- twin', rules.every(([, d]) => ('backdrop-filter' in d) === ('-webkit-backdrop-filter' in d)), rules.filter(([, d]) => ('backdrop-filter' in d) !== ('-webkit-backdrop-filter' in d)).map(([s]) => s));
   }
 
   // --- the manifest rules themselves -----------------------------------------------------------------------
@@ -907,6 +835,8 @@ async function readyPage(hello = HELLO) {
     const good = { protocol: 1, id: 'word-count', name: 'Word count', version: '0.1.0', permissions: ['session:read'], contributes: { views: [{ id: 'main', title: 'W', entry: 'panel.html', seat: 'rail' }] } };
     const errs = (m, opts) => validateManifest(m, Object.assign({ folder: 'word-count', exists: (p) => p === 'panel.html' }, opts)).filter((p) => p.level === 'error').map((p) => p.message);
     check('rules: the docs example is valid', errs(good).length === 0, errs(good));
+    const oldTheme = validateManifest({ ...good, contributes: { styles: ['theme.css'] } }, { folder: 'word-count', exists: () => true });
+    check('rules: contributes.styles is a warning (themes were removed), not an error, and counts as nothing', oldTheme.every((p) => p.level === 'warning') && oldTheme.some((p) => p.message === 'Themes were removed; contributes.styles is ignored.') && oldTheme.some((p) => /contributes nothing/.test(p.message)), oldTheme);
     const bad = (label, patch, re, opts) => {
       const m = JSON.parse(JSON.stringify(good));
       patch(m);

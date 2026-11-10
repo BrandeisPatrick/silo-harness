@@ -168,7 +168,6 @@ const resetHome = () => {
           { id: 'strip', title: 'Strip', entry: 'panel.html', seat: 'composer' },
           { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' },
         ],
-        styles: ['theme.css'],
         commands: [{ name: 'words', description: 'Count', view: 'main' }],
         settings: [
           { key: 'live', type: 'boolean', title: 'Live', default: true },
@@ -185,6 +184,13 @@ const resetHome = () => {
     check('unknown fields are ignored (not copied)', r.manifest && !('futureField' in r.manifest) && !('later' in r.manifest.contributes));
     check('duplicate permissions are folded', r.manifest && r.manifest.permissions.join() === 'session:read,model', r.manifest && r.manifest.permissions);
     check('settings keep their fields', r.manifest && r.manifest.contributes.settings.length === 4 && r.manifest.contributes.settings[2].max === 9);
+    // Themes were removed: contributes.styles still loads, with a note, and its files are never read or checked
+    for (const styles of [['theme.css'], ['nope.css'], ['../x.css'], 'not a list']) {
+      const old = readManifest(writeMod(tmp(), 'old-theme', { protocol: 1, id: 'old-theme', name: 'Old theme', version: '1.0.0', contributes: { styles } }, { 'theme.css': ':root{--accent:red}' }));
+      check(`a manifest with contributes.styles (${JSON.stringify(styles)}) still loads, with one note that does not disable it`, !!old.manifest && !old.manifest.contributes && old.problems.length === 1 && old.problems[0].warning === true && old.problems[0].message === 'Themes were removed; contributes.styles is ignored.', old);
+    }
+    const mixed = readManifest(writeMod(tmp(), 'mixed', { ...full, id: 'mixed', contributes: { ...full.contributes, styles: ['theme.css'] } }, { 'panel.html': page, 'pages/tab.html': page, 'theme.css': ':root{}', 'icon.svg': '<svg/>' }));
+    check('… and next to other parts it keeps them, without styles', !!mixed.manifest && mixed.manifest.contributes.views.length === 4 && !('styles' in mixed.manifest.contributes) && mixed.problems.every((p) => p.warning), mixed.problems);
 
     const files = { 'panel.html': page, 'theme.css': 'a{}', '.secret.html': page, 'notes.txt': 'x' };
     const outside = tmp();
@@ -215,9 +221,6 @@ const resetHome = () => {
       ['entry not html', (m) => (m.contributes.views[0].entry = 'notes.txt'), /^views\[0\].entry: notes.txt must be a .html or .htm file/],
       ['entry symlink out', (m, dir) => (fs.symlinkSync(path.join(outside, 'out.html'), path.join(dir, 'link.html')), (m.contributes.views[0].entry = 'link.html')), /^views\[0\].entry: link.html points outside/],
       ['maxHeight', (m) => (m.contributes.views[0].maxHeight = -1), /^views\[0\].maxHeight:/],
-      ['style missing', (m) => (m.contributes.styles = ['nope.css']), /^styles\[0\]: nope.css does not exist/],
-      ['style escapes', (m) => (m.contributes.styles = ['../theme.css']), /^styles\[0\]: .* leaves/],
-      ['style not css', (m) => (m.contributes.styles = ['panel.html']), /^styles\[0\]: panel.html must be a .css file/],
       ['command name', (m) => (m.contributes.commands = [{ name: 'Do It', description: 'x' }]), /^commands\[0\].name:/],
       ['command twice', (m) => (m.contributes.commands = [{ name: 'go', description: 'x' }, { name: 'go', description: 'y' }]), /^commands\[1\].name: "\/go" is defined twice/],
       ['command description', (m) => (m.contributes.commands = [{ name: 'go' }]), /^commands\[0\].description: missing/],
@@ -284,60 +287,64 @@ const resetHome = () => {
     rpc(f, 'mods.setEnabled', 'beta', true);
     b = byId('beta');
     check('turning it on again grants the new set', b.state === 'on' && b.granted.join() === 'session:read,model');
-    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: man('beta').contributes.views, styles: ['theme.css'] } }), { 'theme.css': ':root{--accent:red}' });
+    const bgView = { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' };
+    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, bgView] } }));
     rpc(f, 'mods.reload');
     b = byId('beta');
-    check('newly contributed styles do not pause the switch: a look asks at its first Use', b.state === 'on' && b.wantsStyles === true && b.approved === false && b.inUse.length === 0, b);
+    check('a newly contributed background does not pause the switch: a look asks at its first Use', b.state === 'on' && b.wantsStyles === true && b.approved === false && b.inUse.length === 0, b);
     let useErr = '';
     try {
-      rpc(f, 'mods.use', { theme: 'beta' });
+      rpc(f, 'mods.use', { background: 'beta/bg' });
     } catch (e) {
       useErr = e.message;
     }
-    check('mods.use refuses a look of yours that was never approved', /not been approved/.test(useErr) && f.app.config().mods.layout.theme !== 'beta' && !rpc(f, 'mods.styles').length, useErr);
-    rpc(f, 'mods.use', { theme: 'beta' }, { approve: true });
+    check('mods.use refuses a look of yours that was never approved', /not been approved/.test(useErr) && f.app.config().mods.layout.background !== 'beta/bg', useErr);
+    rpc(f, 'mods.use', { background: 'beta/bg' }, { approve: true });
     b = byId('beta');
-    check('with the approval it records it, puts the theme in use and serves its styles', b.approved === true && b.wantsStyles === false && f.app.config().mods.approved.beta.permissions.join() === 'session:read,model' && f.app.config().mods.layout.theme === 'beta' && b.inUse.join() === 'theme' && rpc(f, 'mods.styles').some((x) => x.key === 'beta' && /--accent:red/.test(x.css)), b);
-    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' }], styles: ['theme.css'] } }));
+    check('with the approval it records it and puts the background in use', b.approved === true && b.wantsStyles === false && f.app.config().mods.approved.beta.permissions.join() === 'session:read,model' && f.app.config().mods.layout.background === 'beta/bg' && b.inUse.join() === 'background', b);
+    rpc(f, 'mods.use', { theme: 'beta' });
+    check('mods.use ignores a theme (themes were removed): no error, nothing stored', !('theme' in f.app.config().mods.layout) && byId('beta').inUse.join() === 'background');
+    const holoLook = { id: 'holo', title: 'Holo', target: 'conversation', styles: ['look.css'] };
+    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, bgView], looks: [holoLook] } }), { 'look.css': '.msg { color: red }' });
     rpc(f, 'mods.reload');
-    check('a background added later needs no new approval', byId('beta').state === 'on' && byId('beta').approved === true);
+    check('a look added later needs no new approval', byId('beta').state === 'on' && byId('beta').approved === true);
     check('rev changed with the edit', byId('beta').rev !== rev0);
 
     rpc(f, 'mods.setSafeMode', true);
-    check('safe mode turns user and project mods off, their looks too', byId('beta').state === 'off' && byId('beta').approved === false && !rpc(f, 'mods.styles').length && byId('alpha').state === 'on');
-    check('safe mode keeps what is stored', !!f.app.config().mods.enabled.beta && !!f.app.config().mods.approved.beta && f.app.config().mods.layout.theme === 'beta');
+    check('safe mode turns user and project mods off, their looks too', byId('beta').state === 'off' && byId('beta').approved === false && byId('alpha').state === 'on');
+    check('safe mode keeps what is stored', !!f.app.config().mods.enabled.beta && !!f.app.config().mods.approved.beta && f.app.config().mods.layout.background === 'beta/bg');
     rpc(f, 'mods.setSafeMode', false);
-    check('leaving safe mode restores them', byId('beta').state === 'on' && rpc(f, 'mods.styles').length === 1);
+    check('leaving safe mode restores them', byId('beta').state === 'on' && byId('beta').approved === true);
 
     rpc(f, 'mods.setEnabled', 'alpha', false);
     check('a bundled mod turned off is listed in disabledBundled', byId('alpha').state === 'off' && f.app.config().mods.disabledBundled.includes('alpha'));
     rpc(f, 'mods.setEnabled', 'alpha', true);
     check('and back on', byId('alpha').state === 'on' && !f.app.config().mods.disabledBundled.includes('alpha'));
 
-    // A bundled theme has no switch: it is available, and in use only once chosen; one theme at a time
-    writeMod(f.roots.bundled, 'tinted', man('tinted', { contributes: { styles: ['theme.css'] } }), { 'theme.css': ':root{--accent:blue}' });
+    // A bundled look has no switch: it is available, and in use only once chosen; one per region
+    writeMod(f.roots.bundled, 'tinted', { protocol: 1, id: 'tinted', name: 'Tinted', version: '0.1.0', contributes: { looks: [{ id: 'main', title: 'Tinted', target: 'conversation', styles: ['look.css'] }] } }, { 'look.css': '.msg { color: blue }' });
     rpc(f, 'mods.reload');
     const tinted = byId('tinted');
-    check('a bundled theme is available without approval and not in use (off), so its styles are not served', tinted.state === 'off' && tinted.approved === true && tinted.inUse.length === 0 && !rpc(f, 'mods.styles').some((x) => x.key === 'tinted'), tinted);
-    rpc(f, 'mods.use', { theme: 'tinted' });
-    let styles = rpc(f, 'mods.styles');
-    check('used, it is on and it replaces the theme that was in use (one at a time)', byId('tinted').state === 'on' && byId('beta').inUse.length === 0 && styles.length === 1 && styles[0].key === 'tinted' && /--accent:blue/.test(styles[0].css), styles.map((x) => x.key));
-    rpc(f, 'mods.use', { theme: null });
-    check('Default (null) puts the app\'s own theme back', f.app.config().mods.layout.theme === null && !rpc(f, 'mods.styles').length && byId('tinted').state === 'off');
+    check('a bundled look is available without approval and not in use (off), so it is not served', tinted.state === 'off' && tinted.approved === true && tinted.inUse.length === 0 && !rpc(f, 'mods.looks').some((x) => x.mod === 'tinted'), tinted);
+    rpc(f, 'mods.use', { conversation: 'beta/holo' });
+    rpc(f, 'mods.use', { conversation: 'tinted/main' });
+    let looks = rpc(f, 'mods.looks');
+    check('used, it is on and it replaces the look that was in use (one per region)', byId('tinted').state === 'on' && byId('beta').inUse.join() === 'background' && looks.length === 1 && looks[0].mod === 'tinted' && /color: blue/.test(looks[0].css), looks.map((x) => x.mod));
+    rpc(f, 'mods.use', { conversation: null });
+    check('Default (null) puts the app\'s own look back', f.app.config().mods.layout.looks.conversation === null && !rpc(f, 'mods.looks').length && byId('tinted').state === 'off');
     rpc(f, 'mods.setEnabled', 'tinted', true);
-    check('mods.setEnabled(true) on a look means using it', f.app.config().mods.layout.theme === 'tinted' && byId('tinted').state === 'on' && !f.app.config().mods.enabled.tinted);
+    check('mods.setEnabled(true) on a look means using it', f.app.config().mods.layout.looks.conversation === 'tinted/main' && byId('tinted').state === 'on' && !f.app.config().mods.enabled.tinted);
     rpc(f, 'mods.setEnabled', 'tinted', false);
-    check('… and false goes back to Default, with nothing left in enabled or disabledBundled', f.app.config().mods.layout.theme === null && byId('tinted').state === 'off' && !f.app.config().mods.enabled.tinted && !f.app.config().mods.disabledBundled.includes('tinted'));
+    check('… and false goes back to Default, with nothing left in enabled or disabledBundled', f.app.config().mods.layout.looks.conversation === null && byId('tinted').state === 'off' && !f.app.config().mods.enabled.tinted && !f.app.config().mods.disabledBundled.includes('tinted'));
     let kindErr = '';
     try {
-      rpc(f, 'mods.use', { theme: 'alpha' });
+      rpc(f, 'mods.use', { conversation: 'alpha/main' });
     } catch (e) {
       kindErr = e.message;
     }
-    check('mods.use refuses what is not a look of that kind', /is not a theme of an installed mod/.test(kindErr), kindErr);
+    check('mods.use refuses what is not a look of that kind', /is not a conversation look of an installed mod/.test(kindErr), kindErr);
     fs.rmSync(path.join(f.roots.bundled, 'tinted'), { recursive: true, force: true });
     rpc(f, 'mods.reload');
-    rpc(f, 'mods.use', { theme: 'beta' });
   }
   {
     // Last good manifest
@@ -348,7 +355,7 @@ const resetHome = () => {
     check('a broken edit keeps the last good manifest', b.state === 'on' && b.manifest && b.manifest.id === 'beta', b.state);
     check('and lists the problem', b.problems.some((p) => p.kind === 'manifest' && /not valid JSON/.test(p.message)));
     check('rev follows the file even then', b.rev !== goodRev);
-    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' }], styles: ['theme.css'] } }));
+    writeMod(f.roots.user, 'beta', man('beta', { permissions: ['session:read', 'model'], contributes: { views: [...man('beta').contributes.views, { id: 'bg', title: 'Bg', entry: 'panel.html', seat: 'background' }], looks: [{ id: 'holo', title: 'Holo', target: 'conversation', styles: ['look.css'] }] } }));
     rpc(f, 'mods.reload');
     check('fixed again: no problems', byId('beta').problems.length === 0);
   }
@@ -865,10 +872,12 @@ const resetHome = () => {
     const rt = byId('beta').problems.filter((x) => x.kind === 'runtime');
     check('mods.report keeps the last 20 runtime problems', rt.length === 20 && /boom 24/.test(rt[19].message) && rt[0].view === 'main');
 
-    const styles = rpc(f, 'mods.styles');
-    check('mods.styles returns the CSS of on mods', styles.length === 1 && styles[0].key === 'beta' && /--accent:red/.test(styles[0].css), styles);
-    fs.writeFileSync(path.join(f.roots.user, 'beta', 'theme.css'), 'a{}' + ' '.repeat(600 * 1024));
-    check('each stylesheet is capped at 500 KB', rpc(f, 'mods.styles')[0].css.length < 510 * 1024);
+    rpc(f, 'mods.use', { conversation: 'beta/holo' });
+    const served = rpc(f, 'mods.looks');
+    check('mods.looks returns the CSS of the look in use', served.length === 1 && served[0].mod === 'beta' && /color: red/.test(served[0].css), served);
+    fs.writeFileSync(path.join(f.roots.user, 'beta', 'look.css'), 'a{}' + ' '.repeat(600 * 1024));
+    check('each stylesheet is capped at 500 KB', rpc(f, 'mods.looks')[0].css.length < 510 * 1024);
+    rpc(f, 'mods.use', { conversation: null });
 
     const pic = path.join(tmp(), 'my photo.png');
     fs.writeFileSync(pic, 'PNG');
@@ -995,7 +1004,7 @@ const resetHome = () => {
     check('looks: setLayout refuses a malformed choice', /looks must be an object/.test(layoutErr({ looks: 'set/holo' })) && /looks.conversation must be/.test(layoutErr({ looks: { conversation: 'noslash' } })) && /looks.composer must be/.test(layoutErr({ looks: { composer: 5 } })));
     check('looks: checkLayout passes a valid choice through', JSON.stringify(checkLayout({ looks: { conversation: null } }, '/x').looks) === '{"conversation":null}');
     check('checkLayout keeps the closed side-pane tabs once each', JSON.stringify(checkLayout({ closedTabs: ['side-chat/main', 'side-chat/main', 'scheduled/main'] }, '/x').closedTabs) === '["side-chat/main","scheduled/main"]' && /closedTabs must be a list/.test(layoutErr({ closedTabs: 'side-chat/main' })));
-    check('checkLayout takes a theme (a mod key, or null) and refuses anything else', checkLayout({ theme: 'theme-paper' }, '/x').theme === 'theme-paper' && checkLayout({ theme: null }, '/x').theme === null && /theme must be/.test(layoutErr({ theme: 3 })));
+    check('checkLayout drops a theme (themes were removed), whatever it holds', !('theme' in checkLayout({ theme: 'theme-paper' }, '/x')) && !('theme' in checkLayout({ theme: 3 }, '/x')) && layoutErr({ theme: 3 }) === '' && !('theme' in g.app.config().mods.layout));
 
     // mods.looks
     let looks = rpc(g, 'mods.looks');
@@ -1055,10 +1064,13 @@ const resetHome = () => {
     check('… whose stylesheet shows the hooks', /data-running/.test(lookCss) && /data-set-tint/.test(lookCss) && /:scope/.test(lookCss));
     const bar2 = rpc(g, 'mods.create', { id: 'bar-starter', name: 'Bar starter', look: 'composer', scope: 'user' });
     check('mods.create with a chat bar look', bar2.manifest.contributes.looks[0].target === 'composer' && fs.existsSync(path.join(g.roots.user, 'bar-starter', 'look.css')));
-    const theme2 = rpc(g, 'mods.create', { id: 'theme-starter', name: 'Theme starter', theme: true, scope: 'user' });
-    const themeCss = fs.readFileSync(path.join(g.roots.user, 'theme-starter', 'theme.css'), 'utf8');
-    check('mods.create with a theme: a valid mod with one stylesheet and no views, off', theme2.state === 'off' && theme2.problems.length === 0 && theme2.manifest.contributes.styles.join() === 'theme.css' && !theme2.manifest.contributes.views && theme2.wantsStyles === true, theme2.problems);
-    check('… whose stylesheet overrides tokens for light and dark', /:root \{/.test(themeCss) && /data-theme="dark"/.test(themeCss) && /--accent/.test(themeCss));
+    let themeErr = '';
+    try {
+      rpc(g, 'mods.create', { id: 'theme-starter', name: 'Theme starter', theme: true, scope: 'user' });
+    } catch (e) {
+      themeErr = e.message;
+    }
+    check('mods.create makes no theme any more: { theme: true } alone is a mod without a seat', /seat must be one of/.test(themeErr) && !fs.existsSync(path.join(g.roots.user, 'theme-starter')), themeErr);
     let createErr = '';
     try {
       rpc(g, 'mods.create', { id: 'bad-starter', name: 'x', look: 'sidebar', scope: 'user' });
@@ -1072,8 +1084,13 @@ const resetHome = () => {
     // Previews: a look not in use yet (even one never approved) is compiled for the preview's root and served
     const pv = rpc(g, 'mods.previewCss', { kind: 'conversation', ref: 'look-starter/main' }).css;
     check('mods.previewCss: a look is scoped to the preview\'s transcript, never #messages alone', /@scope \(\.lp-root #messages\) \{/.test(pv) && !/@scope \(#messages\)/.test(pv) && /@keyframes look-pulse/.test(pv), pv.slice(0, 300));
-    const pt = rpc(g, 'mods.previewCss', { kind: 'theme', ref: 'theme-starter' }).css;
-    check('mods.previewCss: a theme is scoped to the preview\'s root, with :root read as it', /^@scope \(\.lp-root\) \{/m.test(pt) && /:scope \{/.test(pt) && /:scope\[data-theme="dark"\]/.test(pt) && !/:root/.test(pt), pt);
+    let ptErr = '';
+    try {
+      rpc(g, 'mods.previewCss', { kind: 'theme', ref: 'look-starter' });
+    } catch (e) {
+      ptErr = e.message;
+    }
+    check('mods.previewCss compiles no theme', /kind must be conversation or composer/.test(ptErr), ptErr);
     let pvErr = '';
     try {
       rpc(g, 'mods.previewCss', { kind: 'composer', ref: 'look-starter/main' });
@@ -1101,49 +1118,87 @@ const resetHome = () => {
     gctl.close();
   }
 
-  // ---------- A profile from 0.8.0: looks had switches, themes stacked ----------
+  // ---------- A profile from before 0.10: looks had switches (no `approved` yet) ----------
   {
     const css = { 'a.css': ':root{--accent:red}', 'holo.css': '.msg { color: red }', 'panel.html': page };
     const mg = fakeApp();
-    const theme = (id) => ({ protocol: 1, id, name: id, version: '0.1.0', contributes: { styles: ['a.css'] } });
-    writeMod(mg.roots.bundled, 'inky', theme('inky'), css);
-    writeMod(mg.roots.bundled, 'paperish', theme('paperish'), css);
-    writeMod(mg.roots.bundled, 'sleepy', theme('sleepy'), css);
+    writeMod(mg.roots.bundled, 'inky', { protocol: 1, id: 'inky', name: 'Inky', version: '0.1.0', contributes: { looks: [{ id: 'k', title: 'K', target: 'composer', styles: ['holo.css'] }] } }, css);
     writeMod(mg.roots.bundled, 'hyper', { protocol: 1, id: 'hyper', name: 'Hyper', version: '0.1.0', contributes: { looks: [{ id: 'holo', title: 'Holo', target: 'conversation', styles: ['holo.css'] }, { id: 'bar', title: 'Bar', target: 'composer', styles: ['holo.css'] }] } }, css);
     writeMod(mg.roots.bundled, 'walls', { protocol: 1, id: 'walls', name: 'Walls', version: '0.1.0', contributes: { views: [{ id: 'aurora', title: 'Aurora', entry: 'panel.html', seat: 'background' }] } }, css);
     writeMod(mg.roots.bundled, 'dots', { protocol: 1, id: 'dots', name: 'Dots', version: '0.1.0', contributes: { views: [{ id: 'grid', title: 'Grid', entry: 'panel.html', seat: 'background' }] } }, css);
     writeMod(mg.roots.user, 'mine', { protocol: 1, id: 'mine', name: 'Mine', version: '0.1.0', permissions: ['session:read'], contributes: { looks: [{ id: 'holo', title: 'Holo', target: 'conversation', styles: ['holo.css'] }] } }, css);
-    writeMod(mg.roots.user, 'yourtheme', { ...theme('yourtheme') }, css);
+    // A theme of yours that was on: themes were removed, so nothing of it is put in use
+    writeMod(mg.roots.user, 'yourtheme', { protocol: 1, id: 'yourtheme', name: 'yourtheme', version: '0.1.0', contributes: { styles: ['a.css'] } }, css);
     writeMod(mg.roots.user, 'idle', { protocol: 1, id: 'idle', name: 'Idle', version: '0.1.0', contributes: { looks: [{ id: 'x', title: 'X', target: 'composer', styles: ['holo.css'] }] } }, css);
     const at = 1700000000000;
     mg.app.updateConfig((c) => {
       const { theme: _drop, ...layout } = c.mods.layout;
+      const { approved: _none, ...mods } = c.mods;
       return {
         ...c,
         mods: {
-          ...c.mods,
-          enabled: { inky: { permissions: [], styles: true, at }, paperish: { permissions: [], styles: true, at }, mine: { permissions: ['session:read'], styles: true, at }, yourtheme: { permissions: [], styles: true, at } },
+          ...mods,
+          enabled: { inky: { permissions: [], styles: true, at }, mine: { permissions: ['session:read'], styles: true, at }, yourtheme: { permissions: [], styles: true, at } },
           disabledBundled: ['walls'],
           layout: { ...layout, looks: { conversation: 'mine/holo', composer: 'hyper/bar' }, background: 'walls/aurora' },
         },
       };
     });
-    check('migration: the profile has no theme in its layout (0.8.0)', !('theme' in mg.app.config().mods.layout));
+    check('migration: the profile has no approvals and no theme (before 0.10)', !('approved' in mg.app.config().mods) && !('theme' in mg.app.config().mods.layout));
     const mgc = createMods(mg.app, mg.host);
     const c = mg.app.config().mods;
     const ms = (k) => rpc(mg, 'mods.list').find((m) => m.key === k);
-    check('migration: of the themes that were on, the last in apply order stays (built-in, then yours)', c.layout.theme === 'yourtheme' && rpc(mg, 'mods.styles').length === 1 && rpc(mg, 'mods.styles')[0].key === 'yourtheme', c.layout.theme);
+    check('migration: no theme is put in use, and none is served', !('theme' in c.layout) && !mg.handlers['mods.styles'] && !ms('yourtheme').inUse?.length, c.layout);
     check('migration: a look that showed stays in use (its mod was on), with its approval', c.layout.looks.conversation === 'mine/holo' && c.approved.mine && c.approved.mine.permissions.join() === 'session:read' && ms('mine').state === 'on' && ms('mine').approved === true);
     check('migration: a look whose mod was off showed nothing, so it goes', c.layout.looks.composer === null);
     check('migration: a background from a mod turned off goes too', c.layout.background === null);
-    check('migration: switches of looks are gone (enabled, disabledBundled)', !c.enabled.inky && !c.enabled.paperish && !c.enabled.mine && !c.enabled.yourtheme && !c.disabledBundled.includes('walls'));
-    check('migration: a look mod that was on but not chosen is simply available', ms('inky').state === 'off' && ms('inky').approved === true && ms('yourtheme').approved === true && ms('idle').approved === false);
+    check('migration: switches of looks are gone (enabled, disabledBundled)', !c.enabled.inky && !c.enabled.mine && !c.disabledBundled.includes('walls'));
+    check('migration: a look mod that was on but not chosen is simply available', ms('inky').state === 'off' && ms('inky').approved === true && ms('idle').approved === false);
     mgc.close();
-    // A second start does not migrate again
-    mg.app.updateConfig((cc) => ({ ...cc, mods: { ...cc.mods, layout: { ...cc.mods.layout, theme: null } } }));
+    // A second start does not migrate again: `approved` is there now (a bundled look whose switch was off would go)
+    check('migration: it leaves `approved` behind', !!mg.app.config().mods.approved);
+    mg.app.updateConfig((cc) => ({ ...cc, mods: { ...cc.mods, layout: { ...cc.mods.layout, looks: { ...cc.mods.layout.looks, composer: 'hyper/bar' } } } }));
     const mgc2 = createMods(mg.app, mg.host);
-    check('migration: runs once (a layout with a theme, even null, is left alone)', mg.app.config().mods.layout.theme === null);
+    check('migration: runs once', mg.app.config().mods.layout.looks.composer === 'hyper/bar');
     mgc2.close();
+  }
+
+  // ---------- A stored theme (themes were removed): dropped when read, never applied ----------
+  {
+    const { readStoredConfig } = dist('config.js');
+    const dir = tmp('oa-theme-cfg-');
+    const write = (mods) => {
+      const file = path.join(dir, `${Math.random().toString(36).slice(2)}.json`);
+      fs.writeFileSync(file, JSON.stringify({ schemaVersion: 2, mods }));
+      return readStoredConfig(file).mods;
+    };
+    const layout = { railOpen: true, railWidth: 300, collapsed: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null } };
+    const held = write({ enabled: {}, approved: { x: { permissions: [], at: 1 } }, disabledBundled: [], settings: {}, layout: { ...layout, theme: 'theme-midnight' }, safeMode: false });
+    check('a layout holding theme: "theme-midnight" normalises without it; its approvals are kept', !('theme' in held.layout) && !!held.approved.x && held.layout.backgroundDim === 0.82, held.layout);
+    const noApprovals = write({ enabled: {}, disabledBundled: [], settings: {}, layout: { ...layout, theme: null }, safeMode: false });
+    check('a profile from 0.10 to now (a theme key, no approvals) is not migrated again: approved is {}', JSON.stringify(noApprovals.approved) === '{}' && !('theme' in noApprovals.layout));
+    const legacy = write({ enabled: {}, disabledBundled: [], settings: {}, layout, safeMode: false });
+    check('a profile from before 0.10 (neither) keeps approved missing, so the mods code migrates it', legacy.approved === undefined);
+    const fresh = readStoredConfig(path.join(dir, 'none.json')).mods;
+    check('a new profile has approvals ({}) and no theme', JSON.stringify(fresh.approved) === '{}' && !('theme' in fresh.layout));
+
+    // A profile whose layout still names a theme, with that mod installed and approved: no CSS of it is produced
+    const tf = fakeApp();
+    writeMod(tf.roots.bundled, 'theme-midnight', { protocol: 1, id: 'theme-midnight', name: 'Midnight', version: '0.1.0', contributes: { styles: ['theme.css'] } }, { 'theme.css': ':root{--accent:#123456}' });
+    tf.app.updateConfig((cc) => ({ ...cc, mods: { ...cc.mods, approved: {}, layout: { ...cc.mods.layout, theme: 'theme-midnight' } } }));
+    const tctl = createMods(tf.app, tf.host);
+    const mid = rpc(tf, 'mods.list').find((m) => m.id === 'theme-midnight');
+    const looks = rpc(tf, 'mods.looks');
+    check('a theme named in the layout produces no CSS: no mods.styles, no look, nothing in use', !tf.handlers['mods.styles'] && looks.length === 0 && mid && !(mid.inUse ?? []).length && !mid.manifest.contributes, { looks, mid });
+    check('… and the mod still loads, with a note that does not disable it', mid.state !== 'invalid' && mid.problems.length === 1 && mid.problems[0].warning === true && /Themes were removed/.test(mid.problems[0].message), mid.problems);
+    let useErr = '';
+    try {
+      rpc(tf, 'mods.use', { theme: 'theme-midnight' });
+    } catch (e) {
+      useErr = e.message;
+    }
+    check('… and mods.use cannot put it in use (a theme is not a kind)', useErr === '' && !(rpc(tf, 'mods.list').find((m) => m.id === 'theme-midnight').inUse ?? []).length);
+    tctl.close();
   }
 
   // ---------- Quit ----------

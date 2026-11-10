@@ -156,52 +156,22 @@ export function starterLook(id: string, name: string, target: ModLookTarget): { 
   return { manifest, css };
 }
 
-/** The starter of a theme: a manifest with one stylesheet for the whole app that overrides a few design tokens. */
-export function starterTheme(id: string, name: string): { manifest: ModManifest; css: string } {
-  const manifest: ModManifest = { protocol: 1, id, name, version: '0.1.0', description: 'A theme for the whole app.', contributes: { styles: ['theme.css'] } };
-  const css = `/*
- * A theme: this file is added to the app's own page while it is the theme in use (Settings → Mods → Theme, one at
- * a time; the tab previews it first). Prefer the design tokens on :root to restyling elements; they keep working when
- * the app changes.
- */
-
-:root {
-  --accent: #2f7d6d;
-}
-/* Dark: when the system is dark and the user chose System, and when the user chose Dark */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --accent: #5cc0a8; }
-}
-:root[data-theme="dark"] {
-  --accent: #5cc0a8;
-}
-`;
-  return { manifest, css };
-}
-
-/** Writes a starter mod into `root/<id>`: a view in `seat`, a look for `look`, or a theme. Refuses an id that is taken there. */
-export function createMod(root: string, input: { id: unknown; name: unknown; seat?: unknown; look?: unknown; theme?: unknown }): string {
+/** Writes a starter mod into `root/<id>`: a view in `seat`, or a look for `look`. Refuses an id that is taken there. */
+export function createMod(root: string, input: { id: unknown; name: unknown; seat?: unknown; look?: unknown }): string {
   const id = String(input.id ?? '').trim();
   const name = String(input.name ?? '').trim();
   const look = input.look as ModLookTarget | undefined;
   const seat = input.seat as ModSeat;
   if (!MOD_ID_RE.test(id)) throw new ManageError('The id must be 2 to 40 lower-case letters, digits and -, starting with a letter.');
   if (!name) throw new ManageError('Give the mod a name.');
-  const theme = input.theme === true;
-  if (theme) {
-    /* no seat or region */
-  } else if (look !== undefined && look !== null) {
+  if (look !== undefined && look !== null) {
     if (!MOD_LOOK_TARGETS.includes(look)) throw new ManageError(`The look's region must be one of ${MOD_LOOK_TARGETS.join(', ')}.`);
   } else if (!MOD_SEATS.includes(seat)) throw new ManageError(`The seat must be one of ${MOD_SEATS.join(', ')}.`);
   const dir = path.join(root, id);
   if (fs.existsSync(dir)) throw new ManageError(`There is already a folder ${dir}.`);
   fs.mkdirSync(dir, { recursive: true });
   let manifest: ModManifest;
-  if (theme) {
-    const starter = starterTheme(id, name.slice(0, 80));
-    manifest = starter.manifest;
-    fs.writeFileSync(path.join(dir, 'theme.css'), starter.css);
-  } else if (look) {
+  if (look) {
     const starter = starterLook(id, name.slice(0, 80), look);
     manifest = starter.manifest;
     fs.writeFileSync(path.join(dir, 'look.css'), starter.css);

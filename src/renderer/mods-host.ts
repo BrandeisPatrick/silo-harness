@@ -62,7 +62,7 @@ export interface ModsHostDeps {
   toast(text: string, kind: 'info' | 'error'): void;
   /** Puts text into the composer at the caret */
   insertText(text: string): void;
-  /** Opens Settings at a section; for Mods at one of its tabs, with a look previewed there ("<mod key>/<id>", or a theme's mod key) */
+  /** Opens Settings at a section; for Mods at one of its tabs, with a look previewed there ("<mod key>/<id>") */
   openSettings(section?: string, opts?: { tab?: string; preview?: string }): void;
   /** Opens the Scheduled tasks or the Dreaming page; `form: 'new'` opens the New task form on it */
   openPage(page: 'scheduled' | 'dreaming', opts?: { form?: 'new' }): void;
@@ -312,57 +312,14 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     syncLookState();
   }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-  // ---------- Styles from mods ----------
-
-  let stylesSeq = 0;
-  async function syncStyles(): Promise<void> {
-    const my = ++stylesSeq;
-    let list: { key: string; css: string }[] = [];
-    try {
-      list = await rpc('mods.styles');
-    } catch {
-      list = [];
-    }
-    if (my !== stylesSeq || !Array.isArray(list)) return;
-    const existing = new Map<string, HTMLStyleElement>();
-    document.head.querySelectorAll<HTMLStyleElement>('style[data-mod]').forEach((el) => existing.set(el.dataset.mod ?? '', el));
-    const wanted: HTMLStyleElement[] = [];
-    let changed = false;
-    for (const { key, css } of list) {
-      let el = existing.get(key);
-      existing.delete(key);
-      if (!el) {
-        el = document.createElement('style');
-        el.dataset.mod = key;
-        changed = true;
-      }
-      if (el.textContent !== css) {
-        el.textContent = css;
-        changed = true;
-      }
-      wanted.push(el);
-    }
-    for (const el of existing.values()) {
-      el.remove();
-      changed = true;
-    }
-    styleEls = wanted;
-    placeSheets();
-    if (changed) {
-      tokenNames = null;
-      syncTheme();
-    }
-  }
-
-  let styleEls: HTMLStyleElement[] = [];
   let lookEls: HTMLStyleElement[] = [];
 
   /**
-   * Mod styles in load order after everything the app ships, then the looks: a look is the more specific choice of
-   * the two. Elements are moved only when the order is wrong (moving a <style> makes the page parse it again).
+   * The looks after everything the app ships. Elements are moved only when the order is wrong (moving a <style>
+   * makes the page parse it again).
    */
   function placeSheets(): void {
-    const order = [...styleEls, ...lookEls];
+    const order = lookEls;
     const tail = [...document.head.children].slice(-order.length);
     if (order.length && (tail.length !== order.length || order.some((el, i) => tail[i] !== el))) for (const el of order) document.head.appendChild(el);
   }
@@ -1496,7 +1453,6 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     syncStrip();
     applyRail();
     if (tabsChanged) deps.paneTabsChanged();
-    void syncStyles();
     void syncLooks();
     syncOffers();
   }
@@ -1714,7 +1670,7 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       .join('');
     const seats = [...new Set((m?.contributes?.views ?? []).map((v) => ({ rail: 'a panel in the right-hand rail', tab: 'a tab in the side pane', composer: 'a strip above the composer', background: 'a background', worker: 'a hidden page that handles hooks' })[v.seat]).filter(Boolean))];
     const lookWords = [...new Set((m?.contributes?.looks ?? []).map((l) => (l.target === 'composer' ? 'a look for the chat bar' : 'a look for the conversation')))];
-    const adds = [...seats, ...lookWords, ...(m?.contributes?.styles?.length ? [looks ? 'a theme' : 'styles for the app'] : []), ...(m?.contributes?.commands?.length ? [`${m.contributes.commands.length === 1 ? 'a slash command' : 'slash commands'}`] : [])];
+    const adds = [...seats, ...lookWords, ...(m?.contributes?.commands?.length ? [`${m.contributes.commands.length === 1 ? 'a slash command' : 'slash commands'}`] : [])];
     const title = looks ? (paused ? `Use ${name} again?` : name) : paused ? `Turn ${name} back on?` : `Turn on ${name}?`;
     const asksLabel = paused ? 'Its new version asks to' : looks ? (info.scope === 'bundled' || info.approved ? 'It' : 'Using it lets it') : 'It asks to';
     const buttons = looks
@@ -1812,8 +1768,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
     } else {
       // The mod's place in Settings: the tab of its kind (a background lands on Background, where it is used)
       const tabs = modTabs(o.info);
-      tab = tabs.find((t) => t !== 'mods' && t !== 'themes') ?? tabs[0];
-      const picks = tab !== 'mods' && tab !== 'themes';
+      tab = tabs.find((t) => t !== 'mods') ?? tabs[0];
+      const picks = tab !== 'mods';
       text = how === 'later' ? `${name} stays off. Turn it on in` : how === 'on' ? (picks ? `${name} is on. Use its looks in` : `${name} is on`) : `${name} was turned on in Settings`;
       if (!(how === 'later' || (how === 'on' && picks))) tab = '';
     }

@@ -1,9 +1,9 @@
-// Settings → Mods: a tab strip (Mods, Background, Chat bar, Conversation, Theme). The Mods tab lists the mods that
-// add something (panels, side-pane tabs, composer strips, workers, slash commands), Built-in / Yours / This project,
-// each with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, install,
-// create and reload. The other four are the looks (look-tab.ts): no switches, a preview of what is in use or of the
-// version tried, Use, and every version as a card. While searching, every card and every tab's rows are searched.
-// Follows mods:changed live.
+// Settings → Mods: a tab strip (Mods, Background, Chat bar, Conversation). The Mods tab lists the mods that add
+// something (panels, side-pane tabs, composer strips, workers, slash commands), Built-in / Yours / This project, each
+// with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, install, create
+// and reload. The other three are the looks (look-tab.ts): no switches, a preview of what is in use or of the version
+// tried, Use, and every version as a card. While searching, every card and every tab's rows are searched. Follows
+// mods:changed live.
 
 import type { LookKind, ModInfo, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
 import { dirname, escapeHtml, h } from '../dom.js';
@@ -34,7 +34,7 @@ import { lookTab, type LookTab } from './look-tab.js';
 import { actions, button, chip, group, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
-const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look', theme: 'New theme' };
+const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look' };
 const safeKey = (key: string) => key.replace(/[^a-z0-9-]+/gi, '_');
 
 export function modsSection(ctx: Ctx): Section {
@@ -124,7 +124,7 @@ export function modsSection(ctx: Ctx): Section {
     if (!idEdited) idInput.input.value = deriveModId(nameInput.input.value);
   });
   idInput.input.addEventListener('input', () => (idEdited = idInput.input.value !== ''));
-  // A view in a seat, a look for a region ("look:conversation"), or a theme; preset to the tab's kind
+  // A view in a seat or a look for a region ("look:conversation"); preset to the tab's kind
   let seat: NewModKind = 'rail';
   const seatSel = selectControl<NewModKind>(
     [
@@ -134,7 +134,6 @@ export function modsSection(ctx: Ctx): Section {
       { value: 'background', label: 'Background' },
       { value: 'look:conversation', label: 'Conversation look' },
       { value: 'look:composer', label: 'Chat bar look' },
-      { value: 'theme', label: 'Theme' },
     ],
     'rail',
     (v) => (seat = v),
@@ -161,7 +160,7 @@ export function modsSection(ctx: Ctx): Section {
     if (!validModId(id)) return formProblem(createProblem, 'Use 2 to 40 lower-case letters, digits or -, starting with a letter.');
     b.disabled = true;
     try {
-      const made = await ctx.call('mods.create', seat === 'theme' ? { id, name, theme: true, scope } : seat.startsWith('look:') ? { id, name, look: seat.slice(5) as ModLookTarget, scope } : { id, name, seat: seat as Exclude<NewModKind, 'theme' | `look:${string}`>, scope });
+      const made = await ctx.call('mods.create', seat.startsWith('look:') ? { id, name, look: seat.slice(5) as ModLookTarget, scope } : { id, name, seat: seat as Exclude<NewModKind, `look:${string}`>, scope });
       formProblem(createProblem, null);
       nameInput.set('');
       idInput.set('');
@@ -355,9 +354,9 @@ export function modsSection(ctx: Ctx): Section {
     lookStatusEl.innerHTML = text ? `${icon(error ? 'circle-alert' : 'circle-check', 14)}<span>${escapeHtml(text)}</span>` : '';
   };
 
-  /** Each look's and theme's preview CSS, by kind, ref and the mod's rev (an edit compiles it again) */
+  /** Each look's preview CSS, by kind, ref and the mod's rev (an edit compiles it again) */
   const cssCache = new Map<string, Promise<string>>();
-  const previewCss = (kind: 'theme' | ModLookTarget, ref: string, rev: string): Promise<string> => {
+  const previewCss = (kind: ModLookTarget, ref: string, rev: string): Promise<string> => {
     const k = `${kind}|${ref}|${rev}`;
     let p = cssCache.get(k);
     if (!p) {
@@ -403,7 +402,6 @@ export function modsSection(ctx: Ctx): Section {
     backgrounds: lookTabs.get('backgrounds')!.el,
     'chat-bar': lookTabs.get('chat-bar')!.el,
     conversation: lookTabs.get('conversation')!.el,
-    themes: lookTabs.get('themes')!.el,
   };
   for (const [id, head] of Object.entries(heads)) {
     head.classList.add('sp-tab-head');
@@ -655,8 +653,6 @@ export function modsSection(ctx: Ctx): Section {
     for (const c of m.manifest?.contributes?.commands ?? []) adds.push(`/${c.name}: ${c.description}`);
     const hooks = m.manifest?.contributes?.hooks ?? [];
     if (hooks.length) adds.push(`Hooks: ${hooks.map((x) => x.event).join(', ')}`);
-    const styles = m.manifest?.contributes?.styles ?? [];
-    if (styles.length) adds.push(`A theme: ${styles.join(', ')}`);
     d.append(block('What it adds', adds.length ? h('ul', { class: 'sp-detail-list' }, ...adds.map((a) => h('li', {}, a))) : h('p', { class: 'sp-detail-muted' }, 'Nothing yet.')));
 
     // Permissions

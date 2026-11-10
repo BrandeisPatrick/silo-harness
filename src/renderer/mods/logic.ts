@@ -43,7 +43,7 @@ export function viewsFor(mods: readonly ModInfo[], seat: ModSeat): ViewRef[] {
   return out.sort((a, b) => order(a) - order(b) || String(a.view.title).localeCompare(String(b.view.title)) || a.key.localeCompare(b.key));
 }
 
-/** Whether a mod's looks (its backgrounds, looks and theme) may apply now: bundled, or approved; an older list says it by `state`. */
+/** Whether a mod's looks (its backgrounds and looks) may apply now: bundled, or approved; an older list says it by `state`. */
 export function looksUsable(m: Pick<ModInfo, 'state' | 'approved'>): boolean {
   return m.approved ?? m.state === 'on';
 }
@@ -292,15 +292,14 @@ export function askLines(mod: ModInfo): AskLine[] {
     else if (text) lines.push({ text });
   }
   const c = mod.manifest?.contributes;
-  const hasStyles = !!c?.styles?.length;
   const hasLooks = !!c?.looks?.length;
   const hasBackground = !!c?.views?.some((v) => v.seat === 'background');
   // A look's approval is asked at its first Use: a mod with a switch says nothing of it here, a mod that is only looks does
   const looksOnly = !(c?.views ?? []).some((v) => v.seat !== 'background') && !(c?.commands ?? []).length;
-  if (!looksOnly && (hasStyles || hasLooks || hasBackground)) {
+  if (!looksOnly && (hasLooks || hasBackground)) {
     /* its looks ask when they are first used */
-  } else if ((mod.state !== 'paused' || mod.wantsStyles) && (hasStyles || hasBackground)) {
-    const what = hasStyles && hasBackground ? 'restyle Silo Harness and draw behind it' : hasStyles ? 'restyle Silo Harness itself' : hasLooks ? 'restyle the conversation or the chat bar and draw behind the window' : 'draw behind the whole window';
+  } else if ((mod.state !== 'paused' || mod.wantsStyles) && hasBackground) {
+    const what = hasLooks ? 'restyle the conversation or the chat bar and draw behind the window' : 'draw behind the whole window';
     lines.push({ text: `It can ${what}: its stylesheet applies to the app's own page, approval cards included. Use it only if you trust where it came from.`, strong: true });
   } else if ((mod.state !== 'paused' || mod.wantsStyles) && hasLooks) {
     lines.push({ text: 'It can restyle the conversation or the chat bar: its stylesheet applies to the app\'s own page, approval cards in the conversation included. Use it only if you trust where it came from.', strong: true });

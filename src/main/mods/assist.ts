@@ -9,7 +9,7 @@ import type { ModRegistry } from './registry';
 
 const RUNTIME_SHOWN = 5;
 
-const TAB_OF = { background: 'Background', composer: 'Chat bar', conversation: 'Conversation', theme: 'Theme' } as const;
+const TAB_OF = { background: 'Background', composer: 'Chat bar', conversation: 'Conversation' } as const;
 
 /** The tabs of Settings → Mods where a mod's looks are chosen ("Background, Chat bar") */
 function lookTabs(m: ModInfo): string {
@@ -18,11 +18,10 @@ function lookTabs(m: ModInfo): string {
   if ((c.views ?? []).some((v) => v.seat === 'background')) tabs.push(TAB_OF.background);
   if ((c.looks ?? []).some((l) => l.target === 'composer')) tabs.push(TAB_OF.composer);
   if ((c.looks ?? []).some((l) => l.target === 'conversation')) tabs.push(TAB_OF.conversation);
-  if ((c.styles ?? []).length) tabs.push(TAB_OF.theme);
   return tabs.join(', ');
 }
 
-/** `layout`: what is in use ("<mod key>/<look id>" per region, the background, the theme), so a look can say whether it is the active one. */
+/** `layout`: what is in use ("<mod key>/<look id>" per region, the background), so a look can say whether it is the active one. */
 function describeMod(m: ModInfo, layout?: Partial<ModLayout>): string {
   const chosen = layout?.looks as Record<string, string | null> | undefined;
   const lines: string[] = [];
@@ -49,13 +48,12 @@ function describeMod(m: ModInfo, layout?: Partial<ModLayout>): string {
   }
   lines.push(`Permissions granted: ${m.granted.join(', ') || 'none'}`);
   if (m.wants.length) lines.push(`Permissions asked for and not granted: ${m.wants.join(', ')}`);
-  if (m.wantsStyles) lines.push('Contributes styles, looks or a background that the user has not approved yet (they approve them at the first Use).');
+  if (m.wantsStyles) lines.push('Contributes looks or a background that the user has not approved yet (they approve them at the first Use).');
   const views = m.manifest?.contributes?.views ?? [];
   if (views.length) {
     lines.push('Views:');
     for (const v of views) lines.push(`- ${v.id}: "${v.title}" in the ${v.seat} seat, page ${v.entry}`);
   } else lines.push('Views: none');
-  if (m.manifest?.contributes?.styles?.length) lines.push(`Styles: ${m.manifest.contributes.styles.join(', ')}`);
   const looks = m.manifest?.contributes?.looks ?? [];
   if (looks.length) {
     lines.push('Looks (scoped to their region; the user picks one per region in Settings → Mods → Chat bar or Conversation):');
@@ -67,7 +65,6 @@ function describeMod(m: ModInfo, layout?: Partial<ModLayout>): string {
     for (const p of runtime.slice(-RUNTIME_SHOWN)) lines.push(`- ${p.view ? `[${p.view}] ` : ''}${p.message}`);
   } else if (m.state === 'on') lines.push('Errors its pages reported: none');
   if (layout?.background && views.some((v) => layout.background === `${m.key}/${v.id}`)) lines.push(`Background in use: ${layout.background}`);
-  if (layout?.theme === m.key && m.manifest?.contributes?.styles?.length) lines.push('Theme in use: this one');
   lines.push(`Next: ${nextStep(m, manifestProblems.length, runtime.length, looksOnly)}`);
   return lines.join('\n');
 }
@@ -89,7 +86,7 @@ function nextStep(m: ModInfo, problems: number, runtime: number, looksOnly: bool
 
 /**
  * The text mod_check returns: one mod by id, or every mod that is not bundled. `layout` says what is in use (the look
- * per region, the background, the theme), so a look can say whether it is the active one.
+ * per region, the background), so a look can say whether it is the active one.
  */
 export function modCheckText(registry: ModRegistry, id?: string, layout?: Partial<ModLayout>): string {
   const describe = (m: ModInfo) => describeMod(m, layout);
@@ -127,7 +124,7 @@ export function modCheckTool(registry: ModRegistry, layout?: () => Partial<ModLa
 export function modsPrompt(list: ModInfo[]): string {
   const named = list.filter((m) => m.manifest).slice(0, 30).map((m) => `${m.id} (${m.scope}, ${m.state})`);
   return [
-    'Mods: the user can extend Silo Harness with mods (folders with a mod.json and HTML: panels, tabs, themes, slash commands and more).',
+    'Mods: the user can extend Silo Harness with mods (folders with a mod.json and HTML: panels, tabs, looks, slash commands and more).',
     'Before writing or changing a mod, load the create-mod skill with the skill tool, and check every change with the mod_check tool.',
     `Installed mods: ${named.length ? named.join(', ') : 'none'}.`,
   ].join('\n');

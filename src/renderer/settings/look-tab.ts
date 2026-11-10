@@ -1,4 +1,4 @@
-// One look tab of Settings → Mods (Background, Chat bar, Conversation, Theme). At the top, a preview of what is in
+// One look tab of Settings → Mods (Background, Chat bar, Conversation). At the top, a preview of what is in
 // use, or of the version being tried; under it the version's name and source with "In use", or Use and Back to
 // current; its mod's own settings (and Dim on Background); then every version as a card, Default first, then the
 // built-in ones, yours and the project's. A click on a card previews it; Use applies it, asking first the first time
@@ -10,7 +10,6 @@ import type { ModPreviews, BackgroundPreview } from '../mods-host.js';
 import { escapeHtml, h } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
 import { modeOf } from '../modes.js';
-import { looksUsable } from '../mods/logic.js';
 import { lookInUse, lookSetPatch, lookSets, lookVersions, needsApproval, setInUse, useSheet, type LookTabInfo, type LookVersion, type NewModKind } from './model.js';
 import { createLookPreview, type LookPreview, type PreviewState } from './look-preview.js';
 import { button, chip, row, type Row } from './ui.js';
@@ -34,8 +33,8 @@ export interface LookTabDeps {
   /** The Install form of the section, shown in `slot` */
   openInstall(slot: HTMLElement): void;
   chooseImage(): Promise<void>;
-  /** A look's or a theme's CSS for the previews (cached by the section) */
-  css(kind: 'theme' | 'composer' | 'conversation', ref: string, rev: string): Promise<string>;
+  /** A look's CSS for the previews (cached by the section) */
+  css(kind: 'composer' | 'conversation', ref: string, rev: string): Promise<string>;
   reveal(m: ModInfo): void;
   customise(m: ModInfo): Promise<void>;
   remove(m: ModInfo): Promise<void>;
@@ -46,7 +45,7 @@ export interface LookTab {
   el: HTMLElement;
   /** The mods or the layout changed */
   render(): void;
-  /** Shows a version in the preview ("<mod key>/<id>", a theme's key, "image", null for Default), or what is in use (undefined) */
+  /** Shows a version in the preview ("<mod key>/<id>", "image", null for Default), or what is in use (undefined) */
   preview(ref: string | null | undefined): void;
   /** The tab came on screen or went (live backgrounds run only while it shows) */
   shown(on: boolean): void;
@@ -119,7 +118,7 @@ export function lookTab(d: LookTabDeps): LookTab {
 
   // ---------- Its line: name and source, In use or Use / Back to current ----------
 
-  const head = row({ id: info.row, title: 'Default', desc: '', keywords: `${info.noun} ${info.title} look use preview in use mod ${kind === 'background' ? 'wallpaper picture image' : kind === 'theme' ? 'theme colours colors styles' : kind === 'composer' ? 'composer input message box chat bar' : 'transcript messages chat'}` });
+  const head = row({ id: info.row, title: 'Default', desc: '', keywords: `${info.noun} ${info.title} look use preview in use mod ${kind === 'background' ? 'wallpaper picture image' : kind === 'composer' ? 'composer input message box chat bar' : 'transcript messages chat'}` });
   head.el.classList.add('sp-look-current');
   const acts = h('span', { class: 'sp-control-group sp-look-acts' });
   head.control.append(acts);
@@ -142,7 +141,7 @@ export function lookTab(d: LookTabDeps): LookTab {
       label: 'From a template…',
       icon: 'file-plus',
       run: () =>
-        d.openCreate(kind === 'background' ? 'background' : kind === 'theme' ? 'theme' : `look:${kind}`, formSlot, (m) => {
+        d.openCreate(kind === 'background' ? 'background' : `look:${kind}`, formSlot, (m) => {
           const set = lookSets([m], 1)[0];
           const ref = set?.[kind] ?? null;
           if (ref) preview(ref);
@@ -165,20 +164,9 @@ export function lookTab(d: LookTabDeps): LookTab {
   const modOf = (key: string) => d.mods().find((m) => m.key === key);
   const fresh = (v: LookVersion | null) => (v?.mod ? (modOf(v.mod.key) ?? v.mod) : null);
 
-  /** The theme the previews are dressed in: the one in use (when it applies), or on the Theme tab the version itself */
-  const themeRefFor = (v: LookVersion | null): string | null => {
-    if (kind === 'theme') return v?.ref ?? null;
-    const t = layout()?.theme ?? null;
-    const m = t ? modOf(t) : undefined;
-    return m && looksUsable(m) ? t : null;
-  };
-
   async function stateFor(v: LookVersion | null, frame: BackgroundPreview | null): Promise<PreviewState> {
     const m = fresh(v);
-    const themeRef = themeRefFor(v);
-    const themeMod = themeRef ? modOf(themeRef) : undefined;
-    const themeCss = themeRef && themeMod ? await d.css('theme', themeRef, themeMod.rev).catch(() => '') : '';
-    const st: PreviewState = { themeCss, mode: modeOf(ctx.config()) };
+    const st: PreviewState = { mode: modeOf(ctx.config()) };
     if ((kind === 'composer' || kind === 'conversation') && v?.ref && m) {
       st.lookCss = await d.css(kind, v.ref, m.rev).catch(() => '');
       st.lookRef = v.ref;
@@ -283,8 +271,7 @@ export function lookTab(d: LookTabDeps): LookTab {
     const list = versions();
     const cur = current();
     const shown = shownRef();
-    const themeSig = kind === 'theme' ? '' : `${themeRefFor(null)}|${modOf(themeRefFor(null) ?? '')?.rev ?? ''}`;
-    const sig = JSON.stringify([list.map((v) => [v.ref, v.title, v.source, v.preview ?? '', fresh(v)?.rev ?? '', JSON.stringify(fresh(v)?.settings ?? {})]), themeSig, document.documentElement.dataset.theme ?? '', visible]);
+    const sig = JSON.stringify([list.map((v) => [v.ref, v.title, v.source, v.preview ?? '', fresh(v)?.rev ?? '', JSON.stringify(fresh(v)?.settings ?? {})]), document.documentElement.dataset.theme ?? '', visible]);
     if (sig !== gridSig) {
       gridSig = sig;
       for (const c of cards.values()) disposeCard(c);

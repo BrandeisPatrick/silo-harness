@@ -328,9 +328,9 @@ const js = (v) => JSON.stringify(v);
       await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-use`);
       await sleep(600);
     };
-    const TABS = ['mods', 'backgrounds', 'chat-bar', 'conversation', 'themes'];
+    const TABS = ['mods', 'backgrounds', 'chat-bar', 'conversation'];
     await open(app, 'mods');
-    check('the Mods page has five tabs in a tablist, named in the singular', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Mods,Background,Chat bar,Conversation,Theme');
+    check('the Mods tab strip is exactly Mods, Background, Chat bar, Conversation (no Theme)', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Mods,Background,Chat bar,Conversation' && !(await app.exists('#sp-modtab-themes')) && !(await app.exists('.sp-look-tab[data-subtab="themes"]')));
     await tabTo('backgrounds');
     check('a tab is selected by a click', (await st()).tab === 'backgrounds' && (await app.evaluate(`document.querySelector('#sp-modtab-backgrounds').getAttribute('aria-selected')`)) === 'true');
     // Hyperspace has no switch: no card on any tab, its looks are versions on theirs
@@ -341,13 +341,13 @@ const js = (v) => JSON.stringify(v);
         hyperCard: await shown('#sp-row-mod-hyperspace'),
         words: await shown('#sp-row-mod-word-count'),
         hyperVersion: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref^="hyperspace/"]`),
-        midnight: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref="theme-midnight"]`),
+        theme: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref^="theme-"]`),
       };
       await app.screenshot(path.join(shots, `mods-tab-${t}.png`));
     }
     check('a general mod (Word count) is only on the Mods tab, with its switch', TABS.every((t) => onTabs[t].words === (t === 'mods')), onTabs);
     check('Hyperspace has no card or switch anywhere; its looks are on Background, Chat bar and Conversation', TABS.every((t) => !onTabs[t].hyperCard && onTabs[t].hyperVersion === ['backgrounds', 'chat-bar', 'conversation'].includes(t)), onTabs);
-    check('the Midnight theme is a version on the Theme tab only', TABS.every((t) => onTabs[t].midnight === (t === 'themes')), onTabs);
+    check('no theme is a version on any tab', TABS.every((t) => !onTabs[t].theme), onTabs);
 
     // Background: use Hyperspace's, see its settings under it, move Dim
     await tabTo('backgrounds');
@@ -384,12 +384,9 @@ const js = (v) => JSON.stringify(v);
     check('"Use the set" applies the conversation look, the chat bar look and the background', L.background === 'hyperspace/starfield' && L.looks.conversation === 'hyperspace/holo' && L.looks.composer === 'hyperspace/cockpit', L);
     const inUse = (await Promise.all(['conversation', 'chat-bar', 'backgrounds'].map(looks))).map((x) => x.current).join();
     check('… and the tabs follow', inUse === 'hyperspace/holo,hyperspace/cockpit,hyperspace/starfield', inUse);
-    // Theme: the themes are versions, one in use, no switches
-    await tabTo('themes');
-    const th = await looks('themes');
-    check('Theme lists Default and the themes as versions, without switches, with New', JSON.stringify(th.versions) === JSON.stringify([null, 'theme-glass', 'theme-midnight', 'theme-paper']) && !(await app.exists('.sp-look-tab[data-subtab="themes"] input.switch')) && (await shown('.sp-look-tab[data-subtab="themes"] .sp-look-new')), th);
     // Keyboard: the arrows move between the tabs
-    await app.evaluate(`document.querySelector('#sp-modtab-themes').focus()`);
+    await tabTo('conversation');
+    await app.evaluate(`document.querySelector('#sp-modtab-conversation').focus()`);
     await app.key('ArrowRight');
     await sleep(100);
     check('ArrowRight from the last tab wraps to the first', (await st()).tab === 'mods' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-mods');
@@ -399,8 +396,8 @@ const js = (v) => JSON.stringify(v);
     await app.key('ArrowLeft');
     await app.key('ArrowLeft');
     await sleep(100);
-    check('ArrowLeft goes back (and wraps)', (await st()).tab === 'themes' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-themes');
-    check('only the selected tab is in the tab order', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tab]')].map((b) => b.tabIndex).join()`)) === '-1,-1,-1,-1,0');
+    check('ArrowLeft goes back (and wraps)', (await st()).tab === 'conversation' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-conversation');
+    check('only the selected tab is in the tab order', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tab]')].map((b) => b.tabIndex).join()`)) === '-1,-1,-1,0');
     // Search: a row inside a tab is found, and choosing it opens its tab
     await tabTo('mods');
     s = await searchFor('dim');
@@ -420,8 +417,8 @@ const js = (v) => JSON.stringify(v);
     // Appearance: Light, Dark and System, and one row per look with the one in use, opening its tab
     await open(app, 'appearance');
     check('Appearance keeps Light, Dark and System, a Looks group, and no pickers', !(await app.exists('#sp-sec-appearance select')) && /Looks/.test(await app.text('#sp-sec-appearance')) && (await app.evaluate(`[...document.querySelectorAll('#sp-row-theme input')].map((i) => i.value).join()`)) === 'system,light,dark');
-    const kindText = await app.evaluate(`['background', 'composer', 'conversation', 'themes'].map((k) => document.querySelector('#sp-row-appearance-' + k + ' .sp-row-desc').textContent).join(' | ')`);
-    check('… it shows each look in use in words', kindText === 'Hyperspace: Starfield | Hyperspace: Cockpit | Hyperspace: Holo terminal | Default', kindText);
+    const kindText = await app.evaluate(`['background', 'composer', 'conversation'].map((k) => document.querySelector('#sp-row-appearance-' + k + ' .sp-row-desc').textContent).join(' | ')`);
+    check('… it shows each look in use in words, and has no Theme row', kindText === 'Hyperspace: Starfield | Hyperspace: Cockpit | Hyperspace: Holo terminal' && !(await app.exists('#sp-row-appearance-themes')), kindText);
     await app.screenshot(path.join(shots, 'appearance.png'));
     await app.click('#sp-row-appearance-conversation button');
     await sleep(200);
@@ -433,8 +430,10 @@ const js = (v) => JSON.stringify(v);
     await sleep(300);
     now = await st();
     check("the sidebar's Customize row opens Mods at the tab last open", now.open && now.section === 'mods' && now.tab === 'conversation', now);
+    await app.evaluate(`window.__oc_debug.settings.open('mods', { tab: 'chat-bar' })`);
+    check("openSettings('mods', { tab }) opens that tab", (await st()).tab === 'chat-bar');
     await app.evaluate(`window.__oc_debug.settings.open('mods', { tab: 'themes' })`);
-    check("openSettings('mods', { tab }) opens that tab", (await st()).tab === 'themes');
+    check("… and a tab that is gone (themes) leaves it where it was, without an error", (await st()).tab === 'chat-bar' && (await st()).section === 'mods');
     await app.evaluate(`window.__oc_debug.settings.open('mods:backgrounds')`);
     check("… and so does 'mods:backgrounds'", (await st()).tab === 'backgrounds');
     await app.evaluate(`window.__oc_debug.settings.open('appearance')`);

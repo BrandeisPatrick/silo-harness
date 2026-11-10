@@ -13,9 +13,9 @@ Each commit is one kind of change (one move, one split, one dedup) with a one-se
 | File | Lines | What it mixes |
 | --- | ---: | --- |
 | `src/renderer/renderer.ts` | 4486 | the transcript, tool rows and their folding, approval and question cards, the composer and its menus, the status line, compaction status, rewind, the side pane (browser, diff, terminal), connection checks and the setup strip, recent projects, sessions, the slash menu, the MCP and rules panels, the shortcuts sheet, the debug hook, feature wiring, init, drag-and-drop, the welcome suggestions |
-| `src/renderer/mods-host.ts` | 1922 | one factory, already sectioned (layout, theme, styles, looks, bridge, frames, rail, tabs, strip, workers, hooks, background, previews, seats, menu, events, cards, debug) |
+| `src/renderer/mods-host.ts` | 1922 | one factory, already sectioned (layout, theme, looks, bridge, frames, rail, tabs, strip, workers, hooks, background, previews, seats, menu, events, cards, debug) |
 | `src/main/agent.ts` | 1701 | the system prompt, the permission rules and approval cards, the hooks, the run loop, context accounting, the compaction pipeline, the queue, title generation, the model calls (streaming and not), tool execution |
-| `src/renderer/styles.css` | 1610 | the app's stylesheet; its class names and tokens are what mods and themes style |
+| `src/renderer/styles.css` | 1610 | the app's stylesheet; its class names and tokens are what mods and looks style |
 | `src/renderer/terminal.ts` | 1302 | the Terminal pane (one concern) |
 | `src/renderer/tools.ts` | 1036 | tool rows (one concern) |
 
@@ -134,7 +134,7 @@ save a line each; low value, done last if there is time.
 
 - `mods-host.ts`: already one factory with clear sections; its surface is the mod protocol, and the mods live suites
   check it closely. Splitting it brings little for the risk.
-- `styles.css` and the other stylesheets: class names and tokens are what mods and themes style; reordering rules
+- `styles.css` and the other stylesheets: class names and tokens are what mods and looks style; reordering rules
   changes the cascade.
 - `terminal.ts`, `tools.ts`, `settings/*`: each is one concern.
 - The names mods, tests and the command load: `window.oc`, `__oc_debug.*`, every `dist/main/*.js` path a test or

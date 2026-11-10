@@ -1,9 +1,9 @@
 // Live checks of the look mods in the real window, through the rig: mods/backgrounds (each view, light and dark, at
-// two dims; readability measured from the pixels; CPU while it animates; off restores the look), the chat bar under
-// the themes (geometry and every state, a real message sent through it; its look was the composer-pill mod's and is
-// the app's own now), mods/theme-midnight (the window, Settings, an approval card, a diff, the rail mods following it),
-// all of them together, and the kit's h-md class at rail and tab width.
-// Run: npm run build && node test/live/mods-look.js [phase…]   phases: backgrounds chatbar theme all md
+// two dims; readability measured from the pixels; CPU while it animates; off restores the look), the chat bar in
+// light and dark (geometry and every state, a real message sent through it; its look was the composer-pill mod's and
+// is the app's own now), the light/dark scheme reaching the rail mods (theme.changed) and System following the Mac,
+// the backgrounds with the chat bar together, and the kit's h-md class at rail and tab width.
+// Run: npm run build && node test/live/mods-look.js [phase…]   phases: backgrounds chatbar scheme all md
 // Screenshots go to $SHOTS (default: a temp folder).
 const fs = require('node:fs');
 const os = require('node:os');
@@ -26,11 +26,6 @@ const rpc = (app, method, ...args) => app.evaluate(`window.oc.rpc(${JSON.stringi
 
 async function setTheme(app, scheme) {
   await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = ${JSON.stringify(scheme)}; await window.oc.setConfig(c); document.documentElement.dataset.theme = ${JSON.stringify(scheme)}; })()`);
-  await sleep(900);
-}
-
-async function enable(app, id, on) {
-  await rpc(app, 'mods.setEnabled', id, on);
   await sleep(900);
 }
 
@@ -237,7 +232,7 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
     const list = await dbg(app, 'list()');
     const st = (id) => list.find((m) => m.id === id)?.state;
     const ok = (id) => list.find((m) => m.id === id)?.approved === true;
-    check('bundled looks: backgrounds, theme-midnight and theme-paper available and off until used, nothing shown', ['backgrounds', 'theme-midnight', 'theme-paper'].every((id) => st(id) === 'off' && ok(id)) && !(await app.evaluate(`document.documentElement.classList.contains('mod-bg') || !!document.querySelector('style[data-mod]')`)), { b: st('backgrounds'), t: st('theme-midnight'), p: st('theme-paper') });
+    check('bundled looks: backgrounds available and off until used, nothing shown; no theme mods are bundled', st('backgrounds') === 'off' && ok('backgrounds') && !list.some((m) => /^theme-/.test(m.id)) && !(await app.evaluate(`document.documentElement.classList.contains('mod-bg') || !!document.querySelector('style[data-mod]')`)), { b: st('backgrounds'), ids: list.map((m) => m.id) });
     const stale = list.filter((m) => m.id === 'composer-pill');
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l) && /composer-pill|mod/i.test(l));
     check('a stale composer-pill entry from an older profile: no such mod, no styles, no error', stale.length === 0 && !(await app.exists('style[data-mod="composer-pill"]')) && errors.length === 0, { stale, errors });
@@ -351,7 +346,7 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
       console.log('readability:', JSON.stringify(results));
     }
 
-    // ---------- The chat bar under the themes ----------
+    // ---------- The chat bar, light and dark ----------
     if (want('chatbar')) {
       await app.evaluate(`window.__oc_debug.context({ tokens: 23400, limit: 200000, threshold: 0.8, autoCompact: true })`);
       const menuAt = (sel) => app.evaluate(`(() => { const m = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); const c = document.querySelector('#composer').getBoundingClientRect(); return { open: !document.querySelector(${JSON.stringify(sel)}).hidden, above: m.bottom <= c.top, left: Math.round(m.left - c.left), right: Math.round(m.right - c.right) }; })()`);
@@ -362,11 +357,10 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
       const bar = async (name) => shot(app, `chatbar-${name}`, await clip());
       const geo = () => app.evaluate(`(() => { const r = (s) => { const e = document.querySelector(s); if (!e || e.hidden) return null; const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom, cy: b.y + b.height / 2 }; }; const cs = (s, p) => getComputedStyle(document.querySelector(s))[p]; return { comp: r('#composer'), input: r('#input'), attach: r('#attach-btn'), send: r('#send-btn'), foot: r('#composer-foot'), model: r('#model-btn'), mode: r('#mode-btn'), meter: r('#context-meter'), att: r('#attachments'), radius: cs('#composer', 'borderTopLeftRadius'), border: cs('#composer', 'borderTopColor'), chipBorder: cs('#model-btn', 'borderTopStyle'), modeBorder: cs('#mode-btn', 'borderTopStyle') }; })()`);
       const near = (a, b, d = 1.5) => Math.abs(a - b) <= d;
-      for (const theme of [false, true]) {
-        if (theme) await enable(app, 'theme-midnight', true);
+      {
         for (const scheme of ['light', 'dark']) {
           await setTheme(app, scheme);
-          const tag = `${scheme}${theme ? '-midnight' : ''}`;
+          const tag = scheme;
           await app.fill('#input', '');
           await app.evaluate(`document.activeElement.blur()`);
           await sleep(400);
@@ -391,7 +385,6 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
           await bar(`three-lines-${tag}`);
           await app.fill('#input', '');
         }
-        if (theme) await enable(app, 'theme-midnight', false);
       }
       await setTheme(app, 'light');
       // Attachments
@@ -480,55 +473,44 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
       await app.evaluate(`window.__oc_debug.context({ tokens: 23400, limit: 200000, threshold: 0.8, autoCompact: true })`);
     }
 
-    // ---------- Midnight ----------
-    if (want('theme')) {
+    // ---------- The scheme: light and dark reach the mods, System follows the Mac ----------
+    if (want('scheme')) {
       await app.evaluate(`document.getElementById('new-session-btn').click()`);
       await sleep(800);
       await seed(app);
       await seedCards(app);
-      await enable(app, 'theme-midnight', true);
-      await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#2f5bcc'`, 5000, 'the theme').catch(() => {});
-      check('theme: the accent applies in light', (await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`)) === '#2f5bcc');
-      await sleep(800);
-      const log = await dbg(app, 'log()');
-      const reached = new Set(log.filter((e) => e.kind === 'event' && e.method === 'theme.changed').map((e) => e.view));
-      check('theme: the rail mods were told (theme.changed)', ['context/main', 'tasks/main', 'environment/main'].every((k) => reached.has(k)), [...reached]);
-      const railAccent = await frameEval(app, 'context', `getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
-      if (railAccent !== null) check('theme: a rail mod page uses its accent', railAccent === '#2f5bcc', railAccent);
+      const accentNow = () => app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
+      const bgNow = () => app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--bg-100').trim()`);
+      const values = {};
       for (const scheme of ['light', 'dark']) {
         await setTheme(app, scheme);
-        if (scheme === 'dark') check('theme: the accent applies in dark', (await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`)) === '#5d90f5');
+        await sleep(800);
+        values[scheme] = { accent: await accentNow(), bg: await bgNow() };
+        const log = await dbg(app, 'log()');
+        const reached = new Set(log.filter((e) => e.kind === 'event' && e.method === 'theme.changed').map((e) => e.view));
+        if (scheme === 'dark') check('scheme: the rail mods were told (theme.changed)', ['context/main', 'tasks/main', 'environment/main'].every((k) => reached.has(k)), [...reached]);
+        const railAccent = await frameEval(app, 'context', `getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
+        if (railAccent !== null) check(`scheme (${scheme}): a rail mod page uses the app's accent`, railAccent === values[scheme].accent, { railAccent, app: values[scheme].accent });
         await app.evaluate(`document.querySelector('.approval')?.scrollIntoView({ block: 'center' })`);
         await sleep(1000); // colour transitions settle
-        await shot(app, `theme-window-${scheme}`);
-        await app.screenshotOf(file(`theme-approval-${scheme}`), '.approval', 12).catch(() => {});
-        await app.screenshotOf(file(`theme-diff-${scheme}`), '.tool:has(.diff), .diff', 12).catch(() => {});
-        await app.screenshotOf(file(`theme-rail-${scheme}`), '#mod-rail', 0).catch(() => {});
-        await app.click('#settings-btn');
-        await sleep(900);
-        await shot(app, `theme-settings-${scheme}`);
-        await app.evaluate(`window.__oc_debug.settings.open('mods', { tab: 'themes' })`).catch(() => {});
-        await sleep(500);
-        await shot(app, `theme-settings-mods-${scheme}`);
-        await app.click('#settings-close');
-        await sleep(400);
+        await shot(app, `scheme-window-${scheme}`);
+        await app.screenshotOf(file(`scheme-approval-${scheme}`), '.approval', 12).catch(() => {});
+        await app.screenshotOf(file(`scheme-rail-${scheme}`), '#mod-rail', 0).catch(() => {});
       }
+      check('scheme: light and dark differ', values.light.bg !== values.dark.bg, values);
       // System scheme: with theme "system" the media query block applies
       await app.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
       await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'system'; await window.oc.setConfig(c); delete document.documentElement.dataset.theme; })()`);
       await sleep(800);
-      check('theme: "System" on a dark system gets the dark values', (await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--bg-100').trim()`)) === '#181d28');
+      check('scheme: "System" on a dark system gets the dark values', (await bgNow()) === values.dark.bg);
       await app.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
       await sleep(400);
-      check('theme: "System" on a light system gets the light values', (await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--bg-100').trim()`)) === '#f6f8fc');
+      check('scheme: "System" on a light system gets the light values', (await bgNow()) === values.light.bg);
       await setTheme(app, 'light');
-      await enable(app, 'theme-midnight', false);
-      check('theme off: the app\'s accent is back', (await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`)) === '#1f66c4');
     }
 
-    // ---------- All three ----------
+    // ---------- The backgrounds and the chat bar together ----------
     if (want('all')) {
-      await enable(app, 'theme-midnight', true);
       await app.evaluate(`window.__oc_debug.context({ tokens: 61000, limit: 200000, threshold: 0.8, autoCompact: true })`);
       for (const [scheme, bgv] of [['light', 'aurora'], ['dark', 'aurora'], ['dark', 'constellation'], ['light', 'grid'], ['dark', 'dusk']]) {
         await setTheme(app, scheme);
@@ -536,10 +518,9 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
         await sleep(1500);
         await shot(app, `all-${bgv}-${scheme}`);
         const r = await readability(app, file(`all-${bgv}-${scheme}`));
-        check(`all three (${bgv}, ${scheme}): readable`, r.text >= 4.5 && r.muted >= 3, r);
+        check(`all together (${bgv}, ${scheme}): readable`, r.text >= 4.5 && r.muted >= 3, r);
       }
       await rpc(app, 'mods.setLayout', { background: null });
-      await enable(app, 'theme-midnight', false);
       await setTheme(app, 'light');
     }
 

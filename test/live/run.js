@@ -49,7 +49,6 @@ const SCRIPTS = [
   { name: 'looks', shots: 'env' },
   { name: 'look-tabs' },
   { name: 'palette' },
-  { name: 'glass' },
   { name: 'dreaming' },
   { name: 'pages' },
   { name: 'hooks', shots: 'env' },

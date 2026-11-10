@@ -249,7 +249,7 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-hook .sp-row-desc, .sp-hook-run .sp-row-desc { overflow-wrap: anywhere; }
 .sp-hook-run { min-height: 56px; }
 
-/* ---------- Settings → Mods: the look tabs (Background, Chat bar, Conversation, Theme) ---------- */
+/* ---------- Settings → Mods: the look tabs (Background, Chat bar, Conversation) ---------- */
 /* The preview: a stage that keeps its proportions; what it draws lives in a shadow root (look-preview.ts) */
 .lp-stage { position: relative; width: 100%; overflow: hidden; contain: paint; isolation: isolate; border: 1px solid var(--border-subtle); border-radius: var(--r-card-lg); background: var(--bg-100); }
 .lp-host { position: absolute; inset: 0; }
