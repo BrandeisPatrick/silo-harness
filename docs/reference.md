@@ -191,7 +191,7 @@ Every request starts with the same tools and system prompt, then the conversatio
 - **OpenAI**: caches on its own; the app sends the session as `prompt_cache_key`, so a session's requests reach the same cache.
 - **Others**: nothing extra is sent. Many cache a repeated start on their own.
 
-Where the start is cached, old tool output is set aside in batches (past 90K tokens, down to 50K, or less in a small window) and old screenshots four at a time, so the cached part is rewritten seldom. Ollama and LM Studio keep pruning as before, and so does a session whose provider reports no cache read or write on three requests in a row sent within five minutes of the last reply, until it reports one. The context meter's detail says what share of the last request was read from the cache, when the provider reports it.
+Where the start is cached, old tool output is set aside in batches (past 90K tokens, or 60K after a pause of more than five minutes, down to 50K, or less in a small window) and old screenshots four at a time, so the cached part is rewritten seldom. Ollama and LM Studio keep pruning as before, and so does a session whose provider reports no cache read or write on three requests in a row sent within five minutes of the last reply, until it reports one. The context meter's detail says what share of the last request was read from the cache, when the provider reports it.
 
 ## Remote control
 

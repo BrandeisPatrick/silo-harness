@@ -55,7 +55,7 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
-import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
+import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
@@ -1553,12 +1553,16 @@ export class Agent {
   /**
    * Where the prefix is cached: nothing until the view reaches the high-water mark, then old output set aside, oldest
    * first, until it is down to the low-water mark (context-view.ts batchMarks). Between batches the view, and so the
-   * cached prefix, stays the same.
+   * cached prefix, stays the same. After a pause longer than the cache lasts, the next request writes the whole
+   * conversation anyway, so a batch then starts at COLD_BATCH_FROM of the way from the low mark to the high one.
    */
   private pruneInBatches(limit: number): void {
     const { high, low } = batchMarks(limit, PRUNE_THRESHOLD);
     let tokens = this.contextInfo().tokens;
-    if (tokens < high) return;
+    const st = this.cacheState();
+    const last = st.lastAt ?? st.storedAt;
+    const cold = last !== undefined && this.now() - last > CACHE_TTL_MS;
+    if (tokens < (cold ? low + (high - low) * COLD_BATCH_FROM : high)) return;
     const s = this.session;
     const already = new Set(s.prunedResults ?? []);
     // resultsToPrune lists the newest first

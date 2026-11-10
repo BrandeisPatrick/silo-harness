@@ -9,7 +9,8 @@
 //     and end, as pruning does in a small window.
 // On a provider that caches a request's prefix every change to an earlier message is paid for (the rest of the
 // request is written to the cache again), so there both cuts come in batches: old screenshots SHOT_BATCH at a time,
-// old output once the view reaches a high-water mark, down to a low-water mark (batchMarks).
+// old output once the view reaches a high-water mark, down to a low-water mark (batchMarks). After a pause longer than
+// the cache lasts the whole conversation is written again anyway, so a batch then starts much lower (COLD_BATCH_FROM).
 
 import type { Msg } from '../sessions';
 
@@ -42,6 +43,8 @@ export const CACHE_TTL_MS = 5 * 60_000;
 export const CACHE_EXPECT_MIN_TOKENS = 2_000;
 /** Warm requests in a row that report no cache read or write before a session is treated as not caching (Agent.noteCache). */
 export const CACHE_MISSES_TO_FALLBACK = 3;
+/** After a pause longer than CACHE_TTL_MS a batch starts this far from the low-water mark to the high one (60K at 50K/90K). */
+export const COLD_BATCH_FROM = 0.25;
 
 /** The high- and low-water marks for a window: PRUNE_HIGH/LOW, or lower for a window whose `fraction` is less. */
 export function batchMarks(limit: number, fraction: number): { high: number; low: number } {

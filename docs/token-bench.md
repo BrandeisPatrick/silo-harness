@@ -215,7 +215,9 @@ rewrites that setting it aside earlier would have caused. No compaction happened
 Every provider type but Ollama and LM Studio is first assumed to cache. A session whose provider reports no cache read or
 write on three requests in a row, each sent within five minutes of the last reply with a prompt of 2,000 tokens or more,
 goes back to the rule without caching (old output set aside past 48K, screenshots one at a time) until a read or write is
-reported again. That fallback has not been measured against a live endpoint.
+reported again. After a pause of more than five minutes the next request writes the whole conversation to the cache anyway,
+so a batch then starts at 60K instead of 90K. Neither the fallback nor the batch at a pause has been measured against a live
+endpoint.
 
 ### How it was run
 
