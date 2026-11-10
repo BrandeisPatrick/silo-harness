@@ -44,8 +44,16 @@ export interface El {
   attrs: Record<string, string>;
   children: Node[];
   parent: El | null;
+  /** Levels below the root (the root is 0); never more than MAX_DEPTH */
+  depth: number;
 }
 type Node = El | string;
+
+// Limits that keep a hostile page from freezing the main process. Real pages stay far inside them.
+/** Deepest an element sits in the tree: one opened deeper is kept, but its content goes to its parent */
+const MAX_DEPTH = 256;
+/** Elements in one tree: past this, start tags are ignored and their text flows into the open element */
+const MAX_ELEMENTS = 300_000;
 
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr', 'keygen']);
 /** Elements whose content is raw text up to their end tag */
@@ -63,6 +71,14 @@ const CLOSED_BY: Record<string, Set<string>> = {
   tbody: new Set(['tbody', 'tfoot']),
   option: new Set(['option', 'optgroup']),
 };
+/** CLOSED_BY turned round: the open elements a start tag closes */
+const CLOSES = new Map<string, Set<string>>();
+for (const [open, by] of Object.entries(CLOSED_BY)) {
+  for (const t of by) {
+    if (!CLOSES.has(t)) CLOSES.set(t, new Set());
+    CLOSES.get(t)!.add(open);
+  }
+}
 /** Elements a closing end tag search does not cross (an </li> inside a nested list closes only that list's item) */
 const SCOPE = new Set(['ul', 'ol', 'table', 'td', 'th', 'blockquote', 'div', 'section', 'article', 'main', 'body', 'html']);
 
@@ -77,32 +93,142 @@ function parseAttrs(src: string): Record<string, string> {
   return attrs;
 }
 
-const TAG_RE = /<(\/?)([A-Za-z][A-Za-z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/y;
+const NAME_RE = /[A-Za-z][A-Za-z0-9:-]*/y;
+const TAG_END_RE = /[>"']/g;
+
+/**
+ * Where tags end. From a tag's name on, the first ">" ends it, but a quote, wherever it stands, runs to the next
+ * quote of its kind and a ">" inside does not count; a quote with no partner means the tag never ends. Scanned by
+ * hand rather than by one regex, which on a failed match backtracks over the rest of the page, and with what failed
+ * remembered: a "<" that starts no tag is text and the scan goes on from the next "<", so without that memory every
+ * "<" before an unpartnered quote would scan the rest of the page again.
+ */
+class TagEnds {
+  /** Quotes from which the scan is known to fail (made on the first failure) */
+  private failed: Uint8Array | null = null;
+  /** The last search from a tag's name: from where, and the first ">" or quote it found (-1: none to the end) */
+  private from = -1;
+  private found = -1;
+  constructor(private readonly s: string) {}
+
+  private special(from: number): number {
+    TAG_END_RE.lastIndex = from;
+    return TAG_END_RE.exec(this.s)?.index ?? -1;
+  }
+
+  /** The ">" ending a tag whose name ends at `from`, or -1 when it never ends */
+  find(from: number): number {
+    // Names are found in page order, so one search answers every name between its start and what it found
+    let q: number;
+    if (this.from >= 0 && from >= this.from && (this.found < 0 || from <= this.found)) q = this.found;
+    else {
+      q = this.special(from);
+      this.from = from;
+      this.found = q;
+    }
+    const passed: number[] = [];
+    for (;;) {
+      if (q < 0 || this.failed?.[q]) break;
+      const ch = this.s[q];
+      if (ch === '>') return q;
+      passed.push(q);
+      const close = this.s.indexOf(ch, q + 1);
+      if (close < 0) break;
+      q = this.special(close + 1);
+    }
+    // Every quote this scan passed leads to the same failure
+    if (passed.length) {
+      this.failed ??= new Uint8Array(this.s.length);
+      for (const p of passed) this.failed[p] = 1;
+    }
+    return -1;
+  }
+}
+
+/** The tag at `i` (a "<" then a name, "/" first for an end tag): its name, its attribute text and where it ends */
+function scanTag(s: string, i: number, ends: TagEnds): { end: boolean; name: string; attrs: string; next: number } | null {
+  const end = s[i + 1] === '/';
+  NAME_RE.lastIndex = i + (end ? 2 : 1);
+  const name = NAME_RE.exec(s)?.[0];
+  if (!name) return null;
+  const from = NAME_RE.lastIndex;
+  const gt = ends.find(from);
+  return gt < 0 ? null : { end, name, attrs: s.slice(from, gt), next: gt + 1 };
+}
+
+/** The open elements, root first, with where each tag name and each scope boundary stands, so no step walks them */
+class OpenStack {
+  readonly els: El[];
+  private readonly at = new Map<string, number[]>();
+  private readonly scopes: number[] = [];
+  constructor(root: El) {
+    this.els = [root];
+  }
+  get cur(): El {
+    return this.els[this.els.length - 1];
+  }
+  push(el: El): void {
+    const k = this.els.length;
+    this.els.push(el);
+    let list = this.at.get(el.tag);
+    if (!list) this.at.set(el.tag, (list = []));
+    list.push(k);
+    if (SCOPE.has(el.tag)) this.scopes.push(k);
+  }
+  /** Closes everything from index `k` up */
+  popTo(k: number): void {
+    while (this.els.length > Math.max(k, 1)) {
+      const el = this.els.pop()!;
+      this.at.get(el.tag)!.pop();
+      if (SCOPE.has(el.tag)) this.scopes.pop();
+    }
+  }
+  /** An end tag: closes the nearest open element of that name, not crossing a scope boundary of another kind */
+  end(tag: string): void {
+    const k = this.at.get(tag)?.at(-1);
+    if (k === undefined) return;
+    if (!SCOPE.has(tag) && (this.scopes.at(-1) ?? 0) > k) return;
+    this.popTo(k);
+  }
+  /**
+   * Implied end tags for a start tag: from the current element down to the first scope boundary it does not close,
+   * the outermost element it closes is closed, with everything inside it.
+   */
+  implyEnd(tag: string): void {
+    const closes = CLOSES.get(tag);
+    if (!closes) return;
+    let s = this.scopes.length - 1;
+    while (s >= 0 && closes.has(this.els[this.scopes[s]].tag)) s--;
+    const bound = s >= 0 ? this.scopes[s] : 0;
+    let outer = -1;
+    for (const t of closes) {
+      const list = this.at.get(t);
+      if (!list) continue;
+      for (let j = list.length - 1; j >= 0 && list[j] > bound; j--) if (outer < 0 || list[j] < outer) outer = list[j];
+    }
+    if (outer > 0) this.popTo(outer);
+  }
+}
 
 /** Parses HTML into a tree under a synthetic root. Never throws: broken markup becomes text or is closed where it can. */
 export function parseHtml(html: string): El {
-  const root: El = { tag: '#root', attrs: {}, children: [], parent: null };
-  let cur = root;
+  const root: El = { tag: '#root', attrs: {}, children: [], parent: null, depth: 0 };
+  const stack = new OpenStack(root);
   // The renderer's own markers (pre blocks, list indentation) never come from the page
   const s = String(html ?? '').replace(/[\u0000\u0001]/g, '');
+  const ends = new TagEnds(s);
   let i = 0;
+  let count = 0;
   const text = (t: string) => {
-    if (t) cur.children.push(decodeEntities(t));
+    if (t) stack.cur.children.push(decodeEntities(t));
   };
-  const open = (tag: string, attrs: Record<string, string>): El => {
-    // Implied end tags
-    for (let n: El | null = cur; n && n !== root; ) {
-      if (CLOSED_BY[n.tag]?.has(tag)) {
-        cur = n.parent ?? root;
-        n = cur;
-        continue;
-      }
-      if (SCOPE.has(n.tag)) break;
-      n = n.parent;
-    }
-    const el: El = { tag, attrs, children: [], parent: cur };
-    cur.children.push(el);
-    return el;
+  /** Where a raw element's text ends and the tag after it: one scan, to the end of the page at worst */
+  const rawEnd = (tag: string, from: number): { body: number; next: number } => {
+    if (tag === 'plaintext') return { body: s.length, next: s.length };
+    const close = new RegExp(`</${tag}\\s*>`, 'ig');
+    close.lastIndex = from;
+    const cm = close.exec(s);
+    return cm ? { body: cm.index, next: cm.index + cm[0].length } : { body: s.length, next: s.length };
   };
   while (i < s.length) {
     const lt = s.indexOf('<', i);
@@ -119,7 +245,7 @@ export function parseHtml(html: string): El {
     }
     if (s.startsWith('<![CDATA[', i)) {
       const end = s.indexOf(']]>', i);
-      cur.children.push(s.slice(i + 9, end < 0 ? s.length : end));
+      stack.cur.children.push(s.slice(i + 9, end < 0 ? s.length : end));
       i = end < 0 ? s.length : end + 3;
       continue;
     }
@@ -128,52 +254,66 @@ export function parseHtml(html: string): El {
       i = end < 0 ? s.length : end + 1;
       continue;
     }
-    TAG_RE.lastIndex = i;
-    const m = TAG_RE.exec(s);
+    const m = scanTag(s, i, ends);
     if (!m) {
-      // A lone "<": text
+      // A lone "<", or one whose tag never ends: text
       text('<');
       i++;
       continue;
     }
-    i += m[0].length;
-    const tag = m[2].toLowerCase();
-    if (m[1]) {
-      // End tag: close the nearest open element of that name, not crossing a scope boundary of another kind
-      for (let n: El | null = cur; n && n !== root; n = n.parent) {
-        if (n.tag === tag) {
-          cur = n.parent ?? root;
-          break;
-        }
-        if (SCOPE.has(n.tag) && !SCOPE.has(tag)) break;
-      }
+    i = m.next;
+    const tag = m.name.toLowerCase();
+    if (m.end) {
+      stack.end(tag);
       continue;
     }
-    const attrs = parseAttrs(m[3]);
-    const el = open(tag, attrs);
-    const selfClosing = /\/\s*$/.test(m[3]);
+    if (count >= MAX_ELEMENTS) {
+      // Over budget: the tag is ignored, but a raw element's text is still not read as markup
+      if (RAW.has(tag)) i = rawEnd(tag, i).next;
+      continue;
+    }
+    count++;
+    stack.implyEnd(tag);
+    const parent = stack.cur;
+    const el: El = { tag, attrs: parseAttrs(m.attrs), children: [], parent, depth: parent.depth + 1 };
+    parent.children.push(el);
+    const selfClosing = /\/\s*$/.test(m.attrs);
     if (VOID.has(tag) || (selfClosing && (tag === 'svg' || tag.includes(':') || tag === 'path'))) continue;
     if (RAW.has(tag)) {
-      const close = new RegExp(`</${tag}\\s*>`, 'ig');
-      close.lastIndex = i;
-      const cm = tag === 'plaintext' ? null : close.exec(s);
-      const body = s.slice(i, cm ? cm.index : s.length);
+      const r = rawEnd(tag, i);
+      const body = s.slice(i, r.body);
       if (body) el.children.push(tag === 'title' || tag === 'textarea' ? decodeEntities(body) : body);
-      i = cm ? cm.index + cm[0].length : s.length;
+      i = r.next;
       continue;
     }
-    cur = el;
+    // At the depth cap the element stays in the tree, but what follows goes into its parent
+    if (el.depth < MAX_DEPTH) stack.push(el);
   }
   return root;
 }
 
 // ---------- Finding things ----------
 
-export function* walk(el: El): Generator<El> {
-  for (const c of el.children) {
-    if (typeof c === 'string') continue;
+/** Every element under `el`, in document order. With `skip`, an element it matches is left out with all it holds. */
+export function* walk(el: El, skip?: (e: El) => boolean): Generator<El> {
+  // An explicit stack of child lists and positions: no recursion however deep the tree
+  const lists: Node[][] = [el.children];
+  const at: number[] = [0];
+  while (lists.length) {
+    const top = lists.length - 1;
+    const kids = lists[top];
+    if (at[top] >= kids.length) {
+      lists.pop();
+      at.pop();
+      continue;
+    }
+    const c = kids[at[top]++];
+    if (typeof c === 'string' || skip?.(c)) continue;
     yield c;
-    yield* walk(c);
+    if (c.children.length) {
+      lists.push(c.children);
+      at.push(0);
+    }
   }
 }
 
@@ -182,9 +322,25 @@ function find(root: El, pred: (e: El) => boolean): El | null {
   return null;
 }
 
+/** The text under an element, in document order, leaving out what is never shown */
 export function textOf(el: El): string {
   let out = '';
-  for (const c of el.children) out += typeof c === 'string' ? c : DROP.has(c.tag) ? '' : textOf(c);
+  const lists: Node[][] = [el.children];
+  const at: number[] = [0];
+  while (lists.length) {
+    const top = lists.length - 1;
+    if (at[top] >= lists[top].length) {
+      lists.pop();
+      at.pop();
+      continue;
+    }
+    const c = lists[top][at[top]++];
+    if (typeof c === 'string') out += c;
+    else if (!DROP.has(c.tag)) {
+      lists.push(c.children);
+      at.push(0);
+    }
+  }
   return out;
 }
 
@@ -207,7 +363,33 @@ interface Ctx {
   pres: string[];
   inPre: boolean;
   inLink: boolean;
+  /** Quotes, lists and definitions being rendered inside one another (each prefixes or re-tidies all it holds) */
+  blockNest: number;
+  /** Emphasis, links, headings and tables being rendered inside one another (each re-cleans all it holds) */
+  markNest: number;
+  /** Characters links may still add over their href as written (making a short href absolute can add a lot) */
+  linkRoom: number;
 }
+
+/**
+ * Levels of one kind of nesting that are formatted: deeper ones render as plain content, so the work and the
+ * prefixes added per line stop growing with the depth.
+ */
+const NEST_CAP = 8;
+
+/** Renders with `full` while under the cap for that kind of nesting, else with `plain` */
+function nested(ctx: Ctx, kind: 'blockNest' | 'markNest', full: () => string, plain: () => string): string {
+  if (ctx[kind] >= NEST_CAP) return plain();
+  ctx[kind]++;
+  try {
+    return full();
+  } finally {
+    ctx[kind]--;
+  }
+}
+
+/** Whether a string ends in whitespace, without a regex that tries every position */
+const endsInSpace = (s: string): boolean => s.length > 0 && /\s/.test(s[s.length - 1]);
 
 const BLOCK = new Set(['address', 'article', 'aside', 'blockquote', 'body', 'center', 'dd', 'details', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'html', 'legend', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'summary', 'table', 'ul', 'tr', 'caption']);
 
@@ -245,7 +427,7 @@ function cleanInline(s: string): string {
 function wrap(raw: string, mark: string): string {
   const t = cleanInline(raw);
   const lead = /^\s/.test(raw) ? ' ' : '';
-  const trail = /\s$/.test(raw) ? ' ' : '';
+  const trail = endsInSpace(raw) ? ' ' : '';
   return t ? `${lead}${mark}${t}${mark}${trail}` : lead || trail;
 }
 
@@ -276,6 +458,17 @@ function renderList(el: El, ctx: Ctx): string {
     items.push(marker + indentAfterFirst(body || '', INDENT.repeat(marker.length)));
   }
   return items.length ? `\n\n${items.join('\n')}\n\n` : '';
+}
+
+/** A list past the nesting cap: its items as plain blocks, without markers (the levels around it indent them) */
+function plainList(el: El, ctx: Ctx): string {
+  let out = '';
+  for (const c of el.children) {
+    if (typeof c === 'string') out += c.replace(/[\s\u00a0]+/g, ' ');
+    else if (c.tag === 'li') out += isHidden(c) ? '' : block(renderChildren(c, ctx));
+    else out += renderEl(c, ctx);
+  }
+  return block(out);
 }
 
 /** List indentation: a character the whitespace pass leaves alone, made spaces at the end */
@@ -322,12 +515,20 @@ function renderTable(el: El, ctx: Ctx): string {
   };
   visit(el);
   if (!rows.length) return '';
-  const width = Math.max(...rows.map((r) => r.cells.length));
-  const line = (cells: string[]) => `| ${[...cells, ...Array(width - cells.length).fill('')].join(' | ')} |`;
+  // Short rows are padded to the widest, unless that would add more empty cells than the table has cells: one wide
+  // row over many short ones would otherwise multiply the table's size
+  let width = 0;
+  let cellCount = 0;
+  for (const r of rows) {
+    width = Math.max(width, r.cells.length);
+    cellCount += r.cells.length;
+  }
+  const padTo = width * rows.length - cellCount <= cellCount ? width : 0;
+  const line = (cells: string[]) => `| ${[...cells, ...Array(Math.max(0, padTo - cells.length)).fill('')].join(' | ')} |`;
   const out: string[] = [];
   rows.forEach((r, i) => {
     out.push(line(r.cells));
-    if (i === 0 && r.head) out.push(line(Array(width).fill('---')));
+    if (i === 0 && r.head) out.push(line(Array(Math.max(padTo, r.cells.length)).fill('---')));
   });
   return `\n\n${caption ? `${caption}\n\n` : ''}${out.join('\n')}\n\n`;
 }
@@ -349,10 +550,16 @@ function renderEl(el: El, ctx: Ctx): string {
     case 'h3':
     case 'h4':
     case 'h5':
-    case 'h6': {
-      const t = inline(el, ctx);
-      return t ? `\n\n${'#'.repeat(Number(tag[1]))} ${t}\n\n` : '';
-    }
+    case 'h6':
+      return nested(
+        ctx,
+        'markNest',
+        () => {
+          const t = inline(el, ctx);
+          return t ? `\n\n${'#'.repeat(Number(tag[1]))} ${t}\n\n` : '';
+        },
+        () => block(renderChildren(el, ctx)),
+      );
     case 'p':
     case 'div':
     case 'section':
@@ -377,19 +584,25 @@ function renderEl(el: El, ctx: Ctx): string {
     case 'ul':
     case 'ol':
     case 'menu':
-      return renderList(el, ctx);
+      return nested(ctx, 'blockNest', () => renderList(el, ctx), () => plainList(el, ctx));
     case 'li':
       return block(`- ${renderChildren(el, ctx).trim()}`);
     case 'dl':
       return block(renderChildren(el, ctx));
     case 'dt':
-      return `\n\n**${inline(el, ctx)}**\n`;
+      return nested(ctx, 'markNest', () => `\n\n**${inline(el, ctx)}**\n`, () => block(renderChildren(el, ctx)));
     case 'dd':
-      return `\n${tidy(renderChildren(el, ctx))}\n`;
-    case 'blockquote': {
-      const body = tidy(renderChildren(el, ctx));
-      return body ? `\n\n${body.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n')}\n\n` : '';
-    }
+      return nested(ctx, 'blockNest', () => `\n${tidy(renderChildren(el, ctx))}\n`, () => `\n${renderChildren(el, ctx)}\n`);
+    case 'blockquote':
+      return nested(
+        ctx,
+        'blockNest',
+        () => {
+          const body = tidy(renderChildren(el, ctx));
+          return body ? `\n\n${body.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n')}\n\n` : '';
+        },
+        () => block(renderChildren(el, ctx)),
+      );
     case 'pre': {
       const code = find(el, (e) => e.tag === 'code');
       const cls = `${code?.attrs.class ?? ''} ${el.attrs.class ?? ''}`;
@@ -412,32 +625,19 @@ function renderEl(el: El, ctx: Ctx): string {
     }
     case 'strong':
     case 'b':
-      return wrap(renderChildren(el, ctx), '**');
+      return nested(ctx, 'markNest', () => wrap(renderChildren(el, ctx), '**'), () => renderChildren(el, ctx));
     case 'em':
     case 'i':
     case 'cite':
-      return wrap(renderChildren(el, ctx), '*');
+      return nested(ctx, 'markNest', () => wrap(renderChildren(el, ctx), '*'), () => renderChildren(el, ctx));
     case 'del':
     case 's':
     case 'strike':
-      return wrap(renderChildren(el, ctx), '~~');
-    case 'a': {
-      const was = ctx.inLink;
-      ctx.inLink = true;
-      const raw = renderChildren(el, ctx);
-      const t = cleanInline(raw);
-      const href = el.attrs.href ? absoluteUrl(el.attrs.href, ctx) : null;
-      const lead = /^\s/.test(raw) ? ' ' : '';
-      const trail = /\s$/.test(raw) ? ' ' : '';
-      if (!href || was || !t) {
-        ctx.inLink = was;
-        return t ? `${lead}${t}${trail}` : lead || trail;
-      }
-      ctx.inLink = was;
-      return `${lead}[${escapeLinkText(t)}](${href.replace(/\)/g, '%29').replace(/ /g, '%20')})${trail}`;
-    }
+      return nested(ctx, 'markNest', () => wrap(renderChildren(el, ctx), '~~'), () => renderChildren(el, ctx));
+    case 'a':
+      return nested(ctx, 'markNest', () => renderLink(el, ctx), () => renderChildren(el, ctx));
     case 'table':
-      return renderTable(el, ctx);
+      return nested(ctx, 'markNest', () => renderTable(el, ctx), () => block(renderChildren(el, ctx)));
     case 'tr':
     case 'td':
     case 'th':
@@ -449,6 +649,31 @@ function renderEl(el: El, ctx: Ctx): string {
     default:
       return BLOCK.has(tag) ? block(renderChildren(el, ctx)) : renderChildren(el, ctx);
   }
+}
+
+function renderLink(el: El, ctx: Ctx): string {
+  const was = ctx.inLink;
+  ctx.inLink = true;
+  const raw = renderChildren(el, ctx);
+  ctx.inLink = was;
+  const t = cleanInline(raw);
+  const lead = /^\s/.test(raw) ? ' ' : '';
+  const trail = endsInSpace(raw) ? ' ' : '';
+  const asText = t ? `${lead}${t}${trail}` : lead || trail;
+  // What the URL adds over the href as written comes out of a budget the size of the page: a long <base> under
+  // many short links would otherwise make the Markdown many times the page, and resolving each one against it
+  // would take as long. Once a link does not fit, the rest are text too.
+  if (was || !t || !el.attrs.href || ctx.linkRoom <= 0) return asText;
+  const href = absoluteUrl(el.attrs.href, ctx);
+  if (!href) return asText;
+  const dest = href.replace(/\)/g, '%29').replace(/ /g, '%20');
+  const growth = Math.max(0, dest.length - el.attrs.href.length);
+  if (growth > ctx.linkRoom) {
+    ctx.linkRoom = 0;
+    return asText;
+  }
+  ctx.linkRoom -= growth;
+  return `${lead}[${escapeLinkText(t)}](${dest})${trail}`;
 }
 
 /** A pre's text as written: tags dropped, line breaks kept. */
@@ -470,6 +695,16 @@ function tidy(s: string): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/**
+ * The last guard on size: what is left of the ways markup can grow (list numbers, quote prefixes, header lines) is
+ * bounded per level, but a page made of nothing else could still come out a few times its size. Cut at a line end.
+ */
+function capLength(md: string, max: number): string {
+  if (md.length <= max) return md;
+  const cut = md.lastIndexOf('\n', max);
+  return md.slice(0, cut > max / 2 ? cut : max).trimEnd();
 }
 
 export interface Converted {
@@ -500,22 +735,33 @@ export function htmlToMarkdown(html: string, url?: string): Converted {
       /* keep the page's own */
     }
   }
-  const visible = (e: El): boolean => {
-    for (let n: El | null = e; n; n = n.parent) if (DROP.has(n.tag) || isHidden(n)) return false;
-    return true;
-  };
-  let content: El | null = find(root, (e) => (e.tag === 'main' || e.attrs.role === 'main') && visible(e));
+  // Visible means neither the element nor anything around it is dropped or hidden: a walk that skips those subtrees
+  const unseen = (e: El): boolean => DROP.has(e.tag) || isHidden(e);
+  let content: El | null = null;
+  for (const e of walk(root, unseen)) {
+    if (e.tag === 'main' || e.attrs.role === 'main') {
+      content = e;
+      break;
+    }
+  }
   if (!content) {
-    const articles = [...walk(root)].filter((e) => e.tag === 'article' && visible(e));
-    if (articles.length) content = articles.reduce((a, b) => (textOf(b).length > textOf(a).length ? b : a));
+    // An article inside another never has more text than it, so only the outermost are measured, each once
+    const articles = [...walk(root, (e) => unseen(e) || e.parent?.tag === 'article')].filter((e) => e.tag === 'article');
+    let most = -1;
+    for (const a of articles) {
+      const n = textOf(a).length;
+      if (n > most) [content, most] = [a, n];
+    }
   }
   // A <main> with next to no text (a shell the page fills by script) is not trusted: the body is read instead
   if (content && cleanInline(textOf(content)).length < 40) content = null;
   content ??= find(root, (e) => e.tag === 'body') ?? root;
-  const ctx: Ctx = { base, pres: [], inPre: false, inLink: false };
+  const size = String(html ?? '').length;
+  const ctx: Ctx = { base, pres: [], inPre: false, inLink: false, blockNest: 0, markNest: 0, linkRoom: size };
   let md = tidy(renderEl(content === root ? { ...root, tag: 'div' } : content, ctx));
   md = md.replace(/\u0001/g, ' ');
   md = md.replace(/\u0000(\d+)\u0000/g, (_m, n: string) => ctx.pres[Number(n)] ?? '');
+  md = capLength(md, 2 * size + 1000);
   let title = cleanInline(titleEl ? textOf(titleEl) : '') || cleanInline(ogTitle?.attrs.content ?? '');
   if (!title) {
     const h1 = find(content, (e) => e.tag === 'h1');
