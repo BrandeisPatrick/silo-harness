@@ -288,6 +288,11 @@ export interface AppConfig {
   mcpServers: Record<string, McpServerConfig>;
   /** Project .mcp.json servers the user enabled, by working directory */
   mcpTrusted: Record<string, string[]>;
+  /**
+   * What each trusted project server was trusted for: the SHA-256 of its .mcp.json entry, by working directory and
+   * name. An entry that changes since is not trusted. (A separate key, so older builds still read mcpTrusted.)
+   */
+  mcpTrustedEntries?: Record<string, Record<string, string>>;
   /** Summarise the conversation on its own when it nears the context window (see ContextInfo.threshold) */
   autoCompact: boolean;
   /** macOS notifications when a run ends or waits for approval while the window is in the background */

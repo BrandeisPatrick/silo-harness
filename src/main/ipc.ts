@@ -100,6 +100,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         providers: current.providers,
         mcpServers: current.mcpServers,
         mcpTrusted: current.mcpTrusted,
+        mcpTrustedEntries: current.mcpTrustedEntries,
         allowRules: current.allowRules,
         recentDirs: current.recentDirs,
         settingsTrusted: current.settingsTrusted,

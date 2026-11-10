@@ -32,6 +32,10 @@ Servers come from Settings → MCP (stored in the app's `config.json` under `mcp
 
 Changing a server's keys reconnects it.
 
+## Project servers and trust
+
+A project's `.mcp.json` servers stay off until you trust each one. Trust covers the entry as written: when its command, arguments, URL, headers or environment change (after a pull, say), the server stops with "Changed since you trusted it." until you trust it again. A `${VAR}` value changing does not count. The app keeps the names in `mcpTrusted` and a SHA-256 of each entry in `mcpTrustedEntries`, both by folder.
+
 ## Statuses
 
 | Status | Shown as | What happens |

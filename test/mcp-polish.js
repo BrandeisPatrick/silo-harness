@@ -135,5 +135,68 @@ function manager(cwd, initial, more = {}) {
     await m.close();
   }
 
+  // ---------- Trust follows a project server's entry, not just its name ----------
+  {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpp-trust-'));
+    const marker = path.join(cwd, 'started');
+    const write = (servers) => fs.writeFileSync(path.join(cwd, '.mcp.json'), JSON.stringify({ mcpServers: servers }, null, 2));
+    write({ proj: srv() });
+    const h = manager(cwd, {});
+    const { m } = h;
+    await m.reload();
+    check('trust: a new project server is not started', m.list()[0].status === 'blocked');
+    await m.setEnabled('proj', 'project', true);
+    check('trust: trusted, it connects', m.list()[0].status === 'connected');
+    await m.reload();
+    check('trust: unchanged, it stays trusted', m.list()[0].status === 'connected');
+    // A pull changes the command behind the trusted name
+    write({ proj: { command: 'node', args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, '1')`] } });
+    await m.reload();
+    await new Promise((r) => setTimeout(r, 400));
+    const s = m.list()[0];
+    check('trust: a changed entry is not trusted (blocked, says why)', s.status === 'blocked' && s.error === 'Changed since you trusted it.', s);
+    check('trust: …and no process started', !fs.existsSync(marker));
+    check('trust: the name list is kept for older builds', h.config().mcpTrusted[cwd].includes('proj'));
+    await m.setEnabled('proj', 'project', true);
+    check('trust: trusting again stores the new fingerprint and starts it', fs.existsSync(marker) || m.list()[0].status !== 'blocked', m.list()[0]);
+    const fp1 = h.config().mcpTrustedEntries?.[cwd]?.proj;
+    check('trust: the fingerprint is a sha256', /^[0-9a-f]{64}$/.test(fp1 || ''), fp1);
+    await m.reload();
+    check('trust: …and stays trusted after a reload', m.list()[0].status !== 'blocked');
+    // ${VAR} refs are fingerprinted as written: the value of the variable changing does not withdraw trust
+    write({ proj: srv({ TOKEN: '${OC_SOME_TOKEN}' }) });
+    await m.reload();
+    await m.setEnabled('proj', 'project', true);
+    process.env.OC_SOME_TOKEN = 'changed';
+    await m.reload();
+    check('trust: a ${VAR} value changing keeps trust (the entry is fingerprinted before expansion)', m.list()[0].status === 'connected', m.list()[0]);
+    delete process.env.OC_SOME_TOKEN;
+    // Disabling forgets the fingerprint with the name
+    await m.setEnabled('proj', 'project', false);
+    check('trust: disabling removes the name and the fingerprint', !h.config().mcpTrusted[cwd].includes('proj') && !h.config().mcpTrustedEntries[cwd]?.proj);
+    await m.close();
+
+    // Upgrade: a name trusted by an older build (no fingerprint) adopts the current entry's, nobody is asked again
+    const cwd2 = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpp-up-'));
+    fs.writeFileSync(path.join(cwd2, '.mcp.json'), JSON.stringify({ mcpServers: { old: srv() } }, null, 2));
+    const u = manager(cwd2, { mcpTrusted: { [cwd2]: ['old'] } });
+    await u.m.reload();
+    check('upgrade: a name trusted before fingerprints stays trusted', u.m.list()[0].status === 'connected', u.m.list()[0]);
+    check('upgrade: …and adopts the current entry\'s fingerprint', /^[0-9a-f]{64}$/.test(u.config().mcpTrustedEntries?.[cwd2]?.old || ''));
+    fs.writeFileSync(path.join(cwd2, '.mcp.json'), JSON.stringify({ mcpServers: { old: srv({ X: '1' }) } }, null, 2));
+    await u.m.reload();
+    check('upgrade: a later change is caught', u.m.list()[0].status === 'blocked' && u.m.list()[0].error === 'Changed since you trusted it.');
+    await u.m.close();
+
+    // A project server the user adds is trusted with its fingerprint
+    const cwd3 = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mcpp-add-'));
+    const a = manager(cwd3, {});
+    await a.m.add('mine', `node ${TEST_SERVER}`, 'project', { OC_PROJECT: projectDir });
+    check('add: a project server added here is trusted with a fingerprint', a.m.list()[0].status === 'connected' && /^[0-9a-f]{64}$/.test(a.config().mcpTrustedEntries?.[cwd3]?.mine || ''), a.m.list()[0]);
+    await a.m.remove('mine', 'project');
+    check('remove: the fingerprint goes too', !a.config().mcpTrustedEntries[cwd3]?.mine);
+    await a.m.close();
+  }
+
   done();
 })().catch((e) => { console.error('TEST CRASHED', e); process.exit(1); });

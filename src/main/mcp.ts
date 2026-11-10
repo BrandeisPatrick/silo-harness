@@ -244,20 +244,22 @@ export function parseServerSpec(name: string, spec: string, env?: Record<string,
 }
 
 /** Reads a project's .mcp.json. Entries that cannot be used are returned under `invalid` with the reason. */
-export function readProjectServers(cwd: string): { servers: Record<string, McpServerConfig>; invalid: Record<string, string>; fileError?: string } {
+export function readProjectServers(cwd: string): { servers: Record<string, McpServerConfig>; invalid: Record<string, string>; fingerprints: Record<string, string>; fileError?: string } {
   const file = path.join(cwd, PROJECT_FILE);
   const servers: Record<string, McpServerConfig> = {};
   const invalid: Record<string, string> = {};
-  if (!fs.existsSync(file)) return { servers, invalid };
+  const fingerprints: Record<string, string> = {};
+  if (!fs.existsSync(file)) return { servers, invalid, fingerprints };
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
-    return { servers, invalid, fileError: `${PROJECT_FILE} could not be read: ${err instanceof Error ? err.message : String(err)}` };
+    return { servers, invalid, fingerprints, fileError: `${PROJECT_FILE} could not be read: ${err instanceof Error ? err.message : String(err)}` };
   }
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as { mcpServers?: unknown }).mcpServers : undefined;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return { servers, invalid, fileError: `${PROJECT_FILE} has no "mcpServers" object` };
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return { servers, invalid, fingerprints, fileError: `${PROJECT_FILE} has no "mcpServers" object` };
   for (const [name, entry] of Object.entries(map as Record<string, unknown>)) {
+    fingerprints[name] = entryFingerprint(entry);
     if (!NAME_RE.test(name)) {
       invalid[name.slice(0, 64)] = 'invalid server name';
       continue;
@@ -268,8 +270,26 @@ export function readProjectServers(cwd: string): { servers: Record<string, McpSe
       invalid[name] = err instanceof Error ? err.message : String(err);
     }
   }
-  return { servers, invalid };
+  return { servers, invalid, fingerprints };
 }
+
+/** JSON with every object's keys sorted, so the same entry always reads the same. */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * What trusting a project server covers: the SHA-256 of its whole .mcp.json entry as written (before any ${VAR}
+ * expansion), so a change to its command, arguments, URL, headers or environment withdraws the trust.
+ */
+export function entryFingerprint(entry: unknown): string {
+  return crypto.createHash('sha256').update(canonicalJson(entry)).digest('hex');
+}
+
+/** The note on a trusted project server whose entry changed since. */
+export const CHANGED_SINCE_TRUSTED = 'Changed since you trusted it.';
 
 /** Every key under "mcpServers" in a project's .mcp.json, usable or not. */
 function projectKeys(cwd: string): string[] {
@@ -611,13 +631,29 @@ export class McpManager extends EventEmitter {
     for (const [name, config] of Object.entries(project.servers)) desired.set(keyOf('project', name), { name, scope: 'project', config });
     for (const [name, reason] of Object.entries(project.invalid)) desired.set(keyOf('project', name), { name, scope: 'project', config: { command: '?' }, invalid: reason });
 
-    const trusted = new Set(cfg.mcpTrusted?.[cwd] ?? []);
+    // Trust is the name (what older builds read) plus the fingerprint of the entry it was given for. A name with no
+    // fingerprint was trusted by an older build: it adopts the current entry's, so nobody is asked again on upgrade.
+    const names = new Set(cfg.mcpTrusted?.[cwd] ?? []);
+    const prints = { ...(cfg.mcpTrustedEntries?.[cwd] ?? {}) };
+    let adopted = false;
+    const trustOf = (name: string): 'yes' | 'no' | 'changed' => {
+      if (!names.has(name)) return 'no';
+      const now = project.fingerprints[name];
+      if (!prints[name] && now) {
+        prints[name] = now;
+        adopted = true;
+      }
+      return prints[name] === now ? 'yes' : 'changed';
+    };
+    const trust = new Map<string, 'yes' | 'no' | 'changed'>();
+    for (const want of desired.values()) if (want.scope === 'project') trust.set(want.name, trustOf(want.name));
+    if (adopted) this.opts.saveConfig({ mcpTrustedEntries: { ...(cfg.mcpTrustedEntries ?? {}), [cwd]: prints } });
     const pending: Promise<unknown>[] = [];
     const order = [...this.entries.keys()];
     // Drop entries that are gone or changed.
     for (const [key, e] of [...this.entries]) {
       const want = desired.get(key);
-      const signature = want ? JSON.stringify({ c: want.config, i: want.invalid ?? null, t: want.scope === 'project' ? trusted.has(want.name) : true }) : '';
+      const signature = want ? JSON.stringify({ c: want.config, i: want.invalid ?? null, t: want.scope === 'project' ? trust.get(want.name) : 'yes' }) : '';
       if (!want || signature !== e.signature) {
         this.entries.delete(key);
         pending.push(this.disconnect(e));
@@ -626,7 +662,7 @@ export class McpManager extends EventEmitter {
     // Add new ones.
     for (const [key, want] of desired) {
       if (this.entries.has(key)) continue;
-      const signature = JSON.stringify({ c: want.config, i: want.invalid ?? null, t: want.scope === 'project' ? trusted.has(want.name) : true });
+      const signature = JSON.stringify({ c: want.config, i: want.invalid ?? null, t: want.scope === 'project' ? trust.get(want.name) : 'yes' });
       const e: Entry = {
         name: want.name,
         scope: want.scope,
@@ -647,9 +683,9 @@ export class McpManager extends EventEmitter {
         e.error = `Invalid entry: ${want.invalid}`;
       } else if (want.config.disabled) {
         e.status = 'disabled';
-      } else if (want.scope === 'project' && !trusted.has(want.name)) {
+      } else if (want.scope === 'project' && trust.get(want.name) !== 'yes') {
         e.status = 'blocked';
-        e.error = `Found in ${PROJECT_FILE}. Enable it in Settings → MCP servers to let it run.`;
+        e.error = trust.get(want.name) === 'changed' ? CHANGED_SINCE_TRUSTED : `Found in ${PROJECT_FILE}. Enable it in Settings → MCP servers to let it run.`;
       } else {
         pending.push(this.connect(e));
       }
@@ -1135,9 +1171,7 @@ export class McpManager extends EventEmitter {
         for (const [n, c] of Object.entries(configs)) map[n] = stripUndefined(c);
       });
       // The user added it themselves: no separate "enable" step.
-      const trusted = new Set(cfg.mcpTrusted?.[cwd] ?? []);
-      for (const n of Object.keys(configs)) trusted.add(n);
-      this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: [...trusted] } });
+      this.saveTrust(cwd, Object.keys(configs), true);
     }
     await this.reload();
     return this.list();
@@ -1156,8 +1190,7 @@ export class McpManager extends EventEmitter {
         if (!(name in map)) throw new Error(`No project server named "${name}".`);
         delete map[name];
       });
-      const trusted = (cfg.mcpTrusted?.[cwd] ?? []).filter((n) => n !== name);
-      this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: trusted } });
+      this.saveTrust(cwd, [name], false);
     }
     await this.reload();
     // Its sign-in goes with it: tokens and client registration (Claude Code does the same on remove)
@@ -1178,13 +1211,31 @@ export class McpManager extends EventEmitter {
     } else {
       const cwd = this.opts.cwd();
       if (!this.entries.has(keyOf('project', name))) throw new Error(`No project server named "${name}" in ${PROJECT_FILE}.`);
-      const trusted = new Set(cfg.mcpTrusted?.[cwd] ?? []);
-      if (enabled) trusted.add(name);
-      else trusted.delete(name);
-      this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: [...trusted] } });
+      this.saveTrust(cwd, [name], enabled);
     }
     await this.reload();
     return this.list();
+  }
+
+  /**
+   * Trusts project servers of a folder (their names, and the fingerprints of their entries as the file has them now),
+   * or withdraws the trust.
+   */
+  private saveTrust(cwd: string, list: string[], trusted: boolean): void {
+    const cfg = this.opts.getConfig();
+    const names = new Set(cfg.mcpTrusted?.[cwd] ?? []);
+    const prints = { ...(cfg.mcpTrustedEntries?.[cwd] ?? {}) };
+    const now = trusted ? readProjectServers(cwd).fingerprints : {};
+    for (const n of list) {
+      if (trusted && now[n]) {
+        names.add(n);
+        prints[n] = now[n];
+      } else {
+        names.delete(n);
+        delete prints[n];
+      }
+    }
+    this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: [...names] }, mcpTrustedEntries: { ...(cfg.mcpTrustedEntries ?? {}), [cwd]: prints } });
   }
 
   async reconnect(name: string, scope: McpScope): Promise<McpServerInfo[]> {

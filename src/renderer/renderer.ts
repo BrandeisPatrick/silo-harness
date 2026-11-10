@@ -1804,6 +1804,7 @@ async function syncOwnedConfig(): Promise<void> {
         ...config,
         mcpServers: latest.mcpServers ?? config.mcpServers,
         mcpTrusted: latest.mcpTrusted ?? config.mcpTrusted,
+        mcpTrustedEntries: latest.mcpTrustedEntries ?? config.mcpTrustedEntries,
         allowRules: latest.allowRules ?? config.allowRules,
         recentDirs: latest.recentDirs ?? config.recentDirs,
       };
