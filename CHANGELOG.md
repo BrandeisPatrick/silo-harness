@@ -7,6 +7,8 @@
 - **Claude Code skills load.** Skills in `.claude/skills` and `.agents/skills`, and commands in `.claude/commands`, load next to the app's own.
 - **A skill that writes skills.** `/create-skill` writes a skill, loads it and fixes what the check reports.
 - **Skill arguments.** A skill takes what you type after its name as `$ARGUMENTS` or `$1` to `$9`, with a hint in the slash menu.
+- **Sign in to MCP servers.** A remote server that needs OAuth shows Sign in under Settings → MCP and opens your browser only when you click it.
+- **Server tool filters.** `enabledTools` and `disabledTools` in a server entry choose which of its tools reach the model.
 
 ### Improved
 
@@ -23,6 +25,9 @@
 - **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
 - **Retries you can see.** A failed or dropped model call is tried up to 6 times with growing waits, shown on one status line.
 - **Cheaper page reads.** `browser_get_text` and `browser_read_page` return 12,000 characters at a time and say where to continue.
+- **Servers reconnect themselves.** A remote MCP server that drops is retried 5 times with growing waits, and a crashed local one restarts on its next call.
+- **Longer MCP calls.** A server entry can set its own `timeout`, and progress from the server keeps a call alive for up to 10 minutes.
+- **Big MCP results saved.** A result over 100,000 characters goes to a private temp file; the model gets its start, its end and the path.
 
 ### Fixed
 
@@ -49,10 +54,12 @@
 - **Safer page-opened tabs.** A page cannot open a local file, `data:`, `blob:` or blank tab.
 - **The app's own ports are off-limits.** The agent's browser cannot open the remote-control server or the app's debugging port.
 - **No silent identity choices.** No client certificate or Bluetooth device is picked for a page, and HTTP sign-in prompts are cancelled.
+- **Careful MCP sign-in.** Sign-in uses PKCE, accepts only https or loopback endpoints, and keeps tokens in a file only you can read.
 
 ### For developers
 
 - **Skill format defined.** [docs/skills.md](docs/skills.md) sets out the fields, the folders and every problem message.
+- **MCP reference.** [docs/mcp.md](docs/mcp.md) covers every server key, sign-in, reconnection and the test mocks.
 
 ## 0.12.0 — 2026-11-09
 

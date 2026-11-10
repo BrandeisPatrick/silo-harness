@@ -2,10 +2,11 @@
 // Features never edit this file; they get `app` in their setup function (see docs/architecture.md).
 // First: carry over the folders of the app's older names, before any other module reads them.
 import './carry-over';
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, webContents } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
 import type { AgentEvent, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
+import { FileTokenStore } from './mcp-auth';
 import { ARTIFACT_SCHEME, ArtifactStore, serveArtifactRequest } from './artifacts';
 import { loadConfig, saveConfig } from './config';
 import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
@@ -215,6 +216,8 @@ function buildApp(): AppHost {
         saveConfig: (patch) => void self.updateConfig(patch),
         cwd: () => self.config().workingDirectory,
         version: app.getVersion(),
+        // OAuth for remote servers: tokens in a 0600 file in the data folder (not the keychain: no system prompt).
+        auth: { store: new FileTokenStore(path.join(userData, 'mcp-auth.json')), openExternal: (url) => shell.openExternal(url) },
       }),
   });
   a.events.on((sessionId, ev) => notify(a, sessionId, ev));

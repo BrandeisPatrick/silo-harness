@@ -6,7 +6,7 @@ import { app as electronApp, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
+import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
 import type { AppHost } from './app';
 import { ARTIFACT_SCHEME } from './artifacts';
 import type { BrowserController } from './browser';
@@ -158,6 +158,15 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   ipcMain.handle('mcp:remove', (_e, name: string, scope: McpScope) => requireMcp().remove(String(name), scope === 'project' ? 'project' : 'user'));
   ipcMain.handle('mcp:set-enabled', (_e, name: string, scope: McpScope, enabled: boolean) => requireMcp().setEnabled(String(name), scope === 'project' ? 'project' : 'user', Boolean(enabled)));
   ipcMain.handle('mcp:reconnect', (_e, name: string, scope: McpScope) => requireMcp().reconnect(String(name), scope === 'project' ? 'project' : 'user'));
+  // Sign-in waits for the browser: the handler returns at once (status "authorizing") and the list follows by push.
+  ipcMain.handle('mcp:sign-in', (_e, name: string, scope: McpScope) => {
+    const mcp = requireMcp();
+    const done = mcp.signIn(String(name), scope === 'project' ? 'project' : 'user');
+    done.catch(() => undefined);
+    return Promise.race([done, new Promise<McpServerInfo[]>((r) => setImmediate(() => r(mcp.list())))]);
+  });
+  ipcMain.handle('mcp:cancel-sign-in', (_e, name: string, scope: McpScope) => requireMcp().cancelSignIn(String(name), scope === 'project' ? 'project' : 'user'));
+  ipcMain.handle('mcp:sign-out', (_e, name: string, scope: McpScope) => requireMcp().signOut(String(name), scope === 'project' ? 'project' : 'user'));
 
   // ---------- Sessions: switching, creating and deleting no longer wait for runs; a running session is not forked, deleted or rewound ----------
 

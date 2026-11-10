@@ -134,8 +134,29 @@ export interface PortkeyConfig {
  * { "mcpServers": { "name": { "command": "npx", "args": ["-y", "@scope/server"], "env": { "KEY": "${KEY}" } } } }
  */
 export type McpServerConfig =
-  | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string>; cwd?: string; disabled?: boolean }
-  | { type: 'http' | 'sse'; url: string; headers?: Record<string, string>; disabled?: boolean };
+  | ({ type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string>; cwd?: string } & McpServerOptions)
+  | ({ type: 'http' | 'sse'; url: string; headers?: Record<string, string>; oauth?: McpOAuthConfig } & McpServerOptions);
+
+/** Keys every server entry may have, whatever its transport. */
+export interface McpServerOptions {
+  disabled?: boolean;
+  /** Milliseconds a tool call may take (default 120 000); progress from the server restarts it, up to 10 minutes in all */
+  timeout?: number;
+  /** Only these tools (exact names) are offered to the model */
+  enabledTools?: string[];
+  /** These tools are never offered (wins over enabledTools) */
+  disabledTools?: string[];
+}
+
+/** OAuth sign-in for a remote server (Claude Code's keys). */
+export interface McpOAuthConfig {
+  /** A client id registered with the authorization server beforehand; without it the app registers itself */
+  clientId?: string;
+  /** A fixed port for the 127.0.0.1 callback (some pre-registered clients need it); default: a free one */
+  callbackPort?: number;
+  /** Scopes to ask for; default: what the server advertises */
+  scopes?: string[];
+}
 
 /** user: stored in the app's settings; project: <workingDirectory>/.mcp.json */
 export type McpScope = 'user' | 'project';
@@ -152,8 +173,12 @@ export interface McpToolInfo {
   destructive: boolean;
 }
 
-/** blocked: a project server that the user has not enabled for this working directory yet (it never starts until then) */
-export type McpStatus = 'connecting' | 'connected' | 'error' | 'disabled' | 'blocked';
+/**
+ * blocked: a project server that the user has not enabled for this working directory yet (it never starts until then).
+ * reconnecting: a remote server lost its connection and is being reconnected. needs-auth: a remote server answered
+ * 401 and waits for the user to sign in. authorizing: sign-in is waiting for the browser.
+ */
+export type McpStatus = 'connecting' | 'connected' | 'reconnecting' | 'needs-auth' | 'authorizing' | 'error' | 'disabled' | 'blocked';
 
 export interface McpServerInfo {
   name: string;
@@ -169,6 +194,10 @@ export interface McpServerInfo {
   /** The server's own name and version from the handshake */
   serverInfo?: { name: string; version: string };
   config: McpServerConfig;
+  /** Tools the server offers that enabledTools/disabledTools keep from the model */
+  hiddenTools?: string[];
+  /** A remote server with OAuth tokens stored */
+  signedIn?: boolean;
 }
 
 export interface McpApi {
@@ -185,6 +214,11 @@ export interface McpApi {
   /** User servers: the disabled flag. Project servers: enabled=true trusts the server for this working directory (status blocked → connecting). */
   setEnabled(name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]>;
   reconnect(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Starts OAuth sign-in for a remote server (opens the browser); returns at once with status authorizing */
+  signIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Deletes the server's tokens and client registration */
+  signOut(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** The full list whenever a server's status or tools change */
   onServers(cb: (servers: McpServerInfo[]) => void): () => void;
 }
