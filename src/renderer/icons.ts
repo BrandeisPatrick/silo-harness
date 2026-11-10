@@ -1,4 +1,4 @@
-// Hand-drawn 16px stroke icons (1.5px stroke, currentColor, round caps and joins).
+// Hand-drawn 16px stroke icons (1.25px stroke, currentColor, round caps and joins).
 // Every path is authored on a 16x16 grid; nothing here is copied from an icon font or library.
 
 const GEAR =
@@ -102,6 +102,7 @@ const ICONS = {
   'git-merge': '<circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="9" r="1.5"/><path d="M4.5 5v6M4.5 5.5c0 2 1.5 3.5 3.5 3.5h2"/>',
   'file-export': `<path d="${PAGE}"/><path d="M9 1.75V6h4.25M8 13V8.5M6 10.25L8 8.25l2 2"/>`,
   'circle-dashed': '<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.4 2.2"/>',
+  'circle-pause': '<circle cx="8" cy="8" r="5.5"/><path d="M6.75 6.25v3.5M9.25 6.25v3.5"/>',
   // Dreaming: the navigation row and a dream's sessions (a crescent moon), and the run control (a play triangle)
   moon: '<path d="M13.25 9.75A5.75 5.75 0 1 1 6.25 2.75a4.75 4.75 0 0 0 7 7z"/>',
   play: '<path d="M5.25 3.5v9l7-4.5-7-4.5z"/>',
@@ -133,7 +134,7 @@ export function isIconName(name: string): name is IconName {
 
 /** SVG markup for an icon. Size is in CSS pixels; the drawing is always on the 16px grid. */
 export function icon(name: IconName, size = 16, cls = ''): string {
-  return `<svg class="icon${cls ? ' ' + cls : ''}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
+  return `<svg class="icon${cls ? ' ' + cls : ''}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 }
 
 /** Replaces `data-icon="name"` (and optional `data-icon-size`) placeholders in static markup with SVGs. */
