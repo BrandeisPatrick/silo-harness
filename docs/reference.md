@@ -7,7 +7,7 @@
 | Ask | Commands, writes and edits show an approval card (default) |
 | Accept edits | Edits inside the project run; commands ask |
 | Auto | Actions run without a card; a safety check (a second model call) blocks the risky ones, and the agent reads why. See [Auto mode](#auto-mode) |
-| Plan | Read-only exploration ending in a plan card you approve |
+| Plan | Read-only exploration ending in a plan card you approve; a read-only command the guard flags ("reads secrets") asks |
 | Bypass | Everything runs |
 
 ## Approval cards
@@ -27,7 +27,9 @@ Auto mode works like Claude Code's: rules settle most actions, and a safety chec
 3. **A block.** The action does not run. The agent reads "Blocked by Auto mode: [Category] reason. Do not try to get around it; continue with other work, or ask the user." and goes on. The chat shows one line, "Auto mode blocked git push --force · Allow", with the reason as its tooltip. **Allow** lets that exact action run once, without the check, when the agent tries it again, and tells the agent it may. The phone has the same line and Allow, and Settings → Permissions → Recently blocked lists the blocks since the app started.
 4. **Pauses.** After 3 blocks in a row or 20 in a session, Auto mode pauses for that session: what needs the check shows the approval card again, with a one-line notice.
 5. **Fails closed.** An error, a timeout or an answer that is neither allow nor block blocks the action ("[Unavailable] the safety check could not run"). When no model can run the check (none set, a provider without its key), or its model cannot be reached before it ever answered, Auto mode asks as it used to: risky commands and writes outside the project show the card, the rest runs.
-6. **Always asks.** `ask_user` questions, the browser's cards, `sudo`, and `rm` or `rmdir` of the home folder, `/`, the working directory or a folder above it, or a system folder. A tool's own question (a sub-session, a message to another session) keeps its card too.
+6. **Always asks.** `ask_user` questions, the browser's cards, `sudo`, and `rm` or `rmdir` of the home folder, `/`, the working directory or a folder above it, or a system folder, also inside `$(…)`, backticks, `sh -c '…'`, `eval`, `xargs` and `find -exec`. A tool's own question (a sub-session, a message to another session) keeps its card too.
+
+**Read-only commands** (what Plan mode runs, and Auto mode runs without the check): `ls`, `cat`, `grep`, `rg`, `find`, `sed -n`, `awk`, `git status/log/diff/show …`, `npm ls` and the like, with no substitution (`$(…)`, backticks, `<(…)`), no redirection into a file (`2>/dev/null` and `2>&1` are fine), no leading `VAR=value`, and no flag that writes or runs something (`sed -i`, `sort -o`, `find -exec`, `rg --pre`, `git -c`, `git diff --output`, `npm config set` …). `less`, `more`, `make`, `eslint` and `prettier` are not on the list. The guard reads the command's text; it is a heuristic, not a sandbox.
 
 Tell the check about your setup in your own settings.json: `autoMode.environment`, `autoMode.allow` and `autoMode.model` (see [configure.md](configure.md#auto-mode)).
 

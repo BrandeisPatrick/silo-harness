@@ -4,7 +4,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { splitCommands, words } from '../guard';
+import { allSimpleCommands, commandArgv } from '../guard';
 import { configDir } from '../paths';
 
 /** Blocks in a row, and in all, after which Auto mode pauses for the session (the approval cards come back). */
@@ -74,25 +74,18 @@ export function criticalTarget(target: string, cwd: string): boolean {
   return SYSTEM_DIRS.includes(abs);
 }
 
-const WRAPPERS = new Set(['env', 'nohup', 'time', 'nice', 'exec', 'command', 'builtin', 'caffeinate']);
-
 /**
  * Why a command asks the user even in Auto mode, whatever the safety check would say: it uses sudo, or it deletes a
  * critical folder (rm or rmdir of the home folder, /, the working directory itself, a system folder). Null otherwise.
+ * Commands inside substitutions, sh -c and eval strings, and what xargs or find -exec runs, count too.
  */
 export function alwaysAskReason(command: string, cwd: string): string | null {
-  for (const simple of splitCommands(command.trim())) {
-    const w = words(simple);
-    let i = 0;
-    while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
-    while (i < w.length && WRAPPERS.has(w[i])) {
-      i++;
-      while (i < w.length && w[i].startsWith('-')) i++;
-    }
-    const prog = path.basename(w[i] ?? '');
+  for (const simple of allSimpleCommands(command)) {
+    const argv = commandArgv(simple);
+    const prog = path.basename(argv[0] ?? '');
     if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
     if (prog === 'rm' || prog === 'rmdir') {
-      const args = w.slice(i + 1);
+      const args = argv.slice(1);
       const dash = args.indexOf('--');
       const targets = dash >= 0 ? [...args.slice(0, dash).filter((a) => !a.startsWith('-')), ...args.slice(dash + 1)] : args.filter((a) => !a.startsWith('-'));
       if (targets.some((t) => criticalTarget(t, cwd))) return 'deletes a critical folder';

@@ -1,19 +1,48 @@
 // The auto-mode guard: pure rules that decide which commands and writes still need the user's OK.
 // Also: the plan-mode read-only allowlist and the "program" of a command for session allow-lists.
+// A heuristic over the command text, not a sandbox: it looks inside $(…), backticks, <(…), sh -c '…', eval, xargs
+// and find -exec, and at redirections, but a command can still hide what it runs (a script file, a variable).
 
 import os from 'node:os';
 import path from 'node:path';
+import { configDir } from './paths';
 
-/** Split a command line into simple commands on newlines, ;, &, &&, |, || (quote-aware, no heredoc parsing). */
-export function splitCommands(command: string): string[] {
-  const parts: string[] = [];
+/** A simple command and the operator before it ('' for the first; ';', '\n', '&&', '||', '|', '&'). */
+interface Part {
+  cmd: string;
+  op: string;
+}
+
+/**
+ * Split a command line into simple commands on newlines, ;, &, &&, |, || (quote-aware, no heredoc parsing). The text
+ * of $(…), <(…), >(…) and backticks stays inside its simple command; & and | that belong to a redirection (2>&1, &>f,
+ * >|f) do not split.
+ */
+function splitParts(command: string): Part[] {
+  const parts: Part[] = [];
   let cur = '';
+  let op = '';
   let quote: string | null = null;
+  let depth = 0;
+  const push = (next: string) => {
+    parts.push({ cmd: cur, op });
+    cur = '';
+    op = next;
+  };
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
+    if (quote === "'") {
+      cur += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === '\\' && i + 1 < command.length) {
+      cur += c + command[++i];
+      continue;
+    }
     if (quote) {
       cur += c;
-      if (c === quote && command[i - 1] !== '\\') quote = null;
+      if (c === quote) quote = null;
       continue;
     }
     if (c === '"' || c === "'" || c === '`') {
@@ -21,26 +50,62 @@ export function splitCommands(command: string): string[] {
       cur += c;
       continue;
     }
+    if (c === '(' && (depth > 0 || (i > 0 && '$<>='.includes(command[i - 1])))) {
+      depth++;
+      cur += c;
+      continue;
+    }
+    if (c === ')' && depth > 0) {
+      depth--;
+      cur += c;
+      continue;
+    }
+    if (depth > 0) {
+      cur += c;
+      continue;
+    }
+    const prev = command[i - 1] ?? '';
     if (c === '\n' || c === ';') {
-      parts.push(cur);
-      cur = '';
+      push(c);
       continue;
     }
-    if ((c === '&' && command[i + 1] === '&') || (c === '|' && command[i + 1] === '|')) {
-      parts.push(cur);
-      cur = '';
-      i++;
+    if (c === '&') {
+      // part of a redirection: >&2, <&0, &>file, &>>file
+      if (prev === '>' || prev === '<' || command[i + 1] === '>') {
+        cur += c;
+        continue;
+      }
+      if (command[i + 1] === '&') {
+        i++;
+        push('&&');
+        continue;
+      }
+      push('&');
       continue;
     }
-    if (c === '|' || c === '&') {
-      parts.push(cur);
-      cur = '';
+    if (c === '|') {
+      if (prev === '>') {
+        cur += c; // >| clobber
+        continue;
+      }
+      if (command[i + 1] === '|') {
+        i++;
+        push('||');
+        continue;
+      }
+      if (command[i + 1] === '&') i++; // |& pipes stderr too
+      push('|');
       continue;
     }
     cur += c;
   }
-  parts.push(cur);
-  return parts.map((p) => p.trim()).filter(Boolean);
+  parts.push({ cmd: cur, op });
+  return parts.map((p) => ({ cmd: p.cmd.trim(), op: p.op })).filter((p) => p.cmd);
+}
+
+/** Split a command line into simple commands on newlines, ;, &, &&, |, || (quote-aware, no heredoc parsing). */
+export function splitCommands(command: string): string[] {
+  return splitParts(command).map((p) => p.cmd);
 }
 
 /** Words of a simple command with quotes removed (rough: no variable expansion). */
@@ -78,32 +143,322 @@ export function words(cmd: string): string[] {
   return out;
 }
 
+/** Index of the ) that closes the ( at `open`, quote-aware; the end of the text when there is none. */
+function closingParen(s: string, open: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return i;
+  }
+  return s.length;
+}
+
+/**
+ * The command texts inside substitutions: $(…), backticks, <(…), >(…) and zsh's =(…). `found` is also true for
+ * ${…@P}, ${!…} and zsh's ${(e)…}-style flags, which expand to code or to other variables. $((…)) arithmetic and
+ * plain $VAR / ${VAR} are not substitutions here. Text in single quotes is literal.
+ */
+export function substitutions(s: string): { inner: string[]; found: boolean } {
+  const inner: string[] = [];
+  let found = false;
+  let dq = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (c === "'" && !dq) {
+      const end = s.indexOf("'", i + 1);
+      i = end < 0 ? s.length : end;
+      continue;
+    }
+    if (c === '"') {
+      dq = !dq;
+      continue;
+    }
+    if (c === '`') {
+      let j = i + 1;
+      while (j < s.length && s[j] !== '`') j += s[j] === '\\' ? 2 : 1;
+      inner.push(s.slice(i + 1, j));
+      found = true;
+      i = j;
+      continue;
+    }
+    if (c === '$' && s[i + 1] === '(') {
+      if (s[i + 2] === '(') {
+        i += 2; // $(( arithmetic: its text is scanned on
+        continue;
+      }
+      const j = closingParen(s, i + 1);
+      inner.push(s.slice(i + 2, j));
+      found = true;
+      i = j;
+      continue;
+    }
+    if (c === '$' && s[i + 1] === '{') {
+      const end = s.indexOf('}', i + 2);
+      const body = s.slice(i + 2, end < 0 ? s.length : end);
+      if (body.startsWith('!') || body.startsWith('(') || /@P/.test(body)) found = true;
+      continue;
+    }
+    if (!dq && (c === '<' || c === '>' || (c === '=' && (i === 0 || /\s/.test(s[i - 1])))) && s[i + 1] === '(') {
+      const j = closingParen(s, i + 1);
+      inner.push(s.slice(i + 2, j));
+      found = true;
+      i = j;
+    }
+  }
+  return { inner, found };
+}
+
+/** A simple command lexed: its words (quotes removed, redirections left out) and what it redirects into and from. */
+interface Lexed {
+  words: string[];
+  /** Files written by > >> >| &> &>> >&file <> */
+  writes: string[];
+  /** Files read by < and <> */
+  reads: string[];
+}
+
+const BREAKS = new Set([' ', '\t', '\n', '<', '>', '|', ';', '&']);
+
+function lex(cmd: string): Lexed {
+  const out: Lexed = { words: [], writes: [], reads: [] };
+  let i = 0;
+  const n = cmd.length;
+  // One shell word from i: quotes removed, $(…) <(…) >(…) kept whole.
+  const word = (): string => {
+    let cur = '';
+    while (i < n) {
+      const c = cmd[i];
+      if (c === "'" || c === '"') {
+        const end = cmd.indexOf(c, i + 1);
+        const stop = end < 0 ? n : end;
+        cur += cmd.slice(i + 1, stop);
+        i = stop + 1;
+        continue;
+      }
+      if (c === '\\' && i + 1 < n) {
+        cur += cmd[i + 1];
+        i += 2;
+        continue;
+      }
+      if ((c === '$' || c === '<' || c === '>' || c === '=') && cmd[i + 1] === '(') {
+        const j = closingParen(cmd, i + 1);
+        cur += cmd.slice(i, j + 1);
+        i = j + 1;
+        continue;
+      }
+      if (c === '`') {
+        let j = i + 1;
+        while (j < n && cmd[j] !== '`') j += cmd[j] === '\\' ? 2 : 1;
+        cur += cmd.slice(i, j + 1);
+        i = j + 1;
+        continue;
+      }
+      if (BREAKS.has(c)) break;
+      cur += c;
+      i++;
+    }
+    return cur;
+  };
+  const skipSpace = () => {
+    while (i < n && /\s/.test(cmd[i])) i++;
+  };
+  while (i < n) {
+    skipSpace();
+    if (i >= n) break;
+    const m = /^(\d+|&)?(>>|>\||>&|<>|<&|<<<|<<-?|>|<)/.exec(cmd.slice(i));
+    if (m && !(cmd[i + m[0].length] === '(' && (m[2] === '>' || m[2] === '<'))) {
+      const op = m[2];
+      i += m[0].length;
+      skipSpace();
+      const target = word();
+      if (op === '<<' || op === '<<-' || op === '<<<' || op === '<&') continue;
+      if (op === '>&') {
+        if (!/^(\d+-?|-)$/.test(target)) out.writes.push(target);
+        continue;
+      }
+      if (op === '<') out.reads.push(target);
+      else if (op === '<>') {
+        out.reads.push(target);
+        out.writes.push(target);
+      } else out.writes.push(target);
+      continue;
+    }
+    const start = i;
+    const w = word();
+    if (i === start) {
+      i++; // a stray | ; & the splitter left
+      continue;
+    }
+    out.words.push(w);
+  }
+  return out;
+}
+
 const WRAPPERS = new Set(['env', 'nohup', 'time', 'nice', 'exec', 'command', 'builtin', 'caffeinate']);
+/** A wrapper's options that take a value */
+const WRAPPER_VALUE_FLAGS: Record<string, string[]> = { env: ['-u', '-C', '-S', '-P'], nice: ['-n'], caffeinate: ['-t', '-w'], time: ['-o', '-f'] };
+/** Words that start a command without being its program */
+const LEADERS = new Set(['!', '{', '(', 'do', 'then', 'else', 'elif', 'if', 'while', 'until']);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/;
+
+/** A simple command's program and arguments: leading keywords, env assignments and wrappers (env, nohup, time …) skipped. */
+function argvOf(simple: string): { argv: string[]; assigns: boolean; lexed: Lexed } {
+  const lexed = lex(simple);
+  const w = lexed.words.slice();
+  if (w[0] && /^[({]./.test(w[0])) w[0] = w[0].replace(/^[({]+/, '');
+  let i = 0;
+  let assigns = false;
+  while (i < w.length) {
+    if (LEADERS.has(w[i])) {
+      i++;
+      continue;
+    }
+    if (ASSIGNMENT.test(w[i])) {
+      assigns = true;
+      i++;
+      continue;
+    }
+    if (WRAPPERS.has(w[i])) {
+      let j = i + 1;
+      const valued = WRAPPER_VALUE_FLAGS[w[i]] ?? [];
+      while (j < w.length && (w[j].startsWith('-') || (w[i] === 'env' && ASSIGNMENT.test(w[j])))) {
+        if (ASSIGNMENT.test(w[j])) assigns = true;
+        j += valued.includes(w[j]) ? 2 : 1;
+      }
+      if (j >= w.length) break; // `env` or `time` alone is the program
+      i = j;
+      continue;
+    }
+    break;
+  }
+  const argv = w.slice(i);
+  // the ) that closes a subshell: (cd x; rm -rf ~)
+  const last = argv.length - 1;
+  if (last > 0 && argv[last].endsWith(')') && (argv[last].match(/\)/g) ?? []).length > (argv[last].match(/\(/g) ?? []).length) {
+    argv[last] = argv[last].replace(/\)+$/, '');
+    if (!argv[last]) argv.pop();
+  }
+  return { argv, assigns, lexed };
+}
+
+/** The program and arguments of a simple command (see argvOf), quotes removed and redirections left out. */
+export function commandArgv(simple: string): string[] {
+  return argvOf(simple).argv;
+}
 
 /** The program a simple command runs: env assignments and wrappers like env/nohup/time are skipped; sudo counts as the program. */
 export function programOf(simple: string): string {
-  const w = words(simple);
-  let i = 0;
-  while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
-  while (i < w.length && WRAPPERS.has(w[i])) {
-    i++;
-    while (i < w.length && w[i].startsWith('-')) i++;
-  }
-  return path.basename(w[i] ?? '');
+  return path.basename(argvOf(simple).argv[0] ?? '');
 }
 
-/** Programs of every simple command in a command line, deduplicated, in order. */
+/** Programs of every simple command in a command line, those inside substitutions and sh -c strings included, deduplicated, in order. */
 export function programsOf(command: string): string[] {
   const seen: string[] = [];
-  for (const simple of splitCommands(command)) {
+  for (const simple of allSimpleCommands(command)) {
     const p = programOf(simple);
     if (p && !seen.includes(p)) seen.push(p);
   }
   return seen;
 }
 
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+/** xargs options that take a value as the next word */
+const XARGS_VALUE_FLAGS = new Set(['-I', '-J', '-L', '-n', '-P', '-s', '-E', '-d', '-a', '-R', '-S', '--max-args', '--max-procs', '--delimiter', '--arg-file', '--max-lines', '--replace']);
+
+/** A word list back into a command line */
+function joinWords(w: string[]): string {
+  return w.map((x) => (/^[\w@%+=:,./~-]+$/.test(x) ? x : `'${x.replace(/'/g, `'\\''`)}'`)).join(' ');
+}
+
+/** The commands a simple command runs from its arguments: sh -c and eval strings, xargs and find -exec programs, timeout's command. */
+function nestedCommands(argv: string[], piped: string | null): string[] {
+  const prog = path.basename(argv[0] ?? '');
+  const args = argv.slice(1);
+  if (SHELLS.has(prog)) {
+    const c = args.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
+    if (c >= 0) {
+      const script = args.slice(c + 1).find((a) => !a.startsWith('-'));
+      return script !== undefined ? [script] : [];
+    }
+    return [];
+  }
+  if (prog === 'eval') return [args.join(' ')];
+  if (prog === 'timeout' || prog === 'gtimeout') {
+    let i = 0;
+    while (i < args.length && args[i].startsWith('-')) i += args[i] === '-s' || args[i] === '-k' || args[i] === '--signal' || args[i] === '--kill-after' ? 2 : 1;
+    return args.length > i + 1 ? [joinWords(args.slice(i + 1))] : [];
+  }
+  if (prog === 'xargs') {
+    let i = 0;
+    while (i < args.length && args[i].startsWith('-')) i += XARGS_VALUE_FLAGS.has(args[i]) ? 2 : 1;
+    const run = args.slice(i);
+    if (!run.length) run.push('echo');
+    // `echo ~ | xargs rm -rf`: the words echo or printf feeds it are its arguments
+    if (piped) {
+      const p = argvOf(piped).argv;
+      if (p[0] === 'echo' || p[0] === 'printf') run.push(...p.slice(1).filter((a) => !a.startsWith('-')));
+    }
+    return [joinWords(run)];
+  }
+  if (prog === 'find') {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (!['-exec', '-execdir', '-ok', '-okdir'].includes(args[i])) continue;
+      const run: string[] = [];
+      let j = i + 1;
+      while (j < args.length && args[j] !== ';' && args[j] !== '+') run.push(args[j++]);
+      if (run.length) out.push(joinWords(run));
+      i = j;
+    }
+    return out;
+  }
+  return [];
+}
+
+const MAX_DEPTH = 4;
+const MAX_COMMANDS = 200;
+
+/**
+ * Every simple command a command line runs as far as its text shows: the top-level ones, then (to a bounded depth)
+ * those inside substitutions, sh/bash/zsh -c and eval strings, and the program xargs or find -exec runs.
+ */
+export function allSimpleCommands(command: string): string[] {
+  const out: string[] = [];
+  const walk = (text: string, depth: number) => {
+    const parts = splitParts(text);
+    parts.forEach((p, k) => {
+      if (out.length >= MAX_COMMANDS) return;
+      out.push(p.cmd);
+      if (depth >= MAX_DEPTH) return;
+      const nested = [...substitutions(p.cmd).inner, ...nestedCommands(argvOf(p.cmd).argv, k > 0 && p.op === '|' ? parts[k - 1].cmd : null)];
+      for (const n of nested) walk(n, depth + 1);
+    });
+  };
+  walk(command.trim(), 0);
+  return out;
+}
+
 function expandHome(p: string): string {
-  return p.replace(/^~(?=$|\/)/, os.homedir()).replace(/^\$HOME(?=$|\/)/, os.homedir());
+  return p.replace(/^~(?=$|\/)/, os.homedir()).replace(/^\$\{?HOME\}?(?=$|\/)/, os.homedir());
 }
 
 /** True when `target` is the working directory or inside it (both resolved). */
@@ -114,34 +469,77 @@ export function insideCwd(target: string, cwd: string): boolean {
 }
 
 const TMP_RE = /^(\/private)?\/tmp(\/|$)|^\/var\/folders\//;
+/** Redirection targets that write nothing */
+const NULL_DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr']);
 
 function isAbsolutePathArg(a: string): boolean {
-  return a.startsWith('/') || a.startsWith('~') || a.startsWith('$HOME');
+  return a.startsWith('/') || a.startsWith('~') || a.startsWith('$HOME') || a.startsWith('${HOME}');
 }
 
 function pathArgsOutsideCwd(args: string[], cwd: string): string[] {
-  return args.filter((a) => isAbsolutePathArg(a) && !insideCwd(a, cwd) && !TMP_RE.test(expandHome(a)) && a !== '/dev/null');
+  return args.filter((a) => isAbsolutePathArg(a) && !insideCwd(a, cwd) && !TMP_RE.test(expandHome(a)) && !NULL_DEVICES.has(a));
 }
 
 const BROAD_TARGETS = new Set(['/', '~', '$HOME', '*', './*', '..', '../', '.', './', '~/', '/*']);
 
-function gitWords(w: string[]): { sub: string; rest: string[] } {
+/** Git's global options before the subcommand that take a value as the next word */
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix']);
+
+function gitWords(w: string[]): { sub: string; rest: string[]; globals: string[] } {
   // skip global options such as -C <dir> or --no-pager
   let i = 1;
+  const globals: string[] = [];
   while (i < w.length && w[i].startsWith('-')) {
-    if (w[i] === '-C' || w[i] === '-c') i++;
+    globals.push(w[i]);
+    if (GIT_VALUE_OPTIONS.has(w[i])) i++;
     i++;
   }
-  return { sub: w[i] ?? '', rest: w.slice(i + 1) };
+  return { sub: w[i] ?? '', rest: w.slice(i + 1), globals };
 }
 
+const SECRET_PATH_RE = /(^|\/)(\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.docker\/config\.json|\.config\/gh|\.env(\.(?!(example|sample|template|dist)(\/|$))[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|[^/]*\.key)(\/|$)/;
+/** The app's own data under the home folder: sessions, and config.json with the provider keys */
+export const APP_DATA = ['Library/Application Support/Silo Harness', 'Library/Application Support/Open Harness'];
+
+/** a is b or a folder that holds b */
+function holds(a: string, b: string): boolean {
+  return a === b || b.startsWith(a.endsWith(path.sep) ? a : a + path.sep);
+}
+
+/**
+ * True when a path names keys or credentials: ~/.ssh, ~/.aws, .env files (not .env.example and the like), *.pem …,
+ * or the app's own data (config.json holds provider keys) and the user's settings.json (its env block may).
+ */
+export function isSecretPath(p: string, cwd = '/'): boolean {
+  const e = expandHome(p);
+  if (SECRET_PATH_RE.test(e)) return true;
+  const abs = path.resolve(cwd, e);
+  const h = os.homedir();
+  if (APP_DATA.some((d) => holds(path.join(h, d), abs))) return true;
+  for (const dir of [configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')]) if (abs === path.join(dir, 'settings.json')) return true;
+  return false;
+}
+
+/** The paths an argument may name: itself, and what follows `@` or `=` (curl -d @file, -F key=@file, --file=x). */
+function pathsIn(arg: string): string[] {
+  const out = [arg];
+  if (arg.startsWith('@')) out.push(arg.slice(1));
+  const eq = arg.indexOf('=');
+  if (eq > 0) {
+    const v = arg.slice(eq + 1);
+    out.push(v.startsWith('@') ? v.slice(1) : v);
+  }
+  return out.filter(Boolean);
+}
+
+/** Programs that name a path without reading what is in it */
+const NO_READ_PROGRAMS = new Set(['rm', 'rmdir', 'mkdir', 'touch', 'chmod', 'chown', 'chgrp', 'ls', 'stat', 'test', '[', 'du']);
 const WRITE_PROGRAMS = new Set(['cp', 'mv', 'rm', 'mkdir', 'touch', 'ln', 'rsync', 'install', 'unzip', 'tar']);
-const SECRET_PATH_RE = /(^|\/)(\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.docker\/config\.json|\.config\/gh|\.env(\.[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|[^/]*\.key)(\/|$)/;
-const READ_PROGRAMS = new Set(['cat', 'less', 'more', 'head', 'tail', 'grep', 'rg', 'bat', 'open', 'cp', 'scp', 'base64', 'xxd', 'strings']);
 
 /**
  * Why a shell command should pause for the user in auto mode, or null when it is routine development work
  * (builds, tests, git status/add/commit, file operations inside the working directory, package installs …).
+ * Looks at every simple command, those inside substitutions, sh -c and eval strings and xargs / find -exec too.
  */
 export function guardCommand(command: string, cwd: string): string | null {
   const raw = command.trim();
@@ -150,21 +548,15 @@ export function guardCommand(command: string, cwd: string): string | null {
   if (/\b(sh|bash|zsh)\s+-c\s+["']?\$\(\s*(curl|wget)\b/.test(raw)) return 'pipes a download into a shell';
   if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(raw)) return 'fork bomb';
 
-  for (const simple of splitCommands(raw)) {
-    const w = words(simple);
-    if (!w.length) continue;
-    // env assignments / wrappers
-    let i = 0;
-    while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
-    while (i < w.length && WRAPPERS.has(w[i])) {
-      i++;
-      while (i < w.length && w[i].startsWith('-')) i++;
-    }
-    const argv = w.slice(i);
+  for (const simple of allSimpleCommands(raw)) {
+    const { argv, lexed } = argvOf(simple);
     const prog = path.basename(argv[0] ?? '');
     const args = argv.slice(1);
     const flags = args.filter((a) => a.startsWith('-'));
     const targets = args.filter((a) => !a.startsWith('-'));
+    // redirections: > path, 2> path, &> path, >| path (not 2>&1, >&2, /dev/null)
+    if (pathArgsOutsideCwd(lexed.writes, cwd).length) return 'writes outside the working directory';
+    if (lexed.reads.some((t) => isSecretPath(t, cwd))) return 'reads secrets';
     if (!prog) continue;
 
     if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
@@ -209,17 +601,10 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'security' && targets.some((t) => /^(find|dump|export|delete|add)-/.test(t))) return 'reads or changes the keychain';
     if (prog === 'printenv' && !targets.length) return 'reads secrets';
     if (prog === 'env' && !targets.length && !flags.length) return 'reads secrets';
-    if (READ_PROGRAMS.has(prog) && targets.some((t) => SECRET_PATH_RE.test(expandHome(t)))) return 'reads secrets';
+    if (!NO_READ_PROGRAMS.has(prog) && args.some((a) => pathsIn(a).some((p) => isSecretPath(p, cwd)))) return 'reads secrets';
     if (prog === 'sed' && flags.some((f) => /^-[a-zA-Z]*i/.test(f) || f === '--in-place') && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (WRITE_PROGRAMS.has(prog) && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (prog === 'tee' && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
-    // redirections: > path or >> path (not 2>&1, >&2, /dev/null)
-    const redirects = simple.match(/(?<![0-9&])>{1,2}\s*([^\s;&|]+)/g) ?? [];
-    for (const r of redirects) {
-      const target = r.replace(/^>{1,2}\s*/, '').replace(/^["']|["']$/g, '');
-      if (target.startsWith('&')) continue;
-      if (pathArgsOutsideCwd([target], cwd).length) return 'writes outside the working directory';
-    }
   }
   return null;
 }
@@ -236,54 +621,218 @@ export function guardWrite(absPath: string, cwd: string): string | null {
 const READ_ONLY_PROGRAMS = new Set([
   'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'find', 'fd', 'pwd', 'which', 'whereis', 'type', 'echo', 'printf', 'tree', 'du', 'df', 'stat', 'file',
   'date', 'uname', 'sw_vers', 'hostname', 'whoami', 'id', 'true', 'false', 'test', '[', 'sort', 'uniq', 'cut', 'awk', 'tr', 'diff', 'cmp', 'md5', 'shasum', 'jq', 'yq',
-  'basename', 'dirname', 'realpath', 'readlink', 'column', 'nl', 'less', 'more', 'bat', 'xargs', 'sed', 'git', 'npm', 'pnpm', 'yarn', 'node', 'python3', 'python', 'pip', 'pip3',
-  'cargo', 'go', 'rustc', 'java', 'ruby', 'php', 'perl', 'swift', 'xcodebuild', 'make', 'cmake', 'tsc', 'eslint', 'prettier',
+  'basename', 'dirname', 'realpath', 'readlink', 'column', 'nl', 'bat', 'sed', 'git', 'npm', 'pnpm', 'yarn', 'node', 'python3', 'python', 'pip', 'pip3',
+  'cargo', 'go', 'rustc', 'java', 'ruby', 'php', 'perl', 'swift', 'xcodebuild', 'cmake', 'tsc',
 ]);
 const GIT_READ_ONLY = new Set(['status', 'log', 'diff', 'show', 'blame', 'rev-parse', 'ls-files', 'ls-tree', 'describe', 'shortlog', 'reflog', 'cat-file', 'grep', 'remote', 'config', 'rev-list', 'count-objects', 'branch', 'tag', 'stash', 'worktree', 'help', 'version']);
 const PKG_READ_ONLY = new Set(['ls', 'list', 'view', 'info', 'outdated', 'audit', 'why', 'explain', 'show', 'search', 'help', 'version', '-v', '--version', 'config']);
+/** Git's global options that set config, or point it at other code or another repository */
+const GIT_UNSAFE_GLOBAL = /^(-c|--config-env|--exec-path|--git-dir|--work-tree)(=|$)/;
 
-/** True when every simple command in the line only reads (plan mode runs these without asking). */
-export function isReadOnlyCommand(command: string): boolean {
-  const raw = command.trim();
-  if (!raw) return false;
-  if (/(?<![0-9&])>{1,2}(?!&)/.test(raw)) return false; // any redirection into a file
-  for (const simple of splitCommands(raw)) {
-    const w = words(simple);
-    let i = 0;
-    while (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) i++;
-    while (i < w.length && WRAPPERS.has(w[i])) i++;
-    const argv = w.slice(i);
-    const prog = path.basename(argv[0] ?? '');
-    const args = argv.slice(1);
-    const flags = args.filter((a) => a.startsWith('-'));
-    const targets = args.filter((a) => !a.startsWith('-'));
-    if (!prog) continue;
-    if (!READ_ONLY_PROGRAMS.has(prog)) return false;
-    if (prog === 'sed' && flags.some((f) => /^-[a-zA-Z]*i/.test(f) || f === '--in-place')) return false;
-    if (prog === 'find' && (args.includes('-delete') || args.includes('-exec') || args.includes('-execdir') || args.includes('-ok'))) return false;
-    if (prog === 'xargs') return false;
-    if (prog === 'git') {
-      const { sub, rest } = gitWords(argv);
+/** A short-option cluster (-abc, not --long) that holds one of `letters` */
+const shortHas = (a: string, letters: string): boolean => /^-[^-]/.test(a) && [...a.slice(1)].some((c) => letters.includes(c));
+/** An option given as `--name` or `--name=value` */
+const longIs = (a: string, ...names: string[]): boolean => names.some((n) => a === n || a.startsWith(n + '='));
+
+/**
+ * True when a sed script only prints or edits the stream: no w/W/e/r/R commands, no s///w or s///e flag. Anything it
+ * cannot read is false.
+ */
+export function sedScriptReadOnly(script: string): boolean {
+  const s = script;
+  let i = 0;
+  // Skips a delimited part from i (at the delimiter) and returns the index after its closing delimiter
+  const delimited = (from: number, delim: string): number => {
+    let j = from + 1;
+    while (j < s.length && s[j] !== delim) j += s[j] === '\\' ? 2 : 1;
+    return j + 1;
+  };
+  while (i < s.length) {
+    while (i < s.length && /[\s;{}!]/.test(s[i])) i++;
+    if (i >= s.length) break;
+    // addresses: 1, $, /re/, \cREc, ranges, steps
+    while (i < s.length) {
+      const c = s[i];
+      if (/[0-9$,~+\s]/.test(c)) i++;
+      else if (c === '/') i = delimited(i, '/');
+      else if (c === '\\' && i + 1 < s.length) i = delimited(i + 1, s[i + 1]);
+      else break;
+      if (s[i] === 'I' || s[i] === 'M') i++;
+    }
+    while (i < s.length && /[\s!]/.test(s[i])) i++;
+    const cmd = s[i];
+    if (cmd === undefined) break;
+    if (cmd === '{' || cmd === '}' || cmd === ';') {
+      i++;
+      continue;
+    }
+    if (cmd === 's' || cmd === 'y') {
+      const delim = s[i + 1];
+      if (!delim || delim === '\\' || delim === '\n') return false;
+      i = delimited(i + 1, delim) - 1;
+      i = delimited(i, delim);
+      if (cmd === 's') {
+        const flags = /^[gpiImMe0-9w]*/.exec(s.slice(i))?.[0] ?? '';
+        if (/[we]/.test(flags)) return false;
+        i += flags.length;
+      }
+      continue;
+    }
+    if ('pPdDnNgGhHxlz=Fv'.includes(cmd)) {
+      i++;
+      continue;
+    }
+    if (cmd === 'q' || cmd === 'Q') {
+      i++;
+      while (i < s.length && /[0-9]/.test(s[i])) i++;
+      continue;
+    }
+    if ('bt:T'.includes(cmd) || cmd === '#' || 'aic'.includes(cmd)) {
+      // a label, a comment or text: to the end of the line (or the ; for a label)
+      const stop = 'bt:T'.includes(cmd) ? /[;\n]/ : /\n/;
+      i++;
+      while (i < s.length && !stop.test(s[i])) i++;
+      continue;
+    }
+    return false; // w W e r R, or something this does not know
+  }
+  return true;
+}
+
+/** True when an awk program text only reads: no system(), pipes, output redirection or getline. */
+function awkTextReadOnly(text: string): boolean {
+  return !/system|\||>|getline/.test(text);
+}
+
+/** False when a read-only program's arguments make it write or run something. */
+function readOnlyArgs(prog: string, argv: string[]): boolean {
+  const args = argv.slice(1);
+  const flags = args.filter((a) => a.startsWith('-'));
+  const targets = args.filter((a) => !a.startsWith('-'));
+  switch (prog) {
+    case 'sed': {
+      if (flags.some((f) => longIs(f, '--in-place', '--file') || shortHas(f, 'if'))) return false;
+      const scripts: string[] = [];
+      let sawE = false;
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '-e' || args[i] === '--expression') {
+          sawE = true;
+          scripts.push(args[++i] ?? '');
+        } else if (args[i].startsWith('--expression=')) {
+          sawE = true;
+          scripts.push(args[i].slice('--expression='.length));
+        } else if (/^-[^-]*e./.test(args[i])) {
+          sawE = true;
+          scripts.push(args[i].slice(args[i].indexOf('e') + 1));
+        }
+      }
+      if (!sawE) scripts.push(targets[0] ?? '');
+      return scripts.every(sedScriptReadOnly);
+    }
+    case 'awk':
+      if (flags.some((f) => shortHas(f, 'fiE') || longIs(f, '--file', '--include', '--exec', '--load'))) return false;
+      return args.every(awkTextReadOnly);
+    case 'sort':
+      return !flags.some((f) => /^-[^-]*o/.test(f) || longIs(f, '--output', '--compress-program'));
+    case 'tree':
+      return !flags.some((f) => shortHas(f, 'oR'));
+    case 'uniq': {
+      let operands = 0;
+      for (let i = 0; i < args.length; i++) {
+        if (['-f', '-s', '-w'].includes(args[i])) i++;
+        else if (!args[i].startsWith('-') || args[i] === '-') operands++;
+      }
+      return operands < 2;
+    }
+    case 'find':
+      return !args.some((a) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'].includes(a));
+    case 'fd':
+      return !flags.some((f) => shortHas(f, 'xX') || longIs(f, '--exec', '--exec-batch'));
+    case 'bat':
+      return !flags.some((f) => longIs(f, '--pager'));
+    case 'ag':
+      return !flags.some((f) => longIs(f, '--pager'));
+    case 'yq':
+      return !flags.some((f) => longIs(f, '--inplace') || shortHas(f, 'i'));
+    case 'file':
+      return !flags.some((f) => shortHas(f, 'C') || longIs(f, '--compile'));
+    case 'hostname':
+      return targets.length === 0;
+    case 'rg':
+      return !flags.some((f) => longIs(f, '--pre', '--pre-glob', '--hostname-bin'));
+    case 'tsc':
+      return flags.includes('--noEmit') && !flags.some((f) => longIs(f, '--generateTrace', '--generateCpuProfile', '--build') || f === '-b' || f === '-w' || f === '--watch');
+    case 'git': {
+      const { sub, rest, globals } = gitWords(argv);
+      if (globals.some((g) => GIT_UNSAFE_GLOBAL.test(g))) return false;
       if (!GIT_READ_ONLY.has(sub)) return false;
+      if (rest.some((a) => longIs(a, '--output', '--ext-diff', '--textconv', '--filters'))) return false;
+      if (sub === 'grep' && rest.some((a) => longIs(a, '--open-files-in-pager') || /^-O/.test(a) || shortHas(a, 'O'))) return false;
+      if (sub === 'help' && rest.some((a) => a === '-w' || a === '--web')) return false;
       if (sub === 'branch' && rest.some((a) => /^-[a-zA-Z]*[dDmMcC]/.test(a) || !a.startsWith('-'))) return false; // creating/deleting/renaming
       if (sub === 'tag' && rest.some((a) => !a.startsWith('-') || /^-[a-zA-Z]*[dfa]/.test(a))) return false;
       if (sub === 'stash' && rest[0] !== 'list' && rest[0] !== 'show') return false;
       if (sub === 'remote' && rest.length && rest[0] !== '-v' && rest[0] !== 'show' && rest[0] !== 'get-url') return false;
       if (sub === 'config' && !rest.some((a) => a === '--get' || a === '--list' || a === '-l' || a === '--get-all')) return false;
       if (sub === 'worktree' && rest[0] !== 'list') return false;
+      return true;
     }
-    if (['npm', 'pnpm', 'yarn', 'pip', 'pip3', 'cargo', 'go'].includes(prog)) {
+    case 'npm':
+    case 'pnpm':
+    case 'yarn': {
       const sub = targets[0] ?? flags[0] ?? '';
-      if (prog === 'cargo' && !['tree', 'metadata', 'version', '--version', '-V', 'search'].includes(sub)) return false;
-      if (prog === 'go' && !['version', 'env', 'list', 'doc'].includes(sub)) return false;
-      if ((prog === 'pip' || prog === 'pip3') && !['list', 'show', 'freeze', '--version', '-V', 'check'].includes(sub)) return false;
-      if ((prog === 'npm' || prog === 'pnpm' || prog === 'yarn') && !PKG_READ_ONLY.has(sub)) return false;
+      if (!PKG_READ_ONLY.has(sub)) return false;
+      if (sub === 'config') return ['get', 'list', 'ls'].includes(targets[1] ?? '');
+      if (sub === 'audit') return !args.some((a) => a === 'fix' || a === '--fix');
+      if (sub === 'version') return prog === 'npm' && args.length === 1;
+      return true;
     }
-    if (['node', 'python3', 'python', 'ruby', 'php', 'perl', 'java', 'swift', 'rustc'].includes(prog) && !args.every((a) => /^(-v|--version|-V|-version)$/.test(a))) return false;
-    if (['make', 'cmake', 'tsc', 'xcodebuild', 'eslint', 'prettier'].includes(prog)) {
-      const ok = (prog === 'make' && (flags.includes('-n') || flags.includes('--dry-run'))) || (prog === 'tsc' && flags.includes('--noEmit')) || (prog === 'xcodebuild' && (flags.includes('-list') || flags.includes('-version') || flags.includes('-showsdks'))) || (prog === 'eslint' && !flags.includes('--fix')) || (prog === 'prettier' && (flags.includes('--check') || flags.includes('-c') || flags.includes('--list-different'))) || (prog === 'cmake' && flags.includes('--version'));
-      if (!ok) return false;
+    case 'pip':
+    case 'pip3':
+      return ['list', 'show', 'freeze', '--version', '-V', 'check'].includes(targets[0] ?? flags[0] ?? '');
+    case 'cargo':
+      return ['tree', 'metadata', 'version', '--version', '-V', 'search'].includes(targets[0] ?? flags[0] ?? '');
+    case 'go': {
+      const sub = targets[0] ?? flags[0] ?? '';
+      if (!['version', 'env', 'list', 'doc'].includes(sub)) return false;
+      return !(sub === 'env' && flags.some((f) => f === '-w' || f === '-u'));
     }
+    case 'node':
+    case 'python3':
+    case 'python':
+    case 'ruby':
+    case 'php':
+    case 'perl':
+    case 'java':
+    case 'swift':
+    case 'rustc':
+      return args.every((a) => /^(-v|--version|-V|-version)$/.test(a));
+    case 'xcodebuild':
+      return flags.includes('-list') || flags.includes('-version') || flags.includes('-showsdks');
+    case 'cmake':
+      return flags.includes('--version');
+    default:
+      return true;
+  }
+}
+
+/**
+ * True when every simple command in the line only reads (plan mode runs these without asking). False for any
+ * substitution ($(…), backticks, <(…)), a redirection into a file, a leading VAR=value, a program outside the list,
+ * or a listed program with a flag that writes or runs something (sed -i, sort -o, git -c, rg --pre …).
+ */
+export function isReadOnlyCommand(command: string): boolean {
+  const raw = command.trim();
+  if (!raw) return false;
+  if (substitutions(raw).found) return false;
+  for (const simple of splitCommands(raw)) {
+    const { argv, assigns, lexed } = argvOf(simple);
+    if (assigns) return false;
+    if (lexed.writes.some((t) => !NULL_DEVICES.has(t))) return false;
+    const prog = path.basename(argv[0] ?? '');
+    if (!prog) continue;
+    if (!READ_ONLY_PROGRAMS.has(prog)) return false;
+    if (!readOnlyArgs(prog, argv)) return false;
   }
   return true;
 }

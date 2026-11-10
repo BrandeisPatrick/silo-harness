@@ -59,7 +59,7 @@ export interface ApprovalContext {
  * Decides, per permission mode, whether an action runs, asks, or is refused. A browser card asks: the browser policy
  * (browser/policy.ts siteDecision, clickRule) already weighed the mode, the site and the user's lists, and a purchase
  * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
- * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything. Otherwise a guard
+ * mode asks only for destructive ones). Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a guard
  * reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
  * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') sends what its rules (the
  * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
@@ -92,15 +92,20 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (mode === 'auto') return ref.destructive ? ask('destructive MCP tool', [ref.server]) : allow;
     return ask(null, [ref.server]);
   }
+  const reasonAllowed = (r: string) => ctx.allowed.reason(r) || !!rules?.reasons?.includes(r);
   if (mode === 'plan') {
     if (isEdit) return refuse(PLAN_EDIT_BLOCKED);
-    if (isCmd) return isReadOnlyCommand(detail) ? allow : refuse(PLAN_CMD_BLOCKED);
+    if (isCmd) {
+      if (!isReadOnlyCommand(detail)) return refuse(PLAN_CMD_BLOCKED);
+      // A read-only command the guard flags (cat ~/.aws/credentials: "reads secrets") asks with that reason
+      const r = guardCommand(detail, cwd);
+      return r && !reasonAllowed(r) ? ask(r, programsOf(detail)) : allow;
+    }
     return allow;
   }
   if (!isEdit && !isCmd) return allow;
   const reason = isCmd ? guardCommand(detail, cwd) : target ? guardWrite(target, cwd) : null;
   const programs = isCmd ? programsOf(detail) : [];
-  const reasonAllowed = (r: string) => ctx.allowed.reason(r) || !!rules?.reasons?.includes(r);
   const programsAllowed = programs.length > 0 && programs.every((p) => ctx.allowed.program(p) || rules?.programs?.includes(p));
   if (checked) {
     // Auto mode with its check. Commands: sudo and deleting a critical folder ask whatever the check would say; read-only
