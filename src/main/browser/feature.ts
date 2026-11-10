@@ -175,6 +175,7 @@ export function setupBrowser(app: App, browsers: Browsers): void {
     need().blockedPopup(String(tabId), action);
   });
   app.rpc.handle('browser.devTools', () => controller()?.toggleDevTools());
+  app.rpc.handle('browser.dismissPasskey', (tabId) => controller()?.dismissPasskey(String(tabId)));
   // Live tests only: the hidden window's views get no real input, so a test stands in for the user's key press
   if (process.env.SILO_HARNESS_LIVE_TEST) (app.rpc.handle as unknown as (name: string, fn: () => void) => void)('browser.liveTestUserInput', () => controller()?.liveTestUserInput());
 

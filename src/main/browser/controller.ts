@@ -403,6 +403,11 @@ export class BrowserController {
     if (action === 'show' && url) this.openFromPage(url, false);
   }
 
+  /** The passkey notice's OK on one of this session's tabs. */
+  dismissPasskey(tabId: string): void {
+    this.tabById(tabId).dismissPasskeyNotice();
+  }
+
   /** ⌥⌘I: a tab's DevTools, in a window of their own (a view in the pane has nowhere to dock them), opened or closed. */
   toggleDevTools(tab: BrowserTab = this.activeTab): void {
     const wc = tab.webContents;

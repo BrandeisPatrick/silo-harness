@@ -53,6 +53,8 @@ export interface TabState {
   security: PageSecurity;
   /** The page's zoom in percent (100: none; the URL pill shows a chip otherwise) */
   zoom: number;
+  /** The page asked for a passkey, which the pane cannot serve yet: its notice shows (once per page load) */
+  passkeyNotice?: boolean;
 }
 
 /** What a search in the find bar found on a tab (pushed as browser:found). */
@@ -220,6 +222,8 @@ export interface BrowserRpc {
   'browser.blockedPopup': (tabId: string, action: 'show' | 'dismiss') => void;
   /** ⌥⌘I with the pane focused: the active tab's DevTools, detached, opened or closed */
   'browser.devTools': () => void;
+  /** The passkey notice's OK: it goes for the rest of that tab's page load */
+  'browser.dismissPasskey': (tabId: string) => void;
 
   // ---------- Permissions (the bar under the URL bar) ----------
   /** The requests waiting for an answer, every tab's (the bar shows the active tab's first) */
