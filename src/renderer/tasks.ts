@@ -1,8 +1,8 @@
 // The agent's task list (the update_tasks tool, tasks_updated events, SessionMeta.tasks): a card in the conversation,
 // always last, under the newest message. No header and no counts: one row per task, to do (a dashed circle), in
-// progress (a spinner arc) or done (a filled tick, muted). Rows are keyed by task id and updated in place, so a status
-// change only touches its own row. Also: the rows as a static snapshot, for update_tasks rows in the transcript
-// (those keep their own glyphs, see taskGlyph).
+// progress (a spinner arc during a run, a paused circle otherwise) or done (a filled tick, muted). Rows are keyed by
+// task id and updated in place, so a status change only touches its own row. Also: the rows as a static snapshot,
+// for update_tasks rows in the transcript (those keep their own glyphs, see taskGlyph).
 
 import type { TaskItem } from '../shared/types';
 import { icon } from './icons.js';
@@ -43,16 +43,20 @@ export function taskGlyph(status: Status): string {
   return icon('circle', 14);
 }
 
-/** The card's glyph: to do a dashed circle, in progress a spinner arc, done a filled circle with a tick. */
+/**
+ * The card's glyph: to do a dashed circle, done a filled circle with a tick. In progress carries two, and tasks.css
+ * shows one: the spinner arc while a run goes on (the card is .live), a paused circle otherwise.
+ */
 export function cardGlyph(status: Status): string {
   if (status === 'completed') return icon('circle-check-filled', 16);
-  if (status === 'in_progress') return '<span class="spinner sm" aria-hidden="true"></span>';
+  if (status === 'in_progress') return `<span class="spinner sm" aria-hidden="true"></span>${icon('circle-pause', 16)}`;
   return icon('circle-dashed', 16);
 }
 
 type Glyph = (status: Status) => string;
 
-function fillRow(el: HTMLElement, t: TaskItem, glyph: Glyph): void {
+/** `paused`: no run is going on, so a row in progress reads "Paused" */
+function fillRow(el: HTMLElement, t: TaskItem, glyph: Glyph, paused = false): void {
   if (el.dataset.status !== t.status) {
     el.dataset.status = t.status;
     el.querySelector('.task-glyph')!.innerHTML = glyph(t.status);
@@ -62,15 +66,15 @@ function fillRow(el: HTMLElement, t: TaskItem, glyph: Glyph): void {
     title.textContent = t.title;
     title.title = t.title;
   }
-  el.setAttribute('aria-label', `${STATUS_LABEL[t.status]}: ${t.title}`);
+  el.setAttribute('aria-label', `${paused && t.status === 'in_progress' ? 'Paused' : STATUS_LABEL[t.status]}: ${t.title}`);
 }
 
-function createRow(t: TaskItem, glyph: Glyph): HTMLLIElement {
+function createRow(t: TaskItem, glyph: Glyph, paused = false): HTMLLIElement {
   const el = document.createElement('li');
   el.className = 'task-row';
   el.dataset.id = t.id;
   el.innerHTML = '<span class="task-glyph" aria-hidden="true"></span><span class="task-title"></span>';
-  fillRow(el, t, glyph);
+  fillRow(el, t, glyph, paused);
   return el;
 }
 
@@ -101,7 +105,7 @@ export interface TaskListOptions {
 export interface TaskList {
   /** Shows the list; an empty list (or null) hides the card. Rows are reused by id, so nothing else re-renders. */
   set(tasks: TaskItem[] | null): void;
-  /** A run is in progress (marks the card .live) */
+  /** A run is going on (the card is .live: a row in progress spins) or not (it shows as paused) */
   setRunning(running: boolean): void;
   /** The tasks shown */
   items(): TaskItem[];
@@ -113,6 +117,7 @@ export function createTaskList(o: TaskListOptions): TaskList {
   const rowsEl = root.querySelector<HTMLElement>('.task-rows')!;
   const rows = new Map<string, HTMLLIElement>();
   let items: TaskItem[] = [];
+  let running = false;
 
   /** In the transcript while there are rows, out of it otherwise (so an empty transcript stays empty). */
   const place = () => {
@@ -148,9 +153,9 @@ export function createTaskList(o: TaskListOptions): TaskList {
       let prev: HTMLElement | null = null;
       for (const t of items) {
         let el = rows.get(t.id);
-        if (el) fillRow(el, t, cardGlyph);
+        if (el) fillRow(el, t, cardGlyph, !running);
         else {
-          el = createRow(t, cardGlyph);
+          el = createRow(t, cardGlyph, !running);
           // New rows of a card already on screen fade in (once: a row moved later must not replay it); a card that
           // just appeared comes in as one.
           if (wasShown) {
@@ -168,8 +173,14 @@ export function createTaskList(o: TaskListOptions): TaskList {
       place();
       o.onChange?.();
     },
-    setRunning(running: boolean) {
+    setRunning(next: boolean) {
+      if (next === running) return;
+      running = next;
       root.classList.toggle('live', running);
+      for (const t of items) {
+        const el = rows.get(t.id);
+        if (el) fillRow(el, t, cardGlyph, !running);
+      }
     },
     items: () => items.map((t) => ({ ...t })),
   };

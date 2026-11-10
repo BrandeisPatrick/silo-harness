@@ -74,10 +74,10 @@ export interface ModLookManifest {
 }
 
 /**
- * The four kinds of look, each with a tab of its own in Settings → Mods and one in use at a time: a background view,
- * a chat bar look, a conversation look, a theme (a mod's styles). A look has no switch: it is available once installed.
+ * The three kinds of look, each with a tab of its own in Settings → Mods and one in use at a time: a background view,
+ * a chat bar look, a conversation look. A look has no switch: it is available once installed.
  */
-export type LookKind = 'background' | 'composer' | 'conversation' | 'theme';
+export type LookKind = 'background' | 'composer' | 'conversation';
 
 export interface ModCommandManifest {
   /** Without the slash; lower-case letters, digits and - */
@@ -108,8 +108,6 @@ export interface ModManifest {
   permissions?: ModPermission[];
   contributes?: {
     views?: ModViewManifest[];
-    /** CSS files applied to the app's own page */
-    styles?: string[];
     /** Stylesheets for one region each (the conversation, the chat bar); one look per region is active */
     looks?: ModLookManifest[];
     commands?: ModCommandManifest[];
@@ -153,10 +151,10 @@ export interface ModInfo {
   granted: ModPermission[];
   /** Asked for by the manifest and not granted: what turning it on (or resuming it) would add */
   wants: ModPermission[];
-  /** True when the manifest contributes styles, looks or a background that were not part of what was approved */
+  /** True when the manifest contributes looks or a background that were not part of what was approved */
   wantsStyles: boolean;
   /**
-   * Its looks (backgrounds, chat bar and conversation looks, its theme) can be used without asking: a bundled mod, or
+   * Its looks (backgrounds, chat bar and conversation looks) can be used without asking: a bundled mod, or
    * one the user approved at a first Use and that asks for nothing new since. False in safe mode for user and project mods.
    */
   approved?: boolean;
@@ -191,11 +189,6 @@ export interface ModLayout {
   backgroundDim: number;
   /** The active look per region: "<mod key>/<look id>", or null for the app's own look */
   looks: Record<ModLookTarget, string | null>;
-  /**
-   * The theme in use: the key of a mod with styles, or null for the app's own. One at a time. Missing in a profile
-   * from 0.8.0 or before, which the mods code migrates on start (the last theme that was on, in apply order).
-   */
-  theme?: string | null;
 }
 
 /** The part of the config that belongs to mods (AppConfig.mods). */
@@ -205,7 +198,10 @@ export interface ModsConfig {
    * command). A missing entry means off (bundled mods: on with their manifest's permissions).
    */
   enabled: Record<string, { permissions: ModPermission[]; styles: boolean; at: number }>;
-  /** By mod key: the approval given at the first Use of a look of a user or project mod (bundled looks need none) */
+  /**
+   * By mod key: the approval given at the first Use of a look of a user or project mod (bundled looks need none).
+   * Missing only in a profile from before 0.10, which the mods code migrates on start.
+   */
   approved?: Record<string, { permissions: ModPermission[]; at: number }>;
   /** Bundled mod ids the user turned off */
   disabledBundled: string[];
@@ -220,7 +216,7 @@ export interface ModsConfig {
 
 export interface ModTheme {
   scheme: 'light' | 'dark';
-  /** The app's design tokens as they are right now (--bg-100: "#faf9f5", …), including a theme mod's changes */
+  /** The app's design tokens as they are right now (--bg-100: "#faf9f5", …) */
   tokens: Record<string, string>;
 }
 
@@ -475,12 +471,12 @@ export interface ModsRpc {
   'mods.setEnabled': (key: string, on: boolean) => ModInfo[];
   /**
    * Puts looks in use, one per kind: "<mod key>/<look id>" (conversation, composer), "<mod key>/<view id>" or "image"
-   * (background: the user's picture), "<mod key>" (theme), or null for Default. A user or project mod not approved
+   * (background: the user's picture), or null for Default. A user or project mod not approved
    * yet is refused unless `approve` is set, which records the approval (the Use confirmation was shown).
    */
   'mods.use': (patch: Partial<Record<LookKind, string | null>>, opts?: { approve?: boolean }) => ModInfo[];
-  /** A look's or a theme's CSS compiled for the previews in Settings (scoped to their own root, never the window's) */
-  'mods.previewCss': (input: { kind: 'theme' | ModLookTarget; ref: string }) => { css: string };
+  /** A look's CSS compiled for the previews in Settings (scoped to their own root, never the window's) */
+  'mods.previewCss': (input: { kind: ModLookTarget; ref: string }) => { css: string };
   'mods.setSetting': (key: string, setting: string, value: unknown) => ModInfo[];
   'mods.setLayout': (patch: Partial<ModLayout>) => ModLayout;
   'mods.setSafeMode': (on: boolean) => ModInfo[];
@@ -489,7 +485,7 @@ export interface ModsRpc {
   /** Copies a bundled mod into the user folder so it can be edited; returns the new list */
   'mods.customise': (key: string) => ModInfo[];
   /** Writes a starter mod into the user folder (or the project's) and returns it: a view in `seat`, or a look for `look` */
-  'mods.create': (input: { id: string; name: string; seat?: ModSeat; look?: ModLookTarget; theme?: boolean; scope: 'user' | 'project' }) => ModInfo;
+  'mods.create': (input: { id: string; name: string; seat?: ModSeat; look?: ModLookTarget; scope: 'user' | 'project' }) => ModInfo;
   /** Installs from a folder (copied) or a Git URL (cloned) into the user folder */
   'mods.install': (source: string) => ModInfo;
   /** Moves a user mod's folder to the Trash */
@@ -507,8 +503,6 @@ export interface ModsRpc {
   'mods.call': (caller: ModCaller, method: string, params: unknown) => { result?: unknown; error?: { code: number; message: string; data?: unknown } };
   /** A page reported an uncaught error */
   'mods.report': (caller: ModCaller, problem: { message: string; stack?: string }) => void;
-  /** The CSS text of the theme in use (none, or one) */
-  'mods.styles': () => { key: string; css: string }[];
   /** The active look of each region (its mod on, chosen in the layout), already scoped to the region */
   'mods.looks': () => { target: ModLookTarget; ref: string; mod: string; css: string }[];
 }

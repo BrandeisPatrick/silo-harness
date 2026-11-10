@@ -126,7 +126,7 @@ process.emitWarning = () => {};
     const lines = L.askLines(mod('n', [v('m', 'rail', 'N')], { state: 'off', permissions: ['session:read', 'network'] }));
     check('asks: plain words per permission and a strong network line', lines.some((l) => /Read the session on screen/.test(l.text)) && lines.some((l) => l.strong && /internet/.test(l.text) && /send/.test(l.text)), lines);
     const st = L.askLines(mod('s', [], { state: 'off', contributes: { styles: ['t.css'] } }));
-    check('asks: styles get a clear line', st.some((l) => l.strong && /restyle Silo Harness/.test(l.text)), st);
+    check('asks: styles (themes, removed) are not said to restyle anything', !st.some((l) => /restyle/.test(l.text)), st);
     const bg = L.askLines(mod('b', [v('b', 'background', 'B')], { state: 'off' }));
     check('asks: a background gets a clear line', bg.some((l) => l.strong && /behind the whole window/.test(l.text)), bg);
     const paused = L.askLines(mod('p', [v('m', 'rail', 'P')], { state: 'paused', permissions: ['session:read', 'model'], granted: ['session:read'], wants: ['model'] }));

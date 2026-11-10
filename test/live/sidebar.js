@@ -274,6 +274,17 @@ function seed(profile) {
     await sleep(100);
     check('the card stays last as messages arrive', await app.evaluate(lastCheck));
     await shot('task-card', '#task-list', 12);
+    // A row in progress: a paused circle while no run goes on, the spinner during one
+    const glyph = `(() => { const row = document.querySelector('#task-list .task-row[data-status="in_progress"]'); const shown = (el) => Boolean(el) && getComputedStyle(el).display !== 'none'; return { spinner: shown(row.querySelector('.task-glyph .spinner')), paused: shown(row.querySelector('.task-glyph .icon')), label: row.getAttribute('aria-label') }; })()`;
+    const idle = await app.evaluate(glyph);
+    check('no run: the row in progress shows a paused circle, no spinner', idle.paused && !idle.spinner && /^Paused: /.test(idle.label), idle);
+    await app.evaluate(`window.__oc_debug.emit({ type: 'run_start' })`);
+    const during = await app.evaluate(glyph);
+    check('during a run: the spinner, no paused circle', during.spinner && !during.paused && /^In progress: /.test(during.label), during);
+    await shot('task-card-running', '#task-list', 12);
+    await app.evaluate(`window.__oc_debug.emit({ type: 'run_end', reason: 'done' })`);
+    const after = await app.evaluate(glyph);
+    check('the run ended: paused again', after.paused && !after.spinner && /^Paused: /.test(after.label), after);
     await app.evaluate(`window.__oc_debug.tasks([{ id: '1', title: 'Collect merged changes', status: 'completed' }, { id: '2', title: 'Draft the notes', status: 'completed' }, { id: '3', title: 'Ask for review', status: 'completed' }])`);
     check('all done: the card stays, muted', await app.exists('#task-list.all-done:not([hidden])'));
     await shot('task-card-done', '#task-list', 12);

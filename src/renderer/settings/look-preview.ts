@@ -1,10 +1,9 @@
-// The previews of Settings → Mods → Background, Chat bar, Conversation and Theme: a miniature window, a sample chat
-// bar or a sample exchange, each drawn in a shadow root of its own. Inside it are the app's own stylesheets (with
-// `:root`, `html` and `body` read as the preview's `.lp-root` and `.lp-body`), the theme the preview is dressed in and
-// the look it shows, both compiled by the main process for the preview's root (PREVIEW_ROOTS in
-// src/main/mods/css.ts). Nothing in a preview reaches the window: its CSS lives in its shadow root and is scoped to
-// its own root, the sample's ids (#chatbar, #messages, …) exist only in there, and it takes no input. Nothing of the
-// window reaches a preview either, but the tokens it resets and the theme it is given.
+// The previews of Settings → Mods → Background, Chat bar and Conversation: a miniature window, a sample chat bar or
+// a sample exchange, each drawn in a shadow root of its own. Inside it are the app's own stylesheets (with `:root`,
+// `html` and `body` read as the preview's `.lp-root` and `.lp-body`) and the look it shows, compiled by the main
+// process for the preview's root (PREVIEW_ROOTS in src/main/mods/css.ts). Nothing in a preview reaches the window:
+// its CSS lives in its shadow root and is scoped to its own root, the sample's ids (#chatbar, #messages, …) exist only
+// in there, and it takes no input. Nothing of the window reaches a preview either, but the tokens it resets.
 
 import type { LookKind } from '../../shared/mods';
 import { escapeHtml } from '../dom.js';
@@ -15,7 +14,6 @@ import { lookAttributes } from '../mods/logic.js';
 /** The natural size of each kind of preview, in CSS pixels; it is scaled to the width it is given. */
 const SIZES: Record<LookKind, { w: number; h: number }> = {
   background: { w: 1040, h: 650 },
-  theme: { w: 1040, h: 650 },
   conversation: { w: 660, h: 470 },
   composer: { w: 820, h: 150 },
 };
@@ -26,8 +24,6 @@ const CARD_SIZES: Partial<Record<LookKind, { w: number; h: number }>> = {
 };
 
 export interface PreviewState {
-  /** The theme it is dressed in, compiled for .lp-root ('' for the app's own) */
-  themeCss: string;
   /** The look it shows (Chat bar, Conversation), compiled for .lp-root #chatbar or #messages ('' for Default) */
   lookCss?: string;
   /** That look's ref and its mod's settings: the attributes a look reacts to (data-look, data-set-…) */
@@ -139,7 +135,7 @@ function sheetFor(css: string): CSSStyleSheet | null {
     } catch {
       s.replaceSync('');
     }
-    // A handful of themes and looks: the cache stays small, but never grows without end
+    // A handful of looks: the cache stays small, but never grows without end
     if (cssSheets.size > 60) cssSheets.delete(cssSheets.keys().next().value!);
     cssSheets.set(css, s);
   }
@@ -234,7 +230,7 @@ function sampleHtml(kind: LookKind): string {
 
 // ---------- A preview ----------
 
-/** The scheme the window is in: the preview's root mirrors data-theme, so a theme's light and dark rules both work. */
+/** The scheme the window is in: the preview's root mirrors data-theme, so light and dark rules both work. */
 function mirrorScheme(root: HTMLElement): void {
   const t = document.documentElement.dataset.theme;
   if (t) root.dataset.theme = t;
@@ -281,7 +277,7 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
   root.append(lpRoot);
   mirrorScheme(lpRoot);
 
-  let state: PreviewState = { themeCss: '' };
+  let state: PreviewState = {};
   const region = () => (kind === 'composer' || kind === 'conversation' ? body.querySelector<HTMLElement>(kind === 'composer' ? '#chatbar' : '#messages') : null);
 
   const fit = () => {
@@ -329,7 +325,7 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
     root,
     set(next) {
       state = next;
-      root.adoptedStyleSheets = [app(), own(), sheetFor(next.themeCss), sheetFor(next.lookCss ?? '')].filter((x): x is CSSStyleSheet => !!x);
+      root.adoptedStyleSheets = [app(), own(), sheetFor(next.lookCss ?? '')].filter((x): x is CSSStyleSheet => !!x);
       paintAttrs();
       setBackdrop();
       fit();

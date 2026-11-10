@@ -54,9 +54,10 @@ export function defaultConfig(): AppConfig {
     historyTrashDays: 30,
     mods: {
       enabled: {},
+      approved: {},
       disabledBundled: [],
       settings: {},
-      layout: { railOpen: true, railWidth: 300, collapsed: [], closedTabs: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null }, theme: null },
+      layout: { railOpen: true, railWidth: 300, collapsed: [], closedTabs: [], background: null, backgroundImage: null, backgroundDim: 0.82, looks: { conversation: null, composer: null } },
       safeMode: false,
     },
     remote: { enabled: false, bind: 'lan', port: 0 },
@@ -95,11 +96,17 @@ function modsSection(d: AppConfig['mods'], raw: unknown): AppConfig['mods'] {
   const layout = isRecord(m.layout) ? m.layout : {};
   const looks = isRecord(layout.looks) ? layout.looks : {};
   const ref = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+  // Themes were removed: a stored `theme` is dropped and never applied.
+  const kept: Record<string, unknown> = { ...layout };
+  delete kept.theme;
+  // A mods section with neither `approved` nor `theme` is from before 0.10, when looks had switches: `approved` stays
+  // missing and the mods code migrates it on start (both fields came in 0.10).
+  const legacy = isRecord(raw) && !('approved' in m) && !('theme' in layout);
   return {
     ...d,
     ...m,
-    // A layout without `theme` is from 0.8.0 or before, when themes had switches: the mods code migrates it on start.
-    layout: { ...d.layout, ...layout, looks: { conversation: ref(looks.conversation), composer: ref(looks.composer) }, theme: 'theme' in layout ? ref(layout.theme) : undefined },
+    approved: legacy ? undefined : isRecord(m.approved) ? m.approved : {},
+    layout: { ...d.layout, ...kept, looks: { conversation: ref(looks.conversation), composer: ref(looks.composer) } },
   } as AppConfig['mods'];
 }
 

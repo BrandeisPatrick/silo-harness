@@ -27,7 +27,7 @@ export interface BrowserBarsDeps {
   cleanError(err: unknown): string;
 }
 
-const LOCK = '<svg class="icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.25" y="7" width="9.5" height="6.75" rx="1.5"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/></svg>';
+const LOCK = '<svg class="icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.25" y="7" width="9.5" height="6.75" rx="1.5"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/></svg>';
 
 const PERMISSION_ICONS: Record<string, IconName> = { media: 'camera', notifications: 'message', 'clipboard-read': 'clipboard', openExternal: 'external-link', 'display-capture': 'panel-right', fileSystem: 'folder' };
 

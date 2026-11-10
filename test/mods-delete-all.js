@@ -122,7 +122,7 @@ const summary = (list) => list.map((m) => `${m.id}:${m.scope}:${m.state}`);
 
 (async () => {
   const f = fakeApp();
-  // Built-in: a panel and a theme. Yours: a panel with a setting, a theme, a conversation look, a background, a folder
+  // Built-in: a panel and an old theme (styles, ignored now). Yours: a panel with a setting, an old theme, a conversation look, a background, a folder
   // without mod.json, a customised copy of the built-in panel, an install's staging folder and a plain file. The
   // project's: a panel.
   writeMod(f.roots.bundled, 'alpha', panel('alpha'), { 'panel.html': page });
@@ -140,24 +140,21 @@ const summary = (list) => list.map((m) => `${m.id}:${m.scope}:${m.state}`);
   rpc(f, 'mods.setEnabled', 'hello', true);
   rpc(f, 'mods.setSetting', 'hello', 'n', 5);
   rpc(f, 'mods.setEnabled', projKey, true);
-  rpc(f, 'mods.use', { theme: 'tint', conversation: 'dusk/main', background: 'stars/main' }, { approve: true });
+  rpc(f, 'mods.use', { conversation: 'dusk/main', background: 'stars/main' }, { approve: true });
   rpc(f, 'mods.customise', 'alpha');
-  // A theme ref the layout names for a folder of yours that has no usable mod.json (as a broken edit could leave it)
-  rpc(f, 'mods.setLayout', { theme: 'broken' });
-  rpc(f, 'mods.setLayout', { theme: 'tint' });
   const before = rpc(f, 'mods.list');
   check(
     'setup: the mods of yours are listed: on, in use, overriding, invalid',
-    by(before, 'hello', 'user').state === 'on' && by(before, 'tint', 'user').state === 'on' && by(before, 'dusk', 'user').inUse.join() === 'conversation' && by(before, 'stars', 'user').inUse.join() === 'background' && by(before, 'alpha', 'user').overrides === true && by(before, 'alpha', 'user').state === 'on' && by(before, 'broken', 'user').state === 'invalid' && by(before, 'projo', 'project').state === 'on' && !before.some((m) => m.id.startsWith('.')),
+    by(before, 'hello', 'user').state === 'on' && by(before, 'tint', 'user').state !== 'invalid' && by(before, 'dusk', 'user').inUse.join() === 'conversation' && by(before, 'stars', 'user').inUse.join() === 'background' && by(before, 'alpha', 'user').overrides === true && by(before, 'alpha', 'user').state === 'on' && by(before, 'broken', 'user').state === 'invalid' && by(before, 'projo', 'project').state === 'on' && !before.some((m) => m.id.startsWith('.')),
     summary(before),
   );
   const cfg0 = f.app.config().mods;
   check(
     'setup: the config holds their grants, approvals, settings and looks',
-    !!cfg0.enabled.hello && !!cfg0.enabled.alpha && cfg0.settings.hello.n === 5 && !!cfg0.approved.tint && !!cfg0.approved.dusk && !!cfg0.approved.stars && cfg0.layout.theme === 'tint' && cfg0.layout.looks.conversation === 'dusk/main' && cfg0.layout.background === 'stars/main',
+    !!cfg0.enabled.hello && !!cfg0.enabled.alpha && cfg0.settings.hello.n === 5 && !!cfg0.approved.dusk && !!cfg0.approved.stars && !('theme' in cfg0.layout) && cfg0.layout.looks.conversation === 'dusk/main' && cfg0.layout.background === 'stars/main',
     { enabled: Object.keys(cfg0.enabled), approved: Object.keys(cfg0.approved), layout: cfg0.layout },
   );
-  check('setup: the theme and the look are served', rpc(f, 'mods.styles').length === 1 && rpc(f, 'mods.looks').length === 1);
+  check('setup: the look is served; there is no mods.styles any more', !f.handlers['mods.styles'] && rpc(f, 'mods.looks').length === 1);
   const pushesBefore = f.pushes.length;
 
   const r = await rpc(f, 'mods.removeAll');
@@ -174,8 +171,8 @@ const summary = (list) => list.map((m) => `${m.id}:${m.scope}:${m.state}`);
   check('… and it is what mods.list returns', JSON.stringify(rpc(f, 'mods.list')) === JSON.stringify(after));
   const cfg = f.app.config().mods;
   check('their grants, approvals and settings are forgotten; the project mod keeps its grant', Object.keys(cfg.enabled).join() === projKey && Object.keys(cfg.approved).length === 0 && Object.keys(cfg.settings).length === 0, { enabled: Object.keys(cfg.enabled), approved: Object.keys(cfg.approved), settings: Object.keys(cfg.settings) });
-  check('the theme, the conversation look and the background are Default again', cfg.layout.theme === null && cfg.layout.looks.conversation === null && cfg.layout.looks.composer === null && cfg.layout.background === null, cfg.layout);
-  check('mods.styles and mods.looks serve nothing of theirs', rpc(f, 'mods.styles').length === 0 && rpc(f, 'mods.looks').length === 0);
+  check('the conversation look and the background are Default again', cfg.layout.looks.conversation === null && cfg.layout.looks.composer === null && cfg.layout.background === null, cfg.layout);
+  check('mods.looks serves nothing of theirs', rpc(f, 'mods.looks').length === 0);
   const changed = f.pushes.slice(pushesBefore).filter((p) => p.channel === 'mods:changed');
   check('the window was told the list changed, without them', changed.length >= 1 && !changed[changed.length - 1].payload.some((m) => m.scope === 'user'), changed.length);
 
@@ -188,10 +185,10 @@ const summary = (list) => list.map((m) => `${m.id}:${m.scope}:${m.state}`);
   // A ref in the layout to a folder of yours that is gone with the rest, whatever its mod.json said
   writeMod(f.roots.user, 'ghost', undefined, { 'notes.txt': 'no manifest' });
   rpc(f, 'mods.reload');
-  rpc(f, 'mods.setLayout', { theme: 'ghost', looks: { composer: 'ghost/main' } });
+  rpc(f, 'mods.setLayout', { looks: { composer: 'ghost/main' } });
   const r4 = await rpc(f, 'mods.removeAll');
   const l4 = f.app.config().mods.layout;
-  check('a look in use that names a folder of yours without a manifest goes back to Default with it', r4.removed.join() === 'ghost' && l4.theme === null && l4.looks.composer === null, { removed: r4.removed, theme: l4.theme, looks: l4.looks });
+  check('a look in use that names a folder of yours without a manifest goes back to Default with it', r4.removed.join() === 'ghost' && l4.looks.composer === null, { removed: r4.removed, looks: l4.looks });
 
   ctl.close();
   done();

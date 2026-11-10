@@ -20,7 +20,11 @@
   transition: color 0.15s;
 }
 .task-list .task-glyph { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; color: var(--text-400); }
-.task-list .task-glyph .spinner { display: inline-block; width: 13px; height: 13px; border-width: 1.75px; }
+/* In progress: the spinner arc while a run goes on (.live), a paused circle otherwise */
+.task-list .task-glyph .spinner { display: none; width: 13px; height: 13px; border-width: 1.5px; }
+.task-list.live .task-glyph .spinner { display: inline-block; }
+.task-list.live .task-glyph .spinner + .icon { display: none; }
+.task-list .task-row[data-status="in_progress"] .task-glyph { color: var(--text-400); }
 .task-list .task-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Done: muted text (not struck through) and a muted filled tick */
 .task-list .task-row[data-status="completed"] { color: var(--text-400); }
