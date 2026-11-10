@@ -4,6 +4,7 @@
 
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,20 +12,31 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { ToolListChangedNotificationSchema, type Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError, ToolListChangedNotificationSchema, type Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { AppConfig, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
+import type { AppConfig, McpOAuthConfig, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
 import type { Tool, ToolResult } from './tools/types';
 import { words } from './guard';
 import { expandEnvRefs } from './env';
+import { guardedFetch, hasTokens, InsecureEndpointError, McpOAuthProvider, MemoryTokenStore, NeedsSignInError, redactSecrets, signIn as runSignIn, type TokenStore } from './mcp-auth';
 
 export const PROJECT_FILE = '.mcp.json';
 const NAME_RE = /^[\w.-]{1,64}$/;
 const CONNECT_TIMEOUT_MS = 60_000; // "npx -y …" may download the server on first use
 const CALL_TIMEOUT_MS = 120_000;
+/** A call whose server keeps sending progress may run this long in all (or its own timeout, when longer) */
+const MAX_TOTAL_CALL_MS = 10 * 60_000;
 const MAX_TOOL_NAME = 64;
 const STDERR_LINES = 12;
 const MAX_DETAIL = 2000;
+/** Server instructions kept (untrusted text from the server) */
+export const MAX_INSTRUCTIONS = 2000;
+/** A text result longer than this is written to a file; the model gets its start and end and the path */
+export const SPILL_OVER_CHARS = 100_000;
+export const SPILL_HEAD_CHARS = 60_000;
+export const SPILL_TAIL_CHARS = 10_000;
+const SPILL_MAX_AGE_MS = 24 * 3600_000;
 
 export interface McpManagerOptions {
   getConfig: () => AppConfig;
@@ -32,6 +44,16 @@ export interface McpManagerOptions {
   saveConfig: (patch: Partial<AppConfig>) => void;
   cwd: () => string;
   version?: string;
+  /** OAuth for remote servers: where tokens are kept, and how the authorization page is opened (shell.openExternal) */
+  auth?: { store: TokenStore; openExternal: (url: string) => Promise<void>; signInTimeoutMs?: number };
+  /** Where big tool results are written (default <os tmp>/silo-harness/mcp-results) */
+  resultsDir?: string;
+  /** Automatic reconnection of remote servers (tests shorten it) */
+  reconnect?: { tries?: number; baseMs?: number; maxMs?: number };
+  /** How long a connect may take, and how long a call waits for a reconnecting server (default 60 s) */
+  connectTimeoutMs?: number;
+  /** Waits between reconnection tries (tests inject one) */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface Entry {
@@ -50,6 +72,20 @@ interface Entry {
   stderr: string[];
   /** Bumped on every connect and disconnect so results of a superseded attempt are ignored */
   generation: number;
+  /** Tools filtered out by enabledTools/disabledTools */
+  hiddenTools: string[];
+  /** The server's `instructions`, capped (untrusted) */
+  instructions?: string;
+  /** A stdio server that exited after it was connected: respawned once on the next tool call */
+  respawn?: boolean;
+  /** The automatic reconnection in progress, if any */
+  loop?: { cancelled: boolean } | null;
+  /** The sign-in in progress, if any */
+  signIn?: AbortController | null;
+  /** OAuth tokens are stored for this server */
+  signedIn?: boolean;
+  /** Why the last connection attempt failed */
+  lastError?: string;
 }
 
 export interface McpToolRef {
@@ -101,19 +137,57 @@ export function normalizeServerConfig(raw: unknown): McpServerConfig {
     return Object.keys(out).length ? out : undefined;
   };
   const type = typeof r.type === 'string' ? r.type.toLowerCase() : undefined;
+  const nameList = (v: unknown, what: string): string[] | undefined => {
+    if (v === undefined || v === null) return undefined;
+    if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new Error(`"${what}" must be a list of tool names`);
+    return v.map((x: string) => x.trim()).filter(Boolean);
+  };
+  let timeout: number | undefined;
+  if (r.timeout !== undefined && r.timeout !== null) {
+    if (typeof r.timeout !== 'number' || !Number.isInteger(r.timeout) || r.timeout < 1000 || r.timeout > 86_400_000) throw new Error('"timeout" must be a whole number of milliseconds from 1000 to 86400000');
+    timeout = r.timeout;
+  }
+  const options = { disabled, timeout, enabledTools: nameList(r.enabledTools, 'enabledTools'), disabledTools: nameList(r.disabledTools, 'disabledTools') };
+  const clean = <T extends object>(o: T): T => {
+    for (const k of Object.keys(o) as (keyof T)[]) if (o[k] === undefined) delete o[k];
+    return o;
+  };
   if (typeof r.url === 'string' && r.url.trim()) {
     const url = r.url.trim();
     if (!/^https?:\/\//i.test(url)) throw new Error(`"${url}" is not an http(s) URL`);
     const t: 'http' | 'sse' = type === 'sse' ? 'sse' : 'http';
-    return { type: t, url, headers: strMap(r.headers, 'headers'), disabled };
+    return clean({ type: t, url, headers: strMap(r.headers, 'headers'), oauth: normalizeOAuth(r.oauth), ...options });
   }
   if (typeof r.command === 'string' && r.command.trim()) {
     if (type && type !== 'stdio') throw new Error(`transport "${type}" needs a "url"`);
+    if (r.oauth !== undefined) throw new Error('"oauth" is for servers with a "url"');
     const args = r.args === undefined ? undefined : Array.isArray(r.args) ? r.args.map((a) => String(a)) : (() => { throw new Error('"args" must be a list'); })();
     const cwd = typeof r.cwd === 'string' && r.cwd.trim() ? r.cwd.trim() : undefined;
-    return { type: 'stdio', command: r.command.trim(), args, env: strMap(r.env, 'env'), cwd, disabled };
+    return clean({ type: 'stdio' as const, command: r.command.trim(), args, env: strMap(r.env, 'env'), cwd, ...options });
   }
   throw new Error('a server entry needs a "command" (stdio) or a "url" (http)');
+}
+
+function normalizeOAuth(v: unknown): McpOAuthConfig | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new Error('"oauth" must be an object');
+  const o = v as Record<string, unknown>;
+  const out: McpOAuthConfig = {};
+  if (o.clientId !== undefined) {
+    if (typeof o.clientId !== 'string' || !o.clientId.trim()) throw new Error('"oauth.clientId" must be a string');
+    out.clientId = o.clientId.trim();
+  }
+  if (o.callbackPort !== undefined) {
+    if (typeof o.callbackPort !== 'number' || !Number.isInteger(o.callbackPort) || o.callbackPort < 1024 || o.callbackPort > 65535) throw new Error('"oauth.callbackPort" must be a port from 1024 to 65535');
+    out.callbackPort = o.callbackPort;
+  }
+  if (o.scopes !== undefined) {
+    const list = typeof o.scopes === 'string' ? o.scopes.split(/\s+/) : Array.isArray(o.scopes) && o.scopes.every((x) => typeof x === 'string') ? (o.scopes as string[]) : null;
+    if (!list) throw new Error('"oauth.scopes" must be a list of scopes');
+    const scopes = list.map((x) => x.trim()).filter(Boolean);
+    if (scopes.length) out.scopes = scopes;
+  }
+  return out;
 }
 
 /**
@@ -313,10 +387,101 @@ function errorText(err: unknown): string {
       const m = /spawn (\S+) ENOENT/.exec(err.message);
       return `Command not found${m ? `: ${m[1]}` : ''}. Check that it is installed and on your PATH.`;
     }
-    return err.message || String(err);
+    return redactSecrets(err.message || String(err));
   }
-  return String(err);
+  return redactSecrets(String(err));
 }
+
+const firstLine = (s: string): string => s.trim().split('\n')[0] ?? '';
+
+/** A network failure or a lost session: what reconnecting can fix. */
+export function isConnectionLoss(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { message?: unknown; code?: unknown; cause?: { code?: unknown; message?: unknown } };
+  if (e.code === 404) return true; // streamable HTTP: the server no longer knows the session (it restarted)
+  const text = `${String(e.message ?? '')} ${String(e.cause?.code ?? '')} ${String(e.cause?.message ?? '')}`;
+  return /fetch failed|ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|socket hang up|other side closed|terminated|SSE stream disconnected|Failed to reconnect|Maximum reconnection attempts|SSE error/i.test(text);
+}
+
+function isTimeout(err: unknown): boolean {
+  return err instanceof McpError && err.code === ErrorCode.RequestTimeout;
+}
+
+function formatMs(ms: number): string {
+  return ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`;
+}
+
+/** A path segment from a name: no separators, no leading dots. */
+function safeSegment(s: string): string {
+  return s.replace(/[^\w.-]/g, '_').replace(/^\.+/, '_').slice(0, 80) || '_';
+}
+
+/**
+ * A text result over SPILL_OVER_CHARS: the whole text goes to a file (mode 0600, in a 0700 folder per session) and the
+ * model gets its first SPILL_HEAD_CHARS and last SPILL_TAIL_CHARS, how much was left out and the file's path.
+ * Images and other parts are unchanged.
+ */
+export function spillResult(result: ToolResult, o: { dir: string; sessionId?: string; server: string; tool: string }): ToolResult {
+  const text = result.content;
+  if (text.length <= SPILL_OVER_CHARS) return result;
+  const head = text.slice(0, SPILL_HEAD_CHARS);
+  const tail = text.slice(text.length - SPILL_TAIL_CHARS);
+  const left = text.length - head.length - tail.length;
+  let file: string | null = null;
+  try {
+    const dir = path.join(o.dir, safeSegment(o.sessionId || 'no-session'));
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(o.dir, 0o700);
+    fs.chmodSync(dir, 0o700);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    file = path.join(dir, `${stamp}-${safeSegment(o.server)}-${safeSegment(o.tool)}-${crypto.randomBytes(3).toString('hex')}.txt`);
+    fs.writeFileSync(file, text, { mode: 0o600 });
+  } catch (err) {
+    console.warn('[mcp] could not save a large result:', errorText(err));
+    file = null;
+  }
+  const n = (x: number) => x.toLocaleString('en-US');
+  const where = file
+    ? `The full result (${n(text.length)} characters) is saved in ${file}; read it in parts (read_file with offset and limit, or grep).`
+    : `The result has ${n(text.length)} characters and could not be saved to a file.`;
+  const content = `[${where} Shown here: the first ${n(head.length)} and the last ${n(tail.length)} characters.]\n${head}\n…[${n(left)} characters left out${file ? `; they are in ${file}` : ''}]…\n${tail}`;
+  return { ...result, content };
+}
+
+/** Removes saved results older than `maxAgeMs`, and session folders left empty. */
+export async function cleanOldResults(root: string, maxAgeMs = SPILL_MAX_AGE_MS, now = Date.now()): Promise<void> {
+  let dirs: fs.Dirent[];
+  try {
+    dirs = await fs.promises.readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue;
+    const dir = path.join(root, d.name);
+    let files: string[] = [];
+    try {
+      files = await fs.promises.readdir(dir);
+    } catch {
+      continue;
+    }
+    let kept = 0;
+    for (const f of files) {
+      const p = path.join(dir, f);
+      try {
+        const st = await fs.promises.lstat(p);
+        if (st.isFile() && now - st.mtimeMs > maxAgeMs) await fs.promises.unlink(p);
+        else kept++;
+      } catch {
+        kept++;
+      }
+    }
+    if (!kept) await fs.promises.rmdir(dir).catch(() => undefined);
+  }
+}
+
+type ConnectMode = 'initial' | 'reconnect' | 'respawn';
+type ConnectOutcome = 'connected' | 'needs-auth' | 'failed' | 'stale';
 
 export class McpManager extends EventEmitter {
   private entries = new Map<string, Entry>();
@@ -324,10 +489,21 @@ export class McpManager extends EventEmitter {
   private clientInfo: { name: string; version: string };
   private reloading: Promise<void> | null = null;
   private closed = false;
+  private readonly store: TokenStore;
+  private readonly resultsDir: string;
+  private readonly connectTimeout: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  /** Calls waiting for a reconnecting server: checked on every change */
+  private readonly settleWaiters = new Set<() => void>();
 
   constructor(private readonly opts: McpManagerOptions) {
     super();
     this.clientInfo = { name: 'Silo Harness', version: opts.version ?? '0.1.0' };
+    this.store = opts.auth?.store ?? new MemoryTokenStore();
+    this.resultsDir = opts.resultsDir ?? path.join(os.tmpdir(), 'silo-harness', 'mcp-results');
+    this.connectTimeout = opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    void cleanOldResults(this.resultsDir).catch(() => undefined);
   }
 
   list(): McpServerInfo[] {
@@ -348,6 +524,8 @@ export class McpManager extends EventEmitter {
     };
     if (e.error) info.error = e.error;
     if (e.serverInfo) info.serverInfo = { ...e.serverInfo };
+    if (e.status === 'connected' && e.hiddenTools.length) info.hiddenTools = [...e.hiddenTools];
+    if (e.signedIn) info.signedIn = true;
     return info;
   }
 
@@ -360,11 +538,23 @@ export class McpManager extends EventEmitter {
   private notify(): void {
     this.rebuildIndex();
     this.emit('servers', this.list());
+    for (const check of [...this.settleWaiters]) check();
   }
 
   /** Names of project servers that wait for the user's OK (the renderer shows a notice). */
   blocked(): string[] {
     return [...this.entries.values()].filter((e) => e.status === 'blocked').map((e) => e.name);
+  }
+
+  /**
+   * Each connected server's `instructions` (what it tells a client about using it), at most MAX_INSTRUCTIONS
+   * characters. Untrusted text from the server: quote it as such if it goes into a prompt.
+   */
+  serverInstructions(): { server: string; scope: McpScope; instructions: string }[] {
+    return [...this.entries.values()]
+      .filter((e) => e.status === 'connected' && e.instructions)
+      .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === 'project' ? -1 : 1))
+      .map((e) => ({ server: e.name, scope: e.scope, instructions: e.instructions! }));
   }
 
   /** Re-reads the settings and the project file, connects new or changed servers and drops removed ones. */
@@ -393,7 +583,7 @@ export class McpManager extends EventEmitter {
     for (const [name, reason] of Object.entries(project.invalid)) desired.set(keyOf('project', name), { name, scope: 'project', config: { command: '?' }, invalid: reason });
 
     const trusted = new Set(cfg.mcpTrusted?.[cwd] ?? []);
-    const pending: Promise<void>[] = [];
+    const pending: Promise<unknown>[] = [];
     // Drop entries that are gone or changed.
     for (const [key, e] of [...this.entries]) {
       const want = desired.get(key);
@@ -419,6 +609,7 @@ export class McpManager extends EventEmitter {
         transport: transportOf(want.config),
         stderr: [],
         generation: 0,
+        hiddenTools: [],
       };
       this.entries.set(key, e);
       if (want.invalid) {
@@ -437,15 +628,63 @@ export class McpManager extends EventEmitter {
     await Promise.allSettled(pending);
   }
 
-  private async connect(e: Entry): Promise<void> {
+  /** The entry is still the one listed under its key (not replaced or removed) and the manager runs. */
+  private isLive(e: Entry): boolean {
+    return !this.closed && this.entries.get(keyOf(e.scope, e.name)) === e;
+  }
+
+  private isRemote(e: Entry): boolean {
+    return transportOf(e.config) !== 'stdio';
+  }
+
+  /** The key of a server's record in the token store. */
+  private authKey(e: Entry): string {
+    return keyOf(e.scope, e.name);
+  }
+
+  private urlOf(e: Entry): string {
+    return expandEnvRefs((e.config as Extract<McpServerConfig, { url: string }>).url);
+  }
+
+  /** OAuth applies to a remote server unless it sends its own Authorization header and has no "oauth" key. */
+  private usesOAuth(e: Entry): boolean {
+    if (!this.isRemote(e)) return false;
+    const c = e.config as Extract<McpServerConfig, { url: string }>;
+    if (c.oauth) return true;
+    return !Object.keys(c.headers ?? {}).some((h) => h.toLowerCase() === 'authorization');
+  }
+
+  private isAuthFailure(err: unknown, e: Entry): boolean {
+    if (err instanceof UnauthorizedError || err instanceof NeedsSignInError) return true;
+    return this.usesOAuth(e) && !!err && typeof err === 'object' && (err as { code?: unknown }).code === 401;
+  }
+
+  private async refreshSignedIn(e: Entry): Promise<void> {
+    if (!this.isRemote(e)) return;
+    const now = await hasTokens(this.store, this.authKey(e), this.urlOf(e));
+    if (now !== !!e.signedIn) {
+      e.signedIn = now;
+      if (this.isLive(e)) this.notify();
+    }
+  }
+
+  private async connect(e: Entry, mode: ConnectMode = 'initial'): Promise<ConnectOutcome> {
     const gen = ++e.generation;
-    const current = () => e.generation === gen && this.entries.get(keyOf(e.scope, e.name)) === e && !this.closed;
-    e.status = 'connecting';
-    e.error = undefined;
-    e.tools = [];
-    e.sdkTools = [];
+    const current = () => e.generation === gen && this.isLive(e);
+    if (mode !== 'reconnect') {
+      e.status = 'connecting';
+      e.error = undefined;
+    }
+    if (mode === 'initial') {
+      e.tools = [];
+      e.sdkTools = [];
+      e.hiddenTools = [];
+    }
     e.stderr = [];
+    e.respawn = false;
     this.notify();
+    if (this.isRemote(e)) e.signedIn = await hasTokens(this.store, this.authKey(e), this.urlOf(e));
+    if (!current()) return 'stale';
     let client = new Client(this.clientInfo, { capabilities: {} });
     const open: { transport: Transport | null } = { transport: null };
     try {
@@ -453,15 +692,23 @@ export class McpManager extends EventEmitter {
         const transport = await this.makeTransport(e, kind);
         open.transport = transport;
         e.transport = kind;
-        const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`No answer within ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS).unref());
-        await Promise.race([client.connect(transport, { timeout: CONNECT_TIMEOUT_MS }), timer]);
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`No answer within ${Math.round(this.connectTimeout / 1000)} s`)), this.connectTimeout);
+          timer.unref();
+        });
+        try {
+          await Promise.race([client.connect(transport, { timeout: this.connectTimeout }), timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
       };
       const kind = transportOf(e.config);
       try {
         await attempt(kind);
       } catch (err) {
         // An "http" server that only speaks the older SSE transport answers the streamable POST with 4xx.
-        if (kind === 'http' && /4\d\d|not found|method not allowed|failed to connect|unexpected content type/i.test(errorText(err))) {
+        if (kind === 'http' && !this.isAuthFailure(err, e) && !(err instanceof InsecureEndpointError) && /4\d\d|not found|method not allowed|failed to connect|unexpected content type/i.test(errorText(err))) {
           await open.transport?.close().catch(() => undefined);
           await client.close().catch(() => undefined);
           client = new Client(this.clientInfo, { capabilities: {} });
@@ -470,23 +717,23 @@ export class McpManager extends EventEmitter {
       }
       if (!current()) {
         await client.close().catch(() => undefined);
-        return;
+        return 'stale';
       }
       e.client = client;
       const v = client.getServerVersion();
       if (v) e.serverInfo = { name: String(v.name), version: String(v.version) };
+      const instructions = client.getInstructions();
+      e.instructions = typeof instructions === 'string' && instructions.trim() ? instructions.trim().slice(0, MAX_INSTRUCTIONS) : undefined;
+      const mine = () => current() && e.client === client;
       client.onclose = () => {
-        if (!current()) return;
-        e.client = null;
-        if (e.status === 'connected' || e.status === 'connecting') {
-          e.status = 'error';
-          e.error = `Connection closed${e.stderr.length ? `: ${e.stderr.slice(-3).join(' · ')}` : ''}`;
-          e.tools = [];
-          e.sdkTools = [];
-          this.notify();
-        }
+        if (mine()) this.onDropped(e, 'Connection closed');
       };
-      client.onerror = (err) => console.warn(`[mcp:${e.name}]`, errorText(err));
+      client.onerror = (err) => {
+        const text = errorText(err);
+        console.warn(`[mcp:${e.name}]`, text);
+        // The streamable HTTP transport reports a lost stream here rather than closing.
+        if (mine() && e.transport !== 'stdio' && e.status === 'connected' && isConnectionLoss(err)) this.onDropped(e, text);
+      };
       try {
         client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
           if (!current()) return;
@@ -496,71 +743,147 @@ export class McpManager extends EventEmitter {
         /* a server without the capability */
       }
       await this.refreshTools(e, gen);
-      if (!current()) return;
+      if (!current()) return 'stale';
       e.status = 'connected';
+      e.error = undefined;
+      e.lastError = undefined;
       this.notify();
+      return 'connected';
     } catch (err) {
-      if (!current()) return;
+      if (!current()) {
+        await client.close().catch(() => undefined);
+        return 'stale';
+      }
       // A process that exits at once closes the connection before its stderr has been read: give it a moment.
       if (e.transport === 'stdio') await new Promise((r) => setTimeout(r, 200));
-      if (!current()) return;
+      if (!current()) return 'stale';
       e.client = null;
-      e.status = 'error';
+      await client.close().catch(() => undefined);
+      if (this.isRemote(e) && this.isAuthFailure(err, e)) {
+        // Nothing more until the user clicks "Sign in": no browser, no retry loop.
+        e.status = 'needs-auth';
+        e.error = undefined;
+        e.tools = [];
+        e.sdkTools = [];
+        e.hiddenTools = [];
+        e.signedIn = await hasTokens(this.store, this.authKey(e), this.urlOf(e));
+        this.notify();
+        return 'needs-auth';
+      }
       let text = errorText(err);
       if (/connection closed/i.test(text)) text = e.transport === 'stdio' ? 'The server exited right after starting.' : 'The server closed the connection.';
-      e.error = text + (e.stderr.length ? `\n${e.stderr.slice(-4).join('\n')}` : '');
+      text += e.stderr.length ? `\n${e.stderr.slice(-4).join('\n')}` : '';
+      e.lastError = text;
+      if (mode === 'reconnect') return 'failed'; // the loop decides; the status stays "reconnecting"
+      e.status = 'error';
+      e.error = text;
+      e.tools = [];
+      e.sdkTools = [];
+      e.hiddenTools = [];
       this.notify();
-      await client.close().catch(() => undefined);
+      return 'failed';
     }
   }
 
-  private async makeTransport(e: Entry, kind: 'stdio' | 'http' | 'sse'): Promise<Transport> {
-    const c = e.config;
-    if (kind === 'stdio') {
-      const s = c as Extract<McpServerConfig, { command: string }>;
-      const envExtra: Record<string, string> = {};
-      for (const [k, v] of Object.entries(s.env ?? {})) envExtra[k] = expandEnvRefs(v);
-      const base: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') base[k] = v;
-      base.PATH = await loginPath();
-      const cwd = s.cwd ? path.resolve(this.opts.cwd(), expandHome(expandEnvRefs(s.cwd))) : this.opts.cwd();
-      const t = new StdioClientTransport({
-        command: expandHome(expandEnvRefs(s.command)),
-        args: (s.args ?? []).map((a) => expandHome(expandEnvRefs(a))),
-        env: { ...base, ...envExtra },
-        cwd: fs.existsSync(cwd) ? cwd : os.homedir(),
-        stderr: 'pipe',
-      });
-      // stderr exists once the process is spawned (inside connect → start); attach on the next tick.
-      setImmediate(() => {
-        const stream = t.stderr;
-        if (!stream) return;
-        let buf = '';
-        stream.on('data', (chunk: Buffer) => {
-          buf += chunk.toString();
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
-          for (const line of lines) {
-            const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
-            if (!clean) continue;
-            e.stderr.push(clean.slice(0, 300));
-            if (e.stderr.length > STDERR_LINES) e.stderr.shift();
-          }
-        });
-      });
-      return t;
+  /** A connected server's transport went away: a stdio server waits for its next call, a remote one reconnects. */
+  private onDropped(e: Entry, reason: string): void {
+    if (e.status !== 'connected') return;
+    if (e.transport === 'stdio') {
+      e.client = null;
+      e.status = 'error';
+      e.error = `The server exited${e.stderr.length ? `: ${e.stderr.slice(-3).join(' · ')}` : ''}. It restarts on the next tool call.`;
+      e.respawn = true; // its tools stay offered; the next call starts it again, once
+      this.notify();
+      return;
     }
+    this.scheduleReconnect(e, reason);
+  }
+
+  /** Reconnects a remote server: up to `tries` attempts, waiting baseMs, doubling up to maxMs, before each. */
+  private scheduleReconnect(e: Entry, reason: string): void {
+    if (this.closed || e.loop || !this.isLive(e) || !this.isRemote(e)) return;
+    const loop = { cancelled: false };
+    e.loop = loop;
+    const old = e.client;
+    e.client = null;
+    e.generation++; // the old client's callbacks no longer count
+    void old?.close().catch(() => undefined);
+    e.status = 'reconnecting';
+    e.error = `Connection lost: ${firstLine(reason)}`;
+    this.notify();
+    const { tries = 5, baseMs = 1000, maxMs = 30_000 } = this.opts.reconnect ?? {};
+    void (async () => {
+      let last = firstLine(reason);
+      for (let i = 0; i < tries; i++) {
+        await this.sleep(Math.min(baseMs * 2 ** i, maxMs));
+        if (loop.cancelled || !this.isLive(e)) return;
+        const outcome = await this.connect(e, 'reconnect');
+        if (loop.cancelled) return;
+        if (outcome !== 'failed') {
+          e.loop = null;
+          return;
+        }
+        last = firstLine(e.lastError ?? last);
+      }
+      if (loop.cancelled || !this.isLive(e)) return;
+      e.loop = null;
+      e.status = 'error';
+      e.error = `Could not reconnect after ${tries} tries: ${last}`;
+      e.tools = [];
+      e.sdkTools = [];
+      e.hiddenTools = [];
+      this.notify();
+    })();
+  }
+
+  private makeTransport(e: Entry, kind: 'stdio' | 'http' | 'sse'): Promise<Transport> | Transport {
+    const c = e.config;
+    if (kind === 'stdio') return this.makeStdio(e);
     const h = c as Extract<McpServerConfig, { url: string }>;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(h.headers ?? {})) headers[k] = expandEnvRefs(v);
     const url = new URL(expandEnvRefs(h.url));
-    if (kind === 'sse') {
-      return new SSEClientTransport(url, {
-        requestInit: { headers },
-        eventSourceInit: { fetch: (input, init) => fetch(input, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), ...headers } }) },
+    const authProvider = this.usesOAuth(e)
+      ? new McpOAuthProvider({ key: this.authKey(e), serverUrl: this.urlOf(e), store: this.store, oauth: h.oauth, onChange: () => void this.refreshSignedIn(e) })
+      : undefined;
+    const fetchFn = guardedFetch(url);
+    if (kind === 'sse') return new SSEClientTransport(url, { requestInit: { headers }, authProvider, fetch: fetchFn });
+    return new StreamableHTTPClientTransport(url, { requestInit: { headers }, authProvider, fetch: fetchFn });
+  }
+
+  private async makeStdio(e: Entry): Promise<Transport> {
+    const s = e.config as Extract<McpServerConfig, { command: string }>;
+    const envExtra: Record<string, string> = {};
+    for (const [k, v] of Object.entries(s.env ?? {})) envExtra[k] = expandEnvRefs(v);
+    const base: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') base[k] = v;
+    base.PATH = await loginPath();
+    const cwd = s.cwd ? path.resolve(this.opts.cwd(), expandHome(expandEnvRefs(s.cwd))) : this.opts.cwd();
+    const t = new StdioClientTransport({
+      command: expandHome(expandEnvRefs(s.command)),
+      args: (s.args ?? []).map((a) => expandHome(expandEnvRefs(a))),
+      env: { ...base, ...envExtra },
+      cwd: fs.existsSync(cwd) ? cwd : os.homedir(),
+      stderr: 'pipe',
+    });
+    // stderr exists once the process is spawned (inside connect → start); attach on the next tick.
+    setImmediate(() => {
+      const stream = t.stderr;
+      if (!stream) return;
+      let buf = '';
+      stream.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+          if (!clean) continue;
+          e.stderr.push(clean.slice(0, 300));
+          if (e.stderr.length > STDERR_LINES) e.stderr.shift();
+        }
       });
-    }
-    return new StreamableHTTPClientTransport(url, { requestInit: { headers } });
+    });
+    return t;
   }
 
   private async refreshTools(e: Entry, gen: number): Promise<void> {
@@ -569,14 +892,18 @@ export class McpManager extends EventEmitter {
     const tools: SdkTool[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < 20; page++) {
-      const res = await client.listTools(cursor ? { cursor } : undefined, { timeout: CONNECT_TIMEOUT_MS });
+      const res = await client.listTools(cursor ? { cursor } : undefined, { timeout: this.connectTimeout });
       tools.push(...res.tools);
       cursor = res.nextCursor;
       if (!cursor) break;
     }
     if (e.generation !== gen) return;
-    e.sdkTools = tools;
-    e.tools = tools.map((t) => ({
+    const allow = e.config.enabledTools;
+    const deny = new Set(e.config.disabledTools ?? []);
+    const kept = tools.filter((t) => (!allow || allow.includes(t.name)) && !deny.has(t.name));
+    e.hiddenTools = tools.filter((t) => !kept.includes(t)).map((t) => t.name);
+    e.sdkTools = kept;
+    e.tools = kept.map((t) => ({
       name: t.name,
       fullName: '', // assigned by rebuildIndex (needs the global view for collisions)
       description: String(t.description ?? '').trim(),
@@ -586,11 +913,19 @@ export class McpManager extends EventEmitter {
     this.notify();
   }
 
+  /**
+   * Whether a server's tools are offered to the model: connected, reconnecting (a call waits), an exited stdio server
+   * (the next call starts it again), or one being started again with its tools kept.
+   */
+  private offered(e: Entry): boolean {
+    return e.status === 'connected' || e.status === 'reconnecting' || (e.status === 'error' && !!e.respawn) || (e.status === 'connecting' && e.tools.length > 0);
+  }
+
   /** Assigns the model-facing names (mcp__server__tool, unique and at most 64 characters) and indexes them. */
   private rebuildIndex(): void {
     this.byFullName.clear();
     for (const e of this.entries.values()) {
-      if (e.status !== 'connected' && e.status !== 'connecting') continue;
+      if (!this.offered(e) && e.status !== 'connecting') continue;
       e.tools.forEach((info, i) => {
         let base = `mcp__${sanitizeName(e.name)}__${sanitizeName(info.name)}`;
         if (base.length > MAX_TOOL_NAME) base = base.slice(0, MAX_TOOL_NAME);
@@ -607,18 +942,24 @@ export class McpManager extends EventEmitter {
 
   private async disconnect(e: Entry): Promise<void> {
     e.generation++;
+    if (e.loop) e.loop.cancelled = true;
+    e.loop = null;
+    if (e.signIn) e.signIn.abort();
+    e.signIn = null;
+    e.respawn = false;
     const client = e.client;
     e.client = null;
     e.tools = [];
     e.sdkTools = [];
+    e.hiddenTools = [];
     if (client) await client.close().catch(() => undefined);
   }
 
-  /** What the model gets: one Tool per connected server tool, approval included. */
+  /** What the model gets: one Tool per offered server tool, approval included. */
   tools(): Tool[] {
     const out: Tool[] = [];
     for (const { entry, tool, info } of this.byFullName.values()) {
-      if (entry.status !== 'connected') continue;
+      if (!this.offered(entry)) continue;
       const ref: McpToolRef = { server: entry.name, scope: entry.scope, tool: tool.name, readOnly: info.readOnly, destructive: info.destructive };
       const description = `[${entry.name}] ${info.description || tool.name}`.slice(0, 1024);
       const parameters = (tool.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object', properties: {} }) as Record<string, unknown>;
@@ -630,7 +971,7 @@ export class McpManager extends EventEmitter {
         run: async (args, ctx) => {
           const ok = await ctx.approve(info.fullName, approvalDetail(args));
           if (!ok.ok) return { content: ok.message };
-          return this.call(info.fullName, args, ctx.signal);
+          return this.call(info.fullName, args, ctx.signal, ctx.sessionId);
         },
       });
     }
@@ -644,14 +985,81 @@ export class McpManager extends EventEmitter {
     return { server: hit.entry.name, scope: hit.entry.scope, tool: hit.tool.name, readOnly: hit.info.readOnly, destructive: hit.info.destructive };
   }
 
-  async call(fullName: string, args: unknown, signal?: AbortSignal): Promise<ToolResult> {
+  /** Waits while a server connects or reconnects, up to `ms`; rejects on abort or when the time is up. */
+  private waitSettled(e: Entry, ms: number, signal?: AbortSignal): Promise<void> {
+    const busy = () => this.isLive(e) && (e.status === 'reconnecting' || e.status === 'connecting');
+    if (!busy()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const done = (err?: Error) => {
+        clearTimeout(timer);
+        this.settleWaiters.delete(check);
+        signal?.removeEventListener('abort', onAbort);
+        if (err) reject(err);
+        else resolve();
+      };
+      const check = () => {
+        if (!busy()) done();
+      };
+      const onAbort = () => done(new Error('The call was aborted.'));
+      const timer = setTimeout(() => done(new Error(`MCP server "${e.name}" is reconnecting and did not come back within ${formatMs(ms)}.`)), ms);
+      this.settleWaiters.add(check);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private notConnectedText(e: Entry): string {
+    if (e.status === 'needs-auth' || e.status === 'authorizing') return `MCP server "${e.name}" needs sign-in. The user can sign in under Settings → MCP.`;
+    return `MCP server "${e.name}" is not connected (${firstLine(e.error ?? e.status)})`;
+  }
+
+  async call(fullName: string, args: unknown, signal?: AbortSignal, sessionId?: string): Promise<ToolResult> {
     const hit = this.byFullName.get(fullName);
     if (!hit) throw new Error(`Unknown MCP tool ${fullName}`);
-    const client = hit.entry.client;
-    if (!client || hit.entry.status !== 'connected') throw new Error(`MCP server "${hit.entry.name}" is not connected (${hit.entry.error ?? hit.entry.status})`);
-    const params = { name: hit.tool.name, arguments: (args && typeof args === 'object' ? args : {}) as Record<string, unknown> };
-    const res = (await client.callTool(params, undefined, { timeout: CALL_TIMEOUT_MS, resetTimeoutOnProgress: true, signal })) as CallResult;
-    return contentToResult(res);
+    const e = hit.entry;
+    const toolName = hit.tool.name;
+    if (e.status === 'reconnecting' || e.status === 'connecting') await this.waitSettled(e, this.connectTimeout, signal);
+    else if (e.respawn && !e.client && this.isLive(e)) await this.connect(e, 'respawn'); // once: connect clears the flag
+    const client = e.client;
+    if (!client || e.status !== 'connected') throw new Error(this.notConnectedText(e));
+    if (!e.sdkTools.some((t) => t.name === toolName)) throw new Error(`MCP server "${e.name}" no longer offers "${toolName}".`);
+    const params = { name: toolName, arguments: (args && typeof args === 'object' ? args : {}) as Record<string, unknown> };
+    const timeout = e.config.timeout ?? CALL_TIMEOUT_MS;
+    let res: CallResult;
+    try {
+      // onprogress asks the server for progress notifications; each one restarts the timeout.
+      res = (await client.callTool(params, undefined, { timeout, resetTimeoutOnProgress: true, maxTotalTimeout: Math.max(MAX_TOTAL_CALL_MS, timeout), signal, onprogress: () => undefined })) as CallResult;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (isTimeout(err)) throw new Error(`"${toolName}" on MCP server "${e.name}" did not finish in time (timeout ${formatMs(timeout)}).`);
+      if (this.isRemote(e) && this.isAuthFailure(err, e)) {
+        this.markNeedsAuth(e);
+        throw new Error(this.notConnectedText(e));
+      }
+      if (this.isRemote(e) && isConnectionLoss(err) && e.client === client) {
+        this.scheduleReconnect(e, errorText(err));
+        throw new Error(`Lost the connection to MCP server "${e.name}"; it is reconnecting. Try the call again in a moment.`);
+      }
+      throw new Error(errorText(err));
+    }
+    return spillResult(contentToResult(res), { dir: this.resultsDir, sessionId, server: e.name, tool: toolName });
+  }
+
+  /** A remote server's tokens stopped working (and refreshing them failed): back to "Sign in", nothing automatic. */
+  private markNeedsAuth(e: Entry): void {
+    if (!this.isLive(e)) return;
+    const client = e.client;
+    e.client = null;
+    e.generation++;
+    if (e.loop) e.loop.cancelled = true;
+    e.loop = null;
+    void client?.close().catch(() => undefined);
+    e.status = 'needs-auth';
+    e.error = undefined;
+    e.tools = [];
+    e.sdkTools = [];
+    e.hiddenTools = [];
+    this.notify();
+    void this.refreshSignedIn(e);
   }
 
   /** One line per connected server for the system prompt, or '' when there is none. */
@@ -739,12 +1147,98 @@ export class McpManager extends EventEmitter {
     return this.list();
   }
 
+  private remoteEntry(name: string, scope: McpScope): Entry {
+    const e = this.entries.get(keyOf(scope, name));
+    if (!e) throw new Error(`No ${scope} server named "${name}".`);
+    if (!this.isRemote(e)) throw new Error(`"${name}" is not a remote server: sign-in is for servers with a URL.`);
+    return e;
+  }
+
+  /**
+   * The user's sign-in (OAuth) for a remote server: opens the authorization page in the browser and waits for its
+   * return on 127.0.0.1. The promise settles when sign-in ends (signed in and connected, failed, cancelled or timed
+   * out); the status is "authorizing" meanwhile. Only ever started by the user.
+   */
+  async signIn(name: string, scope: McpScope): Promise<McpServerInfo[]> {
+    const e = this.remoteEntry(name, scope);
+    if (e.status === 'disabled' || e.status === 'blocked') throw new Error(`Turn "${name}" on first.`);
+    if (e.signIn) return this.list();
+    const open = this.opts.auth?.openExternal;
+    if (!open) throw new Error('Sign-in is not available in this build.');
+    if (e.loop) e.loop.cancelled = true;
+    e.loop = null;
+    const old = e.client;
+    e.client = null;
+    e.generation++;
+    void old?.close().catch(() => undefined);
+    const ctl = new AbortController();
+    e.signIn = ctl;
+    e.status = 'authorizing';
+    e.error = undefined;
+    e.tools = [];
+    e.sdkTools = [];
+    e.hiddenTools = [];
+    this.notify();
+    const url = this.urlOf(e);
+    try {
+      await runSignIn({
+        key: this.authKey(e),
+        serverUrl: url,
+        store: this.store,
+        oauth: (e.config as Extract<McpServerConfig, { url: string }>).oauth,
+        open,
+        fetchFn: guardedFetch(new URL(url)),
+        signal: ctl.signal,
+        timeoutMs: this.opts.auth?.signInTimeoutMs,
+      });
+      if (e.signIn !== ctl || !this.isLive(e)) return this.list();
+      e.signIn = null;
+      await this.connect(e);
+    } catch (err) {
+      if (e.signIn !== ctl || !this.isLive(e)) return this.list();
+      e.signIn = null;
+      e.status = 'needs-auth';
+      e.error = ctl.signal.aborted ? undefined : errorText(err);
+      e.signedIn = await hasTokens(this.store, this.authKey(e), url);
+      this.notify();
+    }
+    return this.list();
+  }
+
+  /** Stops a sign-in that waits for the browser (the callback listener closes). */
+  async cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]> {
+    const e = this.remoteEntry(name, scope);
+    const ctl = e.signIn;
+    if (!ctl) return this.list();
+    e.signIn = null;
+    ctl.abort();
+    e.status = 'needs-auth';
+    e.error = undefined;
+    this.notify();
+    return this.list();
+  }
+
+  /** Deletes the server's tokens and client registration, then connects without them. */
+  async signOut(name: string, scope: McpScope): Promise<McpServerInfo[]> {
+    const e = this.remoteEntry(name, scope);
+    await this.disconnect(e);
+    await this.store.delete(this.authKey(e));
+    e.signedIn = false;
+    if (e.status === 'disabled' || e.status === 'blocked') {
+      this.notify();
+      return this.list();
+    }
+    await this.connect(e);
+    return this.list();
+  }
+
   /** Stops every server (app quit). */
   async close(): Promise<void> {
     this.closed = true;
     const all = [...this.entries.values()];
     this.entries.clear();
     this.byFullName.clear();
+    for (const check of [...this.settleWaiters]) check();
     await Promise.allSettled(all.map((e) => this.disconnect(e)));
   }
 }
