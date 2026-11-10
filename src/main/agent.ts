@@ -59,6 +59,7 @@ import { batchMarks, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } 
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { THINKING_KEY } from './agent/anthropic';
+import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
@@ -958,7 +959,7 @@ export class Agent {
     if (!this.session.cwd) this.session.cwd = this.getConfig().workingDirectory;
     this.runCwd = this.session.cwd;
     const cfg = this.sessionConfig();
-    let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' = 'done';
+    let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
 
     const skills = this.getSkills(cfg.workingDirectory);
@@ -1056,6 +1057,10 @@ export class Agent {
       let nudged = false;
       /** Times a Stop hook sent this run back to work */
       let stopContinues = 0;
+      /** Replies cut at the output limit that the model was asked to continue, since the last user message */
+      let continuations = 0;
+      /** The newest tool calls, to stop one made again and again with the same result */
+      const repeats = new RepeatWatch();
       for (let turn = 0; ; turn++) {
         if (turn >= cfg.maxTurns) {
           reason = 'max_turns';
@@ -1066,7 +1071,7 @@ export class Agent {
           break;
         }
         this.flushAutoNotes();
-        if (this.queued.length) await this.drainQueue(skills);
+        if (this.queued.length && (await this.drainQueue(skills))) continuations = 0;
         await this.autoCompactIfNeeded(cfg, client, model, signal);
         if (signal.aborted) {
           reason = 'aborted';
@@ -1096,7 +1101,22 @@ export class Agent {
         const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
         this.emit({ type: 'thinking_done' });
 
-        if (!text.trim() && !toolCalls.length) {
+        // The model declined (Anthropic stop_reason "refusal"): what it wrote stays, one notice, and the run ends
+        if (reply.refused) {
+          if (text.trim()) {
+            const said: Msg = { role: 'assistant', content: text };
+            if (reply.thinking?.length) (said as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
+            this.store.append(this.session, said);
+            lastText = text;
+            this.markPrompt();
+            this.emit({ type: 'text_done' });
+          }
+          this.emit({ type: 'assistant_message', text, toolCalls: 0 });
+          this.emit({ type: 'error', kind: 'notice', message: REFUSAL_NOTICE });
+          break;
+        }
+
+        if (!text.trim() && !toolCalls.length && !reply.cut) {
           // Small models sometimes return nothing after a tool result. Nudge once, then give up.
           if (!nudged) {
             nudged = true;
@@ -1128,9 +1148,18 @@ export class Agent {
         this.markPrompt();
         if (text) this.emit({ type: 'text_done' });
         this.emit({ type: 'assistant_message', text, toolCalls: toolCalls.length });
+        // Cut at the output limit with no call: asked once to go on (twice at most per user message)
+        if (!toolCalls.length && reply.cut && continuations < MAX_CONTINUATIONS && !signal.aborted && !this.hookStop) {
+          continuations++;
+          this.store.append(this.session, { role: 'user', content: CONTINUE_TEXT });
+          continue;
+        }
         if (!toolCalls.length) {
           // A message queued during the run keeps it going instead of ending it.
-          if (this.queued.length && (await this.drainQueue(skills))) continue;
+          if (this.queued.length && (await this.drainQueue(skills))) {
+            continuations = 0;
+            continue;
+          }
           if (this.hookStop || signal.aborted) break;
           // Stop hooks may send the model back to work with a reason.
           const more = await this.stopHooks(lastText, stopContinues);
@@ -1142,6 +1171,7 @@ export class Agent {
           break;
         }
 
+        let looping = false;
         for (const call of toolCalls) {
           if (signal.aborted || this.hookStop) break;
           // load_tools was run above: its result goes in quietly, without a tool row, an approval or hooks
@@ -1150,7 +1180,18 @@ export class Agent {
             this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: loaded });
             continue;
           }
+          // Arguments cut off at the output limit: not run; the result says how to send it instead
+          if (reply.cut && !isCompleteJson(call.function.arguments)) {
+            this.emit({ type: 'tool_start', id: call.id, name: call.function.name, args: call.function.arguments });
+            this.emit({ type: 'tool_end', id: call.id, name: call.function.name, result: CUT_CALL_TEXT, ok: false, durationMs: 0 });
+            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: CUT_CALL_TEXT });
+            continue;
+          }
           const result = await this.execTool(call, tools, ctx);
+          // The same call with the same result again and again: a line on the result, then the run ends
+          const same = repeats.add(call.function.name, call.function.arguments, result.content);
+          if (same >= REPEAT_WARN) result.content = `${result.content}\n${REPEAT_WARNING}`;
+          looping = same >= REPEAT_STOP;
           this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
           const used = tools.find((t) => t.name === call.function.name);
           if (CHANGING_TOOLS.has(call.function.name) || (used?.mcp && !used.mcp.readOnly)) this.notifyChanges();
@@ -1163,6 +1204,12 @@ export class Agent {
               ],
             });
           }
+          if (looping) break;
+        }
+        if (looping) {
+          reason = 'loop';
+          this.emit({ type: 'error', kind: 'notice', message: REPEAT_STOP_NOTICE });
+          break;
         }
         if (this.planSubmitted) {
           reason = 'plan';
@@ -1189,7 +1236,7 @@ export class Agent {
       this.emit({ type: 'session_changed', session: toMeta(this.session) });
       this.emit(lastText ? { type: 'run_end', reason, text: lastText } : { type: 'run_end', reason });
       if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
-      if (reason === 'done' || reason === 'max_turns' || reason === 'plan') {
+      if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
         this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
       }
     }
