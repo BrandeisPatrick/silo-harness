@@ -216,8 +216,22 @@ Every provider type but Ollama and LM Studio is first assumed to cache. A sessio
 write on three requests in a row, each sent within five minutes of the last reply with a prompt of 2,000 tokens or more,
 goes back to the rule without caching (old output set aside past 48K, screenshots one at a time) until a read or write is
 reported again. After a pause of more than five minutes the next request writes the whole conversation to the cache anyway,
-so a batch then starts at 60K instead of 90K. Neither the fallback nor the batch at a pause has been measured against a live
-endpoint.
+so a batch then starts at 60K instead of 90K. The fallback is measured below; the batch at a pause has not been measured
+against a live endpoint.
+
+### On the release build
+
+One run each on November 10, 2026, on 8549857: after the second round of changes (search results capped, the check that the
+provider caches, the batch at a pause).
+
+| | Requests (agent / check / title / compaction) | Input | Read share | Output | Largest request | Cost |
+|---|---|--:|--:|--:|--:|--:|
+| With caching | 69 (49 / 19 / 1 / 0) | 2,666,667 | 96% | 17,662 | 76,112 | $0.0469 |
+| Without caching (`--compat`) | 86 (55 / 30 / 1 / 0) | 2,178,562 | 0% | 24,448 | 48,395 | $0.2301 |
+
+88% and 40% less than before any cut ($0.3812). The run without caching shows the fallback at work: the endpoint reported no
+cache read or write, the session went back to the rule without caching, and no request passed 48,395 tokens. Tier 1, two
+runs: $0.0065 each, the same as before the second round. The release notes quote these two numbers.
 
 ### How it was run
 
@@ -379,4 +393,5 @@ them, and the live sub-session test has it load the sessions group.
 | Tool groups: two live checks of the model loading groups, and the live scripts three times (estimated) | about $0.10 |
 | Prompt caching: a tier 1 trial (Q), tier 1 (two runs) and tier 2 | $0.076 |
 | Prompt caching: API probes of deferred tools and the live checks (estimated) | about $0.03 |
-| **Total** | **about $3.04** |
+| Release build: tier 1 (two runs), tier 2 with and without caching | $0.290 |
+| **Total** | **about $3.33** |
