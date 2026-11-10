@@ -1075,6 +1075,12 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       break;
     case 'thinking_done':
       finishThinking();
+      // The model call completed: what it streamed is the reply
+      transcript.keepReply();
+      break;
+    case 'reply_discarded':
+      // The call failed after it began to stream and is tried again: its text and thinking go
+      transcript.discardReply();
       break;
     case 'text_delta':
       setStatusText(currentMode() === 'plan' ? 'Planning…' : 'Responding…');
@@ -1134,7 +1140,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       statusLine.reportUsage(Number(ev.promptTokens) || 0, Number(ev.completionTokens) || 0);
       break;
     case 'hook_status':
-      // A hook's statusMessage while it runs (one line; the status text never wraps)
+    case 'retry_status':
+      // A hook's statusMessage while it runs, or the wait before a model call is tried again (one line; the status
+      // text never wraps)
       setStatusText(typeof ev.text === 'string' && ev.text.trim() ? ev.text.replace(/\s+/g, ' ').trim().slice(0, 120) : baseVerb());
       break;
     case 'approval_request':
@@ -1213,6 +1221,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     case 'run_end':
       finishThinking();
       endAssistant();
+      transcript.keepReply();
       approvals.interrupt();
       // An auto-compaction belongs to the run; its compact_end (if one still comes) only adds the divider or error.
       statusLine.dropRunCompaction();

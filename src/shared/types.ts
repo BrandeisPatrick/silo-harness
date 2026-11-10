@@ -451,14 +451,27 @@ export type AgentEvent =
   /** A hook with a statusMessage is running (text), or it finished (null): the status line says so meanwhile */
   | { type: 'hook_status'; text: string | null }
   /**
+   * A model call failed and waits to be tried again (text: "Connection lost. Retrying in 4 s (2 of 6)."), or the wait
+   * is over (null: the reply started, or the call ended). One status line that replaces itself, like hook_status.
+   */
+  | { type: 'retry_status'; text: string | null }
+  /**
+   * The model call that streamed the text and thinking since the last thinking_done failed and is tried again: what it
+   * showed is not the answer and goes (the window, the phone and the history log drop it).
+   */
+  | { type: 'reply_discarded' }
+  /**
    * Auto mode's safety check blocked the call `block.id` (sent before its tool_end): the agent got the reason as the
    * call's result and goes on; the window shows one quiet line with Allow instead of the call's row.
    */
   | { type: 'auto_blocked'; block: AutoBlock }
   /** The user allowed the blocked call `id` (here, in Settings or on the phone): it runs once when the agent retries it */
   | { type: 'auto_allowed'; id: string }
-  /** `text` is the last assistant text of the run, when it had any */
-  | { type: 'run_end'; reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan'; text?: string };
+  /** `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times. */
+  | { type: 'run_end'; reason: RunEndReason; text?: string };
+
+/** Why a run ended */
+export type RunEndReason = 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop';
 
 /** Where a user-role message came from. */
 export type MessageOrigin = 'user' | 'queue' | 'schedule' | 'session' | 'remote' | 'mod' | 'command' | 'dream';

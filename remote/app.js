@@ -51,7 +51,9 @@
   /** The live parts of the view, reset with every snapshot */
   let V = freshView();
   function freshView() {
-    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
+    // attempt: the reply and thinking nodes of the model call in flight (a failed attempt's go); retry: the status text
+    // while a failed call waits to be tried again
+    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', attempt: [], retry: null, tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -1093,6 +1095,7 @@
         if (!V.thinking) {
           V.thinking = thinkingEl(true);
           V.thinkingText = '';
+          V.attempt.push(V.thinking);
           append(V.thinking);
         }
         V.thinkingText += ev.text;
@@ -1101,12 +1104,28 @@
       case 'thinking_done':
         if (V.thinking) V.thinking.querySelector('.label').textContent = 'Thought';
         V.thinking = null;
+        // The model call completed: what it streamed is the reply
+        V.attempt = [];
+        break;
+      case 'reply_discarded':
+        // The call failed after it began to stream and is tried again: its text and thinking go
+        for (const n of V.attempt) n.remove();
+        V.attempt = [];
+        V.assistant = null;
+        V.assistantText = '';
+        V.thinking = null;
+        V.thinkingText = '';
+        break;
+      case 'retry_status':
+        V.retry = ev.text || null;
+        renderTop();
         break;
       case 'text_delta':
         if (!V.assistant) {
           V.assistant = assistantEl('');
           V.assistant.classList.add('streaming');
           V.assistantText = '';
+          V.attempt.push(V.assistant);
           append(V.assistant);
         }
         V.assistantText += ev.text;
@@ -1239,6 +1258,8 @@
         endStreaming();
         V.assistant = null;
         V.thinking = null;
+        V.attempt = [];
+        V.retry = null;
         // Rows that never got a result were cut off with the run.
         for (const row of V.tools.values()) setToolState(row, 'Interrupted', false);
         V.tools.clear();
@@ -1300,7 +1321,8 @@
     if (state === 'idle' && S.running) state = 'running';
     el.mark.className = 'mark ' + state;
     el.mark.setAttribute('aria-label', STATE_LABEL[state]);
-    el.statusText.innerHTML = state === 'running' ? '<span class="spinner sm"></span>Working…' : state === 'waiting' ? 'Waiting for you' : '';
+    el.statusText.innerHTML = state === 'running' ? '<span class="spinner sm"></span>' : state === 'waiting' ? 'Waiting for you' : '';
+    if (state === 'running') el.statusText.append(V.retry || 'Working…');
   }
 
   function renderSheet() {

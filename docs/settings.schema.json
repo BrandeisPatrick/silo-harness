@@ -43,7 +43,7 @@
     "maxTurns": {
       "type": "integer",
       "minimum": 1,
-      "description": "How many tool calls one request may make before it stops and asks you to continue."
+      "description": "How many model calls one request may make before it stops and asks you to continue."
     },
     "sendScreenshotsToModel": {
       "type": "boolean",

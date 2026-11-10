@@ -440,6 +440,11 @@ export class SessionRuntime {
       case 'thinking_delta':
         l.thinking += ev.text;
         break;
+      case 'reply_discarded':
+        // A failed model call's text and thinking are not the answer: a window that switches here does not see them
+        l.text = '';
+        l.thinking = '';
+        break;
       case 'thinking_done':
         // Emitted once the model call is complete: its text is about to become a message (assistant_message) or be
         // dropped (an empty reply), so nothing of it is in flight any more. A finished thought is not kept: the

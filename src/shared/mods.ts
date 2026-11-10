@@ -411,6 +411,8 @@ export interface ModEvents {
   'message.user': { text: string; origin: string };
   'message.assistant': { text: string };
   'message.delta': { text: string };
+  /** The text streamed since the last message.assistant is dropped: the model call failed and is tried again */
+  'message.discarded': Record<string, never>;
   'tool.started': { id: string; name: string; args: unknown };
   'tool.ended': { id: string; name: string; ok: boolean; durationMs?: number };
   'tasks.changed': { tasks: TaskItem[] };

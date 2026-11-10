@@ -244,9 +244,12 @@ export function listProviders(cfg: AppConfig, env: NodeJS.ProcessEnv = process.e
   return providerNames(cfg).map((n) => resolveProvider(cfg, n, env));
 }
 
-/** The OpenAI client for a resolved provider. */
+/**
+ * The OpenAI client for a resolved provider. maxRetries 0: the agent's model calls retry in their own loop
+ * (agent/retry.ts), and the other calls (summary, titles, Auto mode's check, …) pass their own.
+ */
 export function clientFor(r: ResolvedProvider): OpenAI {
-  return new OpenAI({ baseURL: r.baseURL, apiKey: r.bearer || 'none', defaultHeaders: r.headers });
+  return new OpenAI({ baseURL: r.baseURL, apiKey: r.bearer || 'none', defaultHeaders: r.headers, maxRetries: 0 });
 }
 
 /**

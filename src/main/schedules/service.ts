@@ -53,6 +53,8 @@ const runStatus: Record<Extract<AgentEvent, { type: 'run_end' }>['reason'], Sche
   aborted: 'stopped',
   error: 'error',
   max_turns: 'error',
+  // Stopped for repeating one call: the task was not done
+  loop: 'error',
 };
 
 /** The message a run receives: says where it came from so the model does not take it for something just typed. */

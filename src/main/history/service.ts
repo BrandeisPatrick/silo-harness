@@ -217,6 +217,10 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         else thinking.set(id, { text: ev.text, started: now() });
         return;
       }
+      case 'reply_discarded':
+        // A failed model call's thinking is not logged as the reply's
+        thinking.delete(id);
+        return;
       case 'thinking_done': {
         const th = thinking.get(id);
         thinking.delete(id);

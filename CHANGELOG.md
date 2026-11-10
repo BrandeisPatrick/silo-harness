@@ -20,12 +20,16 @@
 - **Fewer cache rewrites.** Where the provider caches, old tool output and screenshots are set aside in batches, so the cached prompt is rewritten rarely.
 - **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
+- **Retries you can see.** A failed or dropped model call is tried up to 6 times with growing waits, shown on one status line.
 - **Cheaper page reads.** `browser_get_text` and `browser_read_page` return 12,000 characters at a time and say where to continue.
 
 ### Fixed
 
 - **Long output keeps its end.** Long command output keeps its last lines and always shows the exit code.
 - **Edits match what was asked.** `edit_file` never joins or splits words to match, says when whitespace differed, and refuses files changed since read.
+- **Dropped replies taken back.** Text from a reply that broke off mid-stream is removed before the call is tried again.
+- **Cut replies continue.** A reply cut at the output limit continues, and a tool call cut mid-arguments is not run.
+- **Repeating calls stop.** A tool call made 5 times with the same result ends the run with a notice.
 
 ### Security
 

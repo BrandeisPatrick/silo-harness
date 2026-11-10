@@ -75,12 +75,14 @@ function startMock() {
         // Ollama's calls carry no id unless `ollamaToolIds` is set (as newer versions send them)
         if (reply.toolCalls) message.tool_calls = reply.toolCalls.map((c) => ({ ...(state.ollamaToolIds && c.id ? { id: c.id } : {}), function: { name: c.name, arguments: c.args } }));
         const answer = async () => {
+          // `status` fails the call with that HTTP status, as Ollama does
+          if (reply.status) return json(reply.status, { error: reply.error || `mock error ${reply.status}` });
           res.writeHead(200, { 'content-type': 'application/x-ndjson' });
           for (const piece of reply.chunks ?? []) {
             res.write(JSON.stringify({ model: payload.model, message: { role: 'assistant', content: piece }, done: false }) + '\n');
             await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
           }
-          res.end(JSON.stringify({ model: payload.model, message, done: true, done_reason: reply.toolCalls ? 'tool_calls' : 'stop', prompt_eval_count: reply.promptTokens ?? state.ollamaPromptTokens, eval_count: 20 }) + '\n');
+          res.end(JSON.stringify({ model: payload.model, message, done: true, done_reason: reply.doneReason ?? (reply.toolCalls ? 'tool_calls' : 'stop'), prompt_eval_count: reply.promptTokens ?? state.ollamaPromptTokens, eval_count: 20 }) + '\n');
         };
         if (reply.delayMs) setTimeout(answer, reply.delayMs);
         else answer();
@@ -92,7 +94,14 @@ function startMock() {
       // matching reply is used. `delayMs` delays that reply; `chunks` streams the content in pieces `chunkDelayMs` apart.
       const at = state.replies.findIndex((r) => !r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
       const reply = at >= 0 ? state.replies.splice(at, 1)[0] : { content: 'Done.' };
+      // `status` fails the call (`headers` go with it: retry-after, x-should-retry); `drop` ends the stream after the
+      // content without a finish reason, as a dropped connection does; `finishReason` replaces the finish reason; a
+      // tool call's `rawArgs` is sent as written (half-written JSON, say)
       setTimeout(async () => {
+        if (reply.status) {
+          res.writeHead(reply.status, { 'content-type': 'application/json', ...(reply.headers || {}) });
+          return res.end(JSON.stringify({ error: { message: reply.error || `mock error ${reply.status}`, type: reply.errorType, code: reply.code } }));
+        }
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         const send = (obj) => res.write(`data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: payload.model, ...obj })}\n\n`);
         if (reply.chunks) {
@@ -101,8 +110,9 @@ function startMock() {
             await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
           }
         } else if (reply.content) send({ choices: [{ index: 0, delta: { role: 'assistant', content: reply.content } }] });
-        if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) } }] });
-        send({ choices: [{ index: 0, delta: {}, finish_reason: reply.toolCalls ? 'tool_calls' : 'stop' }] });
+        if (reply.drop) return res.end();
+        if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: c.rawArgs ?? JSON.stringify(c.args) } })) } }] });
+        send({ choices: [{ index: 0, delta: {}, finish_reason: reply.finishReason ?? (reply.toolCalls ? 'tool_calls' : 'stop') }] });
         // `usage` replaces the counts (cache fields and all), as a gateway that caches would send them
         // `promptTokensFromBody`: about a token per four characters of the request, as a real model would count
         send({ choices: [], usage: reply.usage ?? { prompt_tokens: reply.promptTokens ?? (state.promptTokensFromBody ? Math.ceil(body.length / 4) : 300), completion_tokens: 30 } });
@@ -122,6 +132,8 @@ function startMock() {
  * object: input_tokens, cache_read_input_tokens, cache_creation_input_tokens), status and error (fail with that HTTP
  * status and error type), delayMs, chunks (the text in pieces chunkDelayMs apart), failMidStream (an error event after
  * the first text). Non-streamed requests (Auto mode's check) take `nonStream` replies, as on the other routes.
+ * `stopReason` replaces the stop reason ("max_tokens", "refusal"), `headers` go with a failing status, `drop` ends the
+ * stream after the text without a stop reason, and a tool call's `rawArgs` is streamed as written.
  */
 function anthropic(state, payload, res, json) {
   const stream = !!payload.stream;
@@ -136,10 +148,13 @@ function anthropic(state, payload, res, json) {
   const blocks = [];
   if (reply.thinking) blocks.push({ type: 'thinking', thinking: reply.thinking, signature: reply.signature ?? 'sig-mock' });
   if (reply.content || reply.chunks) blocks.push({ type: 'text', text: reply.content ?? reply.chunks.join('') });
-  for (const c of reply.toolCalls ?? []) blocks.push({ type: 'tool_use', id: c.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`, name: c.name, input: c.args ?? {} });
-  const stop = reply.toolCalls?.length ? 'tool_use' : 'end_turn';
+  for (const c of reply.toolCalls ?? []) blocks.push({ type: 'tool_use', id: c.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`, name: c.name, input: c.args ?? {}, rawArgs: c.rawArgs });
+  const stop = reply.stopReason ?? (reply.toolCalls?.length ? 'tool_use' : 'end_turn');
   const answer = async () => {
-    if (reply.status) return json(reply.status, { type: 'error', error: { type: reply.errorType ?? 'api_error', message: reply.error ?? `mock error ${reply.status}` } });
+    if (reply.status) {
+      res.writeHead(reply.status, { 'content-type': 'application/json', ...(reply.headers || {}) });
+      return res.end(JSON.stringify({ type: 'error', error: { type: reply.errorType ?? 'api_error', message: reply.error ?? `mock error ${reply.status}` } }));
+    }
     if (!stream) {
       return json(200, { id: 'msg_mock', type: 'message', role: 'assistant', model: payload.model, content: blocks.length ? blocks : [{ type: 'text', text: '' }], stop_reason: stop, stop_sequence: null, usage: { ...usage, output_tokens: 20 } });
     }
@@ -161,9 +176,10 @@ function anthropic(state, payload, res, json) {
           }
           if (reply.chunks) await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
         }
+        if (reply.drop) return res.end();
       } else {
         send('content_block_start', { index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } });
-        const args = JSON.stringify(b.input);
+        const args = b.rawArgs ?? JSON.stringify(b.input);
         // The arguments in two pieces, as the API streams them
         send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(0, Math.ceil(args.length / 2)) } });
         send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(Math.ceil(args.length / 2)) } });

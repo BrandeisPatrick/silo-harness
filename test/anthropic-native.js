@@ -11,6 +11,7 @@ const { Agent } = dist('agent.js');
 const { SessionStore } = dist('sessions.js');
 const A = dist('agent/anthropic.js');
 const P = dist('providers.js');
+const R = dist('agent/retry.js');
 const { startMock, classifierReply } = require('./support/mock-model.js');
 const { check, done } = require('./support/check.js');
 
@@ -119,6 +120,13 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   })());
 
   // ---------- 4: a tool loop through the agent ----------
+  // The retry loop's waits return at once (agent/retry.ts retryTiming); the waits asked for are kept
+  const waits = [];
+  R.retryTiming.random = () => 0.5;
+  R.retryTiming.sleep = async (ms, signal) => {
+    waits.push(ms);
+    if (signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  };
   const mock = await startMock();
   const { state } = mock;
   state.apiKey = 'sk-test-native-key';
@@ -212,24 +220,63 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await agent.run('Hello?');
   const authErr = events.find((e) => e.type === 'error' && !e.kind);
   check('6: a refused key: the provider and what to check, no key in it', authErr && /refused the key \(HTTP 401\): invalid x-api-key/.test(authErr.message) && !authErr.message.includes('sk-test-native-key'), authErr);
-  // overloaded (the SDK retries twice first)
+  // overloaded every time: six tries (the agent's own loop; the SDK's retries are off), then one error that says so
   reset();
-  for (let i = 0; i < 3; i++) state.replies.push({ status: 529, errorType: 'overloaded_error', error: 'Overloaded' });
+  for (let i = 0; i < 6; i++) state.replies.push({ status: 529, errorType: 'overloaded_error', error: 'Overloaded' });
   await agent.run('Busy?');
-  const over = events.find((e) => e.type === 'error' && !e.kind);
-  check('6: overloaded: said in plain words after the retries', over && /overloaded \(HTTP 529\)/.test(over.message) && native().length === 3, over);
-  // rate limited
+  const over = events.filter((e) => e.type === 'error' && !e.kind);
+  check('6: overloaded: six tries, then one error that says so in plain words', over.length === 1 && /^Could not reach the provider after 6 tries: .*overloaded \(HTTP 529\)/.test(over[0].message) && native().length === 6 && events.find((e) => e.type === 'run_end')?.reason === 'error', over);
+  check('6: …with "Provider busy" on the status line while it waited', events.filter((e) => e.type === 'retry_status' && e.text).map((e) => e.text).join('|').startsWith('Provider busy. Retrying in 1 s (2 of 6).|Provider busy. Retrying in 2 s (3 of 6).'), events.filter((e) => e.type === 'retry_status'));
+  // rate limited twice, then through
   reset();
-  for (let i = 0; i < 3; i++) state.replies.push({ status: 429, errorType: 'rate_limit_error', error: 'Number of request tokens has exceeded your rate limit' });
+  for (let i = 0; i < 2; i++) state.replies.push({ status: 429, errorType: 'rate_limit_error', error: 'Number of request tokens has exceeded your rate limit' });
+  state.replies.push({ content: 'Through.' });
   await agent.run('Fast?');
-  const rate = events.find((e) => e.type === 'error' && !e.kind);
-  check('6: rate limited: said in plain words', rate && /rate limiting/.test(rate.message), rate);
-  // an error in the middle of the stream
+  check('6: rate limited twice: retried, and the run ends with the reply', events.find((e) => e.type === 'run_end')?.text === 'Through.' && native().length === 3 && !events.some((e) => e.type === 'error' && !e.kind));
+  // rate limited with a long Retry-After: no retry, the wait is said
   reset();
-  state.replies.push({ content: 'partial', failMidStream: true });
+  state.replies.push({ status: 429, errorType: 'rate_limit_error', error: 'Number of request tokens has exceeded your rate limit', headers: { 'retry-after': '300' } });
+  await agent.run('Later?');
+  const rate = events.find((e) => e.type === 'error' && !e.kind);
+  check('6: a Retry-After over 60 s: no retry, the error says when, and the provider\'s words', native().length === 1 && rate && /^Rate limited\. Try again in 5 min\. .*rate limiting/.test(rate.message), rate);
+  // an error in the middle of the stream, then a reply: only the second attempt's text is kept
+  reset();
+  state.replies.push({ content: 'partial', thinking: 'first thoughts', failMidStream: true, usage: { input_tokens: 70 } });
+  state.replies.push({ content: 'Whole answer.', usage: { input_tokens: 80 } });
   await agent.run('Stream?');
-  const mid = events.find((e) => e.type === 'error' && !e.kind);
-  check('6: an error mid-stream ends the run with it', events.find((e) => e.type === 'run_end')?.reason === 'error' && mid && /Overloaded/.test(mid.message), mid);
+  const kinds = events.map((e) => e.type);
+  check('6: an error mid-stream: what it showed is discarded, then the call is tried again', kinds.indexOf('reply_discarded') > kinds.indexOf('text_delta') && native().length === 2 && events.find((e) => e.type === 'run_end')?.reason === 'done');
+  check('6: …the stored reply is the second attempt\'s only, without the first one\'s thinking', agent.session.messages[agent.session.messages.length - 1].content === 'Whole answer.' && !JSON.stringify(agent.session.messages).includes('first thoughts'));
+  check('6: …and usage is counted once', events.filter((e) => e.type === 'usage').length === 1 && events.find((e) => e.type === 'usage').promptTokens === 80);
+  // a stream that ends without a stop reason (a dropped connection)
+  reset();
+  state.replies.push({ content: 'half', drop: true });
+  state.replies.push({ content: 'All of it.' });
+  await agent.run('Drop?');
+  check('6: a stream that ends without a stop reason is retried', events.some((e) => e.type === 'reply_discarded') && events.find((e) => e.type === 'run_end')?.text === 'All of it.' && native().length === 2);
+
+  // ---------- 6b: a refusal, and a reply cut at the output limit ----------
+  reset();
+  state.replies.push({ content: 'I can\'t help with that.', stopReason: 'refusal' });
+  await agent.run('Something it declines');
+  const notices = events.filter((e) => e.type === 'error');
+  check('6b: a refusal: one notice, the run ends done, no second request', native().length === 1 && notices.length === 1 && notices[0].kind === 'notice' && notices[0].message === 'The model declined this request.' && events.find((e) => e.type === 'run_end')?.reason === 'done', notices);
+  check('6b: …and the text that came is kept', agent.session.messages[agent.session.messages.length - 1].content === 'I can\'t help with that.');
+  reset();
+  state.replies.push({ content: '', stopReason: 'refusal' });
+  await agent.run('Declined with no text');
+  check('6b: a refusal with no text: no empty-reply nudge', native().length === 1 && events.filter((e) => e.type === 'error').length === 1 && events.find((e) => e.type === 'run_end')?.reason === 'done');
+  reset();
+  state.replies.push({ content: 'Writing it: ', toolCalls: [{ id: 'toolu_cut', name: 'write_file', rawArgs: '{"path":"big.txt","content":"aaaa' }], stopReason: 'max_tokens' });
+  state.replies.push({ content: 'Sending it in pieces.' });
+  await agent.run('Write a big file');
+  const cutResult = agent.session.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'toolu_cut');
+  check('6b: max_tokens in a call\'s arguments: the call is not run, its result says why', cutResult && cutResult.content.startsWith('Cut off at the output limit while writing this call.') && !fs.existsSync(path.join(tmp, 'big.txt')), cutResult);
+  reset();
+  for (let i = 0; i < 3; i++) state.replies.push({ content: `part ${i + 1}`, stopReason: 'max_tokens' });
+  await agent.run('Write a long essay');
+  const asks = native().map((r) => JSON.stringify(r.payload.messages).includes('Your reply was cut off at the output limit')).filter(Boolean).length;
+  check('6b: max_tokens with text only: asked to continue, twice at most', native().length === 3 && asks === 2 && events.find((e) => e.type === 'run_end')?.reason === 'done', native().length);
 
   // ---------- 7: abort ----------
   reset();
