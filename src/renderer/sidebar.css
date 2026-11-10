@@ -183,3 +183,9 @@
 @media (prefers-reduced-motion: reduce) {
   .group-chev, .tree-toggle { transition: none; }
 }
+
+/* The quiet update line above the foot (update-line.ts) */
+.update-line { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 8px 6px 14px; border-top: 1px solid var(--border-subtle); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); }
+.update-line[hidden] { display: none; }
+.update-line-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-line .update-line-close { color: var(--text-400); }

@@ -2179,6 +2179,10 @@ setupImageView({ messages: messagesEl, openLightbox, showError: showInlineError 
 import { setupAutoBlocked } from './auto-blocked.js';
 setupAutoBlocked({ messages: messagesEl });
 
+// [feature:updates]
+import { setupUpdateLine } from './update-line.js';
+setupUpdateLine($('sidebar'));
+
 // [feature:history]
 
 // [feature:schedules]

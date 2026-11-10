@@ -284,6 +284,8 @@ export interface AppConfig {
   autoMode?: AutoModeConfig;
   /** web_search's backend (docs/web.md); absent: DuckDuckGo */
   webSearch?: WebSearchConfig;
+  /** Look for a newer release on GitHub once a day (absent: on) */
+  checkForUpdates?: boolean;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */

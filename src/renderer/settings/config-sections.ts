@@ -8,7 +8,7 @@ import { icon } from '../icons.js';
 import { MODES } from '../modes.js';
 import { onPush } from '../rpc.js';
 import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, parseUrl, TOOL_ACTIVITY, TOOL_SET } from './model.js';
-import { actions, button, group, iconButton, row, sectionTitle, textControl, tildePath, type Choice } from './ui.js';
+import { actions, button, group, iconButton, row, sectionTitle, switchControl, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
 import { recentlyBlocked } from '../auto-blocked.js';
@@ -71,6 +71,12 @@ export function generalSection(ctx: Ctx): Section {
     }
   }
 
+  // Absent means on, so the switch reads `!== false` (ctx.switchField reads absent as off)
+  const updatesOn = (cfg: AppConfig) => cfg.checkForUpdates !== false;
+  const updatesSwitch = switchControl(updatesOn(ctx.config()), (on, input) => void ctx.save(updatesRow, 'checkForUpdates', on).then((ok) => !ok && (input.checked = updatesOn(ctx.config()))));
+  const updatesRow = row({ id: 'checkForUpdates', title: 'Check for updates', desc: 'Once a day, from GitHub.', keywords: 'update updates new version release download github', field: 'checkForUpdates' }, updatesSwitch);
+  updatesRow.el.classList.add('clickable');
+
   el.append(
     group(
       null,
@@ -86,6 +92,7 @@ export function generalSection(ctx: Ctx): Section {
       }),
       cli,
       ctx.switchField({ id: 'notifications', title: 'Notifications', desc: 'Notify when a run finishes or needs approval.', keywords: 'alert notify banner sound', field: 'notifications' }),
+      updatesRow,
       ctx.switchField({ id: 'autoTitles', title: 'Generated titles', desc: 'Name a session from its first exchange.', keywords: 'session name rename title', field: 'autoTitles' }),
       ctx.textField({ id: 'maxTurns', inputId: 'maxTurns', title: 'Max tool turns', desc: 'Tool calls per request before it stops to ask.', keywords: 'limit steps iterations', field: 'maxTurns', type: 'number', width: 96, parse: (t) => parseInteger(t, 1, 500) }),
       ctx.textField({
@@ -106,6 +113,7 @@ export function generalSection(ctx: Ctx): Section {
     id: 'general',
     el,
     sync(cfg) {
+      updatesSwitch.checked = updatesOn(cfg);
       folder.setDesc(tildePath(cfg.workingDirectory));
       folder.descEl.title = cfg.workingDirectory;
     },

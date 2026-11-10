@@ -75,6 +75,7 @@ const SCALARS: Record<string, Check> = {
   toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods.'),
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
+  checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
 };
 
 /** Sections a settings file may set field by field. */

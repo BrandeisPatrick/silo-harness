@@ -136,8 +136,8 @@ const rejects = async (p) => {
   // ---------- The setting ----------
   check('searchSettings: DuckDuckGo by default, junk ignored', S.searchSettings({}).provider === 'duckduckgo' && S.searchSettings({ webSearch: { provider: 'nope' } }).provider === 'duckduckgo' && S.searchSettings({ webSearch: { provider: 'exa', apiKey: ' k ' } }).apiKey === 'k');
   check('providerHost names where queries go', S.providerHost(settings('duckduckgo')) === 'html.duckduckgo.com' && S.providerHost(settings('searxng', { baseUrl: 'http://10.0.0.2:8888/s' })) === '10.0.0.2:8888' && S.providerHost(settings('searxng')) === '');
-  check('settings.json: webSearch fields are checked', checkSetting('webSearch.provider', 'brave') === null && /expected one of/.test(checkSetting('webSearch.provider', 'google')) && checkSetting('webSearch.apiKey', 'k') === null && checkSetting('webSearch.nope', 1) === 'unknown');
-  check('the key is listed as a secret field, and the schema has the section', SECRET_FIELDS.includes('webSearch.apiKey') && settingsSchema().properties.webSearch.properties.provider.enum.length === 5);
+  check('settings.json: webSearch fields are checked', checkSetting('webSearch.provider', 'brave') === null && /expected one of/.test(checkSetting('webSearch.provider', 'google')) && checkSetting('webSearch.apiKey', 'k') === null && checkSetting('webSearch.nope', 1) === 'unknown' && checkSetting('checkForUpdates', false) === null);
+  check('the key is listed as a secret field, and the schema has the section', SECRET_FIELDS.includes('webSearch.apiKey') && settingsSchema().properties.webSearch.properties.provider.enum.length === 5 && settingsSchema().properties.checkForUpdates.type === 'boolean');
   const schemaFile = JSON.parse(fs.readFileSync(path.join(projectDir, 'docs/settings.schema.json'), 'utf8'));
   check('docs/settings.schema.json is up to date', JSON.stringify(schemaFile) === JSON.stringify(settingsSchema()));
 

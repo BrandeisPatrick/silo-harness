@@ -27,6 +27,7 @@ import { setupRemote } from './remote';
 import { setupPower } from './power';
 import { setupDreaming } from './dreaming';
 import { setupProviders } from './providers-service';
+import { setupUpdates } from './updates';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -290,6 +291,7 @@ app.whenReady().then(() => {
   setupProviders(a);
   setupBrowser(a, () => browser);
   setupChatCards(a, () => browser);
+  setupUpdates(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
