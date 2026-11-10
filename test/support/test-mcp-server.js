@@ -38,6 +38,10 @@ if (process.env.OC_TEST_EXTRA) {
   });
   server.registerTool('pid', { description: 'Reports the process id', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: String(process.pid) }] }));
 }
+if (process.env.OC_TEST_ODD) {
+  // A tool whose name has "__" in it, for the interface's name checks
+  server.registerTool('list__items', { description: 'Lists the items', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: 'a, b' }] }));
+}
 if (process.env.OC_TEST_CRASH_IF && require('node:fs').existsSync(process.env.OC_TEST_CRASH_IF)) { process.stderr.write('fatal: marker file present (test)\n'); process.exit(4); }
 if (process.env.OC_TEST_CRASH) { process.stderr.write('fatal: refusing to start (test)\n'); process.exit(3); }
 process.stderr.write('test server starting\n');

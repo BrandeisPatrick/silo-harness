@@ -171,6 +171,15 @@ export interface McpToolInfo {
   readOnly: boolean;
   /** destructiveHint === true: auto mode pauses for these like it does for risky commands */
   destructive: boolean;
+  /** The tool's `title` (else `annotations.title`), one line, at most 64 characters: for the interface only */
+  title?: string;
+}
+
+/** The real names behind an MCP tool's model-facing name (mcp__<server>__<tool> is sanitised and may be shortened) */
+export interface McpCallNames {
+  server: string;
+  tool: string;
+  title?: string;
 }
 
 /**
@@ -444,7 +453,7 @@ export type AgentEvent =
   | { type: 'text_done' }
   | { type: 'thinking_delta'; text: string }
   | { type: 'thinking_done' }
-  | { type: 'tool_start'; id: string; name: string; args: unknown }
+  | { type: 'tool_start'; id: string; name: string; args: unknown; mcp?: McpCallNames }
   | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }
   /**
    * Token usage of one model call (prompt = input incl. history and cached tokens, completion = generated). Emitted
@@ -459,7 +468,7 @@ export type AgentEvent =
    * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
    * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; mcp?: McpCallNames }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */
@@ -558,7 +567,7 @@ export interface LiveState {
   text: string;
   thinking: string;
   /** Tool calls that have started and not finished */
-  tools: { id: string; name: string; args: unknown }[];
+  tools: { id: string; name: string; args: unknown; mcp?: McpCallNames }[];
   /** Approval cards waiting for an answer */
   approvals: Extract<AgentEvent, { type: 'approval_request' }>[];
   /** Question cards (ask_user) waiting for an answer; missing from an older main process */

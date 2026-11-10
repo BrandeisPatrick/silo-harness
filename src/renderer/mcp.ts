@@ -7,6 +7,7 @@ import type { ConfirmOptions } from './changes.js';
 import { escapeHtml } from './dom.js';
 import { icon } from './icons.js';
 import { tilde } from './home.js';
+import { noteMcpServers } from './mcp-labels.js';
 
 export const MCP_STATUS_LABEL: Record<McpStatus, string> = {
   connected: 'Connected',
@@ -386,6 +387,7 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
   const panel: McpPanel = {
     render(servers: McpServerInfo[]) {
       current = cleanServers(servers);
+      noteMcpServers(current);
       const active = document.activeElement as HTMLElement | null;
       const focusKey = active && els.list.contains(active) ? active.dataset.focusKey : undefined;
       els.list.innerHTML = '';

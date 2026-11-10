@@ -15,7 +15,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ErrorCode, McpError, ToolListChangedNotificationSchema, type Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { AppConfig, McpOAuthConfig, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
+import type { AppConfig, McpCallNames, McpOAuthConfig, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
 import type { Tool, ToolResult } from './tools/types';
 import { words } from './guard';
 import { expandEnvRefs } from './env';
@@ -271,6 +271,12 @@ export function readProjectServers(cwd: string): { servers: Record<string, McpSe
   return { servers, invalid };
 }
 
+/** Every key under "mcpServers" in a project's .mcp.json, usable or not. */
+function projectKeys(cwd: string): string[] {
+  const r = readProjectServers(cwd);
+  return [...Object.keys(r.servers), ...Object.keys(r.invalid)];
+}
+
 function writeProjectServers(cwd: string, update: (map: Record<string, unknown>) => void): void {
   const file = path.join(cwd, PROJECT_FILE);
   let root: Record<string, unknown> = {};
@@ -392,6 +398,16 @@ function errorText(err: unknown): string {
   return redactSecrets(String(err));
 }
 
+/**
+ * Why a connection failed, for the row (never the model): an HTTP status said as a number. The SDK's "Streamable HTTP
+ * error: Error POSTing to endpoint: forbidden" says it only in words.
+ */
+function connectErrorText(err: unknown): string {
+  const status = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+  if (!(err instanceof Error) || typeof status !== 'number' || status < 400 || status >= 600) return errorText(err);
+  return redactSecrets(`HTTP ${status}: ${(err.message || '').replace(/^Streamable HTTP error:\s*(Error POSTing to endpoint:\s*)?/i, '')}`.trim());
+}
+
 const firstLine = (s: string): string => s.trim().split('\n')[0] ?? '';
 
 /** A network failure or a lost session: what reconnecting can fix. */
@@ -401,6 +417,16 @@ export function isConnectionLoss(err: unknown): boolean {
   if (e.code === 404) return true; // streamable HTTP: the server no longer knows the session (it restarted)
   const text = `${String(e.message ?? '')} ${String(e.cause?.code ?? '')} ${String(e.cause?.message ?? '')}`;
   return /fetch failed|ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|socket hang up|other side closed|terminated|SSE stream disconnected|Failed to reconnect|Maximum reconnection attempts|SSE error/i.test(text);
+}
+
+/**
+ * The answers the MCP spec's backwards-compatibility section names for a server that only speaks the older HTTP+SSE
+ * transport: a 4xx to the streamable POST, such as 400, 404 or 405. Never 401 or 403: those are about credentials, and
+ * trying SSE would only hide the real answer.
+ */
+export function isOldServerAnswer(err: unknown): boolean {
+  const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+  return code === 400 || code === 404 || code === 405;
 }
 
 function isTimeout(err: unknown): boolean {
@@ -715,7 +741,7 @@ export class McpManager extends EventEmitter {
         await attempt(kind);
       } catch (err) {
         // An "http" server that only speaks the older SSE transport answers the streamable POST with 4xx.
-        if (kind === 'http' && !this.isAuthFailure(err, e) && !(err instanceof InsecureEndpointError) && /4\d\d|not found|method not allowed|failed to connect|unexpected content type/i.test(errorText(err))) {
+        if (kind === 'http' && !this.isAuthFailure(err, e) && !(err instanceof InsecureEndpointError) && isOldServerAnswer(err)) {
           await open.transport?.close().catch(() => undefined);
           await client.close().catch(() => undefined);
           client = new Client(this.clientInfo, { capabilities: {} });
@@ -778,7 +804,7 @@ export class McpManager extends EventEmitter {
         this.notify();
         return 'needs-auth';
       }
-      let text = errorText(err);
+      let text = connectErrorText(err);
       if (/connection closed/i.test(text)) text = e.transport === 'stdio' ? 'The server exited right after starting.' : 'The server closed the connection.';
       text += e.stderr.length ? `\n${e.stderr.slice(-4).join('\n')}` : '';
       e.lastError = text;
@@ -993,6 +1019,13 @@ export class McpManager extends EventEmitter {
     return { server: hit.entry.name, scope: hit.entry.scope, tool: hit.tool.name, readOnly: hit.info.readOnly, destructive: hit.info.destructive };
   }
 
+  /** The real server and tool names (and the tool's title, if any) behind a model-facing name, for the interface. */
+  names(fullName: string): McpCallNames | undefined {
+    const hit = this.byFullName.get(fullName);
+    if (!hit) return undefined;
+    return { server: hit.entry.name, tool: hit.tool.name, ...(hit.info.title ? { title: hit.info.title } : {}) };
+  }
+
   /** Waits while a server connects or reconnects, up to `ms`; rejects on abort or when the time is up. */
   private waitSettled(e: Entry, ms: number, signal?: AbortSignal): Promise<void> {
     const busy = () => this.isLive(e) && (e.status === 'reconnecting' || e.status === 'connecting');
@@ -1093,7 +1126,7 @@ export class McpManager extends EventEmitter {
     const configs = parseServerSpec(name, spec, env);
     const cfg = this.opts.getConfig();
     const cwd = this.opts.cwd();
-    const existing = scope === 'user' ? Object.keys(cfg.mcpServers ?? {}) : Object.keys(readProjectServers(cwd).servers);
+    const existing = scope === 'user' ? Object.keys(cfg.mcpServers ?? {}) : projectKeys(cwd);
     for (const n of Object.keys(configs)) if (existing.includes(n)) throw new Error(`A ${scope === 'user' ? 'server' : 'project server'} named "${n}" already exists. Remove it first or pick another name.`);
     if (scope === 'user') {
       this.opts.saveConfig({ mcpServers: { ...(cfg.mcpServers ?? {}), ...configs } });
@@ -1127,6 +1160,8 @@ export class McpManager extends EventEmitter {
       this.opts.saveConfig({ mcpTrusted: { ...(cfg.mcpTrusted ?? {}), [cwd]: trusted } });
     }
     await this.reload();
+    // Its sign-in goes with it: tokens and client registration (Claude Code does the same on remove)
+    await this.store.delete(keyOf(scope, name)).catch((err: unknown) => console.warn('[mcp] could not delete the sign-in of a removed server:', errorText(err)));
     return this.list();
   }
 

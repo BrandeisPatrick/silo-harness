@@ -21,10 +21,10 @@ Servers come from Settings → MCP (stored in the app's `config.json` under `mcp
 | Key | Transport | Meaning |
 | --- | --- | --- |
 | `command`, `args`, `env`, `cwd` | stdio | The process to start. `${VAR}` and `${VAR:-default}` expand. |
-| `url`, `type` (`http` or `sse`), `headers` | remote | `http` falls back to SSE when the server only speaks SSE. |
+| `url`, `type` (`http` or `sse`), `headers` | remote | `http` falls back to SSE when the server answers 400, 404 or 405 (an older server); never on 401 or 403. |
 | `disabled` | any | Off. |
 | `timeout` | any | Milliseconds a tool call may take (1000–86400000; default 120000). Each progress notification from the server starts it again, up to 10 minutes in all (or `timeout`, if longer). Stop cancels a call at once. |
-| `enabledTools` | any | Only these tools (exact names) are offered to the model. |
+| `enabledTools` | any | Only these tools (exact names) are offered to the model. An empty list offers none. |
 | `disabledTools` | any | These tools are never offered. Wins over `enabledTools`. Settings → MCP counts them as "off". |
 | `oauth.clientId` | remote | A client registered with the authorization server beforehand. Without it the app registers itself (dynamic client registration). |
 | `oauth.callbackPort` | remote | A fixed port for the sign-in callback on 127.0.0.1 (some pre-registered clients need one). Default: a free port. |
@@ -57,7 +57,7 @@ For remote servers without their own `Authorization` header. It uses the MCP SDK
 3. The browser comes back to the callback. One request with the right path and `state` is accepted; the page says "Signed in. You can close this tab." and the listener closes. A wrong `state` or an error ends the sign-in. The listener also closes after 5 minutes or on Cancel.
 4. The code is exchanged for tokens, the tokens are stored and the server connects.
 
-When the access token expires the SDK uses the refresh token. If that fails the server goes back to `needs-auth`: the app never opens a browser by itself. **Sign out** deletes the server's tokens and client registration.
+When the access token expires the SDK uses the refresh token. If that fails the server goes back to `needs-auth`: the app never opens a browser by itself. **Sign out** deletes the server's tokens and client registration; removing the server does too.
 
 Safety: authorization, token and registration endpoints must be `https:` (or `http:` to `localhost`, `127.0.0.1`, `[::1]`); others are refused before any request. Only such URLs are opened in the browser. Tokens, codes and verifiers are never logged, are cut from error text, and never reach the model. The PKCE verifier stays in memory.
 

@@ -38,6 +38,7 @@ import { createChatCards } from './chat-cards.js';
 import { createQueueList } from './queue.js';
 import { normalizeContext } from './context.js';
 import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
+import { rememberMcpNames } from './mcp-labels.js';
 import { createMentionPicker, normalizeMention } from './mentions.js';
 import { createRulesPanel, mockRulesSource } from './rules.js';
 import { cleanTasks, createTaskList } from './tasks.js';
@@ -1055,6 +1056,7 @@ const callArgs = new Map<string, unknown>();
 const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', ...PROPOSAL_TOOLS]);
 
 function handleEvent(ev: AgentEvent, synthetic = false): void {
+  if ((ev.type === 'tool_start' || ev.type === 'approval_request') && ev.mcp) rememberMcpNames(ev.name, ev.mcp);
   switch (ev.type) {
     case 'run_start':
       setRunning(true);

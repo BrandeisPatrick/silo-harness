@@ -10,7 +10,7 @@ import type { AppConfig } from '../shared/types';
 import { statHtml } from './diff.js';
 import { icon, isIconName, type IconName } from './icons.js';
 import { activityWords } from './tool-activity.js';
-import { createToolCard, type ToolCard } from './tools.js';
+import { createToolCard, mcpParts, type ToolCard } from './tools.js';
 
 export interface ToolGroupsDeps {
   /** The transcript the rows and groups live in */
@@ -76,6 +76,7 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
         created: c.created,
         url: typeof c.args.url === 'string' ? c.args.url : undefined,
         denied: c.outcome === 'denied',
+        server: mcpParts(c.name)?.server,
       })),
     );
     // While the run goes on, the line reads like the row of the call in flight; once it is over, what the run did

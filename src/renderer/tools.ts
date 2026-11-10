@@ -9,6 +9,7 @@ import { artifactIcon } from './artifacts.js';
 import { cleanTasks, taskProgress, taskSnapshot, taskSummary } from './tasks.js';
 import { AGENT_TOOLS, agentApproval, agentArgFromApproval, agentArgFromResult, agentBrief, agentStatusVerb, agentToolLabel, agentToolMeta, browserApproval, isDeniedResult, type BrowserCardRef } from './tool-labels.js';
 import { homeDir, tilde } from './home.js';
+import { mcpNames } from './mcp-labels.js';
 import { answeredBody, answerMeta, questionsOf } from './questions.js';
 
 export type Args = Record<string, unknown>;
@@ -71,12 +72,13 @@ export interface ToolLabel {
 export interface McpToolName {
   server: string;
   tool: string;
+  title?: string;
 }
 
-/** "mcp__github__search_issues" → { server: "github", tool: "search_issues" }; null for built-in tools. */
+/** "mcp__github__search_issues" → { server: "github", tool: "search_issues" } (the real names, see mcp-labels.ts); null for built-in tools. */
 export function mcpParts(name: string): McpToolName | null {
-  const m = /^mcp__(.+?)__(.+)$/.exec(name);
-  return m ? { server: m[1], tool: m[2] } : null;
+  const n = mcpNames(name);
+  return n ? { server: n.server, tool: n.tool, ...(n.title ? { title: n.title } : {}) } : null;
 }
 
 /** Verb = the tool's own name; argument = its first string argument, else the arguments as compact JSON. */

@@ -228,7 +228,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         return;
       }
       case 'tool_start':
-        write(id, 'tool.start', { id: ev.id, name: ev.name, args: ev.args });
+        write(id, 'tool.start', { id: ev.id, name: ev.name, args: ev.args, ...(ev.mcp ? { mcp: ev.mcp } : {}) });
         return;
       case 'tool_end':
         write(id, 'tool.end', { id: ev.id, name: ev.name, ok: ev.ok, durationMs: ev.durationMs, chars: ev.result?.length ?? 0 });
