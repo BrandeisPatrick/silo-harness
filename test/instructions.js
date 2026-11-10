@@ -5,6 +5,8 @@ const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { loadInstructions, instructionsPrompt, appendInstruction } = require(path.join(projectDir, 'dist/main/instructions.js'));
 const { check, done } = require('./support/check.js');
+// Never the real config folder
+process.env.SILO_HARNESS_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-instr-noconf-'));
 
 const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-instr-'));
 const read = (name) => fs.readFileSync(path.join(cwd, name), 'utf8');
@@ -23,9 +25,10 @@ r = appendInstruction(cwd2, 'use tabs');
 check('append goes to the existing project file and adds the missing newline', r.label === 'AGENTS.md' && fs.readFileSync(path.join(cwd2, 'AGENTS.md'), 'utf8') === '# Rules\nBe brief\n- use tabs\n');
 const files = loadInstructions(cwd2);
 check('loader picks AGENTS.md and the prompt names it', files.some((f) => f.label === 'AGENTS.md' && /use tabs/.test(f.text)) && /Instructions from AGENTS\.md/.test(instructionsPrompt(files)));
-fs.writeFileSync(path.join(cwd2, 'SILOHARNESS.md'), 'x'.repeat(30000));
-const big = loadInstructions(cwd2).find((f) => f.label === 'SILOHARNESS.md');
-check('SILOHARNESS.md wins and long files are truncated', big && big.truncated && big.text.length < 24100 && !loadInstructions(cwd2).some((f) => f.label === 'AGENTS.md'));
+fs.writeFileSync(path.join(cwd2, 'SILOHARNESS.md'), 'x'.repeat(40000));
+const all2 = loadInstructions(cwd2);
+const big = all2.find((f) => f.label === 'SILOHARNESS.md');
+check('AGENTS.md and SILOHARNESS.md are both read; over the 32 KiB budget the earlier file goes first', big && big.truncated && big.text.length < 32 * 1024 + 200 && !all2.some((f) => f.label === 'AGENTS.md' && f.text) && /Left out to fit the 32 KiB instructions budget: AGENTS\.md/.test(big.text), all2.map((f) => [f.label, f.text.length]));
 
 // Names from before the renames are still read: the app was Open Harness, OpenAgent, and OpenCoder before that.
 const { loadSkills } = require(path.join(projectDir, 'dist/main/skills.js'));
@@ -49,13 +52,13 @@ skillFile('.open-harness', 'new-skill');
 skillFile('.openagent', 'both');
 skillFile('.open-harness', 'both');
 skillFile('.open-harness', 'three');
-const skills = loadSkills(cwd3, path.join(cwd3, 'no-app-root'));
+const skills = loadSkills(cwd3, path.join(cwd3, 'no-app-root'), { home: path.join(cwd3, 'home') });
 const by = (n) => skills.find((k) => k.name === n);
 check('skills in .openagent/skills are still found', by('old-skill') && by('old-skill').source === 'project' && by('new-skill'));
 check('…and .open-harness/skills wins a name clash', by('both') && by('both').description === 'from .open-harness', by('both'));
 skillFile('.silo-harness', 'three');
 skillFile('.silo-harness', 'newest');
-const skills2 = loadSkills(cwd3, path.join(cwd3, 'no-app-root'));
+const skills2 = loadSkills(cwd3, path.join(cwd3, 'no-app-root'), { home: path.join(cwd3, 'home') });
 const by2 = (n) => skills2.find((k) => k.name === n);
 check('.silo-harness/skills is read, and wins a name clash with .open-harness', by2('newest') && by2('three').description === 'from .silo-harness', by2('three'));
 check('…while .open-harness/skills is still read beside it', by2('new-skill') && by2('new-skill').source === 'project' && by2('old-skill'));
