@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+
+- **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
+
 ## 0.12.0 — 2026-11-09
 
 Auto mode now works like Claude Code's, the app says much less, and sessions work in a Silo folder in Documents by default.

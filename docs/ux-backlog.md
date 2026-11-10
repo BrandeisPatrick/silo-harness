@@ -50,7 +50,7 @@ MCP servers · context meter, auto-compaction and `/compact` · project instruct
 | 17 | **History**: append-only log, crash recovery, trash, export | Nothing said in a session should be lost | done (0.2) |
 | 18 | **Compaction** that prunes first and keeps the recent turn | Long sessions on small windows | done (0.2) |
 | 19 | **Scheduled tasks** the agent can create, **remote control** from a phone, **keep awake** | Work that goes on while you are away | done (0.2) |
-| 20 | **Tools loaded on demand**: the model asks for a tool family (schedules, sessions, mods) when it needs it | Today a small window simply goes without them (`toolSet`) | next |
+| 20 | **Tools loaded on demand**: the model asks for a tool family (schedules, sessions, mods) when it needs it | Today a small window simply goes without them (`toolSet`) | done: tool groups (browser, terminal, sessions, schedules, mods) loaded with `load_tools`, see [reference.md](reference.md#tools) |
 | 21 | **Per-session project context**: MCP servers and the project settings file follow each session's folder, not the one on screen | Background sessions in another project | next |
 | 22 | **Mod protocol 2**: tools a mod provides to the model, a background page per mod, seats in the transcript and the status line | Mods that extend the agent, not only the window | next |
 | 23 | **History, further**: thinking blocks restored on reload; search over messages a rewind removed | The log already holds both | later |

@@ -51,17 +51,18 @@ export function setupSubagents(app: App, opts: SubagentsOptions = {}): Subagents
   app.rpc.handle('sessions.related', (id) => svc.related(String(id)));
   app.rpc.handle('sessions.message', (fromId, toId, text) => svc.message(String(fromId), String(toId), String(text ?? '')));
 
-  for (const tool of subagentTools(svc)) app.tools.register({ ...tool, optional: true });
-  // How to use the session tools: left out with them when the tool set is trimmed for a small window.
-  app.prompt.add('sessions', () => PROMPT_SECTION, { optional: true });
-  // This session's name changes when it gets a title: at the end of the prompt, after what every session shares
+  for (const tool of subagentTools(svc)) app.tools.register({ ...tool, optional: true, group: 'sessions' });
+  // How to use the session tools: comes with them (once the session loads the group, and not on a trimmed tool set).
+  app.prompt.add('sessions', () => PROMPT_SECTION, { optional: true, group: 'sessions' });
+  // This session's name changes when it gets a title: at the end of the prompt, after what every session shares; it is
+  // for the session tools, so it comes with them
   app.prompt.add(
     'session-name',
     ({ sessionId }) => {
       const me = app.store.get(sessionId);
       return me ? `This session is named "${me.title}" (id ${me.id}).` : '';
     },
-    { optional: true, perSession: true },
+    { optional: true, perSession: true, group: 'sessions' },
   );
   // What a sub-session must know about itself, whatever tools it has (the user can start one with /spawn).
   app.prompt.add('sub-session', ({ sessionId }) => {

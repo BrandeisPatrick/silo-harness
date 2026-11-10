@@ -9,6 +9,7 @@ import { loadInstructions } from '../instructions';
 import { contextSize, ollamaComplete } from '../ollama';
 import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
+import { LOAD_TOOLS } from '../tools/groups';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
 import { errorMessage } from './errors';
 
@@ -108,7 +109,8 @@ export function toolCalls(s: Session, skipId?: string): string[] {
   for (const m of all) {
     if (m.role !== 'assistant') continue;
     for (const call of m.tool_calls ?? []) {
-      if (call.type !== 'function' || call.id === skipId) continue;
+      // Loading a tool group does nothing the check needs to know about
+      if (call.type !== 'function' || call.id === skipId || call.function.name === LOAD_TOOLS) continue;
       out.push(`${call.function.name} ${clip(call.function.arguments || '{}', MAX_CALL_CHARS)}`);
     }
   }

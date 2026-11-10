@@ -189,7 +189,9 @@ const describe = (i) => `(() => {
     await app.evaluate(WATCH);
     r = await call('browser_navigate', { url: `${A}/shop.html` }, ['once']);
     check('plan mode: a navigation to a new site asks with the site card', r.cards.length === 1 && r.card.title === `Let the agent use fixture.example:${P}?` && /"Shop"/.test(r.result ?? ''), r.card);
-    const offered = (app.mock.state.requests.find((q) => q.payload?.stream)?.payload.tools ?? []).map((t) => t.function.name);
+    // Changed on purpose: the browser tools are a tool group now, offered once the session loaded it (here by the
+    // navigation), so the request to look at is the latest one, not the first
+    const offered = ([...app.mock.state.requests].reverse().find((q) => q.payload?.stream)?.payload.tools ?? []).map((t) => t.function.name);
     check('plan mode offers the reading browser tools, not browser_click', offered.includes('browser_read_page') && !offered.includes('browser_click') && !offered.includes('browser_type') && !offered.includes('browser_eval'), offered.filter((n) => n.startsWith('browser_')));
     r = await call('browser_click', { text: 'Pay now' });
     const planShop = await app.pageTarget(`${A}/shop.html`);

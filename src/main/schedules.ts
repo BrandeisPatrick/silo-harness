@@ -38,8 +38,8 @@ export function setupSchedules(app: App, opts: SchedulerOptions = {}): Scheduler
     return res.canceled || !res.filePaths[0] ? null : res.filePaths[0];
   });
 
-  for (const tool of scheduleTools(svc, now)) app.tools.register({ ...tool, optional: true });
-  app.prompt.add('schedules', () => PROMPT_SECTION, { optional: true });
+  for (const tool of scheduleTools(svc, now)) app.tools.register({ ...tool, optional: true, group: 'schedules' });
+  app.prompt.add('schedules', () => PROMPT_SECTION, { optional: true, group: 'schedules' });
   app.commands.register({
     name: 'schedules',
     description: 'List scheduled tasks and when they run next',

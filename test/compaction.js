@@ -227,6 +227,9 @@ function cleanCut(msgs, cut) {
     portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12000 },
     workingDirectory: cwd, permissionMode: 'bypass', autoApprove: true, maxTurns: 30, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
     mcpServers: {}, mcpTrusted: {}, autoCompact: true, compactThreshold: 0.8, pruneToolResults: true, notifications: false, allowRules: {}, recentDirs: [],
+    // Changed on purpose: the window sizes below were chosen with every tool offered from the first request; tool
+    // groups loaded when needed (the default now) make that floor smaller, which is not what these checks are about.
+    toolSet: 'all',
   };
   let config = { ...baseConfig };
   let events = [];

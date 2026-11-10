@@ -166,6 +166,7 @@ function guarded(tool: Tool): Tool {
   const run = tool.run;
   return {
     ...tool,
+    group: 'browser',
     run: async (args, ctx): Promise<ToolResult> => {
       const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>;
       const stop = (await credentialCheck(tool.name, a, ctx)) ?? (await siteCheck(tool.name, a, ctx));

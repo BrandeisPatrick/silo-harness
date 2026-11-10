@@ -10,6 +10,7 @@ import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
 import { actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
+import { LOAD_TOOLS } from './tools/groups';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -57,6 +58,11 @@ export interface Session {
    * reading and proposing, nothing that changes a file). Unset: the usual tools.
    */
   tools?: string[];
+  /**
+   * The tool groups this session has loaded (tools/groups.ts): their tools are offered from then on, for the rest of
+   * the session, compactions included. Unset: none yet.
+   */
+  toolGroups?: string[];
   /** Set on a dream's session: the dream, and how many of its proposals wait for the user (see dreaming/) */
   dream?: { id: string; waiting?: number };
 }
@@ -308,6 +314,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
       if (text) items.push({ role: 'assistant', text });
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
+        // Loading a tool group is the agent's own business: the tools it loaded show their rows when they are used
+        if (call.function.name === LOAD_TOOLS) continue;
         if (inFlight && !results.has(call)) continue;
         const result = results.get(call) ?? '(no result)';
         const ok = !FAILED_RESULT.test(result);
@@ -505,6 +513,7 @@ export class SessionStore {
       prunedResults: src.prunedResults ? [...src.prunedResults] : undefined,
       turns: src.turns ? structuredClone(src.turns) : undefined,
       tasks: src.tasks ? structuredClone(src.tasks) : undefined,
+      toolGroups: src.toolGroups ? [...src.toolGroups] : undefined,
       seedLength: src.messages.length,
     };
     this.sessions.set(s.id, s);

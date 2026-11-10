@@ -15,11 +15,12 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
                classifier.ts (Auto mode's safety check: its instructions, what it reads, its model, its answer),
                auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block)
 auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs
-context-window.ts  contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports them)
+context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)
 browser/       the Browser pane's main-process side (below)
 tools/browser.ts  the browser_* tools and their guard (below)
+tools/groups.ts   the tool groups loaded when needed, load_tools, and the groups a message clearly needs (below)
 ```
 
 ## The browser (src/main/browser/, tools/browser.ts)
@@ -104,7 +105,7 @@ export interface App {
   readonly runtime: SessionRuntime;
   readonly events: { on(cb: (sessionId: string, ev: AgentEvent) => void): Disposer };  // every event of every session, in order
   readonly tools: { register(tool: Tool): Disposer; list(): Tool[] };
-  readonly prompt: { add(id: string, section: (info: { cwd: string; mode: PermissionMode; sessionId: string }) => string, opts?: { optional?: boolean; restricted?: boolean }): Disposer };
+  readonly prompt: { add(id: string, section: (info: { cwd: string; mode: PermissionMode; sessionId: string }) => string, opts?: { optional?: boolean; restricted?: boolean; perSession?: boolean; group?: ToolGroup }): Disposer };
   readonly commands: { register(cmd: Command): Disposer; list(): CommandInfo[] };
   provide(name: string, service: unknown): Disposer;
   service<T>(name: string): T | undefined;
@@ -121,9 +122,26 @@ export interface App {
 - Registered tools: `Tool.readOnly` decides whether plan mode offers them. Prompt sections are appended after the
   project instructions; an empty string adds nothing.
 - A tool that is not needed for plain coding work is registered with `optional: true`, and the prompt section that
-  explains it with `{ optional: true }`. Both are left out of a request when the tool set is trimmed
-  (`AppConfig.toolSet`: `auto` trims under a 32k-token window, `all` never, `essential` always; `essentialToolsOnly`
-  in agent.ts), and the model is told what is off. The scheduling, session and mod tools are registered this way.
+  explains it with `{ optional: true }`. Both are left out altogether when the user chose the essential tools
+  (`AppConfig.toolSet: 'essential'`, `essentialToolsOnly` in context-window.ts), and the model is told what is off.
+  The scheduling, session and mod tools are registered this way. (`auto` used to do the same under a 32k-token window;
+  as tool groups, below, they cost nothing until loaded.)
+- **Tool groups** (tools/groups.ts): `Tool.group` puts a tool in one of five groups, `browser`, `terminal`, `sessions`,
+  `schedules` and `mods` (the browser and terminal tools say so themselves; the features register theirs with it), and
+  `{ group }` does the same for a prompt section. Every tool definition goes with every request, and these took about
+  half of the fixed part of each one, so the agent splits what a session may use (`toolPool`: mode, trimming, a tool
+  set of its own) from what a request offers (`toolsFor`): the pool without the groups the session has not loaded,
+  plus `load_tools` (after the built-in tools) taking the names of those groups, which the system prompt lists one line
+  each. The prompt's own browser rules and terminal mentions, and a group's sections, come only with the group.
+  `Session.toolGroups` holds the loaded ones: saved with the session, copied on fork, untouched by compaction and
+  rewinds. A group is loaded by `load_tools`, by a call to one of its tools by name (loaded before the reply's calls
+  are stored, so `shownArgs` and hooks see the tool, then the call runs as usual), or before the first request by a
+  message that clearly needs it (`groupsForMessage`: a web address it asks to open, or one named with the word
+  browser). The run loop rebuilds the tool list after a load, so the request prefix changes once per group and session.
+  `load_tools` is the agent's own: it runs before the reply's other calls, without a tool row, an approval or hooks;
+  `toTranscript`, the export and Auto mode's check leave its calls out. `toolSet: 'all'` (`allGroupsUpFront`) offers
+  every group from the first request and no `load_tools`; a session with a tool set of its own has no groups. The
+  context meter's "Tool definitions" is what the request offers.
 - **A session with a tool set of its own** (`Session.tools`, a list of names; a dream's session): its agent is offered
   exactly the built-in and registered tools it names, in every permission mode, and never an MCP tool; the system prompt
   names those tools instead of describing the shell and the browser, leaves out the mode text, the skills list, MCP and

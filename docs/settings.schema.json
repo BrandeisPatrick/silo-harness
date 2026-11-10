@@ -100,7 +100,7 @@
         "all",
         "essential"
       ],
-      "description": "Which tools the model is offered."
+      "description": "Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods."
     },
     "toolActivity": {
       "type": "string",

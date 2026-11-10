@@ -3,6 +3,7 @@
 import type { Msg, Session } from '../sessions';
 import { displayText, pairToolResults, type StoredToolCall } from '../sessions';
 import { isCompactPreamble } from '../compact';
+import { LOAD_TOOLS } from '../tools/groups';
 
 export type ExportFormat = 'markdown' | 'json' | 'jsonl';
 
@@ -50,6 +51,7 @@ function messagesMarkdown(s: Session, messages: Msg[], out: string[]): void {
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
         const name = call.function.name;
+        if (name === LOAD_TOOLS) continue; // internal, as in the transcript
         if (name === 'submit_plan') {
           let args: { title?: string; markdown?: string } = {};
           try {

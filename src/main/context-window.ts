@@ -1,13 +1,10 @@
-// The configured model's context window and what follows from its size: how many tokens a request may take and
-// whether the optional tool families are offered at all. Facts about the provider and the config, read by the agent,
-// the window's IPC, dreaming and mods alike.
+// The configured model's context window and what follows from the config: how many tokens a request may take,
+// whether the optional tool families are offered at all, and whether the tool groups come up front. Facts about the
+// provider and the config, read by the agent, the window's IPC, dreaming and mods alike.
 
 import type { AppConfig } from '../shared/types';
 import { contextSize } from './ollama';
 import { ollamaOf, resolveProvider } from './providers';
-
-/** Below this window the optional tool families are left out unless the user asks for all tools. */
-export const FULL_TOOLS_WINDOW = 32_000;
 
 /** The context window the configured model has, in tokens. */
 export function contextLimit(cfg: AppConfig): number {
@@ -17,11 +14,19 @@ export function contextLimit(cfg: AppConfig): number {
 }
 
 /**
- * Whether only the essential tools are offered. Every tool definition is sent with every request: with a 16k window
- * the optional families (scheduled tasks, sub-sessions, mod authoring) would take a fifth of it before a word is said.
+ * Whether the optional tool families (scheduled tasks, sub-sessions, mod authoring) are left out altogether: only when
+ * the user chose the essential tools. They used to be left out under a 32k window too, since every definition went
+ * with every request; now each is a tool group a session loads only when it needs it, so a small window pays for one
+ * only once it is used.
  */
 export function essentialToolsOnly(cfg: AppConfig): boolean {
-  if (cfg.toolSet === 'essential') return true;
-  if (cfg.toolSet === 'all') return false;
-  return contextLimit(cfg) < FULL_TOOLS_WINDOW;
+  return cfg.toolSet === 'essential';
+}
+
+/**
+ * Whether every tool group (tools/groups.ts) is offered from a session's first request, as before groups were loaded
+ * when needed: only when the user chose all tools. Otherwise a session gets a group once it needs it.
+ */
+export function allGroupsUpFront(cfg: AppConfig): boolean {
+  return cfg.toolSet === 'all';
 }

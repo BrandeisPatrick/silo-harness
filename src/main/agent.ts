@@ -5,7 +5,7 @@ import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo
 import { expandMentions } from './mentions';
 import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
-import { contextLimit, essentialToolsOnly } from './context-window';
+import { allGroupsUpFront, contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
 import {
   PRUNE_HARD,
@@ -36,6 +36,7 @@ import {
 } from './compact';
 import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
+import { LOAD_TOOLS, TOOL_GROUPS, groupsForMessage, isToolGroup, loadToolsTool, requestedGroups, sortGroups, type ToolGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
@@ -51,7 +52,7 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
-import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
+import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra, type PromptGroups } from './agent/prompt';
 import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
@@ -61,7 +62,7 @@ import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUS
 import type { AutoBlock } from '../shared/auto-mode';
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
-export { contextLimit, essentialToolsOnly, FULL_TOOLS_WINDOW } from './context-window';
+export { contextLimit, essentialToolsOnly } from './context-window';
 
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
@@ -143,7 +144,7 @@ export interface AgentOptions {
   /** Extra tools offered next to the built-in and MCP ones (app.tools) */
   tools?: () => Tool[];
   /** Extra system-prompt text (app.prompt sections, already joined): those every session shares, or (part 'session') this session's own */
-  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session' }) => string;
+  prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[] }) => string;
   /** The hook engine (default: the app's 'hooks' service; none in bare tests) */
   hooks?: HookEngine | null;
 }
@@ -283,7 +284,9 @@ export class Agent {
       const base = { cwd: cfg.workingDirectory, mode: cfg.permissionMode, sessionId: this.session.id };
       const restricted = Boolean(this.ownTools());
       const essential = !restricted && essentialToolsOnly(cfg);
-      const info = restricted ? { ...base, restricted } : { ...base, essential };
+      // The sections of a tool group come with it (all of them when every group is offered up front)
+      const groups = allGroupsUpFront(cfg) ? {} : { groups: this.loadedGroups() };
+      const info = restricted ? { ...base, restricted } : { ...base, essential, ...groups };
       const text = this.opts.prompt({ ...info, part: 'shared' });
       const session = this.opts.prompt({ ...info, part: 'session' });
       const shared = essential ? `${text}${text ? '\n\n' : ''}${ESSENTIAL_NOTE}` : text;
@@ -296,7 +299,13 @@ export class Agent {
   }
 
   private prompt(cfg: AppConfig, skills: Skill[]): string {
-    return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg));
+    return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
+  }
+
+  /** What the prompt says of the tool groups: which are loaded and which wait (undefined: every group is offered). */
+  private promptGroups(cfg: AppConfig): PromptGroups | undefined {
+    if (this.ownTools() || allGroupsUpFront(cfg)) return undefined;
+    return { loaded: this.loadedGroups(), pending: this.pendingGroups(cfg) };
   }
 
   /** The names of the tools a session with a tool set of its own really has (those it names that exist). */
@@ -305,11 +314,12 @@ export class Agent {
   }
 
   /**
-   * The tools a run in this mode offers: built-in, registered and MCP ones (plan mode: the read-only ones). A session
-   * with a tool set of its own gets exactly the built-in and registered tools it names, in every mode, and never an
-   * MCP tool; scoped tools are offered to no other session.
+   * The tools a run in this mode may use: built-in, registered and MCP ones (plan mode: the read-only ones), without
+   * the optional ones when the tool set is trimmed. A session with a tool set of its own gets exactly the built-in and
+   * registered tools it names, in every mode, and never an MCP tool; scoped tools are offered to no other session.
+   * Of these, a request offers those of the tool groups the session has loaded (toolsFor).
    */
-  private toolsFor(cfg: AppConfig): Tool[] {
+  private toolPool(cfg: AppConfig): Tool[] {
     const registered = this.opts.tools?.() ?? [];
     const own = this.ownTools();
     if (own) {
@@ -326,6 +336,96 @@ export class Agent {
     const essential = essentialToolsOnly(cfg);
     const extraTools = registered.filter((t) => !t.scoped && !(essential && t.optional));
     return [...allTools(cfg.permissionMode), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+  }
+
+  /** The tool groups this session has loaded (Session.toolGroups), in their fixed order. */
+  private loadedGroups(): ToolGroup[] {
+    return sortGroups(this.session.toolGroups ?? []);
+  }
+
+  /**
+   * The groups this session may use and has not loaded: their tools wait for load_tools. None when every group is
+   * offered up front (AppConfig.toolSet 'all') or the session has a tool set of its own.
+   */
+  private pendingGroups(cfg: AppConfig, pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+    if (this.ownTools() || allGroupsUpFront(cfg)) return [];
+    const loaded = new Set(this.loadedGroups());
+    return TOOL_GROUPS.filter((g) => !loaded.has(g) && pool.some((t) => t.group === g));
+  }
+
+  /**
+   * The tools a request offers: the pool without the groups this session has not loaded, and while there are such
+   * groups, load_tools after the built-in tools.
+   */
+  private toolsFor(cfg: AppConfig): Tool[] {
+    const pool = this.toolPool(cfg);
+    const pending = this.pendingGroups(cfg, pool);
+    if (!pending.length) return pool;
+    const offered = pool.filter((t) => !t.group || !pending.includes(t.group));
+    const builtIn = new Set(allTools(cfg.permissionMode));
+    let at = 0;
+    offered.forEach((t, i) => {
+      if (builtIn.has(t)) at = i + 1;
+    });
+    offered.splice(at, 0, loadToolsTool(pending));
+    return offered;
+  }
+
+  /**
+   * Loads tool groups into this session: their tools are offered from the next request on, for the rest of the
+   * session (saved with it). Returns those that were not loaded before; groups the session cannot use are left out.
+   */
+  private loadGroups(cfg: AppConfig, groups: readonly ToolGroup[], pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+    const pending = this.pendingGroups(cfg, pool);
+    const fresh = groups.filter((g) => pending.includes(g));
+    if (fresh.length) this.session.toolGroups = sortGroups([...this.loadedGroups(), ...fresh]);
+    return fresh;
+  }
+
+  /**
+   * Before a reply's calls run: loads the groups they ask for (load_tools) and those they need (a tool called by name
+   * before its group was loaded: an old session, a model that knows the name), which then runs as usual. Returns
+   * load_tools' results by call id; the run loop stores them without a tool row, an approval or hooks.
+   */
+  private loadForCalls(calls: ToolCall[], cfg: AppConfig): Map<string, string> {
+    const results = new Map<string, string>();
+    if (this.ownTools()) return results;
+    const pool = this.toolPool(cfg);
+    for (const call of calls) {
+      const name = call.function.name;
+      if (name !== LOAD_TOOLS) {
+        const group = pool.find((t) => t.name === name)?.group;
+        if (group) this.loadGroups(cfg, [group], pool);
+        continue;
+      }
+      let args: unknown = call.function.arguments;
+      try {
+        args = JSON.parse(call.function.arguments || '{}');
+      } catch {
+        /* a bare list of names is read as it is */
+      }
+      results.set(call.id, this.loadToolsResult(cfg, pool, requestedGroups(args)));
+    }
+    return results;
+  }
+
+  /** What a load_tools call gets back: the groups it loaded with their tools, and any it could not. */
+  private loadToolsResult(cfg: AppConfig, pool: Tool[], asked: string[]): string {
+    const known = TOOL_GROUPS.filter((g) => pool.some((t) => t.group === g));
+    if (!asked.length) return `Error: name the groups to load (${known.join(', ') || 'none here'}).`;
+    const loaded: string[] = [];
+    const had: string[] = [];
+    const missing: string[] = [];
+    for (const name of asked) {
+      if (!isToolGroup(name) || !known.includes(name)) missing.push(name);
+      else if (this.loadGroups(cfg, [name], pool).length) loaded.push(`${name} (${pool.filter((t) => t.group === name).map((t) => t.name).join(', ')})`);
+      else had.push(name);
+    }
+    const out: string[] = [];
+    if (loaded.length) out.push(`Loaded ${loaded.join('; ')}.`);
+    if (had.length) out.push(`Already loaded: ${had.join(', ')}.`);
+    if (missing.length) out.push(`${out.length ? 'Not' : 'Error: not'} a tool group here: ${missing.join(', ')}. The groups are ${known.join(', ') || 'none'}.`);
+    return out.join(' ');
   }
 
   /** True while the approval card `id` is waiting for this agent. */
@@ -833,12 +933,15 @@ export class Agent {
       const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
-      const tools = this.toolsFor(cfg);
-      const specs = tools.map(toSpec);
+      // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step
+      if (!this.ownTools()) this.loadGroups(cfg, groupsForMessage(userText));
+      let tools = this.toolsFor(cfg);
+      let specs = tools.map(toSpec);
       this.specTokens = estimateSpecTokens(specs);
       this.emitContext();
+      const groupsKey = () => (this.session.toolGroups ?? []).join(',');
       // A model that cannot take tools (e.g. a vision-only Ollama model) still works as a plain chat.
-      let activeSpecs = specs;
+      let toolless = false;
       if (!client) {
         const key = `${ollamaOf(cfg).baseURL}|${model}`;
         if (!this.toolSupport.has(key)) {
@@ -846,7 +949,7 @@ export class Agent {
           if (caps && caps.tools !== null) this.toolSupport.set(key, caps.tools);
         }
         if (this.toolSupport.get(key) === false) {
-          activeSpecs = [];
+          toolless = true;
           this.emit({ type: 'error', kind: 'notice', message: noToolsNotice(model) });
         }
       }
@@ -894,6 +997,7 @@ export class Agent {
           break;
         }
         const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
+        const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
         let reply: { text: string; toolCalls: ToolCall[] };
         try {
@@ -922,6 +1026,14 @@ export class Agent {
             continue;
           }
         }
+        // Tool groups the calls load (load_tools) or need (a tool of a group not loaded yet): offered from here on
+        const groupsBefore = groupsKey();
+        const loadResults = this.loadForCalls(toolCalls, cfg);
+        if (groupsKey() !== groupsBefore) {
+          tools = this.toolsFor(cfg);
+          specs = tools.map(toSpec);
+          this.specTokens = estimateSpecTokens(specs);
+        }
         const assistant: Msg = { role: 'assistant', content: text };
         if (toolCalls.length) assistant.tool_calls = await this.storedCalls(toolCalls, tools, ctx);
         this.store.append(this.session, assistant);
@@ -945,6 +1057,12 @@ export class Agent {
 
         for (const call of toolCalls) {
           if (signal.aborted || this.hookStop) break;
+          // load_tools was run above: its result goes in quietly, without a tool row, an approval or hooks
+          const loaded = loadResults.get(call.id);
+          if (loaded !== undefined) {
+            this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: loaded });
+            continue;
+          }
           const result = await this.execTool(call, tools, ctx);
           this.store.append(this.session, { role: 'tool', tool_call_id: call.id, content: result.content });
           const used = tools.find((t) => t.name === call.function.name);
@@ -1020,7 +1138,7 @@ export class Agent {
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
     const chars = (t: string) => (t ? Math.ceil(t.length / 4) : 0);
-    const parts = systemPromptParts(cfg, this.getSkills(cfg.workingDirectory), this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg));
+    const parts = systemPromptParts(cfg, this.getSkills(cfg.workingDirectory), this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
     const noTools = isOllama(cfg) && this.toolSupport.get(`${ollamaOf(cfg).baseURL}|${ollamaOf(cfg).model}`) === false;
     const tools = noTools ? [] : this.toolsFor(cfg);
     const byServer = new Map<string, Tool[]>();

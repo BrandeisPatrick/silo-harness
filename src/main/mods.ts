@@ -513,8 +513,8 @@ export function createMods(app: App, host: ModsHost = electronHost(app)): ModsCo
 
   // ---------- For the agent ----------
 
-  disposers.push(app.tools.register({ ...modCheckTool(registry, () => app.config().mods.layout), optional: true }));
-  disposers.push(app.prompt.add('mods', () => modsPrompt(registry.list()), { optional: true }));
+  disposers.push(app.tools.register({ ...modCheckTool(registry, () => app.config().mods.layout), optional: true, group: 'mods' }));
+  disposers.push(app.prompt.add('mods', () => modsPrompt(registry.list()), { optional: true, group: 'mods' }));
   disposers.push(app.provide('skill-usage', usage));
   disposers.push(app.events.on((sessionId, ev) => usage.handle(sessionId, ev)));
 

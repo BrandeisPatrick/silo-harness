@@ -260,9 +260,10 @@ export interface AppConfig {
   /** Shorten old tool results the model no longer needs word for word: in what it is sent past 48K tokens, and before summarising */
   pruneToolResults: boolean;
   /**
-   * Which tools the model is offered. Every tool's definition is sent with every request, so a small context window
-   * cannot afford them all. essential: files, shell, browser, terminal, tasks, artifacts, images. all: also scheduled
-   * tasks, sub-sessions and mod authoring. auto: all when the window is at least 32k tokens, essential below that.
+   * Which tools the model is offered. Every offered tool's definition is sent with every request, so the browser,
+   * terminal, sub-session, schedule and mod tools are groups a session loads when it needs them (tools/groups.ts).
+   * auto: every group, each when needed. all: every group from the first request. essential: groups when needed, but
+   * never the scheduled tasks, sub-sessions or mod authoring.
    */
   toolSet: 'auto' | 'all' | 'essential';
   /** The tool calls in the conversation: summary folds each run of two or more into one line, all shows every call as its own row */

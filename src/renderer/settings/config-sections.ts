@@ -452,7 +452,7 @@ export function contextSection(ctx: Ctx): Section {
       ctx.segField({
         id: 'toolSet',
         title: 'Tools offered to the model',
-        desc: 'Each tool costs tokens; Essential suits small context windows.',
+        desc: 'Automatic adds tools like the browser when a task needs them; Essential suits small windows.',
         keywords: 'tools schedule sub-session subagent mods small window local model overhead essential all automatic',
         field: 'toolSet',
         choices: TOOL_SET,

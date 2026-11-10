@@ -44,6 +44,7 @@ function state(t: TerminalTabInfo): string {
 
 export const terminalRun: Tool = {
   name: 'terminal_run',
+  group: 'terminal',
   description:
     'Run a command in the Terminal pane the user can see: a shell tab next to the chat that keeps running after this call. Use it for dev servers, watchers and anything the user should watch or take over, or to run in a tab the user is already using; use bash for ordinary builds, tests and git. Returns the output and exit code when the command finishes within timeout_ms (default 15 s), otherwise what it printed so far while it keeps running (then terminal_read shows more).',
   parameters: {
@@ -77,6 +78,7 @@ export const terminalRun: Tool = {
 
 export const terminalRead: Tool = {
   name: 'terminal_read',
+  group: 'terminal',
   description:
     "Read what a Terminal pane tab shows: the last lines of its screen and scrollback, including commands the user ran there. Use it to see later output of a command terminal_run left running, or when the user refers to something in their terminal.",
   parameters: {
@@ -100,6 +102,7 @@ export const terminalRead: Tool = {
 
 export const terminalList: Tool = {
   name: 'terminal_list',
+  group: 'terminal',
   description: 'List the Terminal pane tabs: id, title, whether a command is running, and the current directory.',
   parameters: { type: 'object', properties: {} },
   async run(_args, ctx) {
@@ -109,6 +112,7 @@ export const terminalList: Tool = {
 
 export const terminalStop: Tool = {
   name: 'terminal_stop',
+  group: 'terminal',
   description: 'Interrupt the command running in a Terminal pane tab (sends Ctrl-C). The tab and its shell stay open.',
   parameters: {
     type: 'object',

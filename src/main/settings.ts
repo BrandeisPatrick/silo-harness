@@ -72,7 +72,7 @@ const SCALARS: Record<string, Check> = {
   pruneToolResults: describe(bool, 'Shorten old tool results for the model: past 48K tokens, and before summarising.'),
   notifications: describe(bool, 'Notify when a run finishes or needs approval while the app is in the background.'),
   keepAwake: describe(oneOf('off', 'running', 'always'), 'Keep the Mac awake: never, while a session runs, or whenever the app is open.'),
-  toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered.'),
+  toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods.'),
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
 };

@@ -19,6 +19,7 @@ import { SessionStore, toTranscript } from './sessions';
 import { loadSkills } from './skills';
 import type { TerminalManager } from './terminal';
 import type { Tool } from './tools';
+import type { ToolGroup } from './tools/groups';
 
 export type Disposer = () => void;
 
@@ -50,8 +51,9 @@ export interface App {
   /** `optional` sections belong to optional tools and are left out with them (see AppConfig.toolSet). A session with a */
   /** tool set of its own (Session.tools) gets only the sections added with `restricted` (they say what it can do). */
   /** `perSession` sections differ from session to session (its name, its parent): they go at the very end of the */
-  /** prompt, so the part every session shares stays the same from its first character (for prompt caching). */
-  readonly prompt: { add(id: string, section: (info: { cwd: string; mode: PermissionMode; sessionId: string }) => string, opts?: { optional?: boolean; restricted?: boolean; perSession?: boolean }): Disposer };
+  /** prompt, so the part every session shares stays the same from its first character (for prompt caching). A `group` */
+  /** section belongs to that tool group (tools/groups.ts) and comes only once the session has loaded it. */
+  readonly prompt: { add(id: string, section: (info: { cwd: string; mode: PermissionMode; sessionId: string }) => string, opts?: { optional?: boolean; restricted?: boolean; perSession?: boolean; group?: ToolGroup }): Disposer };
   /** Slash commands that are not skills */
   readonly commands: { register(cmd: Command): Disposer; list(): CommandInfo[] };
   /** Named services features expose to each other, e.g. app.service<HistoryService>('history') */
@@ -151,6 +153,8 @@ export class AppHost implements App {
   private readonly optionalSections = new Set<string>();
   private readonly restrictedSections = new Set<string>();
   private readonly perSessionSections = new Set<string>();
+  /** The tool group a section belongs to, by section id */
+  private readonly sectionGroups = new Map<string, ToolGroup>();
   private readonly commandMap = new Map<string, Command>();
   private readonly services = new Map<string, unknown>();
   private readonly quitFns: (() => void | Promise<void>)[] = [];
@@ -188,12 +192,14 @@ export class AppHost implements App {
         if (opts?.optional) this.optionalSections.add(id);
         if (opts?.restricted) this.restrictedSections.add(id);
         if (opts?.perSession) this.perSessionSections.add(id);
+        if (opts?.group) this.sectionGroups.set(id, opts.group);
         return () => {
           if (this.sections.get(id) === section) {
             this.sections.delete(id);
             this.optionalSections.delete(id);
             this.restrictedSections.delete(id);
             this.perSessionSections.delete(id);
+            this.sectionGroups.delete(id);
           }
         };
       },
@@ -399,12 +405,15 @@ export class AppHost implements App {
    * session has a tool set of its own, and only the sections written for such sessions apply. `part`: only the sections
    * every session shares, or only the per-session ones; without it all of them, the shared ones first.
    */
-  promptFor(info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session' }): string {
+  /** `groups`: the tool groups the session has loaded (a section of another group is left out); unset: all of them. */
+  promptFor(info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[] }): string {
     if (!info.part) return [this.promptFor({ ...info, part: 'shared' }), this.promptFor({ ...info, part: 'session' })].filter(Boolean).join('\n\n');
     const out: string[] = [];
     for (const [id, fn] of this.sections) {
       if (info.restricted ? !this.restrictedSections.has(id) : this.restrictedSections.has(id)) continue;
       if (info.essential && this.optionalSections.has(id)) continue;
+      const group = this.sectionGroups.get(id);
+      if (group && info.groups && !info.groups.includes(group)) continue;
       if (this.perSessionSections.has(id) !== (info.part === 'session')) continue;
       try {
         const text = fn(info);
