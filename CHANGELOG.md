@@ -9,7 +9,9 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Sessions cost less.** The same 19-turn session costs $0.06 on Claude Haiku 5.5 instead of $0.38, and a third less where the provider has no prompt cache ([measurement](docs/token-bench.md)).
   ![Cost of one 19-turn session in 0.12.0 and in 0.13.0, with and without a prompt cache](docs/releases/0.13.0/token-saving.png)
 - **Search and read the web.** `web_search` finds pages and `web_fetch` reads one as text, without opening the Browser pane and behind the same site approval.
+  ![The agent searches the web, reads RFC 9110 and answers with links to the spec](docs/releases/0.13.0/web-tools.png)
 - **A more careful browser.** What a page says reaches the agent as data, not instructions, and clicks, downloads, new tabs and the clipboard each get a check.
+  ![The Browser pane holds a download the agent started until you allow it](docs/releases/0.13.0/browser-safety.png)
 
 ### New
 
@@ -70,6 +72,7 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 - **Careful MCP sign-in.** Sign-in uses PKCE, accepts only https or loopback endpoints, and keeps tokens in a file only you can read.
 - **Public sites only.** `web_fetch` refuses private and local-network addresses, re-checks every redirect, and asks for a new site as the browser does.
 - **Web text is data.** Fetched pages and search results arrive in a fence, and text imitating the fence is made harmless.
+- **Hostile pages stay cheap.** `web_fetch` turns a page built to stall it into text in bounded time and size, and hidden text stays out.
 - **Search keys stay put.** A search key is masked in Settings, never shown to the model and cannot be set by a project's settings file.
 - **Prompts that explain themselves.** Every macOS permission prompt now says in a sentence what asked for it.
 
