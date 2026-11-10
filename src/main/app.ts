@@ -52,7 +52,8 @@ export interface App {
   /** tool set of its own (Session.tools) gets only the sections added with `restricted` (they say what it can do). */
   /** `perSession` sections differ from session to session (its name, its parent): they go at the very end of the */
   /** prompt, so the part every session shares stays the same from its first character (for prompt caching). A `group` */
-  /** section belongs to that tool group (tools/groups.ts) and comes only once the session has loaded it. */
+  /** section belongs to that tool group (tools/groups.ts): when groups load as needed it is not in the system prompt but */
+  /** in the result of the group's load, so the prompt stays the same as groups load. */
   readonly prompt: { add(id: string, section: (info: { cwd: string; mode: PermissionMode; sessionId: string }) => string, opts?: { optional?: boolean; restricted?: boolean; perSession?: boolean; group?: ToolGroup }): Disposer };
   /** Slash commands that are not skills */
   readonly commands: { register(cmd: Command): Disposer; list(): CommandInfo[] };
@@ -405,15 +406,18 @@ export class AppHost implements App {
    * session has a tool set of its own, and only the sections written for such sessions apply. `part`: only the sections
    * every session shares, or only the per-session ones; without it all of them, the shared ones first.
    */
-  /** `groups`: the tool groups the session has loaded (a section of another group is left out); unset: all of them. */
-  promptFor(info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[] }): string {
+  /**
+   * `groups`: the tool groups whose sections go in (a section of another group is left out); unset: all of them.
+   * `onlyGroup`: only the sections of that group, both parts (what the group's load tells the model).
+   */
+  promptFor(info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[]; onlyGroup?: string }): string {
     if (!info.part) return [this.promptFor({ ...info, part: 'shared' }), this.promptFor({ ...info, part: 'session' })].filter(Boolean).join('\n\n');
     const out: string[] = [];
     for (const [id, fn] of this.sections) {
       if (info.restricted ? !this.restrictedSections.has(id) : this.restrictedSections.has(id)) continue;
       if (info.essential && this.optionalSections.has(id)) continue;
       const group = this.sectionGroups.get(id);
-      if (group && info.groups && !info.groups.includes(group)) continue;
+      if (info.onlyGroup !== undefined ? group !== info.onlyGroup : group && info.groups && !info.groups.includes(group)) continue;
       if (this.perSessionSections.has(id) !== (info.part === 'session')) continue;
       try {
         const text = fn(info);

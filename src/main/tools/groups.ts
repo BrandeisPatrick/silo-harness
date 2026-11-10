@@ -1,22 +1,41 @@
 // Tool groups: families of tools a session is offered only once it needs them. Every tool definition is sent with
 // every request, and these five took about half of the fixed part of each one (docs/token-bench.md), mostly in
-// sessions that never used them. A session starts with the core tools and load_tools, the system prompt names each
-// group in one line, and a group stays loaded for the rest of the session once it was loaded (Session.toolGroups): by
+// sessions that never used them. A session starts with the core tools and load_tools, whose description names each
+// group in one line; a group stays loaded for the rest of the session once it was loaded (Session.toolGroups): by
 // load_tools, by a call to one of its tools by name, or by a user message that clearly needs it. AppConfig.toolSet
 // 'all' offers every group from the first request instead. The agent does the loading (Agent.loadGroups).
+//
+// Built for prompt caching, which hashes the tools and the system prompt into a request's prefix: the tools only ever
+// grow at the end (the core tools, load_tools among them, then each group's tools in the order the session loaded
+// them), load_tools' description and the system prompt never change when a group loads, and what a group needs the
+// model to know (the browser's rules, the sub-session guide) comes in the load's result, in the conversation. Every
+// group is described here, in one place, so a native path can send all their tools up front as deferred instead.
 
 import type { Tool } from './types';
 
 export const TOOL_GROUPS = ['browser', 'terminal', 'sessions', 'schedules', 'mods'] as const;
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
 
-/** What each group is for: its line in the system prompt while it is not loaded. */
+/** What each group is for: its line in load_tools' description (the same whether it is loaded or not). */
 const GROUP_LINES: Record<ToolGroup, string> = {
   browser: 'open and use web pages in the Browser pane',
   terminal: 'run what keeps running (dev servers, watchers) or what the user should watch, in the Terminal pane',
   sessions: 'start sub-sessions that work in parallel, message, read or merge other sessions, rename this one',
   schedules: 'run a prompt later or on a schedule',
   mods: "write, change and check the app's mods (panels, themes, slash commands)",
+};
+
+/** The browser's rules: in the system prompt when every group is offered up front, else in the browser load's result. */
+export const BROWSER_RULES =
+  "Browser: act by visible text (browser_click with text, browser_type with field); browser_read_page gives refs when text is ambiguous, and refs change after navigation. Each site needs the user's approval before you read or act on it; say why in reason. Never type a password, a one-time code or card details: ask the user to do that in the pane. Purchases and new accounts are the user's to approve.";
+
+/**
+ * What a load of a built-in group tells the model besides its tools (the registered groups bring their prompt sections,
+ * app.prompt.add with `group`). When every group is offered up front the system prompt says the same.
+ */
+export const GROUP_GUIDANCE: Partial<Record<ToolGroup, string>> = {
+  browser: BROWSER_RULES,
+  terminal: 'Use terminal_run for what should keep running or the user should watch; bash stays the tool for one-off commands.',
 };
 
 /** The tool that loads groups. Internal: no tool row, no approval, no hooks; the transcript leaves its calls out. */
@@ -26,27 +45,31 @@ export function isToolGroup(v: unknown): v is ToolGroup {
   return typeof v === 'string' && (TOOL_GROUPS as readonly string[]).includes(v);
 }
 
-/** The groups in their fixed order, without repeats or names that are not groups. */
-export function sortGroups(groups: Iterable<unknown>): ToolGroup[] {
-  const set = new Set(groups);
-  return TOOL_GROUPS.filter((g) => set.has(g));
+/** The groups in the order given, without repeats or names that are not groups. */
+export function cleanGroups(groups: Iterable<unknown>): ToolGroup[] {
+  const out: ToolGroup[] = [];
+  for (const g of groups) if (isToolGroup(g) && !out.includes(g)) out.push(g);
+  return out;
 }
 
-/** The system prompt's lines for the groups not loaded yet ('' when there are none). */
-export function pendingGroupsText(pending: readonly ToolGroup[]): string {
-  if (!pending.length) return '';
-  const lines = pending.map((g) => `- ${g}: ${GROUP_LINES[g]}`).join('\n');
-  return `\nMore tools come in groups. When the task needs one, call ${LOAD_TOOLS} with its name; its tools are yours from the next step on.\n${lines}`;
+/** The system prompt's line about the groups a session can load ('' when there are none). The same all session long. */
+export function groupsPromptLine(groups: readonly ToolGroup[]): string {
+  if (!groups.length) return '';
+  return `\nMore tools come in groups (${groups.join(', ')}): when the task needs one, load it with ${LOAD_TOOLS}.`;
 }
 
-/** load_tools as offered while some groups are not loaded (`pending`). The agent runs its calls itself. */
-export function loadToolsTool(pending: readonly ToolGroup[]): Tool {
+/**
+ * load_tools as offered to a session that can load `groups` (those its mode and tool set allow, loaded or not): one
+ * line per group, so the definition stays the same all session long. The agent runs its calls itself.
+ */
+export function loadToolsTool(groups: readonly ToolGroup[]): Tool {
+  const lines = groups.map((g) => `- ${g}: ${GROUP_LINES[g]}`).join('\n');
   return {
     name: LOAD_TOOLS,
-    description: 'Load tool groups (listed in the system prompt) so their tools can be called. A group stays loaded for the rest of the session.',
+    description: `Load tool groups so their tools can be called, from your next step on. A group stays loaded for the rest of the session. The groups:\n${lines}`,
     parameters: {
       type: 'object',
-      properties: { groups: { type: 'array', items: { type: 'string', enum: [...pending] } } },
+      properties: { groups: { type: 'array', items: { type: 'string', enum: [...groups] } } },
       required: ['groups'],
     },
     readOnly: true,

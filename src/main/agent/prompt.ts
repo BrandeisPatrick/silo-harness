@@ -7,7 +7,7 @@ import { instructionsPrompt, loadInstructions } from '../instructions';
 import type { McpManager } from '../mcp';
 import type { Msg } from '../sessions';
 import type { Skill } from '../skills';
-import { pendingGroupsText, type ToolGroup } from '../tools/groups';
+import { BROWSER_RULES, groupsPromptLine, type ToolGroup } from '../tools/groups';
 
 /** Tells the model what is missing, so it can say so instead of improvising. */
 export const ESSENTIAL_NOTE =
@@ -47,20 +47,14 @@ export function joinPrompt(p: PromptParts): string {
 }
 
 /**
- * The tool groups (tools/groups.ts) as the prompt tells of them: those loaded get their own lines (the browser's rules,
- * the Terminal pane), those pending one line each. Unset: every group is offered.
- */
-export interface PromptGroups {
-  loaded: readonly ToolGroup[];
-  pending: readonly ToolGroup[];
-}
-
-/**
  * `cfg.workingDirectory` is the session's folder here (see Agent.sessionConfig). `extra` is the app's registered
  * sections. `own`: the session has a tool set of its own (Session.tools), named here instead of the usual ones.
- * `groups`: which tool groups the session has loaded and which wait for load_tools (unset: all are offered).
+ * `groups`: the tool groups (tools/groups.ts) the session loads when it needs them, loaded yet or not. The prompt then
+ * says nothing of what they are for beyond one line naming them, the same all session long: what a group needs the
+ * model to know comes with its load, in the conversation. Unset: every group is offered from the start, and the prompt
+ * tells of the browser and the Terminal pane itself.
  */
-export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra: string | PromptExtra = '', own?: string[], groups?: PromptGroups): string {
+export function systemPrompt(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extra: string | PromptExtra = '', own?: string[], groups?: readonly ToolGroup[]): string {
   return joinPrompt(systemPromptParts(cfg, skills, mcp, extra, own, groups));
 }
 
@@ -88,22 +82,19 @@ In this session you have only these tools: ${own.join(', ')}. You cannot run com
   return { base, sections: block(extra.shared), skills: '', mcp: '', userExtra, instructions: [], mode: '', env: envText(cfg), sessionSections: block(extra.session) };
 }
 
-export function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extraIn: string | PromptExtra = '', own?: string[], groups?: PromptGroups): PromptParts {
+export function systemPromptParts(cfg: AppConfig, skills: Skill[], mcp: McpManager | null, extraIn: string | PromptExtra = '', own?: string[], groups?: readonly ToolGroup[]): PromptParts {
   const extra = extraParts(extraIn);
   if (own) return ownToolsPromptParts(cfg, extra, own);
-  const has = (g: ToolGroup): boolean => !groups || groups.loaded.includes(g);
-  const panes = [has('browser') ? 'the built-in browser pane next to the chat (browser_* tools), ' : '', has('terminal') ? 'the Terminal pane next to the chat (terminal_* tools), ' : ''].join('');
-  const browserRules = has('browser')
-    ? `\n- Browser: act by visible text (browser_click with text, browser_type with field); browser_read_page gives refs when text is ambiguous, and refs change after navigation. Each site needs the user's approval before you read or act on it; say why in reason. Never type a password, a one-time code or card details: ask the user to do that in the pane. Purchases and new accounts are the user's to approve.`
-    : '';
+  const upFront = !groups;
+  const panes = upFront ? 'the built-in browser pane next to the chat (browser_* tools), the Terminal pane next to the chat (terminal_* tools), ' : '';
   const base = `You are Silo Harness, an autonomous coding agent running on the user's Mac.
 
-You have tools for the filesystem, a shell (bash), ${panes}and create_artifact for deliverables shown in the browser pane.${pendingGroupsText(groups?.pending ?? [])}
+You have tools for the filesystem, a shell (bash), ${panes}and create_artifact for deliverables shown in the browser pane.${groupsPromptLine(groups ?? [])}
 
 How to work:
 - Act with tools instead of guessing. Explore with glob/grep/read_file before editing. Read a file before you edit it, and prefer edit_file for targeted changes.
-- Use bash for builds, tests, git and other one-off commands (non-interactive)${has('terminal') ? '; use terminal_run for what should keep running or the user should watch' : ''}.
-- Images the user attaches are visible to you if the model supports vision. Never append "/think", "/no_think" or similar switches to commands, file contents or tool arguments.${browserRules}
+- Use bash for builds, tests, git and other one-off commands (non-interactive)${upFront ? '; use terminal_run for what should keep running or the user should watch' : ''}.
+- Images the user attaches are visible to you if the model supports vision. Never append "/think", "/no_think" or similar switches to commands, file contents or tool arguments.${upFront ? `\n- ${BROWSER_RULES}` : ''}
 - Keep going until the task is complete, then finish with a short summary of what you did and what you found. Do not ask questions you can answer with a tool.
 - If a tool reports that an action was not permitted, do not retry it; explain what you would have done and continue with what you can do.
 - Skills: a <skill> block in a user message holds instructions for that request; follow them. Only load a skill with the skill tool when the user invoked it with /name or the task clearly matches its description, never as a substitute for finishing the task.

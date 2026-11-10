@@ -130,18 +130,29 @@ export interface App {
   `schedules` and `mods` (the browser and terminal tools say so themselves; the features register theirs with it), and
   `{ group }` does the same for a prompt section. Every tool definition goes with every request, and these took about
   half of the fixed part of each one, so the agent splits what a session may use (`toolPool`: mode, trimming, a tool
-  set of its own) from what a request offers (`toolsFor`): the pool without the groups the session has not loaded,
-  plus `load_tools` (after the built-in tools) taking the names of those groups, which the system prompt lists one line
-  each. The prompt's own browser rules and terminal mentions, and a group's sections, come only with the group.
-  `Session.toolGroups` holds the loaded ones: saved with the session, copied on fork, untouched by compaction and
-  rewinds. A group is loaded by `load_tools`, by a call to one of its tools by name (loaded before the reply's calls
-  are stored, so `shownArgs` and hooks see the tool, then the call runs as usual), or before the first request by a
-  message that clearly needs it (`groupsForMessage`: a web address it asks to open, or one named with the word
-  browser). The run loop rebuilds the tool list after a load, so the request prefix changes once per group and session.
-  `load_tools` is the agent's own: it runs before the reply's other calls, without a tool row, an approval or hooks;
-  `toTranscript`, the export and Auto mode's check leave its calls out. `toolSet: 'all'` (`allGroupsUpFront`) offers
-  every group from the first request and no `load_tools`; a session with a tool set of its own has no groups. The
-  context meter's "Tool definitions" is what the request offers.
+  set of its own) from what a request offers (`toolsFor`). It is built so that a provider's prompt cache keeps working:
+  - The tools only grow at the end: the pool's core tools with `load_tools` after the built-in ones, then each loaded
+    group's tools in the order the session loaded them (`Session.toolGroups` keeps that order). Nothing is unloaded or
+    reordered; a load changes the list once.
+  - `load_tools`'s definition never changes in a session: one line per group the session can load (≤250 characters),
+    loaded or not, and an enum of them.
+  - The system prompt never changes as groups load: it names the groups in one line, and the browser's rules, the
+    Terminal pane and a group's registered sections are not in it. They come in the load's result (`groupLoadText`:
+    `GROUP_GUIDANCE` for the built-in groups, `promptFor({ onlyGroup })` for the registered ones), in the conversation.
+  - A loaded group stays loaded: saved with the session, copied on fork, untouched by compaction and rewinds. When a
+    compaction folds a load's result, the brief repeats it (`foldedGroupsText`, a section of `compactedPreamble`).
+  A group is loaded by `load_tools`, by a call to one of its tools by name (before the reply's calls are stored, so
+  `shownArgs` and hooks see the tool; the agent stores a `load_tools` call of its own first in that reply, with the
+  load's result, then the call runs as usual), or before the first request by a message that clearly needs it
+  (`groupsForMessage`: a web address it asks to open, or one named with the word browser; again a `load_tools` call of
+  the agent's own, right after the message). `load_tools` is the agent's own: it runs before the reply's other calls,
+  without a tool row, an approval or hooks; `toTranscript`, the export and Auto mode's check leave its calls out.
+  `toolSet: 'all'` (`allGroupsUpFront`) offers every group from the first request, with the browser's rules, the
+  Terminal pane and every section in the system prompt, and no `load_tools`; a session with a tool set of its own has
+  no groups. The context meter's "Tool definitions" is what the request offers. A native Anthropic path could send
+  every group's tools from the first request marked `defer_loading` (the pool, in the same order) and have `load_tools`
+  return `tool_reference` blocks, with the cache breakpoint on the last core tool; the groups are described in one
+  place for that.
 - **A session with a tool set of its own** (`Session.tools`, a list of names; a dream's session): its agent is offered
   exactly the built-in and registered tools it names, in every permission mode, and never an MCP tool; the system prompt
   names those tools instead of describing the shell and the browser, leaves out the mode text, the skills list, MCP and

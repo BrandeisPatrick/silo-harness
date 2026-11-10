@@ -79,7 +79,17 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   const streams = () => state.requests.filter((r) => r.url === '/v1/chat/completions' && r.payload.stream);
   const names = (req) => (req?.payload.tools ?? []).map((t) => t.function.name);
   const system = (req) => String(req?.payload.messages?.[0]?.content ?? '');
-  const loadEnum = (req) => req?.payload.tools?.find((t) => t.function.name === 'load_tools')?.function.parameters.properties.groups.items.enum ?? null;
+  const loadTool = (req) => req?.payload.tools?.find((t) => t.function.name === 'load_tools')?.function ?? null;
+  const loadEnum = (req) => loadTool(req)?.parameters.properties.groups.items.enum ?? null;
+  /** Prompt caching: within a session the tools only grow at the end and the system prompt never changes */
+  const cacheSafe = (reqs) =>
+    reqs.every((r, i) => {
+      if (!i) return true;
+      const prev = reqs[i - 1].payload.tools ?? [];
+      const now = r.payload.tools ?? [];
+      return now.length >= prev.length && prev.every((t, k) => JSON.stringify(t) === JSON.stringify(now[k])) && system(r) === system(reqs[i - 1]);
+    });
+  const toolMsgs = (req) => (req?.payload.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content));
   let n = 0;
   const call = (name, args) => ({ id: `g${++n}`, name, args });
 
@@ -89,20 +99,23 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   check('…but not an address the task only mentions', groupsForMessage('Clone https://github.com/a/b and run its tests').length === 0 && groupsForMessage('Open a PR at https://github.com/a/b').length === 0 && groupsForMessage('Open the browser settings file').length === 0);
   check('load_tools arguments are read leniently', requestedGroups({ groups: ['Browser', 'terminal', 'browser'] }).join() === 'browser,terminal' && requestedGroups({ groups: 'sessions, schedules' }).join() === 'sessions,schedules' && requestedGroups({ group: 'mods' }).join() === 'mods' && requestedGroups(['terminal']).join() === 'terminal' && requestedGroups({}).length === 0);
 
-  // ---- A: a fresh session offers the core tools and load_tools, and names the groups ----
+  // ---- A: a fresh session offers the core tools and load_tools, which names the groups ----
   reset();
   const a = agentFor(store.create({ cwd: project }));
   state.replies.push({ content: 'hi' });
   await a.run('hello');
   let req = streams()[0];
+  const firstLoadTool = JSON.stringify(loadTool(req));
+  const firstSystem = system(req);
   check('A: no tool of a group is offered', !names(req).some((t) => GROUP_TOOLS.test(t)), names(req));
   check('A: the core tools, a registered tool of no group and load_tools are', ['read_file', 'write_file', 'edit_file', 'bash', 'skill', 'create_artifact', 'update_tasks', 'ask_user', 'always_there', 'load_tools'].every((t) => names(req).includes(t)), names(req));
-  check('A: load_tools comes after the built-in tools and takes the groups not loaded', names(req).indexOf('load_tools') === names(req).indexOf('ask_user') + 1 && loadEnum(req).join() === 'browser,terminal,sessions,schedules,mods', loadEnum(req));
-  check('A: the prompt names each group in one line', /More tools come in groups\. When the task needs one, call load_tools with its name/.test(system(req)) && /^- browser: open and use web pages in the Browser pane$/m.test(system(req)) && /^- mods: /m.test(system(req)), system(req).slice(0, 900));
-  check('A: …and leaves out what belongs to a group (browser rules, terminal_run, sub-sessions, schedules, mods, the session name)', !/browser_click|terminal_run|## Sub-sessions|## Schedules|MODS-SECTION|This session is named/.test(system(req)));
+  check('A: load_tools comes after the built-in tools and takes every group', names(req).indexOf('load_tools') === names(req).indexOf('ask_user') + 1 && loadEnum(req).join() === 'browser,terminal,sessions,schedules,mods', loadEnum(req));
+  check("A: load_tools' description names each group in one line", /^- browser: open and use web pages in the Browser pane$/m.test(loadTool(req).description) && /^- mods: /m.test(loadTool(req).description) && loadTool(req).description.split('\n').every((l) => l.length <= 250), loadTool(req).description);
+  check('A: the prompt names the groups in one line and says nothing more of them', /More tools come in groups \(browser, terminal, sessions, schedules, mods\): when the task needs one, load it with load_tools\./.test(firstSystem) && !/^- browser:/m.test(firstSystem), firstSystem.slice(0, 500));
+  check('A: …nor of what belongs to a group (browser rules, terminal_run, sub-sessions, schedules, mods, the session name)', !/browser_click|act by visible text|terminal_run|## Sub-sessions|## Schedules|MODS-SECTION|This session is named/.test(firstSystem));
   check('A: nothing is loaded yet', !a.session.toolGroups);
 
-  // ---- B: load_tools adds a group for the next request, quietly ----
+  // ---- B: load_tools adds a group at the end of the tools for the next request, quietly ----
   reset();
   state.replies.push({ toolCalls: [call('load_tools', { groups: ['terminal'] })] });
   state.replies.push({ toolCalls: [call('terminal_list', {})] });
@@ -110,9 +123,10 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   await a.run('List the terminal tabs');
   let [r1, r2, r3] = streams();
   check('B: the request before the load does not offer the terminal', !names(r1).includes('terminal_list'));
-  check('B: the next request does, with the prompt line for it, and the group is off the list', names(r2).includes('terminal_run') && names(r2).includes('terminal_list') && /use terminal_run for what should keep running/.test(system(r2)) && !/^- terminal:/m.test(system(r2)) && loadEnum(r2).join() === 'browser,sessions,schedules,mods', loadEnum(r2));
-  const loadResult = r2.payload.messages.find((m) => m.role === 'tool');
-  check('B: load_tools answers with the group and its tools', /^Loaded terminal \(terminal_run, terminal_read, terminal_list, terminal_stop\)\.$/.test(loadResult?.content ?? ''), loadResult?.content);
+  check('B: the next one does, its tools added at the end', names(r2).slice(-4).join() === 'terminal_run,terminal_read,terminal_list,terminal_stop' && names(r2).length === names(r1).length + 4, names(r2));
+  check('B: the system prompt and load_tools stay as they were (prompt caching)', system(r2) === firstSystem && JSON.stringify(loadTool(r2)) === firstLoadTool && cacheSafe(streams()));
+  const loadResult = toolMsgs(r2)[0];
+  check('B: load_tools answers with the group, its tools and what to know of them', loadResult === 'Loaded terminal: terminal_run, terminal_read, terminal_list, terminal_stop.\nUse terminal_run for what should keep running or the user should watch; bash stays the tool for one-off commands.', loadResult);
   check('B: the terminal tool then ran as usual', events.some((e) => e.type === 'tool_end' && e.name === 'terminal_list' && e.ok) && names(r3).includes('terminal_list'));
   check('B: no tool row, no approval for load_tools', !events.some((e) => (e.type === 'tool_start' || e.type === 'tool_end' || e.type === 'approval_request') && e.name === 'load_tools'));
   check('B: the session keeps the group', JSON.stringify(a.session.toolGroups) === '["terminal"]');
@@ -130,7 +144,11 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   [r1, r2] = streams();
   const ends = events.filter((e) => e.type === 'tool_end');
   check('C: both calls ran (no "unknown tool")', ends.length === 2 && ends.every((e) => e.ok) && ends[1].result === 'mods ok', ends.map((e) => e.result.slice(0, 60)));
-  check('C: both groups are loaded and offered from the next request, with their sections', JSON.stringify(a.session.toolGroups) === '["terminal","sessions","mods"]' && names(r2).includes('session_spawn') && names(r2).includes('mod_check') && /## Sub-sessions/.test(system(r2)) && /MODS-SECTION/.test(system(r2)) && /This session is named/.test(system(r2)), a.session.toolGroups);
+  check('C: both groups are loaded, their tools added at the end in the order they loaded', JSON.stringify(a.session.toolGroups) === '["terminal","sessions","mods"]' && names(r2).slice(-7).join() === 'session_spawn,session_send,session_list,session_read,session_merge,session_rename,mod_check' && cacheSafe(streams()), names(r2).slice(-8));
+  const stored = a.session.messages.filter((m) => m.role === 'assistant' && m.tool_calls?.length).pop();
+  check('C: the reply is stored with a load_tools call of the agent\'s own first', stored.tool_calls.map((c) => c.function.name).join() === 'load_tools,session_list,mod_check' && JSON.parse(stored.tool_calls[0].function.arguments).groups.join() === 'sessions,mods');
+  const implied = toolMsgs(r2).find((t) => t.startsWith('Loaded sessions:')) ?? '';
+  check('C: its result carries the groups\' own sections, the system prompt does not', /## Sub-sessions/.test(implied) && /This session is named/.test(implied) && /Loaded mods: mod_check\.\nMODS-SECTION/.test(implied) && system(r2) === firstSystem, implied.slice(0, 300));
   const hookInputs = fs.existsSync(hookLog) ? fs.readFileSync(hookLog, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)) : [];
   check('C: PreToolUse hooks saw the real tool names', hookInputs.map((h) => h.silo_tool_name).join() === 'session_list,mod_check' && hookInputs.every((h) => h.hook_event_name === 'PreToolUse'), hookInputs.map((h) => h.silo_tool_name));
   // load_tools never reaches a hook
@@ -139,32 +157,35 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   state.replies.push({ toolCalls: [call('load_tools', { groups: ['schedules', 'nonsense', 'terminal'] })] });
   state.replies.push({ content: 'ok' });
   await a.run('Load the schedules');
-  const partial = streams()[1].payload.messages.filter((m) => m.role === 'tool').pop()?.content ?? '';
+  const partial = toolMsgs(streams()[1]).pop() ?? '';
   check('C: load_tools fires no hook', !fs.existsSync(hookLog) || !/load_tools/.test(fs.readFileSync(hookLog, 'utf8')));
-  check('C: a mix of new, loaded and unknown names: each said', /^Loaded schedules \(schedule_create, schedule_list, schedule_update, schedule_delete\)\. Already loaded: terminal\. Not a tool group here: nonsense\. The groups are browser, terminal, sessions, schedules, mods\.$/.test(partial), partial);
-  check('C: one group left: load_tools offers only the browser', loadEnum(streams()[1]).join() === 'browser');
+  check('C: a mix of new, loaded and unknown names: each said', /^Loaded schedules: schedule_create, schedule_list, schedule_update, schedule_delete\.\n## Schedules\n[^\n]+\n\nAlready loaded: terminal\.\n\nNot a tool group here: nonsense\. The groups are browser, terminal, sessions, schedules, mods\.$/.test(partial), partial);
+  check('C: load_tools still offers every group, unchanged', loadEnum(streams()[1]).join() === 'browser,terminal,sessions,schedules,mods' && JSON.stringify(loadTool(streams()[1])) === firstLoadTool);
 
   // ---- D: saved, reloaded, forked and compacted, the groups stay ----
   store.save(a.session);
   const id = a.session.id;
   store = new SessionStore(sessionsDir);
   const reloaded = store.get(id);
-  check('D: the session file keeps the loaded groups', JSON.stringify(reloaded.toolGroups) === '["terminal","sessions","schedules","mods"]', reloaded.toolGroups);
+  check('D: the session file keeps the loaded groups, in their order', JSON.stringify(reloaded.toolGroups) === '["terminal","sessions","mods","schedules"]', reloaded.toolGroups);
   const forked = store.fork(id);
   check('D: a fork copies them', JSON.stringify(forked.toolGroups) === JSON.stringify(reloaded.toolGroups) && forked.toolGroups !== reloaded.toolGroups);
   reset();
   const d = agentFor(reloaded);
   state.replies.push({ content: 'still here' });
   await d.run('Are the tools still there?');
-  check('D: a reopened session is offered them from its first request', names(streams()[0]).includes('terminal_run') && names(streams()[0]).includes('schedule_create') && !names(streams()[0]).includes('browser_navigate'));
+  const reopened = names(streams()[0]);
+  check('D: a reopened session is offered them from its first request, in the same order', reopened.join() === names(r2).concat(['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete']).join() && !reopened.includes('browser_navigate'), reopened.slice(-12));
   reset();
   state.summary = '## 1. Request and intent\nTools.\n\n## 6. Pending work\nNone.';
   const compacted = await d.compactNow();
   check('D: the session compacted', compacted.ok && (reloaded.compactions ?? []).length === 1, compacted);
+  const brief = String(reloaded.messages[0].content);
+  check('D: the brief carries what the folded loads said', /## Tool groups loaded earlier in this session\nLoaded terminal: /.test(brief) && /Loaded sessions: /.test(brief) && /## Sub-sessions/.test(brief) && /Loaded schedules: /.test(brief) && /MODS-SECTION/.test(brief), brief.slice(0, 400));
   reset();
   state.replies.push({ content: 'after compaction' });
   await d.run('And now?');
-  check('D: …and still offers the groups after it', JSON.stringify(reloaded.toolGroups) === '["terminal","sessions","schedules","mods"]' && names(streams()[0]).includes('terminal_run') && names(streams()[0]).includes('session_spawn'));
+  check('D: …and the same tools are offered after it', JSON.stringify(reloaded.toolGroups) === '["terminal","sessions","mods","schedules"]' && names(streams()[0]).join() === reopened.join());
 
   // ---- E: a message that asks to open a page loads the browser before the first request ----
   reset();
@@ -172,7 +193,12 @@ const GROUP_TOOLS = /^(browser_|terminal_|session_|schedule_|mod_check$)/;
   state.replies.push({ content: 'ok' });
   await e.run('Open https://example.com and tell me its title.');
   req = streams()[0];
-  check('E: the first request already offers the browser, with its rules', names(req).includes('browser_navigate') && names(req).includes('browser_click') && /- Browser: act by visible text/.test(system(req)) && JSON.stringify(e.session.toolGroups) === '["browser"]', names(req).filter((t) => t.startsWith('browser_')).length);
+  const msgs = req.payload.messages;
+  check('E: the first request already offers the browser, at the end of the tools', names(req).slice(-12).every((t) => t.startsWith('browser_')) && JSON.stringify(e.session.toolGroups) === '["browser"]', names(req).slice(-13));
+  check("E: …after the message, a load_tools call of the agent's own whose result has the browser's rules", msgs[1].role === 'user' && msgs[2].role === 'assistant' && msgs[2].tool_calls[0].function.name === 'load_tools' && msgs[3].role === 'tool' && /^Loaded browser: browser_tabs, /.test(msgs[3].content) && /act by visible text/.test(msgs[3].content), msgs.map((m) => m.role));
+  check('E: the system prompt is the one every session starts with', system(req) === firstSystem);
+  items = toTranscript(e.session);
+  check('E: the transcript shows the message and the reply only', items.map((i) => i.role).join() === 'user,assistant', items.map((i) => i.role));
 
   // ---- F: the context meter counts the tools offered (two sessions that have not run: estimates on both) ----
   const toolsSlice = (groups) => {
