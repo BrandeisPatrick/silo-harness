@@ -60,8 +60,8 @@ import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
-import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
-import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
+import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
+import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 
@@ -104,6 +104,26 @@ interface PendingApproval {
 
 /** Browser cards a PreToolUse hook's "allow" does not skip: money and accounts are the user's, as in bypass mode. */
 const USER_ONLY_CARDS = new Set(['purchase', 'account']);
+
+/** What a browser action Allow on its Auto mode block lets through once: the tool, the card, the site and the card's first line. */
+function browserActionKey(name: string, detail: string, b: BrowserApproval): string {
+  return actionKey(name, [b.card, b.site.key, detail.split('\n')[0] ?? ''].join('\u0000'));
+}
+
+/** What Auto mode's check is told about a browser card (classifier.ts): never the page's text or the model's reason. */
+function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
+  const kind = b.check?.kind === 'eval' || b.card === 'eval' ? 'page script' : b.check?.kind === 'act' || b.card === 'sensitive' ? 'act' : 'read';
+  return {
+    card: b.card,
+    kind,
+    site: b.site.display,
+    ...(b.check?.url ? { url: b.check.url } : {}),
+    ...(b.note ? { note: b.note } : {}),
+    ...(b.reason ? { flag: b.reason } : {}),
+    what: detail.split('\n')[0] ?? '',
+    ...(b.check?.code !== undefined ? { code: b.check.code } : {}),
+  };
+}
 
 /** What a call stopped while it waited gets back. */
 const INTERRUPTED = 'Tool call was interrupted before it produced a result.';
@@ -675,8 +695,10 @@ export class Agent {
     const decision = decide(mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
     if (decision.kind === 'refuse') return settle(decision);
     if (decision.kind === 'allow' || (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? ''))) return Promise.resolve({ ok: true });
-    // An action Auto mode blocked and the user then allowed runs once, without the check or a card
-    if (!opts.browser && !opts.custom && this.sessionSet(this.autoAllowed).delete(actionKey(name, detail))) return Promise.resolve({ ok: true });
+    // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
+    // by its card, site and first line: the model's reason under it may differ on the retry)
+    const onceKey = opts.browser ? (CHECKED_BROWSER_CARDS.has(opts.browser.card) ? browserActionKey(name, detail, opts.browser) : null) : opts.custom ? null : actionKey(name, detail);
+    if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve({ ok: true });
     if (decision.kind !== 'classify') return settle(decision);
     const checker = classifierTarget(cfg);
     if (!checker) {
@@ -684,7 +706,8 @@ export class Agent {
       this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
       return settle(decide('guard'));
     }
-    return this.autoCheck(checker, cfg, { name, detail, args: call?.args, callId: call?.id }, () => settle(decide('guard')));
+    const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}) };
+    return this.autoCheck(checker, cfg, action, () => settle(decide('guard')), { key: onceKey ?? actionKey(name, detail), browser: opts.browser });
   }
 
   // ---------- Auto mode ----------
@@ -710,15 +733,20 @@ export class Agent {
    * Auto mode's safety check on one action: allowed, it runs; blocked, the agent reads why (and the window shows the
    * quiet line). Fails closed: an error, a timeout or an answer that is not one blocks. Only when the model cannot be
    * reached before it ever answered does the session fall back to the rule guard (`fallback`) until its next run.
+   * A browser action (`on.browser`) has a third answer, ask, which shows its card (`fallback`) without counting toward
+   * the pause, and a check that fails shows the card too: it is never allowed because the check could not run. An
+   * allowed site card allows the site for the session, as the user's "for this session" does; an act on a sensitive
+   * page and page script are checked each time. `on.key` is what the user's Allow on a block lets through once.
    */
-  private async autoCheck(checker: ClassifierTarget, cfg: AppConfig, action: ClassifiedAction, fallback: () => Promise<ApprovalResult>): Promise<ApprovalResult> {
+  private async autoCheck(checker: ClassifierTarget, cfg: AppConfig, action: ClassifiedAction, fallback: () => Promise<ApprovalResult>, on: { key: string; browser?: BrowserApproval }): Promise<ApprovalResult> {
     const st = this.autoState();
     const signal = this.abortController?.signal;
+    const browser = on.browser;
     let verdict: Verdict | null = null;
     try {
       const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action), signal);
       st.reached = true;
-      verdict = parseVerdict(raw);
+      verdict = parseVerdict(raw, { ask: !!browser });
       if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
     } catch (err) {
       if (signal?.aborted) return { ok: false, message: INTERRUPTED };
@@ -733,19 +761,22 @@ export class Agent {
     if (signal?.aborted) return { ok: false, message: INTERRUPTED };
     if (verdict?.decision === 'allow') {
       st.inARow = 0;
+      if (browser?.card === 'site' && browser.site.key) this.sessionSet(this.allowedSites).add(browser.site.key);
       return { ok: true };
     }
-    return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON);
+    // A browser action the check left to the user, or could not decide: the card, as without the check
+    if (browser && verdict?.decision !== 'block') return fallback();
+    return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON, on.key);
   }
 
   /** Records a block, tells the window, pauses Auto mode after too many, and returns what the agent reads. */
-  private autoBlock(action: ClassifiedAction, reason: string): ApprovalResult {
+  private autoBlock(action: ClassifiedAction, reason: string, key = actionKey(action.name, action.detail)): ApprovalResult {
     const st = this.autoState();
     st.inARow++;
     st.total++;
     const id = action.callId || `block_${randomUUID()}`;
     const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
-    this.sessionMap(this.autoBlocks).set(id, { block, key: actionKey(action.name, action.detail) });
+    this.sessionMap(this.autoBlocks).set(id, { block, key });
     this.emit({ type: 'auto_blocked', block: { ...block } });
     if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {
       st.paused = true;

@@ -43,6 +43,11 @@ export interface BrowserApproval {
   reason?: string;
   /** For a sensitive card: the sign-in page its answer is remembered for (signInPageKey) */
   page?: string;
+  /**
+   * What Auto mode's safety check is told besides the card (never page text): the kind of call (an act, a read or a
+   * navigation, page script), the page's URL and a browser_eval's code.
+   */
+  check?: { kind: 'read' | 'act' | 'eval'; url: string; code?: string };
 }
 
 /** Outcome of asking for permission: denied actions carry the message the model should read. */
