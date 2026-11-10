@@ -1526,6 +1526,15 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-dot.error { background: var(--danger); }
 .mcp-dot.disabled { background: var(--text-400); opacity: 0.45; }
 .mcp-dot.blocked { background: var(--warn); }
+.mcp-dot.reconnecting, .mcp-dot.authorizing { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.mcp-dot.needs-auth { background: var(--warn); }
+.mcp-auth-btn {
+  flex: none; height: 24px; padding: 0 8px; border-radius: var(--r-control); font-size: var(--fs-small); line-height: var(--lh-small);
+  color: var(--text-400); white-space: nowrap; transition: background-color 0.12s, color 0.12s;
+}
+.mcp-auth-btn:hover { background: var(--hover); color: var(--text-100); }
+.mcp-auth-btn:active { background: var(--pressed); }
+.mcp-auth-btn.primary { border: 1px solid var(--border); color: var(--text-100); font-weight: 500; }
 .mcp-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mcp-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mcp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
@@ -1594,7 +1603,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .tool-body > img.shot { align-self: flex-start; }
 
 @media (prefers-reduced-motion: reduce) {
-  .mcp-dot.connecting, .mcp-row.busy .mcp-dot { animation: none; }
+  .mcp-dot.connecting, .mcp-dot.reconnecting, .mcp-dot.authorizing, .mcp-row.busy .mcp-dot { animation: none; }
 }
 
 /* ---------- Round 8: @ file mentions, mention chips, project approvals, Permissions ---------- */
