@@ -77,7 +77,7 @@ A message starting with `#` is added to the project's instructions file after a 
 | `bash` | Shell command in the session's folder, with an optional short description of what it does (shown on its approval card); stopping the run stops the command and what it started. Long output keeps its first 12K and last 18K characters, and the exit code always |
 | `terminal_run` `terminal_read` `terminal_list` `terminal_stop` | Terminal pane tabs; long output keeps its start and its end |
 | `browser_*` | Built-in browser, on the active tab: navigate, click and type by visible text, read, find, wait, scroll, press a key, screenshot, eval (see Browser) |
-| `browser_tabs` | The pane's tabs: `list`, `new` (with `url`; `background` keeps the current tab in front), `select` and `close` (`tab_id`) |
+| `browser_tabs` | The pane's tabs: `list`, `new` (with `url`; `background` keeps the current tab in front), `select` and `close` (`tab_id`). A tab on a site not allowed yet shows its site name only |
 | `show_image` | Put an image (a screenshot, a chart, a picture in the project) inline in the reply |
 | `create_artifact` | HTML, SVG, Markdown or code shown in the browser pane; an HTML artifact runs its own code and scripts from cdnjs, jsDelivr or unpkg, and sends nothing anywhere (a CSP blocks every request out; it never leaves the artifact or opens a window by itself, the blocked-popup strip offers the address instead) |
 | `update_tasks` | The task list card |
