@@ -132,7 +132,9 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
   const signIn = action === 'act' && page !== null && ctx.mode !== 'bypass' && !ctx.signInPagesAllowed?.().has(page) && !isExempt(url, settings.exempt, ctx.cwd);
   const pageHasPasswordField = signIn ? await askPage(() => ctx.browser.pageHasPasswordField(), false) : false;
   const code = name === 'browser_eval' ? String(args.code ?? '') : undefined;
-  const decision = siteDecision({ url, action, mode: ctx.mode, cwd: ctx.cwd, settings, sessionAllowed: ctx.sitesAllowed?.() ?? new Set(), pageHasPasswordField, evalCode: code });
+  // A blank or data: page a page made is that page's site (its committed origin)
+  const origin = !siteOf(url) && action !== 'navigate' ? await askPage(async () => ctx.browser.pageOrigin(), '') : '';
+  const decision = siteDecision({ url, action, mode: ctx.mode, cwd: ctx.cwd, settings, sessionAllowed: ctx.sitesAllowed?.() ?? new Set(), pageHasPasswordField, evalCode: code, origin });
   if (decision.kind === 'allow') return null;
   if (decision.kind === 'refuse') return decision.message;
   const detail = cardDetail(line ?? actionLine(name, args, decision.site), args, code);

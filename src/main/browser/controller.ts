@@ -12,7 +12,7 @@ import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from
 import { aimScript, describeScript, fieldKindScript, flashScript, getTextScript, passwordFieldScript, readPageScript, REF_RE, scrollScript, selectAllScript, targetScript, waitScript } from './page-scripts';
 import { CHANGED_UNDER_CLICK, CREDENTIAL_REFUSAL, sameClickTarget, type ClickTarget } from './policy';
 import { fencePage } from './fence';
-import { leavesArtifact, PopupManager } from './popups';
+import { leavesArtifact, opensInTab, PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
 // Polish: the right click, find in page and zoom per site
@@ -192,6 +192,7 @@ export class BrowserController {
 
   /** A link or window.open from a page: a tab (the active one when the cap is reached, as a plain navigation). */
   private openFromPage(url: string, background: boolean): void {
+    if (!opensInTab(url)) return;
     try {
       this.newTab(url, { background });
     } catch {
@@ -588,6 +589,19 @@ export class BrowserController {
       return new URL(f.src).origin;
     } catch {
       return 'another site';
+    }
+  }
+
+  /**
+   * The committed origin of the active page's main frame: for a page with no address of its own (about:blank, data:)
+   * that a page opened or navigated to, the origin it inherited; '' when it is opaque ("null") or cannot be read.
+   */
+  pageOrigin(): string {
+    try {
+      const o = this.wc.mainFrame.origin;
+      return o && o !== 'null' ? o : '';
+    } catch {
+      return '';
     }
   }
 

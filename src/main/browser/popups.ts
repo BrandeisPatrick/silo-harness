@@ -73,6 +73,16 @@ export function leavesArtifact(from: string, to: string): boolean {
   return /^\s*artifact:/i.test(String(from ?? '')) && !/^\s*artifact:/i.test(String(to ?? ''));
 }
 
+/**
+ * Whether a page may open `url` in a tab of its own (a link with target=_blank, a window.open without a size, the
+ * context menu's Open Link in New Tab): web pages and artifacts only. A file:, data:, blob:, javascript: or about:
+ * address from a page is refused: loaded from the main process it would skip Chromium's own block, and the agent could
+ * then read a local file it was never given.
+ */
+export function opensInTab(url: string): boolean {
+  return /^\s*(https?|artifact):/i.test(String(url ?? ''));
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
 
 /**
@@ -232,6 +242,12 @@ export class PopupManager {
         return { action: 'deny' };
       }
       const decision = popupDecision({ disposition: details.disposition, features: details.features, url: details.url, openPopups: this.popups.length });
+      // Another scheme is refused and counted on the strip, with no Show: the user can open it some other way if they mean to
+      const blank = /^\s*about:blank\s*$/i.test(details.url) || details.url === '';
+      if (decision !== 'deny' && !opensInTab(details.url) && !(decision === 'popup' && blank)) {
+        tab.blockedPopup();
+        return { action: 'deny' };
+      }
       if (decision === 'tab' || decision === 'background-tab') {
         openTab(details.url, decision === 'background-tab');
         return { action: 'deny' };

@@ -283,6 +283,11 @@ export interface SiteDecisionInput {
   pageHasPasswordField?: boolean;
   /** browser_eval's code, for the guard in auto mode */
   evalCode?: string;
+  /**
+   * For a page with no site of its own (about:blank, data:): the committed origin it inherited from the page that
+   * opened or navigated it, which then decides as that site would. Empty or absent: a blank page of the user's, as before.
+   */
+  origin?: string;
 }
 
 /** Which card to show: the site's first approval with its scopes, a sensitive site's act, or a browser_eval (Allow and Deny). */
@@ -291,7 +296,8 @@ export type SiteCard = 'site' | 'sensitive' | 'eval';
 export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site: Site; note?: string; reason?: string };
 
 /**
- * Whether a browser tool call runs, asks or is refused, in this order: a page with no site (about:blank) runs; an
+ * Whether a browser tool call runs, asks or is refused, in this order: a page with no site (about:blank) runs unless
+ * it inherited an origin from the page that made it (`origin`), which then decides as that site; an
  * exempt page runs, every action in every mode; plan mode refuses acting and eval (reading and navigating stay, with
  * their cards); bypass mode runs everything else; a site the user has not allowed this session or always asks with
  * the site card, whatever the action (reading included: that is where an injection enters); on an allowed site a
@@ -301,8 +307,11 @@ export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site:
  * as the card saves them and the exempt patterns' forms.
  */
 export function siteDecision(input: SiteDecisionInput): SiteDecision {
-  const { url, action, mode, cwd, settings, sessionAllowed } = input;
-  const site = siteOf(url);
+  const { action, mode, cwd, settings, sessionAllowed } = input;
+  const own = siteOf(input.url);
+  // A page with no site that a page made takes that page's site: typing into it is typing to that site
+  const url = own ? input.url : input.origin && siteOf(input.origin) ? input.origin : input.url;
+  const site = own ?? siteOf(url);
   if (!site) return ALLOW;
   if (isExempt(url, settings.exempt, cwd)) return ALLOW;
   if (mode === 'plan' && (action === 'act' || action === 'eval')) return refuse(PLAN_BROWSER_BLOCKED);
