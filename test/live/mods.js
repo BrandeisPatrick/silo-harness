@@ -343,13 +343,13 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
         const front = tabs.find((t) => t.getAttribute('aria-selected') === 'true');
         const plus = box(document.getElementById('browser-tab-new'));
         const corner = box(document.querySelector('.window-actions'));
-        return { pane: Math.round(box(document.getElementById('side-pane')).width), tabs: tabs.length, scrolls: strip.scrollWidth > strip.clientWidth, sticksOut, overlaps, named, tips, frontShown: !!front && box(front).left >= box(strip).left - 0.5 && box(front).right <= box(strip).right + 0.5, plusShown: plus.width > 0 && plus.right <= corner.left, minWidth: Math.min(...tabs.map((t) => Math.round(box(t).width))) };
+        return { pane: Math.round(box(document.getElementById('side-pane')).width), tabs: tabs.length, scrolls: strip.scrollWidth > strip.clientWidth, sticksOut, overlaps, named, tips, frontShown: !!front && box(front).left >= box(strip).left - 0.5 && box(front).right <= box(strip).right + 0.5, plusShown: plus.width > 0 && plus.right <= corner.left, minWidth: Math.min(...tabs.filter((t) => !t.classList.contains('icon-only')).map((t) => Math.round(box(t).width))), iconWidth: Math.min(32, ...tabs.filter((t) => t.classList.contains('icon-only')).map((t) => Math.round(box(t).width))) };
       })()`;
       for (const w of [360, 440, 520]) {
         await app.evaluate(`document.getElementById('side-pane').style.setProperty('--browser-w', '${w}px')`);
         await paint(app);
         const st = await app.evaluate(STRIP);
-        check(`pane tabs at ${w} px: nothing clipped, no badge over a neighbour, every tab named, cut titles have a tooltip, the front tab in view, + clear of the corner's buttons`, st.tabs === 4 && !st.sticksOut.length && !st.overlaps.length && st.named && st.tips && st.frontShown && st.plusShown && st.minWidth >= 60, st);
+        check(`pane tabs at ${w} px: nothing clipped, no badge over a neighbour, every tab named, cut titles have a tooltip, the front tab in view, + clear of the corner's buttons, a titled tab 60 px or more`, st.tabs === 4 && !st.sticksOut.length && !st.overlaps.length && st.named && st.tips && st.frontShown && st.plusShown && st.minWidth >= 60 && st.iconWidth >= 30, st);
         await app.screenshotOf(path.join(SHOTS, `pane-tabs-${w}-light.png`), '.pane-strip', 0);
       }
       await app.evaluate(`document.getElementById('side-pane').style.removeProperty('--browser-w')`);

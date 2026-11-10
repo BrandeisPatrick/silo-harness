@@ -263,8 +263,10 @@ session-messages.ts  "Received message from …" and "Messaged …" lines, the o
 approvals.ts      the approval card and the question card, and which one waits
 status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter
 side-pane.ts      the pane's one strip (page tabs, and Diff, Terminal and the mods' panes as tabs), the pane toggle, the resizer, the URL bar, the native browser view's bounds
+strip-fit.ts      how the strip shares its width: natural widths, shorter titles, icon-only tools, icon-only pages (pure; test/strip-fit.js)
 browser-pane.ts   the browser's page tabs, popups, profile note, zoom chip and blocked-popup strip
 new-tab-page.ts   a blank tab's page: the tools the strip can open
+terminal.ts       the Terminal pane: an xterm per shell tab, and their own row of tabs, shown only while there are two or more
 browser-bars.ts   the permission and download bars, the certificate interstitial, the URL pill's lock, the downloads tray
 browser-find.ts   the find bar under the URL bar
 settings/browser-section.ts  Settings → Browser

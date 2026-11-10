@@ -83,7 +83,8 @@ export function createBrowserPane(o: BrowserPaneDeps) {
       } else iconEl.innerHTML = GLOBE;
     }
     el.setAttribute('aria-label', `${title}${blank ? '' : `, ${t.url}`}`);
-    el.dataset.tip = blank ? 'New tab' : t.url;
+    // The title too: a tab short of room shows only its icon
+    el.dataset.tip = blank ? 'New tab' : title === hostOf(t.url) ? t.url : `${title}\n${t.url}`;
     el.querySelector('.browser-tab-close')!.setAttribute('aria-label', `Close ${title}`);
   }
 

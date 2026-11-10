@@ -127,8 +127,8 @@
         <!-- The one strip: page tabs and tool tabs in the order they were opened (side-pane.ts arranges them), then + -->
         <div class="pane-strip drag">
           <div id="pane-tabs" class="pane-tabs" role="tablist" aria-label="Side pane tabs">
-            <button type="button" id="pane-tab-diff" class="pane-tab strip-tab" role="tab" aria-selected="false" aria-controls="diff-pane" data-tab="diff" data-tip="Diff" data-tip-kbd="⌘ ⇧ D" tabindex="-1" hidden><span class="tab-icon" data-icon="file-diff"></span><span class="tab-title">Diff</span><span id="pane-diff-count" class="count-badge" hidden>0</span><span class="tab-close" aria-hidden="true" data-tip="Close Diff" data-icon="x" data-icon-size="14"></span></button>
-            <button type="button" id="pane-tab-terminal" class="pane-tab strip-tab" role="tab" aria-selected="false" aria-controls="terminal-pane" data-tab="terminal" data-tip="Terminal" data-tip-kbd="⌘ ⇧ T" tabindex="-1" hidden><span class="tab-icon" data-icon="terminal"></span><span class="tab-title">Terminal</span><span id="pane-terminal-busy" class="busy-dot" hidden></span><span class="tab-close" aria-hidden="true" data-tip="Close Terminal" data-icon="x" data-icon-size="14"></span></button>
+            <button type="button" id="pane-tab-diff" class="pane-tab strip-tab" role="tab" aria-label="Diff" aria-selected="false" aria-controls="diff-pane" data-tab="diff" data-tip="Diff" data-tip-kbd="⌘ ⇧ D" tabindex="-1" hidden><span class="tab-icon" data-icon="file-diff"></span><span class="tab-title">Diff</span><span id="pane-diff-count" class="count-badge" hidden>0</span><span class="tab-close" aria-hidden="true" data-tip="Close Diff" data-icon="x" data-icon-size="14"></span></button>
+            <button type="button" id="pane-tab-terminal" class="pane-tab strip-tab" role="tab" aria-label="Terminal" aria-selected="false" aria-controls="terminal-pane" data-tab="terminal" data-tip="Terminal" data-tip-kbd="⌘ ⇧ T" tabindex="-1" hidden><span class="tab-icon" data-icon="terminal"></span><span class="tab-title">Terminal</span><span id="pane-terminal-busy" class="busy-dot" hidden></span><span class="tab-close" aria-hidden="true" data-tip="Close Terminal" data-icon="x" data-icon-size="14"></span></button>
           </div>
           <button type="button" id="browser-tab-new" class="icon-btn chrome-btn strip-new" aria-label="New tab" data-tip="New tab" data-tip-kbd="⌘ ⇧ N" data-icon="plus"></button>
         </div>
@@ -196,7 +196,7 @@
         </section>
 
         <section class="terminal term-pane" id="terminal-pane" role="tabpanel" aria-label="Terminal" hidden>
-          <div class="term-bar">
+          <div id="terminal-bar" class="term-bar" hidden>
             <div id="terminal-tabs" class="term-tabs" role="tablist" aria-label="Terminals"></div>
             <button type="button" id="terminal-new" class="icon-btn sm term-new" aria-label="New terminal" data-tip="New terminal" data-tip-kbd="⌘ T" data-icon="plus"></button>
           </div>
