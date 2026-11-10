@@ -1,0 +1,6 @@
+{
+  "timeoutMs": 2000,
+  "maxAttempts": 3,
+  "backoffMs": 1000,
+  "testSubscribers": ["sub-test-01"]
+}
