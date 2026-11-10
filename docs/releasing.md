@@ -25,14 +25,14 @@ Work that is merged but not released sits under `## Unreleased` at the top of [C
 
 ## Release notes
 
-The changelog section is the release notes (`scripts/release-notes.js` adds the screenshot, Install and the Full changelog link), so every section has the same shape.
+The changelog section is the release notes (`scripts/release-notes.js` serves its images from the release commit and adds Install and the Full changelog link), so every section has the same shape.
 
 1. **A summary line** right under the heading: one sentence of at most 30 words saying what the release is about.
 2. **Sections in this order**, each only when it has something, and no others:
 
 | Section | What goes in it |
 | --- | --- |
-| `### Highlights` | Minor releases only: the one to three changes the release is about. The notes put the screenshot under the summary line when this section is there. |
+| `### Highlights` | Minor releases only: the one to three changes the release is about. A highlight may show one image (rule 4). |
 | `### New` | Things you can now do. |
 | `### Improved` | Existing features that work better or look different. |
 | `### Fixed` | What was wrong and works now. |
@@ -42,6 +42,8 @@ The changelog section is the release notes (`scripts/release-notes.js` adds the 
 | `### Known issues` | What does not work yet. |
 
 3. **One bullet per change, one pattern:** a bold label of two to four words ending in a full stop, then one plain sentence of at most 25 words, present tense. Say what the user gets, not how it is built or what it was like before. `code` only for what you type; names in the app in quotes. Detail belongs in the docs, linked at the end of the bullet when it helps.
+
+4. **An image for a highlight that is easier to see than to read:** a new screen, or a number such as tokens saved. Put it on its own line under the bullet, indented two spaces, with alt text saying what it shows: `![Cost of one session before and after](docs/releases/X.Y.Z/name.png)`. One per highlight, 1600 px wide, readable at half that, and committed under `docs/releases/X.Y.Z/`. A figure's numbers come from a measurement in the repository, linked from the bullet. A release whose highlights have no image gets the README's hero screenshot under its summary line instead.
 
 Example:
 
