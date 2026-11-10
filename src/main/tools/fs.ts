@@ -452,9 +452,8 @@ export const grep: Tool = {
     if (refused) return { content: refused };
     const skipSecrets = !isSecretPath(target, ctx.cwd);
     const { out, timedOut } = await search(target, String(args.pattern), !!args.ignore_case, args.include ? String(args.include) : undefined);
-    const stopped = timedOut ? `\n…(the search stopped after ${GREP_TIMEOUT / 1000} s; narrow the pattern or path)` : '';
-    if (!out.trim()) return { content: timedOut ? `No matches before the search stopped after ${GREP_TIMEOUT / 1000} s; narrow the pattern or path.` : 'No matches.' };
-    if (!out.trim()) return { content: 'No matches.' };
+    const stopped = timedOut ? `\n…(the search stopped after ${grepTimeout / 1000} s; narrow the pattern or path)` : '';
+    if (!out.trim()) return { content: timedOut ? `No matches before the search stopped after ${grepTimeout / 1000} s; narrow the pattern or path.` : 'No matches.' };
     // Inside a search root that is not secret itself, matches in secret files are left out
     const lines = out.split('\n').filter((l) => l && !(skipSecrets && isSecretPath(/^(.*?):\d+:/.exec(l)?.[1] ?? '')));
     if (!lines.length) return { content: 'No matches.' };
@@ -470,6 +469,11 @@ export const grep: Tool = {
 
 /** How long a grep search may run */
 export const GREP_TIMEOUT = 30_000;
+let grepTimeout = GREP_TIMEOUT;
+/** For the tests: a shorter time cap (undefined: back to GREP_TIMEOUT) */
+export function setGrepTimeout(ms: number | undefined): void {
+  grepTimeout = ms ?? GREP_TIMEOUT;
+}
 const SEARCH_BUFFER = 20 * 1024 * 1024;
 const RG_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', `${os.homedir()}/.cargo/bin`, '/usr/bin', '/bin'];
 let rgPath: string | null | undefined;
@@ -508,22 +512,25 @@ function search(target: string, pattern: string, ignoreCase: boolean, include?: 
   let argv: string[];
   if (rg) {
     file = rg;
-    argv = ['--no-heading', '--with-filename', '-n', '--hidden', '--no-require-git', '--color', 'never', '--no-messages'];
+    // Line-buffered: a search killed at its time cap has written every line it found (a pipe is block-buffered)
+    argv = ['--no-heading', '--with-filename', '-n', '--hidden', '--no-require-git', '--color', 'never', '--no-messages', '--line-buffered'];
     if (ignoreCase) argv.push('-i');
     for (const d of IGNORED_DIRS) argv.push('--glob', `!${d}`);
     if (include) argv.push('--glob', include);
     argv.push('-e', pattern, target);
   } else {
     file = 'grep';
-    argv = ['-rnIE'];
+    argv = ['-rnIE', '--line-buffered'];
     if (ignoreCase) argv.push('-i');
     for (const d of IGNORED_DIRS) argv.push(`--exclude-dir=${d}`);
     if (include) argv.push(`--include=${include}`);
     argv.push('-e', pattern, target);
   }
   return new Promise((resolve, reject) => {
-    execFile(file, argv, { maxBuffer: SEARCH_BUFFER, timeout: GREP_TIMEOUT, killSignal: 'SIGKILL' }, (err, stdout) => {
+    execFile(file, argv, { maxBuffer: SEARCH_BUFFER, timeout: grepTimeout, killSignal: 'SIGKILL' }, (err, stdout) => {
       const e = err as (Error & { code?: unknown; killed?: boolean; signal?: string }) | null;
+      // More output than the buffer holds: what it holds is plenty (the result keeps 300 lines)
+      if (e?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return resolve({ out: stdout ?? '', timedOut: false });
       if (e?.killed || (e && e.signal === 'SIGKILL')) return resolve({ out: stdout ?? '', timedOut: true });
       if (e && Number(e.code) === 1) return resolve({ out: '', timedOut: false });
       if (e && !stdout) return reject(e);
