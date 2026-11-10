@@ -9,7 +9,7 @@
 - **Skill arguments.** A skill takes what you type after its name as `$ARGUMENTS` or `$1` to `$9`, with a hint in the slash menu.
 - **Sign in to MCP servers.** A remote server that needs OAuth shows Sign in under Settings → MCP and opens your browser only when you click it.
 - **Server tool filters.** `enabledTools` and `disabledTools` in a server entry choose which of its tools reach the model.
-- **Read web pages.** `web_fetch` reads a public page as text, 12,000 characters at a time, without opening the Browser pane.
+- **Read web pages.** `web_fetch` reads a public page as text, 20,000 characters at a time, without opening the Browser pane.
 - **Search the web.** `web_search` uses DuckDuckGo, or Brave, Tavily, Exa or your own SearXNG, chosen under Settings → Browser.
 - **Update notice.** A line in the sidebar says when a newer release is out; the daily check can be switched off in Settings.
 

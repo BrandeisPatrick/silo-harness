@@ -1,0 +1,12 @@
+{
+  "title": "What one working session costs",
+  "subtitle": "The same 19-turn session in this repository, Claude Haiku 5.5, US dollars",
+  "bars": [
+    { "label": "0.12.0", "value": 0.3812 },
+    { "label": "0.13.0, provider without a prompt cache", "value": 0.2497 },
+    { "label": "0.13.0 on Claude, prompt cached", "value": 0.0623, "now": true }
+  ],
+  "format": "$0.00",
+  "hero": { "value": "−84%", "label": "cost of the session on Claude, against 0.12.0" },
+  "source": "docs/token-bench.md, tier 2. The middle bar is the mean of two runs ($0.2364 and $0.2630)."
+}
