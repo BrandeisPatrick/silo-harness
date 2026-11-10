@@ -1292,6 +1292,8 @@ export class Agent {
       updatedAt: Date.now(),
     };
     const last = s.compactions?.[s.compactions.length - 1];
+    // The share of the last request's input its provider read from the prompt cache, when it said
+    if (reported && mark.cacheRead !== undefined && mark.tokens > 0) out.cached = Math.min(1, mark.cacheRead / mark.tokens);
     if (last) out.lastCompaction = { at: last.createdAt, reason: last.reason, tokensBefore: last.tokensBefore, tokensAfter: last.tokensAfter };
     return out;
   }
@@ -1302,6 +1304,8 @@ export class Agent {
     if (!u || !u.promptTokens) return;
     const s = this.session;
     s.lastPrompt = { tokens: u.promptTokens + u.completionTokens, at: s.messages.length };
+    // What the provider read from its prompt cache, for the meter's detail (only when it reports it)
+    if (u.cacheReadTokens !== undefined) s.lastPrompt.cacheRead = Math.min(u.cacheReadTokens, u.promptTokens);
     const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(this.modelView());
     if (estimated > 0) this.estimateScale = Math.min(2, Math.max(0.67, s.lastPrompt.tokens / estimated));
     this.emitContext();

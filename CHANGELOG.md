@@ -6,6 +6,7 @@
 
 - **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
 - **A system prompt that stays put.** A mode switch, a rename or a new day adds a short note to the conversation, so providers keep the prompt cached.
+- **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 
 ## 0.12.0 — 2026-11-09
 

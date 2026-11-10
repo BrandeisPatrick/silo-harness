@@ -401,8 +401,11 @@ export type AgentEvent =
   | { type: 'thinking_done' }
   | { type: 'tool_start'; id: string; name: string; args: unknown }
   | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }
-  /** Token usage of one model call (prompt = input incl. history, completion = generated). Emitted after each call. */
-  | { type: 'usage'; promptTokens: number; completionTokens: number }
+  /**
+   * Token usage of one model call (prompt = input incl. history and cached tokens, completion = generated). Emitted
+   * after each call. The cache counts, of the prompt, only when the provider reports them.
+   */
+  | { type: 'usage'; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
   /**
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text

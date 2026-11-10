@@ -46,7 +46,7 @@ export interface Session {
   /** Compactions in order; each keeps the messages it folded so the transcript can still show them */
   compactions?: StoredCompaction[];
   /** Size of the last request the model saw (prompt + reply), and the message index it covered; drives the context meter */
-  lastPrompt?: { tokens: number; at: number };
+  lastPrompt?: { tokens: number; at: number; cacheRead?: number };
   /** Tool results set aside to save context: the model gets only their start and end (agent/context-view.ts); kept whole here */
   prunedResults?: string[];
   /** One checkpoint per user message of the live conversation, for rewinding (see rewindSession) */

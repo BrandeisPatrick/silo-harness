@@ -26,12 +26,50 @@ export function noToolsNotice(model: string): string {
   return `${model} doesn't support tools, so it can't read files, run commands or browse.`;
 }
 
+/** An OpenAI-shaped usage object as providers and gateways send it, with every spelling of the cache counts. */
+export interface RawUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  /** OpenAI, OpenRouter, LiteLLM, Portkey (cache_write_tokens: OpenRouter, OpenAI on newer models) */
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number } | null;
+  /** Anthropic's spellings, which LiteLLM and Portkey pass through */
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/** A count when the provider sent one (0 included), else undefined. */
+function count(...values: unknown[]): number | undefined {
+  for (const v of values) if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  return undefined;
+}
+
+/**
+ * One usage object in our terms. The prompt stays the whole input; a gateway that reports only the uncached part as
+ * prompt_tokens (fewer than it read and wrote) gets the cached tokens added back.
+ */
+export function usageOf(u: RawUsage): Usage {
+  const read = count(u.prompt_tokens_details?.cached_tokens, u.cache_read_input_tokens);
+  const write = count(u.prompt_tokens_details?.cache_write_tokens, u.cache_creation_input_tokens);
+  let prompt = Number(u.prompt_tokens) || 0;
+  if ((read ?? 0) + (write ?? 0) > prompt) prompt += (read ?? 0) + (write ?? 0);
+  const out: Usage = { promptTokens: prompt, completionTokens: Number(u.completion_tokens) || 0 };
+  if (read !== undefined) out.cacheReadTokens = read;
+  if (write !== undefined) out.cacheWriteTokens = write;
+  return out;
+}
+
 /** Folds one chunk's usage into the running counts (gateways may repeat or split the counts across chunks). */
-function mergeUsage(prev: Usage | null, u: { prompt_tokens?: number; completion_tokens?: number }): Usage {
-  return {
-    promptTokens: Math.max(prev?.promptTokens ?? 0, Number(u.prompt_tokens) || 0),
-    completionTokens: Math.max(prev?.completionTokens ?? 0, Number(u.completion_tokens) || 0),
+export function mergeUsage(prev: Usage | null, raw: RawUsage): Usage {
+  const u = usageOf(raw);
+  const out: Usage = {
+    promptTokens: Math.max(prev?.promptTokens ?? 0, u.promptTokens),
+    completionTokens: Math.max(prev?.completionTokens ?? 0, u.completionTokens),
   };
+  const read = prev?.cacheReadTokens === undefined ? u.cacheReadTokens : Math.max(prev.cacheReadTokens, u.cacheReadTokens ?? 0);
+  const write = prev?.cacheWriteTokens === undefined ? u.cacheWriteTokens : Math.max(prev.cacheWriteTokens, u.cacheWriteTokens ?? 0);
+  if (read !== undefined) out.cacheReadTokens = read;
+  if (write !== undefined) out.cacheWriteTokens = write;
+  return out;
 }
 
 export async function complete(
@@ -116,7 +154,7 @@ async function completeStreaming(
 
   for await (const chunk of stream) {
     // With include_usage the counts arrive on a final chunk whose choices array is empty.
-    if (chunk.usage) usage = mergeUsage(usage, chunk.usage);
+    if (chunk.usage) usage = mergeUsage(usage, chunk.usage as RawUsage);
     const delta = chunk.choices?.[0]?.delta;
     if (!delta) continue;
     const reasoning = (delta as { reasoning_content?: string; reasoning?: string }).reasoning_content ?? (delta as { reasoning?: string }).reasoning;
@@ -185,7 +223,7 @@ async function completeOnce(
   turn: number,
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
   const res = await client.chat.completions.create({ model, messages: history, tools: specs, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}) }, { signal });
-  if (res.usage) host.reportUsage(mergeUsage(null, res.usage));
+  if (res.usage) host.reportUsage(usageOf(res.usage as RawUsage));
   const msg = res.choices?.[0]?.message;
   const text = msg?.content ?? '';
   if (text) host.emit({ type: 'text_delta', text });

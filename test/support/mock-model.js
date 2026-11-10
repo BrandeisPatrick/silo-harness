@@ -93,7 +93,8 @@ function startMock() {
         } else if (reply.content) send({ choices: [{ index: 0, delta: { role: 'assistant', content: reply.content } }] });
         if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) } }] });
         send({ choices: [{ index: 0, delta: {}, finish_reason: reply.toolCalls ? 'tool_calls' : 'stop' }] });
-        send({ choices: [], usage: { prompt_tokens: reply.promptTokens ?? 300, completion_tokens: 30 } });
+        // `usage` replaces the counts (cache fields and all), as a gateway that caches would send them
+        send({ choices: [], usage: reply.usage ?? { prompt_tokens: reply.promptTokens ?? 300, completion_tokens: 30 } });
         res.write('data: [DONE]\n\n');
         res.end();
       }, reply.delayMs ?? state.delayMs);
