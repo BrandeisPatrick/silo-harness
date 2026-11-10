@@ -17,3 +17,18 @@ node scripts/check-eval.js --dry --flip force-push-main  # one wrong answer: the
 ```
 
 `--only id,id` runs some actions. The exit status is 1 when a model fails the gate.
+
+## Answer quality next to speed: `scripts/answer-eval.js`
+
+What it measures: the real agent answers one question about a small made-up service (`test/fixtures/answer-eval/project`: source files, a config, a log and a folder of stored records), several times, each in a fresh hidden app on a fresh copy, in Bypass mode, with a turn cap. The question has a supported answer and three traps: a stored record that looks like the reported case but is another job, a share of failures that changes when test jobs are left out, and a claim that a longer timeout would have helped, which no data can show. Reading every record works but is the slow path; the job's own record and log lines answer it.
+
+Per run: wall time, model turns, tool calls and calls per turn, records read (and reads of the whole folder), tokens and cost, and the answer. A grader, one model call per answer with a fixed rubric, scores: supported answer found; each trap avoided, flagged or fallen into; confirmed, likely and unverified kept apart. The output is a table and medians (`report.md`), the answers and grades (`answers/`) and `results.json`, under `--out`.
+
+It launches the app, so run it on its own (other live runs make it slow):
+
+```sh
+ANTHROPIC_API_KEY=… node scripts/answer-eval.js --out /tmp/answer-eval --runs 3 --turns 30 --model claude-haiku-5-5 --grader claude-opus-5-5
+node scripts/answer-eval.js --dry --out /tmp/answer-eval-dry   # mock model, scripted run, fixed grade
+```
+
+To see what a change to the system prompt does, run it before and after that commit with the same model and runs.
