@@ -301,6 +301,37 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('8: the check went to /v1/messages, not streamed, its instructions marked for the cache', checkReq && checkReq.payload.system[0].text.startsWith('You are the safety check') && same(checkReq.payload.system[0].cache_control, { type: 'ephemeral' }) && checkReq.payload.max_tokens === 400 && same(checkReq.payload.thinking, { type: 'disabled' }), checkReq && { system: checkReq.payload.system[0].cache_control, max: checkReq.payload.max_tokens });
   check('8: …and its verdict blocked the call', events.some((e) => e.type === 'auto_blocked') && /Blocked by Auto mode/.test(agent.session.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'toolu_c')?.content ?? ''));
 
+  // ---------- 9: the check's notes and instruction files are marked for the cache on the native API ----------
+  const C = require(path.join(projectDir, 'dist/main/agent/classifier.js'));
+  const realHome = process.env.HOME;
+  process.env.HOME = path.join(tmp, 'fake-home'); // no instruction files of the user's own
+  fs.mkdirSync(process.env.HOME, { recursive: true });
+  const withFiles = path.join(tmp, 'with-files');
+  const without = path.join(tmp, 'without-files');
+  fs.mkdirSync(withFiles);
+  fs.mkdirSync(without);
+  fs.writeFileSync(path.join(withFiles, 'AGENTS.md'), '# Rules\nNever deploy on Fridays.\n');
+  const action = { tool: 'bash', args: { command: 'npm publish' }, callId: 'c9' };
+  const checkSession = { messages: [{ role: 'user', content: 'Publish it' }] };
+  const checkOnce = async (cfg) => {
+    reset();
+    state.replies.push(classifierReply('allow'));
+    const msgs = C.classifierRequest(checkSession, cfg, action);
+    await C.runClassifier(C.classifierTarget(cfg), msgs);
+    return { msgs, payload: state.requests.find((r) => r.url.startsWith('/v1/'))?.payload };
+  };
+  const filesCfg = { ...config, workingDirectory: withFiles, permissionMode: 'auto' };
+  const a9 = await checkOnce(filesCfg);
+  const blocks = a9.payload.messages[0].content;
+  check('9: with instruction files: two text blocks, the first (notes and files) marked', Array.isArray(blocks) && blocks.length === 2 && same(blocks[0].cache_control, { type: 'ephemeral' }) && !blocks[1].cache_control && blocks[0].text.includes('<instructions_files>') && blocks[1].text.startsWith('<user_messages>'), blocks);
+  check('9: …and the text the model reads is byte for byte the single message', blocks.map((b) => b.text).join('') === a9.msgs[1].content && blocks[0].text.endsWith('</instructions_files>\n\n'));
+  const b9 = await checkOnce({ ...config, workingDirectory: without, permissionMode: 'auto' });
+  check('9: without instruction files or notes: the request as before, one string, no second mark', typeof b9.payload.messages[0].content === 'string' && b9.payload.messages[0].content === b9.msgs[1].content && JSON.stringify(b9.payload).split('cache_control').length === 2, b9.payload.messages);
+  const portkeyCfg = { ...filesCfg, provider: 'portkey', portkey: { baseURL: `http://127.0.0.1:${mock.port}/v1`, apiKey: 'sk-test-native-key', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 200000 } };
+  const c9 = await checkOnce(portkeyCfg);
+  check('9: the OpenAI-shaped request is unchanged: the two messages as built, no cache mark', c9.payload && same(c9.payload.messages, c9.msgs) && !JSON.stringify(c9.payload).includes('cache_control'), c9.payload);
+  process.env.HOME = realHome;
+
   mock.close();
   done();
 })().catch((err) => {

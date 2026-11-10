@@ -230,6 +230,8 @@ and one-hour writes. Model `claude-haiku-5-5`, thinking off (the native path tur
 - **Auto mode's check** (native, its instructions marked for the cache): 16 calls in tier 2, 42,110 tokens in, 16,240 of them
   read from the cache (the 1,015 tokens of instructions each time), $0.0031. What follows the instructions (the user's messages,
   the recent tool calls, the action) changes every call and is paid in full. Tier 1: 4 calls per run, $0.0004 and $0.0005.
+  Since then the Auto mode notes and instruction files the check is shown are marked for the cache too; the benchmark project
+  has neither, so these numbers do not show it.
 - **Titles** stay on the OpenAI-compatible endpoint: one per session, 70 to 122 tokens in, under $0.0001 each.
 - **Compaction summary**: none happened in these runs. It stays on the OpenAI-compatible endpoint, so when one happens it is
   paid in full.

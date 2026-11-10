@@ -186,7 +186,7 @@ Near the limit (`compactThreshold`, 80% by default) old tool output is shortened
 
 Every request starts with the same tools and system prompt, then the conversation so far. What changes during a session (the mode, the folder and date, the session's name) is a short note added to the conversation, so that start stays the same.
 
-- **Anthropic** (a provider of type `anthropic`, or any base URL on `api.anthropic.com`): the app uses Claude's own Messages API and marks what to cache. The tools and the system prompt are kept an hour; the conversation is kept five minutes from its last use. Auto mode's check caches its instructions. Titles and the compaction summary use the OpenAI-compatible endpoint and are not cached.
+- **Anthropic** (a provider of type `anthropic`, or any base URL on `api.anthropic.com`): the app uses Claude's own Messages API and marks what to cache. The tools and the system prompt are kept an hour; the conversation is kept five minutes from its last use. Auto mode's check caches its instructions, and the Auto mode notes and instruction files it is shown. Titles and the compaction summary use the OpenAI-compatible endpoint and are not cached.
 - **Claude through a gateway** (OpenRouter, Portkey, Vercel, LiteLLM or another OpenAI-compatible one): the request asks for caching in the shape that gateway takes. A gateway that refuses it gets the request again without, for as long as the app runs.
 - **OpenAI**: caches on its own; the app sends the session as `prompt_cache_key`, so a session's requests reach the same cache.
 - **Others**: nothing extra is sent. Many cache a repeated start on their own.
