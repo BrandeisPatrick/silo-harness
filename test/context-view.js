@@ -58,7 +58,8 @@ check('5: a result set aside keeps its start and end with a note', /^h{1200}\n\[
 check('5: the others are sent whole', contentOf('p6') === long(6) && contentOf('p10') === long(0));
 check('5: the budget is well below a large window', PRUNE_BUDGET >= 32000 && PRUNE_BUDGET <= 64000, PRUNE_BUDGET);
 
-// ---- 6: an agent with a large window sets old output aside once a request passes the budget ----
+// ---- 6: an agent with a large window sets old output aside once a request passes the budget (on a provider that does
+// not cache the prefix: a local LM Studio; one that does waits for the high-water mark, see prune-batches.js) ----
 (async () => {
   const fs = require('node:fs');
   const os = require('node:os');
@@ -72,7 +73,8 @@ check('5: the budget is well below a large window', PRUNE_BUDGET >= 32000 && PRU
   fs.mkdirSync(cwd);
   for (let i = 1; i <= 8; i++) fs.writeFileSync(path.join(cwd, `f${i}.txt`), `F${i}-START ${'word '.repeat(1200)}F${i}-END`);
   let config = {
-    provider: 'portkey',
+    provider: 'local',
+    providers: { local: { type: 'lmstudio', baseURL: `http://127.0.0.1:${mock.port}/v1`, model: 'mock', contextWindow: 1_000_000 } },
     portkey: { baseURL: `http://127.0.0.1:${mock.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 1_000_000 },
     ollama: { baseURL: 'http://127.0.0.1:1/v1', model: 'x', numCtx: 4096, think: 'auto' },
     workingDirectory: cwd, permissionMode: 'bypass', autoApprove: true, maxTurns: 10, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
@@ -99,6 +101,16 @@ check('5: the budget is well below a large window', PRUNE_BUDGET >= 32000 && PRU
   check('6: the session keeps every result whole (the tool rows show all of it)', stored.length === 8 && stored.every((m) => /F\d-END/.test(m.content)));
   check('6: and remembers what it set aside', JSON.stringify([...(agent.session.prunedResults ?? [])].sort()) === JSON.stringify(['rf1', 'rf2']), agent.session.prunedResults);
   check('6: no notice: nothing the user sees changed', !events.some((e) => e.type === 'error' && /Cleared/.test(e.message ?? '')));
+
+  // A provider that caches the prefix: past the budget but under the high-water mark, nothing is set aside
+  config = { ...config, provider: 'portkey' };
+  agent.session = store.create({ cwd });
+  await firstTurn();
+  mock.state.replies.push({ content: 'ok' });
+  await agent.run('And now?');
+  const cachedView = streams().pop().messages.filter((m) => m.role === 'tool');
+  check('6: a provider that caches the prefix: nothing set aside under the high-water mark', cachedView.length === 8 && cachedView.every((m) => /F\d-END/.test(m.content)) && !agent.session.prunedResults);
+  config = { ...config, provider: 'local' };
 
   // Turned off with pruneToolResults: false
   config = { ...config, pruneToolResults: false };

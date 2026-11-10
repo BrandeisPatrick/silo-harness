@@ -261,7 +261,9 @@ function cleanCut(msgs, cut) {
   check('4: setup: the prompt and tools take a few thousand tokens of the 12k window', base > 2500 && base < 6000, base);
 
   // ---- 4: prune only, when that is enough ----
-  fresh({ portkey: { contextWindow: 24000 } });
+  // On a provider that does not cache the prefix (a local LM Studio here); where it is cached, prune-batches.js
+  const local = (window) => ({ provider: 'local', providers: { local: { type: 'lmstudio', baseURL: `http://127.0.0.1:${model.port}/v1`, model: 'mock', contextWindow: window } } });
+  fresh(local(24000));
   for (const f of 'abcdefgh') state.replies.push(read(`${f}.txt`));
   state.replies.push({ content: 'Read them all.' });
   await agent.run('Read a.txt to h.txt, one at a time.');
@@ -278,7 +280,7 @@ function cleanCut(msgs, cut) {
   check('4: a quiet notice says how much was cleared', notices().some((n) => /^Cleared [\d.]+k? tokens of old tool output/.test(n)), notices());
   check('4: the request after pruning is well-formed and smaller', runEnd().reason === 'done' && JSON.stringify(streams()[0].messages).length < lastTurn1, { lastTurn1, now: JSON.stringify(streams()[0].messages).length });
   // the kill switch
-  fresh({ portkey: { contextWindow: 24000 }, pruneToolResults: false });
+  fresh({ ...local(24000), pruneToolResults: false });
   for (const f of 'abcdefgh') state.replies.push(read(`${f}.txt`));
   state.replies.push({ content: 'ok' });
   await agent.run('Read a.txt to h.txt, one at a time.');

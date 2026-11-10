@@ -9,6 +9,7 @@
 - **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Prompt caching on Claude.** Anthropic providers use Claude's own API, which caches the prompt and conversation, so long sessions cost about 70% less.
 - **Caching through gateways.** Claude through OpenRouter, Portkey, LiteLLM or Vercel asks for prompt caching, and OpenAI gets the session as its cache key.
+- **Fewer cache rewrites.** Where the provider caches, old tool output and screenshots are set aside in batches, so the cached prompt is rewritten rarely.
 
 ## 0.12.0 — 2026-11-09
 

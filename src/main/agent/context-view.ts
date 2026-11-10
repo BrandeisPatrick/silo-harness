@@ -7,6 +7,9 @@
 //     replaced by a line saying so. Images the user attached are always sent.
 //   - Results the agent set aside to save context (Session.prunedResults, see pruneForModel) keep only their start
 //     and end, as pruning does in a small window.
+// On a provider that caches a request's prefix every change to an earlier message is paid for (the rest of the
+// request is written to the cache again), so there both cuts come in batches: old screenshots SHOT_BATCH at a time,
+// old output once the view reaches a high-water mark, down to a low-water mark (batchMarks).
 
 import type { Msg } from '../sessions';
 
@@ -24,6 +27,27 @@ export const PRUNE_MIN_CHARS = 2000;
  * large window (200K, 1M) would send every earlier output again with every request until 60% of it is full.
  */
 export const PRUNE_BUDGET = 48_000;
+/**
+ * Where the prefix is cached: nothing is set aside until the view reaches PRUNE_HIGH, then enough to come down to
+ * PRUNE_LOW, and nothing again until PRUNE_HIGH. Setting aside ~20K that ~30K of cached prefix is written again for
+ * (at 1.25x) pays back only after many requests, so it is done seldom and in bulk.
+ */
+export const PRUNE_HIGH = 90_000;
+export const PRUNE_LOW = 50_000;
+/** Where the prefix is cached: old screenshots are left out this many at a time */
+export const SHOT_BATCH = 4;
+
+/** The high- and low-water marks for a window: PRUNE_HIGH/LOW, or lower for a window whose `fraction` is less. */
+export function batchMarks(limit: number, fraction: number): { high: number; low: number } {
+  const high = Math.min(PRUNE_HIGH, Math.round(limit * fraction));
+  return { high, low: Math.min(PRUNE_LOW, Math.round((high * PRUNE_LOW) / PRUNE_HIGH)) };
+}
+
+/** About how many tokens setting a result aside saves (its text as the model gets it now). */
+export function pruneSaving(content: unknown): number {
+  const text = textOf(content);
+  return Math.max(0, Math.ceil((text.length - shortened(text).length) / 4));
+}
 
 const SCREENSHOT_MARK = '[Screenshot returned by';
 const OLD_SCREENSHOT = '[An earlier screenshot was left out to save context; take a new one if you need it.]';
@@ -56,18 +80,23 @@ function shortened(text: string): string {
   return `${text.slice(0, PRUNED_HEAD)}\n[… ${text.length - PRUNED_HEAD - PRUNED_TAIL} characters cleared to save context. Run the tool again if you need them.]\n${text.slice(text.length - PRUNED_TAIL)}`;
 }
 
-/** The messages as the model gets them (see the top of this file). Unchanged messages keep their identity. */
-export function modelMessages(messages: Msg[], pruned: ReadonlySet<string> = new Set()): Msg[] {
+/**
+ * The messages as the model gets them (see the top of this file). Unchanged messages keep their identity.
+ * `batchShots`: old screenshots go SHOT_BATCH at a time (a provider that caches the prefix).
+ */
+export function modelMessages(messages: Msg[], pruned: ReadonlySet<string> = new Set(), opts: { batchShots?: boolean } = {}): Msg[] {
   const names = new Map<string, string>();
   for (const m of messages) if (m.role === 'assistant') for (const tc of m.tool_calls ?? []) if (tc.type === 'function') names.set(tc.id, tc.function.name);
-  // The screenshot carriers, newest first: the first KEEP_SCREENSHOTS keep their image
-  let shots = 0;
-  const keepShot = new Set<number>();
+  // The screenshot carriers, newest first: the first KEEP_SCREENSHOTS keep their image (in batches: the older ones
+  // are left out SHOT_BATCH at a time, so one more screenshot does not change an earlier message every time)
+  const carriers: number[] = [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role !== 'user' || !Array.isArray(m.content) || !textOf(m.content).startsWith(SCREENSHOT_MARK)) continue;
-    if (shots++ < KEEP_SCREENSHOTS) keepShot.add(i);
+    if (m.role === 'user' && Array.isArray(m.content) && textOf(m.content).startsWith(SCREENSHOT_MARK)) carriers.push(i);
   }
+  let drop = Math.max(0, carriers.length - KEEP_SCREENSHOTS);
+  if (opts.batchShots) drop = Math.floor(drop / SHOT_BATCH) * SHOT_BATCH;
+  const keepShot = new Set(carriers.slice(0, carriers.length - drop));
   return messages.map((m, i) => {
     if (m.role === 'tool') {
       const text = typeof m.content === 'string' ? m.content : textOf(m.content);

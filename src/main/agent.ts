@@ -3,7 +3,7 @@ import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
-import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
+import { isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
 import { allGroupsUpFront, contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
@@ -55,7 +55,7 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
-import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
+import { batchMarks, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { THINKING_KEY } from './agent/anthropic';
@@ -1355,8 +1355,13 @@ export class Agent {
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
     const tokens = this.contextInfo().tokens;
-    if (tokens >= limit * PRUNE_THRESHOLD && cfg.pruneToolResults !== false) this.prune(PRUNE_NORMAL, true);
-    else if (tokens >= PRUNE_BUDGET && cfg.pruneToolResults !== false) this.pruneForModel();
+    // Where the provider caches the prefix, old output is set aside in batches (a change to it is paid for); elsewhere
+    // as before: a little more past PRUNE_BUDGET, and in the stored messages past 60% of the window
+    if (cfg.pruneToolResults !== false) {
+      if (this.cachesPrefix(cfg)) this.pruneInBatches(limit);
+      else if (tokens >= limit * PRUNE_THRESHOLD) this.prune(PRUNE_NORMAL, true);
+      else if (tokens >= PRUNE_BUDGET) this.pruneForModel();
+    }
     if (this.contextInfo().tokens < limit * threshold) return;
     const base = this.baseTokens(cfg);
     if (base >= limit * threshold) {
@@ -1418,7 +1423,44 @@ export class Agent {
 
   /** The stored conversation as the model is sent it (agent/context-view.ts): long output cut, old screenshots left out. */
   private modelView(): Msg[] {
-    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []));
+    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []), { batchShots: this.cachesPrefix(this.sessionConfig()) });
+  }
+
+  /**
+   * Whether the provider in use caches a request's prefix, so that changing an earlier message costs a cache write of
+   * everything after it: every provider but Ollama and a local LM Studio (which keep the old way of pruning).
+   */
+  private cachesPrefix(cfg: AppConfig): boolean {
+    try {
+      const type = resolveProvider(cfg).type;
+      return type !== 'ollama' && type !== 'lmstudio';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Where the prefix is cached: nothing until the view reaches the high-water mark, then old output set aside, oldest
+   * first, until it is down to the low-water mark (context-view.ts batchMarks). Between batches the view, and so the
+   * cached prefix, stays the same.
+   */
+  private pruneInBatches(limit: number): void {
+    const { high, low } = batchMarks(limit, PRUNE_THRESHOLD);
+    let tokens = this.contextInfo().tokens;
+    if (tokens < high) return;
+    const s = this.session;
+    const already = new Set(s.prunedResults ?? []);
+    // resultsToPrune lists the newest first
+    const candidates = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m)).reverse();
+    const byId = new Map<string, Msg>();
+    for (const m of s.messages) if (m.role === 'tool') byId.set(m.tool_call_id, m);
+    const chosen: string[] = [];
+    for (const id of candidates) {
+      if (tokens <= low) break;
+      chosen.push(id);
+      tokens -= pruneSaving(byId.get(id)?.content) * this.estimateScale;
+    }
+    this.pruneForModel(chosen);
   }
 
   /**
@@ -1426,14 +1468,14 @@ export class Agent {
    * sent (only its start and end go with each later request). The session keeps it whole, so the tool rows still show
    * all of it, and an output once set aside stays so: the requests keep the same prefix until the next time.
    */
-  private pruneForModel(): void {
+  private pruneForModel(chosen?: string[]): void {
     const s = this.session;
     const already = new Set(s.prunedResults ?? []);
-    const ids = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
+    const ids = chosen ?? resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
     if (!ids.length) return;
-    const before = estimateTokens(modelMessages(s.messages, already));
+    const before = estimateTokens(this.modelView());
     s.prunedResults = [...already, ...ids];
-    const after = estimateTokens(modelMessages(s.messages, new Set(s.prunedResults)));
+    const after = estimateTokens(this.modelView());
     // The reported size of the last request covered the output now set aside.
     const mark = s.lastPrompt;
     if (mark) mark.tokens = Math.max(0, Math.round(mark.tokens - (before - after) * this.estimateScale));

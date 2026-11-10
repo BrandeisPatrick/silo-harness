@@ -104,7 +104,8 @@ function startMock() {
         if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) } }] });
         send({ choices: [{ index: 0, delta: {}, finish_reason: reply.toolCalls ? 'tool_calls' : 'stop' }] });
         // `usage` replaces the counts (cache fields and all), as a gateway that caches would send them
-        send({ choices: [], usage: reply.usage ?? { prompt_tokens: reply.promptTokens ?? 300, completion_tokens: 30 } });
+        // `promptTokensFromBody`: about a token per four characters of the request, as a real model would count
+        send({ choices: [], usage: reply.usage ?? { prompt_tokens: reply.promptTokens ?? (state.promptTokensFromBody ? Math.ceil(body.length / 4) : 300), completion_tokens: 30 } });
         res.write('data: [DONE]\n\n');
         res.end();
       }, reply.delayMs ?? state.delayMs);
