@@ -1,5 +1,6 @@
-// Mock model servers for the round 7 tests: an OpenAI-compatible streaming endpoint (the Portkey path) and
-// Ollama's native /api/chat + /api/show (the Ollama path, incl. the non-streaming summary request).
+// Mock model servers for the round 7 tests: an OpenAI-compatible streaming endpoint (the Portkey path),
+// Ollama's native /api/chat + /api/show (the Ollama path, incl. the non-streaming summary request), and Anthropic's
+// native /v1/messages (SSE events, tool_use, thinking, usage with cache fields; replies with `status` fail).
 const http = require('node:http');
 
 function startMock() {
@@ -15,12 +16,17 @@ function startMock() {
         res.end(JSON.stringify(obj));
       };
       // A service that checks its key: with `apiKey` set, the OpenAI-compatible routes want exactly that bearer token.
-      if (state.apiKey && req.url.startsWith('/v1/') && req.headers.authorization !== `Bearer ${state.apiKey}`) {
+      // Anthropic's API takes the key as x-api-key or (the SDK since 1.x) a bearer token
+      if (state.apiKey && req.url.startsWith('/v1/messages') && req.headers['x-api-key'] !== state.apiKey && req.headers.authorization !== `Bearer ${state.apiKey}`) {
+        return json(401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key (mock)' } });
+      }
+      if (state.apiKey && req.url.startsWith('/v1/') && !req.url.startsWith('/v1/messages') && req.headers.authorization !== `Bearer ${state.apiKey}`) {
         return json(401, { error: { message: 'Invalid API key (mock)', type: 'authentication_error' } });
       }
       // The models list most OpenAI-compatible services have (GET /v1/models)
       if (req.url === '/v1/models' && req.method === 'GET') return json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
       if (req.url === '/api/show') return json(200, { capabilities: ['completion', 'tools'] });
+      if (req.url.startsWith('/v1/messages')) return anthropic(state, payload, res, json);
       // The local models, for the model menu: whatever `ollamaModels` lists (none unless a test sets it)
       if (req.url === '/api/tags' && state.ollamaModels) return json(200, { models: state.ollamaModels.map((name) => ({ name, model: name })) });
       // A one-shot request (titles, summaries, Auto mode's safety check): a queued reply marked `nonStream` that
@@ -105,6 +111,67 @@ function startMock() {
   });
 }
 
+/**
+ * Anthropic's Messages API. A reply (state.replies, the first whose `when(payload)` matches) may have: content,
+ * toolCalls ({ id, name, args }), thinking (text of a thinking block, with a signature), usage (fields of the usage
+ * object: input_tokens, cache_read_input_tokens, cache_creation_input_tokens), status and error (fail with that HTTP
+ * status and error type), delayMs, chunks (the text in pieces chunkDelayMs apart), failMidStream (an error event after
+ * the first text). Non-streamed requests (Auto mode's check) take `nonStream` replies, as on the other routes.
+ */
+function anthropic(state, payload, res, json) {
+  const stream = !!payload.stream;
+  const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(payload)));
+  let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;
+  if (!reply && !stream && state.classifierDefault && isClassifierRequest(payload)) {
+    const d = state.classifierDefault;
+    reply = { content: JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' }) };
+  }
+  reply = reply ?? { content: stream ? 'Done.' : state.summary };
+  const usage = { input_tokens: 300, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...(reply.usage || {}) };
+  const blocks = [];
+  if (reply.thinking) blocks.push({ type: 'thinking', thinking: reply.thinking, signature: reply.signature ?? 'sig-mock' });
+  if (reply.content || reply.chunks) blocks.push({ type: 'text', text: reply.content ?? reply.chunks.join('') });
+  for (const c of reply.toolCalls ?? []) blocks.push({ type: 'tool_use', id: c.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`, name: c.name, input: c.args ?? {} });
+  const stop = reply.toolCalls?.length ? 'tool_use' : 'end_turn';
+  const answer = async () => {
+    if (reply.status) return json(reply.status, { type: 'error', error: { type: reply.errorType ?? 'api_error', message: reply.error ?? `mock error ${reply.status}` } });
+    if (!stream) {
+      return json(200, { id: 'msg_mock', type: 'message', role: 'assistant', model: payload.model, content: blocks.length ? blocks : [{ type: 'text', text: '' }], stop_reason: stop, stop_sequence: null, usage: { ...usage, output_tokens: 20 } });
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    const send = (type, obj) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...obj })}\n\n`);
+    send('message_start', { message: { id: 'msg_mock', type: 'message', role: 'assistant', model: payload.model, content: [], stop_reason: null, stop_sequence: null, usage: { ...usage, output_tokens: 1 } } });
+    for (const [index, b] of blocks.entries()) {
+      if (b.type === 'thinking') {
+        send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } });
+        send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: b.thinking } });
+        send('content_block_delta', { index, delta: { type: 'signature_delta', signature: b.signature } });
+      } else if (b.type === 'text') {
+        send('content_block_start', { index, content_block: { type: 'text', text: '' } });
+        for (const piece of reply.chunks ?? [b.text]) {
+          send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } });
+          if (reply.failMidStream) {
+            send('error', { error: { type: 'overloaded_error', message: 'Overloaded (mock, mid-stream)' } });
+            return res.end();
+          }
+          if (reply.chunks) await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+        }
+      } else {
+        send('content_block_start', { index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } });
+        const args = JSON.stringify(b.input);
+        // The arguments in two pieces, as the API streams them
+        send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(0, Math.ceil(args.length / 2)) } });
+        send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(Math.ceil(args.length / 2)) } });
+      }
+      send('content_block_stop', { index });
+    }
+    send('message_delta', { delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 30 } });
+    send('message_stop', {});
+    res.end();
+  };
+  setTimeout(answer, reply.delayMs ?? state.delayMs ?? 0);
+}
+
 let askSeq = 0;
 /**
  * A scripted reply in which the model calls ask_user with `questions` (each { question, header, options, multiSelect },
@@ -121,6 +188,8 @@ const CLASSIFIER_MARK = 'You are the safety check of Auto mode in Silo Harness';
 
 /** True for a request of Auto mode's safety check (its system message). */
 function isClassifierRequest(payload) {
+  // Anthropic's native requests carry the instructions as system blocks
+  if (Array.isArray(payload?.system)) return String(payload.system[0]?.text ?? '').startsWith(CLASSIFIER_MARK);
   const sys = (payload?.messages ?? []).find((m) => m.role === 'system');
   return typeof sys?.content === 'string' && sys.content.startsWith(CLASSIFIER_MARK);
 }

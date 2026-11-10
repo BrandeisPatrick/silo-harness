@@ -8,9 +8,11 @@
 // Keys: read from the entry (apiKey) or the environment (apiKeyEnv, else the preset's variable). A key never leaves
 // this module except as a request header: the window gets providerView (set / not set), errors are scrubbed.
 
+import type Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { AppConfig, ModelCapabilities, NamedProviderConfig, OllamaConfig, ProviderType, ProvidersView, ProviderView } from '../shared/types';
 import { expandEnvRefs } from './env';
+import { anthropicClient, isNativeAnthropic } from './agent/anthropic';
 import { contextSize, ollamaRoot } from './ollama';
 import { PRESETS, validateProviderEntry } from './provider-presets';
 import os from 'node:os';
@@ -30,6 +32,8 @@ export interface ProviderClient {
   label: string;
   /** max_tokens for the agent's requests, when the entry sets one */
   maxOutput?: number;
+  /** Anthropic's own API: the client of its native Messages API, which the agent's model calls use (they cache) */
+  native?: Anthropic;
 }
 
 export interface ResolvedProvider {
@@ -252,7 +256,9 @@ export function clientFor(r: ResolvedProvider): OpenAI {
 export function makeClient(cfg: AppConfig): ProviderClient {
   const r = resolveProvider(cfg);
   if (r.error) throw new Error(r.error);
-  return { client: clientFor(r), model: r.model, label: `${r.label} · ${r.model}`, maxOutput: r.maxOutput };
+  const out: ProviderClient = { client: clientFor(r), model: r.model, label: `${r.label} · ${r.model}`, maxOutput: r.maxOutput };
+  if (isNativeAnthropic(r)) out.native = anthropicClient(r);
+  return out;
 }
 
 /** True when the provider in use is an Ollama (the block or a named entry of type ollama): the native path. */
@@ -397,6 +403,7 @@ export function plainError(err: unknown, r: ResolvedProvider): string {
   else if (e?.status === 401 || e?.status === 403) msg = `${r.label} refused the key (HTTP ${e.status}): ${detail}${r.keySource ? ` Check ${r.keySource}.` : ''}`;
   else if (e?.status === 404) msg = `${r.label} answered 404: ${detail} Check the model id ("${r.model}") and the base URL (${r.baseURL}).`;
   else if (e?.status === 429) msg = `${r.label} is rate limiting or out of credit (HTTP 429): ${detail}`;
+  else if (e?.status === 529) msg = `${r.label} is overloaded (HTTP 529). Try again shortly.`;
   else if (e?.status) msg = `${r.label} returned HTTP ${e.status}: ${detail}`;
   else msg = `${r.label}: ${detail}`;
   return scrubSecrets(msg);

@@ -2,12 +2,14 @@
 // stream_options or streaming with tools, and the plain-chat retry for an Ollama model that takes no tools.
 
 import { randomUUID } from 'node:crypto';
+import type Anthropic from '@anthropic-ai/sdk';
 import type OpenAI from 'openai';
 import type { AgentEvent, AppConfig } from '../../shared/types';
 import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
 import { ollamaOf } from '../providers';
 import type { Msg } from '../sessions';
+import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropic';
 import { errorMessage } from './errors';
 
 /** What the agent lends a model call: its events, its usage report and the memories kept across calls. */
@@ -20,6 +22,15 @@ export interface CompletionHost {
   toolSupport: Map<string, boolean>;
   /** max_tokens for the provider in use, when its entry sets maxOutput */
   maxOutput(): number | undefined;
+  /** The native Anthropic path's memory for this session (agent/anthropic.ts NativeHost.thinking) */
+  thinking?: { stripBefore: number };
+}
+
+/** A model's reply: its text, its tool calls, and (native Anthropic path) its thinking blocks to keep with it. */
+export interface Reply {
+  text: string;
+  toolCalls: ToolCall[];
+  thinking?: ThinkingBlock[];
 }
 
 export function noToolsNotice(model: string): string {
@@ -81,7 +92,12 @@ export async function complete(
   specs: ToolSpec[],
   signal: AbortSignal,
   turn: number,
-): Promise<{ text: string; toolCalls: ToolCall[] }> {
+  native?: Anthropic,
+): Promise<Reply> {
+  // Anthropic's own API: the Messages path, which caches (agent/anthropic.ts)
+  if (native) return completeAnthropic(host, native, model, history, specs, signal, turn);
+  // The thinking blocks kept for that path go to no other provider
+  history = withoutNative(history);
   if (!client) {
     const ol = ollamaOf(cfg);
     const chat = (tools: ToolSpec[]) =>

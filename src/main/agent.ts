@@ -57,7 +57,8 @@ import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
 import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
+import { THINKING_KEY } from './agent/anthropic';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
@@ -998,7 +999,7 @@ export class Agent {
     this.emit({ type: 'session_changed', session: toMeta(this.session) });
 
     try {
-      const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
+      const { client, model, maxOutput, native } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined, native: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
@@ -1075,9 +1076,9 @@ export class Agent {
         const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
         const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
-        let reply: { text: string; toolCalls: ToolCall[] };
+        let reply: Reply;
         try {
-          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn, native);
         } catch (err) {
           // The provider says the request does not fit: compact and try this call once more instead of ending the run.
           if (signal.aborted || cfg.autoCompact === false || !isContextLengthError(err)) throw err;
@@ -1088,7 +1089,7 @@ export class Agent {
           }
           this.lastUsage = null;
           this.addContextNote(cfg);
-          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn, native);
         }
         const { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
@@ -1118,6 +1119,8 @@ export class Agent {
           loads.results.set(implied.id, loads.implied.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n'));
         }
         const assistant: Msg = { role: 'assistant', content: text };
+        // The native Anthropic path's thinking goes back with the reply, on that path only (agent/anthropic.ts)
+        if (reply.thinking?.length) (assistant as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
         if (toolCalls.length) assistant.tool_calls = [...(implied ? [implied] : []), ...(await this.storedCalls(toolCalls, tools, ctx))];
         this.store.append(this.session, assistant);
         if (implied) this.store.append(this.session, { role: 'tool', tool_call_id: implied.id, content: loads.results.get(implied.id)! });
@@ -1324,7 +1327,16 @@ export class Agent {
       noStreamUsage: this.noStreamUsage,
       toolSupport: this.toolSupport,
       maxOutput: () => this.maxOutput,
+      thinking: this.sessionThinking(),
     };
+  }
+
+  /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
+  private nativeThinking = new Map<string, { stripBefore: number }>();
+  private sessionThinking(): { stripBefore: number } {
+    let t = this.nativeThinking.get(this.session.id);
+    if (!t) this.nativeThinking.set(this.session.id, (t = { stripBefore: 0 }));
+    return t;
   }
 
   /** What every request costs before any conversation: the system prompt and the tool definitions. */
