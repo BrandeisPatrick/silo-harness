@@ -7,6 +7,7 @@
 import { ipcMain, View, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WindowOpenHandlerResponse } from 'electron';
 import path from 'node:path';
 import type { Bounds, PopupState } from '../../shared/browser';
+import { noPageDragRegions } from './drag-regions';
 import { BROWSER_PARTITION, cleanUserAgent } from './session';
 import { faviconAllowed, fetchFavicon, NO_DEVICE_APIS, type BrowserTab } from './tab';
 
@@ -272,6 +273,7 @@ export class PopupManager {
     const view = guest && !guest.isDestroyed() ? new WebContentsView({ webContents: guest, webPreferences: prefs }) : new WebContentsView({ webPreferences: { ...prefs, partition: BROWSER_PARTITION } });
     const wc = view.webContents;
     wc.setUserAgent(cleanUserAgent(wc.getUserAgent()));
+    noPageDragRegions(wc);
     const t = this.host.dark() ? THEMES.dark : THEMES.light;
     const frame = new View();
     frame.setBackgroundColor(t.frame);

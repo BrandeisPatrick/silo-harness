@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Clicks reach every page.** A page that marks itself as a window-drag area, such as the Microsoft sign-in page after Teams, now gets your clicks.
+
 ## 0.13.0 — 2026-11-10
 
 Sessions cost a fraction of what they did, the agent can search and read the web, the browser trusts pages less, and MCP servers sign in with OAuth.
