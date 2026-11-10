@@ -51,6 +51,20 @@ export interface NamedProviderConfig {
   numCtx?: number;
   /** ollama: thinking mode */
   think?: 'auto' | 'on' | 'off';
+  /** Reasoning effort for the session's model calls; unset: the model's default (agent/effort.ts) */
+  effort?: EffortLevel;
+}
+
+/** A reasoning-effort level, as the Messages API names them (agent/effort.ts) */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** The effort pill of a provider: the levels the model takes, the one chosen (clamped to them) and the model's default. */
+export interface EffortInfo {
+  levels: EffortLevel[];
+  /** null: none chosen, nothing is sent */
+  chosen: EffortLevel | null;
+  /** The model's documented default; null where it is not known (OpenAI-compatible services) */
+  default: EffortLevel | null;
 }
 
 /**
@@ -79,6 +93,8 @@ export interface ProviderView {
   owner?: 'user' | 'project';
   /** Why it cannot be used as it is (no key, no model, no base URL), in plain words */
   error?: string;
+  /** The effort pill; absent where the model or the service takes no effort setting */
+  effort?: EffortInfo;
 }
 
 export interface ProvidersView {

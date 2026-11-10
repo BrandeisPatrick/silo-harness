@@ -70,6 +70,7 @@ import { createSessionMessages } from './session-messages.js';
 import { createSessionsView } from './sessions-view.js';
 import { createStatusLine } from './status-line.js';
 import { createHeader } from './header.js';
+import { createEffortPill } from './effort.js';
 
 declare global {
   interface Window {
@@ -1666,6 +1667,20 @@ const header = createHeader({
   cleanError,
 });
 const { currentMode, announceMode, setMode, toggleMode, applyConfigToUi } = header;
+
+// The effort pill next to the model (effort.ts)
+createEffortPill({
+  btn: $<HTMLButtonElement>('effort-btn'),
+  boundary: transcriptWrap,
+  api: oc,
+  config: () => config,
+  setConfig: (next) => {
+    config = next;
+  },
+  focusComposer: () => inputEl.focus(),
+  showError: showInlineError,
+  cleanError,
+});
 
 // ---------- Provider connection: the banner above the composer and the welcome screen's setup strip ----------
 

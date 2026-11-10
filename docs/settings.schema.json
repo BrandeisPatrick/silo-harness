@@ -427,6 +427,17 @@
               "off"
             ],
             "description": "ollama: thinking mode for models that can reason."
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "description": "Reasoning effort for the session's model calls (the pill next to the model). Unset: the model's default. Clamped to the levels the model takes."
           }
         },
         "allOf": [
@@ -520,6 +531,29 @@
                 "type": {
                   "enum": [
                     "ollama"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "effort"
+              ]
+            },
+            "then": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "anthropic",
+                    "openai",
+                    "openrouter",
+                    "portkey",
+                    "groq",
+                    "deepseek",
+                    "together",
+                    "openai-compatible"
                   ]
                 }
               }

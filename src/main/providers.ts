@@ -10,9 +10,10 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import type { AppConfig, ModelCapabilities, NamedProviderConfig, OllamaConfig, ProviderType, ProvidersView, ProviderView } from '../shared/types';
+import type { AppConfig, EffortInfo, EffortLevel, ModelCapabilities, NamedProviderConfig, OllamaConfig, ProviderType, ProvidersView, ProviderView } from '../shared/types';
 import { expandEnvRefs } from './env';
 import { anthropicClient, isNativeAnthropic } from './agent/anthropic';
+import { effortInfo } from './agent/effort';
 import { contextSize, ollamaRoot } from './ollama';
 import { PRESETS, validateProviderEntry } from './provider-presets';
 import os from 'node:os';
@@ -58,6 +59,8 @@ export interface ResolvedProvider {
   /** ollama type */
   numCtx: number;
   think: 'auto' | 'on' | 'off';
+  /** Reasoning effort chosen for the entry (agent/effort.ts); unset: send nothing */
+  effort?: EffortLevel;
   /** Why it cannot be used as it is; makeClient throws it */
   error?: string;
   /** Problems with the entry's fields (skipped ones), for doctor */
@@ -227,6 +230,7 @@ function resolveNamed(cfg: AppConfig, name: string, env: NodeJS.ProcessEnv): Res
     maxOutput: e.maxOutput,
     numCtx,
     think: e.think ?? 'auto',
+    ...(e.effort ? { effort: e.effort } : {}),
     error,
     problems: problemLines,
   };
@@ -300,7 +304,20 @@ export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): P
     headers: Object.keys(r.headers).filter((h) => !/^x-portkey-api-key$/i.test(h)),
     ...(owner ? { owner } : {}),
     ...(r.error ? { error: scrubSecrets(r.error) } : {}),
+    ...withEffort(r),
   };
+}
+
+/** The effort pill of a provider, when its model takes the setting. */
+function withEffort(r: ResolvedProvider): { effort?: EffortInfo } {
+  const info = r.builtIn ? null : effortInfo({ type: r.type, model: r.model, effort: r.effort, native: isNativeAnthropic(r) });
+  return info ? { effort: info } : {};
+}
+
+/** The effort chosen for a provider (live: read at each model request), or undefined. */
+export function effortOf(cfg: AppConfig, name: string): EffortLevel | undefined {
+  if (name === 'ollama' || name === 'portkey') return undefined;
+  return resolveProvider(cfg, name).effort;
 }
 
 export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, env: NodeJS.ProcessEnv = process.env): ProvidersView {

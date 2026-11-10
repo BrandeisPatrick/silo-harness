@@ -65,6 +65,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 | `/rename [new name]` | Rename this session; alone, it makes the title in the top bar editable |
 | `/schedules` | The scheduled tasks and their next run |
 | `/dream` | Dream now about this session's project (see Dreaming) |
+| `/effort [level]` | Show or set the reasoning effort of the provider in use (`low` … `max`, `default`) |
 | a mod's commands | Listed in the menu with the mod's name |
 
 A message starting with `#` is added to the project's instructions file after a confirmation (and recorded in the session's history log, where a dream sees it).
@@ -201,7 +202,7 @@ Settings → Remote control turns on a small web page, served by the app, for fo
 
 - **Ollama** (default): native `/api/chat` with `num_ctx`, thinking control and capability detection.
 - **Gateway fields** (the `portkey` block) = any OpenAI-compatible endpoint, Portkey's by default. The window calls it Portkey for Portkey's own address and Gateway for any other.
-- **Named providers**: any number of entries in `"providers"` of `settings.json` (or `config.json`), each of a type that knows its base URL, key variable and headers: `openrouter`, `portkey`, `openai`, `anthropic`, `groq`, `deepseek`, `together`, `ollama`, `lmstudio`, and `openai-compatible` for anything else. `"provider"` picks one by name. Settings → Model chooses among all of them and their models; the model button under the chat bar lists the provider's models and the other usable providers.
+- **Named providers**: any number of entries in `"providers"` of `settings.json` (or `config.json`), each of a type that knows its base URL, key variable and headers: `openrouter`, `portkey`, `openai`, `anthropic`, `groq`, `deepseek`, `together`, `ollama`, `lmstudio`, and `openai-compatible` for anything else. `"provider"` picks one by name. Settings → Model chooses among all of them and their models; the model button under the chat bar lists the provider's models and the other usable providers. The pill after it sets the reasoning effort, where the model takes one ([configure.md](configure.md#effort)).
 - **The command line**: `silo` (in the app at `Contents/Resources/bin/silo`; Settings → General → Command line tool links it into `~/.local/bin`) adds, selects and tests providers and sets the other fields, for you or for a coding agent: `silo provider add openrouter --type openrouter --model … --use`, then `silo provider test`.
 - All of it, with the shortest working example for each service, the field reference and the steps for coding agents: [configure.md](configure.md). Schema: [settings.schema.json](settings.schema.json).
 

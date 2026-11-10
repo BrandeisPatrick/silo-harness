@@ -198,10 +198,21 @@ Fields of an entry (only `type` is required):
 | `maxOutput` | all | The most tokens one reply may have, sent as `max_tokens`. Default: the service decides. |
 | `virtualKey`, `config`, `provider` | `portkey` | `x-portkey-virtual-key`, `x-portkey-config`, `x-portkey-provider`. With `provider`, put the upstream key in `headers` as `"Authorization": "Bearer ${UPSTREAM_KEY}"`. |
 | `numCtx`, `think` | `ollama` | `num_ctx` (also the context window) and the thinking mode, as in the `ollama` block. An `ollama` entry uses Ollama's native API, like the block. |
+| `effort` | all but `ollama`, `lmstudio` | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. Unset: the model's default. See [Effort](#effort). |
 
 A bad field is skipped and reported; an entry without a usable `type`, or an `openai-compatible` one without `baseURL`, is skipped whole. A missing key is an error that names the variable to set, shown in Settings, under the chat bar and by `silo doctor`.
 
 What the model can do (images, tools) is detected for Ollama; for the other services it is unknown, so the app does not refuse an image it cannot be sure about.
+
+### Effort
+
+The pill after the model under the chat bar sets the reasoning effort of the provider in use (stored as its entry's `effort`; `/effort <level>` does the same, `/effort default` clears it). It applies from the next model request, sub-sessions included; titles, compaction summaries and Auto mode's check keep their own settings.
+
+- Anthropic: sent as `output_config.effort`, for the models that take it (Claude Opus 4.6 and later, Sonnet 4.6 and later, Haiku 5.5, Fable, Mythos). A level the model lacks runs as the nearest one (`xhigh` on the 4.6 models runs as `high`). Where the app turns thinking off, `xhigh` and `max` turn it on, since the API refuses the pair.
+- OpenRouter: `reasoning.effort`. OpenAI, Groq, DeepSeek, Together, Portkey and OpenAI-compatible services: `reasoning_effort`. There the levels are Default (nothing sent), Low, Medium and High. A service that refuses the field gets the request again without it, and the window says so once.
+- Ollama keeps its own Thinking setting; LM Studio documents no effort field. No pill for either, or for the built-in Gateway block.
+
+Changing the effort re-writes the cached prompt once, so the app never changes it on its own.
 
 ### Keys
 

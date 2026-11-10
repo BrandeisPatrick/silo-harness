@@ -76,6 +76,10 @@ export const ENTRY_FIELDS: Record<keyof NamedProviderConfig, Field> = {
   provider: { check: describe(nonEmpty, 'portkey: a provider slug (x-portkey-provider), e.g. openai.'), types: ['portkey'] },
   numCtx: { check: describe(positiveInt, 'ollama: the context size asked for (num_ctx).'), types: ['ollama'] },
   think: { check: describe(oneOf('auto', 'on', 'off'), 'ollama: thinking mode for models that can reason.'), types: ['ollama'] },
+  effort: {
+    check: describe(oneOf('low', 'medium', 'high', 'xhigh', 'max'), "Reasoning effort for the session's model calls (the pill next to the model). Unset: the model's default. Clamped to the levels the model takes."),
+    types: ['anthropic', 'openai', 'openrouter', 'portkey', 'groq', 'deepseek', 'together', 'openai-compatible'],
+  },
 };
 
 export interface EntryProblem {
