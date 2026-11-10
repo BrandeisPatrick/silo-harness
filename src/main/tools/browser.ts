@@ -172,6 +172,31 @@ async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: {
 /** The optional `reason` of the tools that may need the user's approval: shown on the card, under the action. */
 const REASON = { reason: { type: 'string', description: 'Why, in one sentence (shown if approval is needed)' } };
 
+/** The tools that return what a page says, which must come from the page that was checked. */
+const READS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_wait_for']);
+
+/** The active tab and its page's site key ('' when the browser cannot say). */
+function pageNow(ctx: ToolContext): { tabId: string; url: string; key: string } {
+  try {
+    const s = ctx.browser.state();
+    const url = String(s.url ?? '');
+    return { tabId: String(s.activeId ?? ''), url, key: siteOf(url)?.key ?? url };
+  } catch {
+    return { tabId: '', url: '', key: '' };
+  }
+}
+
+/**
+ * The refusal when the page moved between the site check (and its card) and the action or the read: another tab in
+ * front, or (`sameSite`) another site in the tab. null: the same page.
+ */
+function pageChanged(checked: { tabId: string; key: string }, now: { tabId: string; url: string; key: string }, sameSite: boolean): string | null {
+  const where = siteOf(now.url)?.display ?? (now.url || 'a blank page');
+  if (checked.tabId !== now.tabId) return `The active tab changed to ${now.tabId} (${where}); call again.`;
+  if (sameSite && checked.key !== now.key) return `The page changed to ${where}; call again.`;
+  return null;
+}
+
 /** The tools whose whole result is the page's text (the others fence the page's words inside their own sentence). */
 const PAGE_RESULTS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_eval']);
 
@@ -187,12 +212,21 @@ function guarded(tool: Tool): Tool {
     group: 'browser',
     run: async (args, ctx): Promise<ToolResult> => {
       const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>;
+      // The page the check is about: the call acts on that one, and reads from it, or not at all
+      const checked = pageNow(ctx);
       const stop = (await credentialCheck(tool.name, a, ctx)) ?? (await siteCheck(tool.name, a, ctx));
       if (stop) return { content: stop };
+      const tabsOnly = tool.name === 'browser_tabs' && a.action !== 'new';
+      const opens = tool.name === 'browser_navigate' || tool.name === 'browser_tabs';
+      const moved = tabsOnly ? null : pageChanged(checked, pageNow(ctx), !opens);
+      if (moved) return { content: moved };
       const before = await secrets(ctx);
       try {
         const r = await run(args, ctx);
         const content = scrubSecrets(r.content, [...before, ...(await secrets(ctx))]);
+        // A read that came back from another page than the one checked (a redirect, another tab in front) is not returned
+        const after = READS.has(tool.name) ? pageChanged(checked, pageNow(ctx), true) : null;
+        if (after) return { content: after };
         // What the page says is data from the site: fenced, the site named by the browser
         return { ...r, content: PAGE_RESULTS.has(tool.name) ? fencePage(activeUrl(ctx), content) : content };
       } catch (err) {
