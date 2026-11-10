@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.13.1 — 2026-11-10
+
+Fixes clicks not reaching a page in the Browser pane after a site marked the tab as a window-drag area.
 
 ### Fixed
 
-- **Clicks reach every page.** A page that marks itself as a window-drag area, such as the Microsoft sign-in page after Teams, now gets your clicks.
+- **Clicks reach every page.** A site can no longer make its tab a window-drag area, which stopped clicks on the Microsoft sign-in page after Teams.
 
 ## 0.13.0 — 2026-11-10
 
