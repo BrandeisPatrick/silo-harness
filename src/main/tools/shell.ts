@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
+import path from 'node:path';
+import { commandArgv, splitCommands } from '../guard';
 import type { Tool } from './types';
 import { truncateMiddle } from './types';
 
@@ -10,8 +12,42 @@ const MAX_BUFFER = 20 * 1024 * 1024;
 /** What the result keeps of stdout and stderr together: their start and their end (the exit code comes after) */
 export const OUTPUT_BUDGET = 30_000;
 
-/** stdout and stderr cut to OUTPUT_BUDGET together, each keeping its start and end, then the exit code, which is never cut. */
-export function shellResult(stdout: string, stderr: string, code: string | number): string {
+/**
+ * The known sign-ins that wait for the user (a browser, a code, a password prompt), which cannot finish in this
+ * tool: its name as the user would type it, or null. Every simple command of the line is looked at.
+ */
+export function interactiveLogin(command: string): string | null {
+  for (const simple of splitCommands(command)) {
+    const argv = commandArgv(simple);
+    const prog = path.basename(argv[0] ?? '');
+    const words = argv.slice(1).filter((a) => !a.startsWith('-'));
+    const has = (...o: string[]) => argv.some((a) => o.some((x) => a === x || a.startsWith(x + '=')));
+    const seq = (...s: string[]) => words.slice(0, s.length).join(' ') === s.join(' ');
+    const anywhere = (...s: string[]) => argv.some((_, i) => argv.slice(i, i + s.length).join(' ') === s.join(' '));
+    if (prog === 'aws' && (anywhere('sso', 'login') || anywhere('configure', 'sso') || seq('login'))) return anywhere('configure', 'sso') ? 'aws configure sso' : anywhere('sso', 'login') ? 'aws sso login' : 'aws login';
+    if (prog === 'gcloud' && (seq('auth', 'login') || seq('auth', 'application-default', 'login')) && !has('--cred-file')) return `gcloud ${words.slice(0, words[1] === 'login' ? 2 : 3).join(' ')}`;
+    if (prog === 'az' && seq('login') && !has('--service-principal', '--identity', '--federated-token')) return 'az login';
+    if (prog === 'gh' && seq('auth', 'login') && !has('--with-token')) return 'gh auth login';
+    if (prog === 'npm' && (seq('login') || seq('adduser') || seq('add-user'))) return `npm ${words[0]}`;
+    if (prog === 'docker' && seq('login') && !has('--password-stdin', '--password', '-p')) return 'docker login';
+  }
+  return null;
+}
+
+/** What the shell's result says when a command is a sign-in that waits for the user */
+export function loginRedirect(login: string): string {
+  return `Not run: ${login} waits for the user to sign in, which this tool cannot show. Run it with terminal_run, in a terminal the user can type in.`;
+}
+
+/** The hint after a result, before its exit code: a timeout, or a missing timeout command on macOS */
+function hintFor(code: string | number, stderr: string, timeout: number): string | null {
+  if (typeof code === 'string' && code.startsWith('killed (timeout')) return `[timed out: raise timeout_ms (up to 600000, now ${timeout}), or run it with terminal_run]`;
+  if (/command not found: g?timeout\b/.test(stderr)) return "[macOS has no timeout: use this tool's timeout_ms]";
+  return null;
+}
+
+/** stdout and stderr cut to OUTPUT_BUDGET together, each keeping its start and end, then a hint, then the exit code, which is never cut. */
+export function shellResult(stdout: string, stderr: string, code: string | number, hint: string | null = null): string {
   const total = stdout.length + stderr.length;
   if (total > OUTPUT_BUDGET) {
     // stderr gets its share, at least 6,000 characters when it has them (a failing build's errors)
@@ -21,6 +57,7 @@ export function shellResult(stdout: string, stderr: string, code: string | numbe
   }
   let out = stdout;
   if (stderr) out += (out ? '\n' : '') + '[stderr]\n' + stderr;
+  if (hint) out += `${out.endsWith('\n') || !out ? '' : '\n'}${hint}`;
   return out + `${out.endsWith('\n') || !out ? '' : '\n'}[exit code: ${code}]`;
 }
 
@@ -34,7 +71,7 @@ function buildPath(): string {
 export const bash: Tool = {
   name: 'bash',
   description:
-    'Run a shell command (zsh) in the working directory and return stdout, stderr and the exit code. Non-interactive only: never run commands that wait for input. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
+    'Run a shell command (zsh) in the working directory and return stdout, stderr and the exit code. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
   parameters: {
     type: 'object',
     properties: {
@@ -47,6 +84,9 @@ export const bash: Tool = {
   async run(args, ctx) {
     const command = String(args.command ?? '').trim();
     if (!command) throw new Error('command is required');
+    // A sign-in that waits for the user cannot finish here (no terminal, no stdin): said at once, before any approval
+    const login = interactiveLogin(command);
+    if (login) return { content: loginRedirect(login) };
     const approval = await ctx.approve('bash', command);
     if (!approval.ok) return { content: approval.message };
     const timeout = Math.min(Math.max(1000, Number(args.timeout_ms) || 120_000), 600_000);
@@ -57,7 +97,8 @@ export const bash: Tool = {
       let stderr = '';
       // Its own process group, so that stopping the command also stops what it started (a sleep, a build, a server).
       // No stdin: a command that tries to read input sees end-of-file instead of waiting for ever.
-      const child = spawn('/bin/zsh', ['-lc', command], {
+      // An unmatched wildcard passes through as in bash (grep --include=*.ts), set after the login profile has run
+      const child = spawn('/bin/zsh', ['-lc', `setopt nonomatch; ${command}`], {
         cwd: ctx.cwd,
         env: { ...process.env, PATH: buildPath(), TERM: 'dumb', CI: '1' },
         detached: true,
@@ -68,7 +109,7 @@ export const bash: Tool = {
         settled = true;
         clearTimeout(timer);
         ctx.signal?.removeEventListener('abort', onAbort);
-        resolve({ content: shellResult(stdout, stderr, code) });
+        resolve({ content: shellResult(stdout, stderr, code, hintFor(code, stderr, timeout)) });
       };
       const outcome = (code: number | null, signal: NodeJS.Signals | null): string | number =>
         stopped === 'user' ? 'stopped by the user' : stopped === 'timeout' ? `killed (timeout after ${timeout} ms)` : signal ? `killed (${signal})` : (code ?? 0);
@@ -80,7 +121,7 @@ export const bash: Tool = {
       child.stderr.on('data', (d: string) => {
         if (stderr.length < MAX_BUFFER) stderr += d;
       });
-      child.on('error', (err) => finish(err.message));
+      child.on('error', (err) => finish(`could not start (${err.message})`));
       // 'close' waits for the output pipes too, so nothing a child printed is lost.
       child.on('close', (code, signal) => finish(outcome(code, signal)));
       const signalGroup = (sig: NodeJS.Signals) => {

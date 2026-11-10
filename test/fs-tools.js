@@ -88,6 +88,36 @@ const { check, done } = require('./support/check.js');
     out = (await grep.run({ pattern: 'TOKEN' }, ctx)).content;
     check('grep (rg): secret files left out', out.includes('a.txt') && !out.includes('secret-value'), out);
   } else console.log('skip grep (rg): ripgrep is not installed');
+
+  // The time cap: what the search found before it is returned, with one line on narrowing it. grep reads a FIFO whose
+  // writer sends one matching line and then holds it open, so grep hangs after the match; without line buffering
+  // that match would still sit in grep's buffer when it is killed.
+  const { setGrepTimeout } = require(path.join(projectDir, 'dist/main/tools/fs.js'));
+  const cp = require('node:child_process');
+  const slow = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-slow-'));
+  fs.mkdirSync(path.join(slow, 'sub'));
+  const fifo = path.join(slow, 'sub', 'pipe');
+  cp.execFileSync('mkfifo', [fifo]);
+  const writer = cp.spawn('/bin/sh', ['-c', 'exec 3>"$1"; echo "NEEDLE in the pipe" >&3; exec sleep 20', '_', fifo], { stdio: 'ignore' });
+  setGrepTimeout(1500);
+  setRipgrep(null);
+  let started = Date.now();
+  out = (await grep.run({ pattern: 'NEEDLE', path: 'sub' }, { ...ctx, cwd: slow })).content;
+  writer.kill('SIGKILL');
+  check('grep at its time cap (grep): returns what it found, and says to narrow', Date.now() - started < 5000 && /^sub\/pipe:1:NEEDLE in the pipe$/m.test(out) && out.endsWith('\n…(the search stopped after 1.5 s; narrow the pattern or path)'), out);
+  // A stand-in for ripgrep that prints a match, then hangs
+  const fake = path.join(slow, 'fake-rg.sh');
+  fs.writeFileSync(fake, '#!/bin/sh\necho "src/b.txt:3:NEEDLE from rg"\nexec sleep 20\n', { mode: 0o755 });
+  setRipgrep(fake);
+  started = Date.now();
+  out = (await grep.run({ pattern: 'NEEDLE', path: 'src' }, { ...ctx, cwd: slow })).content;
+  check('grep at its time cap (rg): the same', Date.now() - started < 5000 && out.includes('src/b.txt:3:NEEDLE from rg') && out.endsWith('…(the search stopped after 1.5 s; narrow the pattern or path)'), out);
+  fs.writeFileSync(fake, '#!/bin/sh\nexec sleep 20\n', { mode: 0o755 });
+  out = (await grep.run({ pattern: 'NEEDLE', path: 'src' }, { ...ctx, cwd: slow })).content;
+  check('grep at its time cap with nothing found: says so in one line', out === 'No matches before the search stopped after 1.5 s; narrow the pattern or path.', out);
+  setGrepTimeout(undefined);
+  fs.rmSync(slow, { recursive: true, force: true });
+
   setRipgrep(undefined);
   fs.rmSync(g, { recursive: true, force: true });
 

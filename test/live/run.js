@@ -56,6 +56,8 @@ const SCRIPTS = [
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
   { name: 'auto-mode' },
+  { name: 'aws-reads' },
+  { name: 'shell-traps' },
   { name: 'remote-page', electron: true },
   { name: 'browser-safety' },
   { name: 'browser-permissions' },
