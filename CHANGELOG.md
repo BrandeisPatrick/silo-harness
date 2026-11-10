@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-11-10
 
 Sessions cost a fraction of what they did, the agent can search and read the web, the browser trusts pages less, and MCP servers sign in with OAuth.
 
