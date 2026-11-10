@@ -11,7 +11,7 @@ import path from 'node:path';
 import type { Bounds, BrowserState, FindResultState, PopupState, TabState } from '../../shared/browser';
 import { clickTargetScript, describeScript, fieldKindScript, flashScript, GET_TEXT_SCRIPT, passwordFieldScript, readPageScript, rectScript, REF_RE, scrollScript, SELECT_ALL_SCRIPT, targetScript, waitScript } from './page-scripts';
 import { CREDENTIAL_REFUSAL, type ClickTarget } from './policy';
-import { PopupManager } from './popups';
+import { leavesArtifact, PopupManager } from './popups';
 import { fieldPhrase, frameCheckScript, inSafetyWorld, SAFETY_WORLD, typedSecretMessage } from './safety';
 import { BrowserTab, type TabShortcut } from './tab';
 // Polish: the right click, find in page and zoom per site
@@ -150,6 +150,12 @@ export class BrowserController {
       },
     });
     tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
+    // An artifact never takes its tab anywhere else by itself (a link, location, a meta refresh): the strip offers it.
+    tab.webContents.on('will-frame-navigate', (details) => {
+      if (tab.webContents.isDestroyed() || !leavesArtifact(tab.webContents.getURL(), details.url)) return;
+      details.preventDefault();
+      tab.blockedPopup(details.url);
+    });
     // Tabs sit below the popup cards: at the index of the last tab, never at the end of the window's views.
     this.win.contentView.addChildView(tab.view, this.tabs.length);
     this.tabs.push(tab);

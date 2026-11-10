@@ -64,6 +64,15 @@ export function popupDecision(d: { disposition: string; features: string; url: s
   return 'popup';
 }
 
+/**
+ * Whether a navigation or a window from `from` to `to` leaves an artifact: page. An artifact the model wrote never
+ * sends the tab (or a new one) anywhere else by itself, a link the user clicks included: the blocked-popup strip
+ * offers the address instead, so leaving takes the user's own click on Show.
+ */
+export function leavesArtifact(from: string, to: string): boolean {
+  return /^\s*artifact:/i.test(String(from ?? '')) && !/^\s*artifact:/i.test(String(to ?? ''));
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
 
 /**
@@ -216,8 +225,12 @@ export class PopupManager {
    * The window-open handler of one tab (and of the popups it opens). `openTab` makes a tab for links and plain
    * window.open calls; a sized window becomes a popup card over the pane.
    */
-  handlerFor(tab: BrowserTab, openTab: (url: string, background: boolean) => void): (details: { url: string; disposition: string; features: string }) => WindowOpenHandlerResponse {
+  handlerFor(tab: BrowserTab, openTab: (url: string, background: boolean) => void, openerUrl: () => string = () => tab.webContents.getURL()): (details: { url: string; disposition: string; features: string }) => WindowOpenHandlerResponse {
     return (details) => {
+      if (leavesArtifact(openerUrl(), details.url)) {
+        tab.blockedPopup(details.url);
+        return { action: 'deny' };
+      }
       const decision = popupDecision({ disposition: details.disposition, features: details.features, url: details.url, openPopups: this.popups.length });
       if (decision === 'tab' || decision === 'background-tab') {
         openTab(details.url, decision === 'background-tab');
@@ -305,7 +318,7 @@ export class PopupManager {
     // A popup that closes itself (window.close()), or whose contents go, is taken down.
     wc.on('destroyed', () => this.remove(popup));
     // A popup opening another window: the same rules as its tab.
-    wc.setWindowOpenHandler(this.handlerFor(tab, openTab));
+    wc.setWindowOpenHandler(this.handlerFor(tab, openTab, () => (wc.isDestroyed() ? '' : wc.getURL())));
     this.host.onChange();
     return wc;
   }
