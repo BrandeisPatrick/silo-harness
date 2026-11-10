@@ -47,7 +47,8 @@ const { launch, checker } = require('./rig.js');
     const loop = rows.filter((r) => r.label === 'tool loop');
     check('a tool loop of at least four model calls', loop.length >= 4, loop.length);
     check('every call after the first reads the cache', loop.slice(1).every((r) => r.read > 0), loop);
-    check('the first call writes the prefix to the cache', loop[0].write > 1000, loop[0]);
+    // A run minutes after another finds the prefix (the tools and the system prompt) still cached, and reads it.
+    check('the first call writes the prefix to the cache, or reads it from an earlier run', loop[0].write > 1000 || loop[0].read > 1000, loop[0]);
 
     await setMode('auto');
     await app.send('Read a.txt again with read_file and repeat the first code word.');

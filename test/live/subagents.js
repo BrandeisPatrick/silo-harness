@@ -63,7 +63,9 @@ const { launch, checker, sleep } = require('./rig.js');
     // ---- by hand: /spawn, /sessions, /merge ----
     await app.click('#new-session-btn');
     await app.waitFor(`document.querySelector('#empty-state') && !document.querySelector('#empty-state').hidden`, 10_000, 'a new session');
-    await app.send('Reply with exactly: READY');
+    // The parent can merge a sub-session itself when its report comes in (the report names session_merge, and a
+    // message from a session loads those tools). This part checks the commands, so the parent is told to leave it.
+    await app.send('Reply with exactly: READY. Later a sub-session will report to you: answer that report with only the word NOTED and call no tools. I merge it by hand.');
     await app.waitIdle();
     const S = await current();
     await app.send('/spawn Reply with exactly the word PONG and nothing else');
