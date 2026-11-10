@@ -3,7 +3,7 @@ import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
 import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
-import { isOllama, makeClient, modelCapabilities, ollamaOf } from './providers';
+import { isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
 import { allGroupsUpFront, contextLimit, essentialToolsOnly } from './context-window';
 import { McpManager } from './mcp';
@@ -25,7 +25,9 @@ import {
   formatTokens,
   isCompactPreamble,
   isContextLengthError,
+  isContextNote,
   isSyntheticUser,
+  lastContextNote,
   lastUserIndex,
   pruneMessages,
   scaleTo,
@@ -52,10 +54,11 @@ import { FAILED_RESULT, HOOK_NOTE_PREFIX } from './compact';
 import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
-import { ESSENTIAL_NOTE, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
-import { modelMessages, PRUNE_BUDGET, resultsToPrune } from './agent/context-view';
+import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
+import { batchMarks, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, uniqueCallIds, type CompletionHost } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
+import { THINKING_KEY } from './agent/anthropic';
 import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
@@ -300,6 +303,21 @@ export class Agent {
 
   private prompt(cfg: AppConfig, skills: Skill[]): string {
     return systemPrompt(cfg, skills, this.mcp, this.promptExtra(cfg), this.ownToolNames(cfg), this.promptGroups(cfg));
+  }
+
+  /** What this session's context note says now (agent/prompt.ts sessionContext). */
+  private contextState(cfg: AppConfig): string {
+    return sessionContext(cfg, this.promptExtra(cfg), Boolean(this.ownTools()));
+  }
+
+  /**
+   * Before a model call: appends a context note when what it says (the mode, folder, date, the session's name and
+   * parent) differs from the newest one in the conversation, which is the case on the first call, after a change, and
+   * after a compaction or a rewind took the last one away. Earlier notes stay as they are, so the prefix does too.
+   */
+  private addContextNote(cfg: AppConfig): void {
+    const note = contextNote(this.contextState(cfg), lastContextNote(this.session.messages));
+    if (note) this.store.append(this.session, { role: 'user', content: note });
   }
 
   /** The groups the prompt names as loadable (undefined: every group is offered up front, or none is a group here). */
@@ -981,7 +999,7 @@ export class Agent {
     this.emit({ type: 'session_changed', session: toMeta(this.session) });
 
     try {
-      const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
+      const { client, model, maxOutput, native } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined, native: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
@@ -1054,12 +1072,13 @@ export class Agent {
           reason = 'aborted';
           break;
         }
+        this.addContextNote(cfg);
         const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
         const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
-        let reply: { text: string; toolCalls: ToolCall[] };
+        let reply: Reply;
         try {
-          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn);
+          reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn, native);
         } catch (err) {
           // The provider says the request does not fit: compact and try this call once more instead of ending the run.
           if (signal.aborted || cfg.autoCompact === false || !isContextLengthError(err)) throw err;
@@ -1069,7 +1088,8 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
-          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn);
+          this.addContextNote(cfg);
+          reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn, native);
         }
         const { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
@@ -1099,6 +1119,8 @@ export class Agent {
           loads.results.set(implied.id, loads.implied.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n'));
         }
         const assistant: Msg = { role: 'assistant', content: text };
+        // The native Anthropic path's thinking goes back with the reply, on that path only (agent/anthropic.ts)
+        if (reply.thinking?.length) (assistant as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
         if (toolCalls.length) assistant.tool_calls = [...(implied ? [implied] : []), ...(await this.storedCalls(toolCalls, tools, ctx))];
         this.store.append(this.session, assistant);
         if (implied) this.store.append(this.session, { role: 'tool', tool_call_id: implied.id, content: loads.results.get(implied.id)! });
@@ -1211,8 +1233,11 @@ export class Agent {
     let summary = 0;
     let said = 0;
     let toolTokens = 0;
+    // The context notes carry what used to be the end of the system prompt, and are counted with it
+    let notes = 0;
     for (const m of s.messages) {
-      if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
+      if (isContextNote(m)) notes += estimateMessageTokens(m);
+      else if (isCompactPreamble(m)) summary += estimateMessageTokens(m);
       else if (m.role === 'tool' || isSyntheticUser(m)) toolTokens += estimateMessageTokens(m);
       else if (m.role === 'assistant' && m.tool_calls?.length) {
         const total = estimateMessageTokens(m);
@@ -1225,7 +1250,7 @@ export class Agent {
     const mcpItems = [...byServer].map(([server, list]) => ({ label: server, tokens: estimateSpecTokens(list.map(toSpec)) }));
     const skillItems = parts.skills ? [{ label: 'Skills list', tokens: chars(parts.skills) }] : [];
     const used: ContextSlice[] = [
-      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra + parts.mode + parts.env + parts.sessionSections) + 2 },
+      { key: 'system', label: 'System prompt', tokens: chars(parts.base + parts.sections + parts.mcp + parts.userExtra) + 2 + (notes || chars(this.contextState(cfg))) },
       { key: 'instructions', label: 'Instructions files', tokens: instr.reduce((a, b) => a + b.tokens, 0), items: instr },
       { key: 'skills', label: 'Skills', tokens: chars(parts.skills), items: skillItems },
       { key: 'tools', label: 'Tool definitions', tokens: estimateSpecTokens(tools.filter((t) => !t.mcp).map(toSpec)) },
@@ -1270,6 +1295,8 @@ export class Agent {
       updatedAt: Date.now(),
     };
     const last = s.compactions?.[s.compactions.length - 1];
+    // The share of the last request's input its provider read from the prompt cache, when it said
+    if (reported && mark.cacheRead !== undefined && mark.tokens > 0) out.cached = Math.min(1, mark.cacheRead / mark.tokens);
     if (last) out.lastCompaction = { at: last.createdAt, reason: last.reason, tokensBefore: last.tokensBefore, tokensAfter: last.tokensAfter };
     return out;
   }
@@ -1280,6 +1307,8 @@ export class Agent {
     if (!u || !u.promptTokens) return;
     const s = this.session;
     s.lastPrompt = { tokens: u.promptTokens + u.completionTokens, at: s.messages.length };
+    // What the provider read from its prompt cache, for the meter's detail (only when it reports it)
+    if (u.cacheReadTokens !== undefined) s.lastPrompt.cacheRead = Math.min(u.cacheReadTokens, u.promptTokens);
     const estimated = this.baseTokens(this.sessionConfig()) + estimateTokens(this.modelView());
     if (estimated > 0) this.estimateScale = Math.min(2, Math.max(0.67, s.lastPrompt.tokens / estimated));
     this.emitContext();
@@ -1298,7 +1327,17 @@ export class Agent {
       noStreamUsage: this.noStreamUsage,
       toolSupport: this.toolSupport,
       maxOutput: () => this.maxOutput,
+      thinking: this.sessionThinking(),
+      cacheKey: this.session.id,
     };
+  }
+
+  /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
+  private nativeThinking = new Map<string, { stripBefore: number }>();
+  private sessionThinking(): { stripBefore: number } {
+    let t = this.nativeThinking.get(this.session.id);
+    if (!t) this.nativeThinking.set(this.session.id, (t = { stripBefore: 0 }));
+    return t;
   }
 
   /** What every request costs before any conversation: the system prompt and the tool definitions. */
@@ -1316,8 +1355,13 @@ export class Agent {
     const limit = contextLimit(cfg);
     const threshold = compactThreshold(cfg);
     const tokens = this.contextInfo().tokens;
-    if (tokens >= limit * PRUNE_THRESHOLD && cfg.pruneToolResults !== false) this.prune(PRUNE_NORMAL, true);
-    else if (tokens >= PRUNE_BUDGET && cfg.pruneToolResults !== false) this.pruneForModel();
+    // Where the provider caches the prefix, old output is set aside in batches (a change to it is paid for); elsewhere
+    // as before: a little more past PRUNE_BUDGET, and in the stored messages past 60% of the window
+    if (cfg.pruneToolResults !== false) {
+      if (this.cachesPrefix(cfg)) this.pruneInBatches(limit);
+      else if (tokens >= limit * PRUNE_THRESHOLD) this.prune(PRUNE_NORMAL, true);
+      else if (tokens >= PRUNE_BUDGET) this.pruneForModel();
+    }
     if (this.contextInfo().tokens < limit * threshold) return;
     const base = this.baseTokens(cfg);
     if (base >= limit * threshold) {
@@ -1379,7 +1423,44 @@ export class Agent {
 
   /** The stored conversation as the model is sent it (agent/context-view.ts): long output cut, old screenshots left out. */
   private modelView(): Msg[] {
-    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []));
+    return modelMessages(this.session.messages, new Set(this.session.prunedResults ?? []), { batchShots: this.cachesPrefix(this.sessionConfig()) });
+  }
+
+  /**
+   * Whether the provider in use caches a request's prefix, so that changing an earlier message costs a cache write of
+   * everything after it: every provider but Ollama and a local LM Studio (which keep the old way of pruning).
+   */
+  private cachesPrefix(cfg: AppConfig): boolean {
+    try {
+      const type = resolveProvider(cfg).type;
+      return type !== 'ollama' && type !== 'lmstudio';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Where the prefix is cached: nothing until the view reaches the high-water mark, then old output set aside, oldest
+   * first, until it is down to the low-water mark (context-view.ts batchMarks). Between batches the view, and so the
+   * cached prefix, stays the same.
+   */
+  private pruneInBatches(limit: number): void {
+    const { high, low } = batchMarks(limit, PRUNE_THRESHOLD);
+    let tokens = this.contextInfo().tokens;
+    if (tokens < high) return;
+    const s = this.session;
+    const already = new Set(s.prunedResults ?? []);
+    // resultsToPrune lists the newest first
+    const candidates = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m)).reverse();
+    const byId = new Map<string, Msg>();
+    for (const m of s.messages) if (m.role === 'tool') byId.set(m.tool_call_id, m);
+    const chosen: string[] = [];
+    for (const id of candidates) {
+      if (tokens <= low) break;
+      chosen.push(id);
+      tokens -= pruneSaving(byId.get(id)?.content) * this.estimateScale;
+    }
+    this.pruneForModel(chosen);
   }
 
   /**
@@ -1387,14 +1468,14 @@ export class Agent {
    * sent (only its start and end go with each later request). The session keeps it whole, so the tool rows still show
    * all of it, and an output once set aside stays so: the requests keep the same prefix until the next time.
    */
-  private pruneForModel(): void {
+  private pruneForModel(chosen?: string[]): void {
     const s = this.session;
     const already = new Set(s.prunedResults ?? []);
-    const ids = resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
+    const ids = chosen ?? resultsToPrune(s.messages, already, (m) => m.role === 'user' && !isSyntheticUser(m));
     if (!ids.length) return;
-    const before = estimateTokens(modelMessages(s.messages, already));
+    const before = estimateTokens(this.modelView());
     s.prunedResults = [...already, ...ids];
-    const after = estimateTokens(modelMessages(s.messages, new Set(s.prunedResults)));
+    const after = estimateTokens(this.modelView());
     // The reported size of the last request covered the output now set aside.
     const mark = s.lastPrompt;
     if (mark) mark.tokens = Math.max(0, Math.round(mark.tokens - (before - after) * this.estimateScale));
@@ -1485,7 +1566,7 @@ export class Agent {
     let dropAt = this.cutFor(tail, limit);
     if (!dropAt) dropAt = findCut(s.messages, tail, { insideTurn: true });
     const dropped = s.messages.slice(0, dropAt);
-    const count = dropped.filter((m) => !isCompactPreamble(m)).length;
+    const count = dropped.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length;
     const note = droppedPreamble(count, filesTouched(dropped), this.requestToCarry(dropped), this.foldedGroupsText(cfg, s.messages.slice(dropAt)));
     if (!dropAt || estimateMessageTokens({ role: 'user', content: note }) >= estimateTokens(dropped)) {
       // Told once until the conversation has grown: every turn of the run would end up here again.
@@ -1555,7 +1636,7 @@ export class Agent {
       tokensBefore: o.before,
       tokensAfter: this.contextInfo().tokens,
       summary,
-      messages: folded.filter((m) => !isCompactPreamble(m)).length,
+      messages: folded.filter((m) => !isCompactPreamble(m) && !isContextNote(m)).length,
       kept: kept.length,
       stage: o.stage,
     };

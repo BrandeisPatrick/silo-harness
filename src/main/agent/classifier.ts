@@ -10,6 +10,7 @@ import { contextSize, ollamaComplete } from '../ollama';
 import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
 import { LOAD_TOOLS } from '../tools/groups';
+import { nativeError, thinkingFor } from './anthropic';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
 import { errorMessage } from './errors';
 
@@ -269,7 +270,34 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
       return await call(undefined);
     }
   }
-  const { client, model } = makeClient(cfg);
+  const { client, model, native } = makeClient(cfg);
+  if (native) {
+    // Anthropic's own API: the instructions are the same on every check, so they are marked for its prompt cache
+    // (when long enough to be cached: 512 tokens on the Claude 5 models, about four characters each)
+    const system = messages.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n');
+    const rest = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
+    const thinking = thinkingFor(model);
+    // A model that always thinks needs room for it before the one line of JSON
+    const maxTokens = thinking?.type === 'adaptive' ? MAX_REPLY_TOKENS * 10 : MAX_REPLY_TOKENS;
+    try {
+      const res = await native.messages.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          system: [{ type: 'text', text: system, ...(system.length >= CACHE_MIN_CHARS ? { cache_control: { type: 'ephemeral' as const } } : {}) }],
+          messages: rest,
+          ...(thinking ? { thinking } : {}),
+        },
+        { signal: timeout, maxRetries: 0 },
+      );
+      return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    } catch (err) {
+      throw nativeError(err);
+    }
+  }
   const res = await client.chat.completions.create({ model, messages, max_tokens: MAX_REPLY_TOKENS, stream: false }, { signal: timeout, maxRetries: 0 });
   return res.choices?.[0]?.message?.content ?? '';
 }
+
+/** The shortest system prompt worth a cache mark (512 tokens on the Claude 5 models, about four characters each). */
+const CACHE_MIN_CHARS = 2048;

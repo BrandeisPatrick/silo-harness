@@ -261,7 +261,9 @@ function cleanCut(msgs, cut) {
   check('4: setup: the prompt and tools take a few thousand tokens of the 12k window', base > 2500 && base < 6000, base);
 
   // ---- 4: prune only, when that is enough ----
-  fresh({ portkey: { contextWindow: 24000 } });
+  // On a provider that does not cache the prefix (a local LM Studio here); where it is cached, prune-batches.js
+  const local = (window) => ({ provider: 'local', providers: { local: { type: 'lmstudio', baseURL: `http://127.0.0.1:${model.port}/v1`, model: 'mock', contextWindow: window } } });
+  fresh(local(24000));
   for (const f of 'abcdefgh') state.replies.push(read(`${f}.txt`));
   state.replies.push({ content: 'Read them all.' });
   await agent.run('Read a.txt to h.txt, one at a time.');
@@ -278,7 +280,7 @@ function cleanCut(msgs, cut) {
   check('4: a quiet notice says how much was cleared', notices().some((n) => /^Cleared [\d.]+k? tokens of old tool output/.test(n)), notices());
   check('4: the request after pruning is well-formed and smaller', runEnd().reason === 'done' && JSON.stringify(streams()[0].messages).length < lastTurn1, { lastTurn1, now: JSON.stringify(streams()[0].messages).length });
   // the kill switch
-  fresh({ portkey: { contextWindow: 24000 }, pruneToolResults: false });
+  fresh({ ...local(24000), pruneToolResults: false });
   for (const f of 'abcdefgh') state.replies.push(read(`${f}.txt`));
   state.replies.push({ content: 'ok' });
   await agent.run('Read a.txt to h.txt, one at a time.');
@@ -300,7 +302,7 @@ function cleanCut(msgs, cut) {
   check('5: the run compacted once and finished', runEnd().reason === 'done' && events.filter((e) => e.type === 'compact_start').length === 1 && comp && comp.stage === 'summary', { notices: notices(), end: runEnd() });
   const summaryReq = summaries()[0];
   check('5: only the earlier turn went to the summariser, with the task list', summaryReq && /USER: Read notes\.txt and remember/.test(summaryReq.messages[1].content) && !/Now read a\.txt/.test(summaryReq.messages[1].content) && /\[in_progress\] Read the files/.test(summaryReq.messages[1].content));
-  check('5: after compaction the conversation is the brief, then the tail unchanged', C.isCompactPreamble(s5.messages[0]) && s5.messages[1].content === 'Now read a.txt, b.txt and c.txt.' && comp.folded.length === 4 && comp.kept >= 3 && comp.messages === 4);
+  check('5: after compaction the conversation is the brief, then the tail unchanged', C.isCompactPreamble(s5.messages[0]) && s5.messages[1].content === 'Now read a.txt, b.txt and c.txt.' && comp.folded.length === 5 && comp.folded.filter(C.isContextNote).length === 1 && comp.kept >= 3 && comp.messages === 4);
   check('5: the brief lists the files touched in the folded part', /## Files touched[\s\S]*- read: notes\.txt/.test(s5.messages[0].content));
   const afterCompact = streams().slice(-1)[0];
   check('5: the next request is brief + tail and the mock accepted it as well-formed', afterCompact.messages[1].content.startsWith('[Context compacted]') && afterCompact.messages[2].content.startsWith('Now read') && !malformed(afterCompact.messages) && runEnd().reason === 'done');
@@ -347,7 +349,8 @@ function cleanCut(msgs, cut) {
   check('7: /compact folds a single finished turn whole and carries its request', r.ok && agent.session.messages.length === 1 && /Read notes\.txt and remember the code word\./.test(agent.session.messages[0].content) && agent.session.compactions.length === 1 && agent.session.compactions[0].kept === 0, { ok: r.ok, error: r.error, messages: agent.session.messages.length });
   state.replies.push({ content: 'falcon' });
   await agent.run('What was the code word?');
-  check('7: …and the conversation goes on from the brief', streams().length === 1 && streams()[0].messages.length === 3 && runEnd().reason === 'done', streams().map((q) => q.messages.map((m) => m.role)));
+  check('7: …and the conversation goes on from the brief', streams().length === 1 && streams()[0].messages.length === 4 && runEnd().reason === 'done', streams().map((q) => q.messages.map((m) => m.role)));
+  check('7: …with the context note again, after the request, since the fold took the old one', C.isContextNote(streams()[0].messages[3]) && agent.session.messages.filter(C.isContextNote).length === 1, streams()[0].messages.map((m) => String(m.content).slice(0, 30)));
 
   // ---- 8: fallbacks when no summary can be produced ----
   // (a) prune harder
@@ -372,7 +375,7 @@ function cleanCut(msgs, cut) {
   state.replies.push({ content: 'done' });
   await agent.run('Now read a.txt, b.txt and c.txt.');
   const c8 = agent.session.compactions && agent.session.compactions[0];
-  check('8b: the summary failed and nothing could be pruned, so the oldest messages were dropped', runEnd().reason === 'done' && c8 && c8.stage === 'dropped' && c8.folded.length === 4 && /dropped because a summary could not be produced/.test(agent.session.messages[0].content) && agent.session.messages[1].content.startsWith('Now read') && notices().some((n) => /Dropped the \d+ oldest messages/.test(n)), notices());
+  check('8b: the summary failed and nothing could be pruned, so the oldest messages were dropped', runEnd().reason === 'done' && c8 && c8.stage === 'dropped' && c8.folded.length === 5 && /dropped because a summary could not be produced/.test(agent.session.messages[0].content) && agent.session.messages[1].content.startsWith('Now read') && notices().some((n) => /Dropped the \d+ oldest messages/.test(n)), notices());
   check('8b: the dropped messages still show in the transcript above the divider', toTranscript(agent.session).findIndex((i) => i.role === 'compaction') === 3);
   state.summaryFails = false;
 

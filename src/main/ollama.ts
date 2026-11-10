@@ -22,10 +22,16 @@ interface OllamaChunk {
   error?: string;
 }
 
-/** Token counts of one model call: prompt = whole input incl. history, completion = generated tokens. */
+/**
+ * Token counts of one model call: prompt = whole input incl. history (cached tokens included, so the context meter
+ * means the same whatever the provider caches), completion = generated tokens. The cache fields are set only when the
+ * provider reports them: of the prompt, the tokens read from its prompt cache and those written to it.
+ */
 export interface Usage {
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 /** Native API root for a configured base URL, which may be the OpenAI-compatible .../v1 endpoint. */

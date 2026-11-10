@@ -8,7 +8,7 @@ import path from 'node:path';
 import type { HistoryRecord } from '../../shared/history';
 import type { DreamMode } from '../../shared/dreaming';
 import type { MessageOrigin } from '../../shared/types';
-import { FAILED_RESULT, isCompactPreamble } from '../compact';
+import { FAILED_RESULT, isCompactPreamble, isContextNote } from '../compact';
 import { displayText, type Msg, type Session } from '../sessions';
 
 /** How much of each piece a digest keeps */
@@ -81,7 +81,7 @@ class TurnBuilder {
 
   message(m: Msg, t: number): void {
     if (m.role === 'user') {
-      if (isCompactPreamble(m)) return;
+      if (isCompactPreamble(m) || isContextNote(m)) return;
       const text = displayText(m.content).trim();
       if (!text || text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.')) return;
       const turn: DigestTurn = { sessionId: this.sessionId, t, text, tools: {}, failed: [], denied: [], memory: [] };

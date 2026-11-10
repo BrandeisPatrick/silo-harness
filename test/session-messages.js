@@ -64,11 +64,13 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
     const asked = [];
     return { asked, ctx: { sessionId, cwd: dir, app, approve: async (...a) => (asked.push(a), answer) } };
   };
-  const userTexts = (id) => rt.get(id).messages.filter((m) => m.role === 'user' && typeof m.content === 'string').map((m) => m.content);
+  const userTexts = (id) => rt.get(id).messages.filter((m) => m.role === 'user' && typeof m.content === 'string' && !m.content.startsWith('[Session context]')).map((m) => m.content);
   const holds = (id, words) => userTexts(id).some((t) => t.includes(words));
   /** The requests the mock answered for a session: those whose first user message carries its tag */
   const requestsOf = (tag) => state.requests.filter((r) => r.url === '/v1/chat/completions' && r.payload.stream && has(firstUser(r.payload), tag));
-  const systemOf = (req) => String(req.payload.messages[0]?.role === 'system' ? req.payload.messages[0].content : '');
+  // What the model is told about itself: the system prompt, and the context notes that carry the per-session sections
+  const systemOf = (req) =>
+    [String(req.payload.messages[0]?.role === 'system' ? req.payload.messages[0].content : ''), ...req.payload.messages.filter((m) => m.role === 'user' && String(m.content).startsWith('[Session context]')).map((m) => m.content)].join('\n\n');
   const hookInputs = () => (fs.existsSync(upsFile) ? fs.readFileSync(upsFile, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)) : []);
   const mode = () => app.config().permissionMode;
   const newSession = async (title, tag) => {

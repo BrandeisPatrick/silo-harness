@@ -2,12 +2,15 @@
 // stream_options or streaming with tools, and the plain-chat retry for an Ollama model that takes no tools.
 
 import { randomUUID } from 'node:crypto';
+import type Anthropic from '@anthropic-ai/sdk';
 import type OpenAI from 'openai';
 import type { AgentEvent, AppConfig } from '../../shared/types';
 import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
-import { ollamaOf } from '../providers';
+import { ollamaOf, resolveProvider } from '../providers';
 import type { Msg } from '../sessions';
+import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropic';
+import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
 
 /** What the agent lends a model call: its events, its usage report and the memories kept across calls. */
@@ -20,18 +23,71 @@ export interface CompletionHost {
   toolSupport: Map<string, boolean>;
   /** max_tokens for the provider in use, when its entry sets maxOutput */
   maxOutput(): number | undefined;
+  /** The native Anthropic path's memory for this session (agent/anthropic.ts NativeHost.thinking) */
+  thinking?: { stripBefore: number };
+  /** The session's id: the key a provider's prompt cache is steered by (agent/gateway-cache.ts) */
+  cacheKey?: string;
+}
+
+/** What a request adds for the provider's prompt cache (gateway-cache.ts), or nothing. */
+type Decorate = (messages: Msg[], tools: ToolSpec[]) => { messages: Msg[]; tools: ToolSpec[]; extra: Record<string, unknown> };
+const plain: Decorate = (messages, tools) => ({ messages, tools, extra: {} });
+
+/** A model's reply: its text, its tool calls, and (native Anthropic path) its thinking blocks to keep with it. */
+export interface Reply {
+  text: string;
+  toolCalls: ToolCall[];
+  thinking?: ThinkingBlock[];
 }
 
 export function noToolsNotice(model: string): string {
   return `${model} doesn't support tools, so it can't read files, run commands or browse.`;
 }
 
+/** An OpenAI-shaped usage object as providers and gateways send it, with every spelling of the cache counts. */
+export interface RawUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  /** OpenAI, OpenRouter, LiteLLM, Portkey (cache_write_tokens: OpenRouter, OpenAI on newer models) */
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number } | null;
+  /** Anthropic's spellings, which LiteLLM and Portkey pass through */
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/** A count when the provider sent one (0 included), else undefined. */
+function count(...values: unknown[]): number | undefined {
+  for (const v of values) if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  return undefined;
+}
+
+/**
+ * One usage object in our terms. The prompt stays the whole input; a gateway that reports only the uncached part as
+ * prompt_tokens (fewer than it read and wrote) gets the cached tokens added back.
+ */
+export function usageOf(u: RawUsage): Usage {
+  const read = count(u.prompt_tokens_details?.cached_tokens, u.cache_read_input_tokens);
+  const write = count(u.prompt_tokens_details?.cache_write_tokens, u.cache_creation_input_tokens);
+  let prompt = Number(u.prompt_tokens) || 0;
+  if ((read ?? 0) + (write ?? 0) > prompt) prompt += (read ?? 0) + (write ?? 0);
+  const out: Usage = { promptTokens: prompt, completionTokens: Number(u.completion_tokens) || 0 };
+  if (read !== undefined) out.cacheReadTokens = read;
+  if (write !== undefined) out.cacheWriteTokens = write;
+  return out;
+}
+
 /** Folds one chunk's usage into the running counts (gateways may repeat or split the counts across chunks). */
-function mergeUsage(prev: Usage | null, u: { prompt_tokens?: number; completion_tokens?: number }): Usage {
-  return {
-    promptTokens: Math.max(prev?.promptTokens ?? 0, Number(u.prompt_tokens) || 0),
-    completionTokens: Math.max(prev?.completionTokens ?? 0, Number(u.completion_tokens) || 0),
+export function mergeUsage(prev: Usage | null, raw: RawUsage): Usage {
+  const u = usageOf(raw);
+  const out: Usage = {
+    promptTokens: Math.max(prev?.promptTokens ?? 0, u.promptTokens),
+    completionTokens: Math.max(prev?.completionTokens ?? 0, u.completionTokens),
   };
+  const read = prev?.cacheReadTokens === undefined ? u.cacheReadTokens : Math.max(prev.cacheReadTokens, u.cacheReadTokens ?? 0);
+  const write = prev?.cacheWriteTokens === undefined ? u.cacheWriteTokens : Math.max(prev.cacheWriteTokens, u.cacheWriteTokens ?? 0);
+  if (read !== undefined) out.cacheReadTokens = read;
+  if (write !== undefined) out.cacheWriteTokens = write;
+  return out;
 }
 
 export async function complete(
@@ -43,7 +99,12 @@ export async function complete(
   specs: ToolSpec[],
   signal: AbortSignal,
   turn: number,
-): Promise<{ text: string; toolCalls: ToolCall[] }> {
+  native?: Anthropic,
+): Promise<Reply> {
+  // Anthropic's own API: the Messages path, which caches (agent/anthropic.ts)
+  if (native) return completeAnthropic(host, native, model, history, specs, signal, turn);
+  // The thinking blocks kept for that path go to no other provider
+  history = withoutNative(history);
   if (!client) {
     const ol = ollamaOf(cfg);
     const chat = (tools: ToolSpec[]) =>
@@ -74,10 +135,19 @@ export async function complete(
   let emitted = false;
   const onEmit = () => (emitted = true);
   const endpoint = `${client.baseURL}|${model}`;
+  let shape: CacheShape | null = null;
+  try {
+    shape = cacheShape(resolveProvider(cfg), model);
+  } catch {
+    shape = null;
+  }
+  const noFields = refusedCacheFields;
+  const decorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
   for (;;) {
     const includeUsage = !host.noStreamUsage.has(endpoint);
+    const withFields = decorate() !== plain;
     try {
-      return await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit);
+      return await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit, decorate());
     } catch (err) {
       if (signal.aborted || emitted || isContextLengthError(err)) throw err;
       // A gateway or provider that rejects stream_options still streams without it.
@@ -85,10 +155,16 @@ export async function complete(
         host.noStreamUsage.add(endpoint);
         continue;
       }
+      // A gateway that refuses the cache fields gets the request without them, now and for the rest of the process
+      if (withFields && isFieldRefusal(err)) {
+        console.warn('[agent] the provider refused the prompt-cache fields; sending without them:', errorMessage(err));
+        noFields.add(client.baseURL);
+        continue;
+      }
       // Some gateways/models reject streaming with tools; fall back to a single request
       // as long as nothing has been shown to the user yet.
       console.warn('[agent] streaming failed, retrying without streaming:', errorMessage(err));
-      return completeOnce(host, client, model, history, specs, signal, turn);
+      return completeOnce(host, client, model, history, specs, signal, turn, decorate());
     }
   }
 }
@@ -103,9 +179,11 @@ async function completeStreaming(
   turn: number,
   includeUsage: boolean,
   onEmit: () => void,
+  decorate: Decorate = plain,
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
+  const d = decorate(history, specs);
   const stream = await client.chat.completions.create(
-    { model, messages: history, tools: specs, stream: true, stream_options: includeUsage ? { include_usage: true } : undefined, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}) },
+    { model, messages: d.messages, tools: d.tools, stream: true, stream_options: includeUsage ? { include_usage: true } : undefined, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}), ...d.extra } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
     { signal },
   );
   let text = '';
@@ -116,7 +194,7 @@ async function completeStreaming(
 
   for await (const chunk of stream) {
     // With include_usage the counts arrive on a final chunk whose choices array is empty.
-    if (chunk.usage) usage = mergeUsage(usage, chunk.usage);
+    if (chunk.usage) usage = mergeUsage(usage, chunk.usage as RawUsage);
     const delta = chunk.choices?.[0]?.delta;
     if (!delta) continue;
     const reasoning = (delta as { reasoning_content?: string; reasoning?: string }).reasoning_content ?? (delta as { reasoning?: string }).reasoning;
@@ -183,9 +261,11 @@ async function completeOnce(
   specs: ToolSpec[],
   signal: AbortSignal,
   turn: number,
+  decorate: Decorate = plain,
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  const res = await client.chat.completions.create({ model, messages: history, tools: specs, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}) }, { signal });
-  if (res.usage) host.reportUsage(mergeUsage(null, res.usage));
+  const d = decorate(history, specs);
+  const res = await client.chat.completions.create({ model, messages: d.messages, tools: d.tools, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}), ...d.extra } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal });
+  if (res.usage) host.reportUsage(usageOf(res.usage as RawUsage));
   const msg = res.choices?.[0]?.message;
   const text = msg?.content ?? '';
   if (text) host.emit({ type: 'text_delta', text });

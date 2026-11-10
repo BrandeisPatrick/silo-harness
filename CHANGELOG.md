@@ -5,6 +5,11 @@
 ### Improved
 
 - **Tools sent when needed.** The browser, terminal, sub-session, schedule and mod tools reach the model only once a session needs them, so short sessions send about 40% fewer tokens.
+- **Prompt caching on Claude.** Anthropic providers use Claude's own API, which caches the prompt and the conversation from one request to the next.
+- **Caching through gateways.** Claude through OpenRouter, Portkey, LiteLLM or Vercel asks for prompt caching, and OpenAI gets the session as its cache key.
+- **A system prompt that stays put.** A mode switch, a rename or a new day adds a short note to the conversation, so providers keep the prompt cached.
+- **Fewer cache rewrites.** Where the provider caches, old tool output and screenshots are set aside in batches, so the cached prompt is rewritten rarely.
+- **Cached share shown.** The context meter says how much of the last request came from the provider's prompt cache, when the provider reports it.
 - **Faster, cleaner search.** grep uses ripgrep when installed, skips `.gitignore`d files and stops after 30 seconds; glob lists recent files first.
 
 ### Fixed

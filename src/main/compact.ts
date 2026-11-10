@@ -87,11 +87,28 @@ export function isSyntheticUser(m: Msg): boolean {
   if (m.role !== 'user') return false;
   if (isCompactPreamble(m)) return true;
   const t = textOf(m.content).text;
-  return t.startsWith('[Screenshot returned by') || t.startsWith('You returned an empty response.') || t.startsWith(HOOK_NOTE_PREFIX) || t.startsWith(AUTO_NOTE_PREFIX);
+  return t.startsWith('[Screenshot returned by') || t.startsWith('You returned an empty response.') || t.startsWith(HOOK_NOTE_PREFIX) || t.startsWith(AUTO_NOTE_PREFIX) || t.startsWith(CONTEXT_NOTE_PREFIX);
 }
 
 /** A user-role message a hook added (context, a Stop hook's reason to keep going): sent to the model, not shown as a turn. */
 export const HOOK_NOTE_PREFIX = '[Hook ';
+
+/**
+ * The note that carries what changes during a session (the mode, the folder and date, the session's name and parent),
+ * appended to the conversation instead of written into the system prompt, so the prompt stays byte for byte the same
+ * and a provider's prompt cache keeps it (agent/prompt.ts contextNote). Sent to the model, not shown as a turn.
+ */
+export const CONTEXT_NOTE_PREFIX = '[Session context]';
+
+export function isContextNote(m: Msg | undefined): boolean {
+  return !!m && m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(CONTEXT_NOTE_PREFIX);
+}
+
+/** The text of the newest context note in `messages`, if any. */
+export function lastContextNote(messages: Msg[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) if (isContextNote(messages[i])) return messages[i].content as string;
+  return undefined;
+}
 
 /** A tool result that reports a failure: the call did not do what was asked (the window shows the row as failed). */
 export const FAILED_RESULT = /^(Error:|User denied|Not permitted|Blocked by Auto mode|Tool call was interrupted|[A-Za-z]+(?::\S+)? hook (?:error|denied))/;
@@ -130,8 +147,8 @@ export function cutPoints(messages: Msg[]): boolean[] {
  */
 export function findCut(messages: Msg[], tailTokens: number, opts: { insideTurn?: boolean } = {}): number {
   const cut = rawCut(messages, tailTokens, opts);
-  // Folding nothing but an earlier brief would only rewrite it.
-  return cut > 0 && messages.slice(0, cut).every(isCompactPreamble) ? 0 : cut;
+  // Folding nothing but an earlier brief (and context notes) would only rewrite it.
+  return cut > 0 && messages.slice(0, cut).every((m) => isCompactPreamble(m) || isContextNote(m)) ? 0 : cut;
 }
 
 function rawCut(messages: Msg[], tailTokens: number, opts: { insideTurn?: boolean }): number {
@@ -303,6 +320,8 @@ export function renderForSummary(messages: Msg[], budgetChars: number): string {
   for (const m of messages) {
     if (m.role === 'system') continue;
     if (m.role === 'user') {
+      // The newest context note follows the brief again; the summary need not repeat it
+      if (isContextNote(m)) continue;
       if (isCompactPreamble(m)) {
         lines.push(`EARLIER SUMMARY:\n${briefOf(m)}`);
         continue;

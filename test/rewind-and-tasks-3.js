@@ -50,7 +50,7 @@ module.exports = async ({ check, done }) => {
   check('queued message gets its own checkpoint; edits land on the current one', s.turns.length === 3 && s.turns[1].text === 'second run' && s.turns[1].files[f('existing.txt')] === 'v1' && s.turns[2].text === 'queued message' && s.turns[2].files[f('existing.txt')] === 'v2', s.turns.map((t) => [t.at, t.text, Object.keys(t.files).length]));
   check('transcript user items carry turn 0..2', toTranscript(s).filter((i) => i.role === 'user').map((i) => i.turn).join() === '0,1,2');
   const r = rewindSession(s, cwd, 1);
-  check('rewind to turn 1 restores v1 and keeps new.txt; text returned', read(f('existing.txt')) === 'v1' && read(f('new.txt')) === 'n' && r.text === 'second run' && s.turns.length === 1 && s.messages.length === 5, [r, s.messages.length]);
+  check('rewind to turn 1 restores v1 and keeps new.txt; text returned', read(f('existing.txt')) === 'v1' && read(f('new.txt')) === 'n' && r.text === 'second run' && s.turns.length === 1 && s.messages.length === 6, [r, s.messages.length]); // the first run's messages and its context note
 
   events = [];
   state.replies.push({ toolCalls: [call('update_tasks', { tasks: [{ id: 't1', title: 'Read the code', status: 'completed' }, { title: 'Write tests', status: 'in_progress' }, { title: 'Run them', status: 'pending' }] })] });

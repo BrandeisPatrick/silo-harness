@@ -2,7 +2,7 @@
 
 import type { Msg, Session } from '../sessions';
 import { displayText, pairToolResults, type StoredToolCall } from '../sessions';
-import { isCompactPreamble } from '../compact';
+import { isCompactPreamble, isContextNote } from '../compact';
 import { LOAD_TOOLS } from '../tools/groups';
 
 export type ExportFormat = 'markdown' | 'json' | 'jsonl';
@@ -39,7 +39,7 @@ function messagesMarkdown(s: Session, messages: Msg[], out: string[]): void {
   for (const [call, m] of pairToolResults(messages)) results.set(call, typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
   for (const m of messages) {
     if (m.role === 'user') {
-      if (isCompactPreamble(m)) continue;
+      if (isCompactPreamble(m) || isContextNote(m)) continue;
       const text = displayText(m.content).trim();
       const images = imageCount(m.content);
       if (!text && !images) continue;
