@@ -20,7 +20,7 @@ const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_directory']);
 const SECRET_REASON = 'reads secrets';
 /** The browser cards Auto mode's safety check decides (allow, block or ask the user); purchase and account always ask. */
 export const CHECKED_BROWSER_CARDS: ReadonlySet<string> = new Set(['site', 'sensitive', 'eval']);
-const PLAN_CUSTOM_BLOCKED ='Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
+const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 
 /**
  * What the rules decide: run it, refuse it with this message, show a card (`custom`: a tool's own question, Allow and

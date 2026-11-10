@@ -155,8 +155,9 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
  * account asks with a card of its own (Allow and Deny, in every mode, Bypass included), except on an exempt host,
  * which is the user's own app under development. What decides is what is really under the click point (hit-tested in
  * the safety world): a ref covered by something else, or changed since the outline, is refused; a click that lands in
- * a frame from another site asks with that site named (in every mode), and is refused when that site is a sensitive
- * one. `target` is what the rules saw, which the click checks again at the moment it clicks.
+ * a frame from another site asks with that site named (in every mode; in Auto mode the safety check decides it while
+ * it runs), and is refused when that site is a sensitive one. `target` is what the rules saw, which the click checks
+ * again at the moment it clicks.
  */
 async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<{ stop: string | null; target: ClickTarget | null }> {
   const target = await askPage<ClickTarget | null>(() => ctx.browser.describeTarget(at), null);
