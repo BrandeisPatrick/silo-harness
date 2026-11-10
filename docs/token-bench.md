@@ -212,6 +212,13 @@ larger than without caching: on a provider that caches, old tool output is set a
 requests grew to 89K before the one batch in turn 15 brought them to 55K. Cache reads of that output cost less than the
 rewrites that setting it aside earlier would have caused. No compaction happened.
 
+Every provider type but Ollama and LM Studio is first assumed to cache. A session whose provider reports no cache read or
+write on three requests in a row, each sent within five minutes of the last reply with a prompt of 2,000 tokens or more,
+goes back to the rule without caching (old output set aside past 48K, screenshots one at a time) until a read or write is
+reported again. After a pause of more than five minutes the next request writes the whole conversation to the cache anyway,
+so a batch then starts at 60K instead of 90K. Neither the fallback nor the batch at a pause has been measured against a live
+endpoint.
+
 ### How it was run
 
 `node scripts/token-bench.js --runs 2` and `node scripts/token-bench.js --tier 2`: the app's provider of type `anthropic` on the
@@ -223,6 +230,8 @@ and one-hour writes. Model `claude-haiku-5-5`, thinking off (the native path tur
 - **Auto mode's check** (native, its instructions marked for the cache): 16 calls in tier 2, 42,110 tokens in, 16,240 of them
   read from the cache (the 1,015 tokens of instructions each time), $0.0031. What follows the instructions (the user's messages,
   the recent tool calls, the action) changes every call and is paid in full. Tier 1: 4 calls per run, $0.0004 and $0.0005.
+  Since then the Auto mode notes and instruction files the check is shown are marked for the cache too; the benchmark project
+  has neither, so these numbers do not show it.
 - **Titles** stay on the OpenAI-compatible endpoint: one per session, 70 to 122 tokens in, under $0.0001 each.
 - **Compaction summary**: none happened in these runs. It stays on the OpenAI-compatible endpoint, so when one happens it is
   paid in full.

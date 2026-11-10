@@ -55,7 +55,7 @@ import type { HookEvent } from '../shared/hooks';
 import type { FireContext, HookEngine, HookOutcome } from './hooks/engine';
 import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from './hooks/tools';
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
-import { batchMarks, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
+import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
@@ -151,6 +151,20 @@ export interface AgentOptions {
   prompt?: (info: { cwd: string; mode: PermissionMode; sessionId: string; essential?: boolean; restricted?: boolean; part?: 'shared' | 'session'; groups?: readonly string[]; onlyGroup?: string }) => string;
   /** The hook engine (default: the app's 'hooks' service; none in bare tests) */
   hooks?: HookEngine | null;
+  /** The clock for the cache bookkeeping (default Date.now; tests pass their own) */
+  now?: () => number;
+}
+
+/**
+ * What a session has seen of the provider's prompt cache, in memory only (a reloaded session starts from the provider
+ * type's assumption). `lastAt` is when the last main model call answered; `storedAt` the stored session's last activity
+ * when this process first ran it.
+ */
+interface CacheSeen {
+  caching: boolean;
+  misses: number;
+  lastAt?: number;
+  storedAt?: number;
 }
 
 /** A hook's block reason for a notice: without the "<Event> hook error: [<command>]: " prefix the model reads. */
@@ -201,6 +215,10 @@ export class Agent {
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
   private lastUsage: Usage | null = null;
+  /** Per session: whether its provider was seen caching (cachesPrefix, noteCache) */
+  private cacheSeen = new Map<string, CacheSeen>();
+  /** When the current main model call was sent */
+  private requestAt = 0;
   /**
    * Reported over estimated size of the last request: models count tool schemas and the like differently than four
    * characters per token, so an estimate (after a prune or a fold, before the next reply) is scaled by it.
@@ -969,6 +987,7 @@ export class Agent {
     // A session from before folders were per session adopts the app's folder the first time it runs.
     if (!this.session.cwd) this.session.cwd = this.getConfig().workingDirectory;
     this.runCwd = this.session.cwd;
+    this.cacheState(); // before the run touches the session, so a reloaded one keeps its last activity time
     const cfg = this.sessionConfig();
     let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
@@ -1092,6 +1111,7 @@ export class Agent {
         const history: Msg[] = [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()];
         const activeSpecs = toolless ? [] : specs;
         this.lastUsage = null;
+        this.requestAt = this.now();
         let reply: Reply;
         try {
           reply = await complete(this.completionHost(), cfg, client, model, history, activeSpecs, signal, turn, native);
@@ -1104,6 +1124,7 @@ export class Agent {
             break;
           }
           this.lastUsage = null;
+          this.requestAt = this.now();
           this.addContextNote(cfg);
           reply = await complete(this.completionHost(), cfg, client, model, [{ role: 'system', content: this.prompt(cfg, skills) }, ...this.modelView()], activeSpecs, signal, turn, native);
         }
@@ -1376,6 +1397,7 @@ export class Agent {
 
   private reportUsage(usage: Usage): void {
     this.lastUsage = usage;
+    this.noteCache(usage);
     this.emit({ type: 'usage', ...usage });
   }
 
@@ -1488,26 +1510,59 @@ export class Agent {
 
   /**
    * Whether the provider in use caches a request's prefix, so that changing an earlier message costs a cache write of
-   * everything after it: every provider but Ollama and a local LM Studio (which keep the old way of pruning).
+   * everything after it: every provider but Ollama and a local LM Studio (which keep the old way of pruning), unless
+   * this session has seen it not cache (noteCache).
    */
   private cachesPrefix(cfg: AppConfig): boolean {
     try {
       const type = resolveProvider(cfg).type;
-      return type !== 'ollama' && type !== 'lmstudio';
+      return type !== 'ollama' && type !== 'lmstudio' && this.cacheState().caching;
     } catch {
       return false;
     }
   }
 
+  private now(): number {
+    return this.opts.now?.() ?? Date.now();
+  }
+
+  private cacheState(): CacheSeen {
+    let st = this.cacheSeen.get(this.session.id);
+    if (!st) {
+      st = { caching: true, misses: 0, storedAt: this.session.messages.length ? this.session.updatedAt : undefined };
+      this.cacheSeen.set(this.session.id, st);
+    }
+    return st;
+  }
+
+  /**
+   * After each main model call: a reported cache read or write means the provider caches. A request that should have
+   * read the cache (sent within CACHE_TTL_MS of the last reply, a prompt of CACHE_EXPECT_MIN_TOKENS or more) and reports
+   * neither is a miss; CACHE_MISSES_TO_FALLBACK in a row and the session prunes the uncached way until a read or write.
+   */
+  private noteCache(usage: Usage): void {
+    const st = this.cacheState();
+    const warm = st.lastAt !== undefined && this.requestAt - st.lastAt < CACHE_TTL_MS && usage.promptTokens >= CACHE_EXPECT_MIN_TOKENS;
+    if ((usage.cacheReadTokens ?? 0) > 0 || (usage.cacheWriteTokens ?? 0) > 0) {
+      st.caching = true;
+      st.misses = 0;
+    } else if (warm && ++st.misses >= CACHE_MISSES_TO_FALLBACK) st.caching = false;
+    st.lastAt = this.now();
+  }
+
   /**
    * Where the prefix is cached: nothing until the view reaches the high-water mark, then old output set aside, oldest
    * first, until it is down to the low-water mark (context-view.ts batchMarks). Between batches the view, and so the
-   * cached prefix, stays the same.
+   * cached prefix, stays the same. After a pause longer than the cache lasts, the next request writes the whole
+   * conversation anyway, so a batch then starts at COLD_BATCH_FROM of the way from the low mark to the high one.
    */
   private pruneInBatches(limit: number): void {
     const { high, low } = batchMarks(limit, PRUNE_THRESHOLD);
     let tokens = this.contextInfo().tokens;
-    if (tokens < high) return;
+    const st = this.cacheState();
+    const last = st.lastAt ?? st.storedAt;
+    const cold = last !== undefined && this.now() - last > CACHE_TTL_MS;
+    if (tokens < (cold ? low + (high - low) * COLD_BATCH_FROM : high)) return;
     const s = this.session;
     const already = new Set(s.prunedResults ?? []);
     // resultsToPrune lists the newest first

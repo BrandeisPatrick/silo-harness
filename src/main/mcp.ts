@@ -507,9 +507,12 @@ export class McpManager extends EventEmitter {
   }
 
   list(): McpServerInfo[] {
-    return [...this.entries.values()]
-      .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === 'project' ? -1 : 1))
-      .map((e) => this.infoOf(e));
+    return this.sorted().map((e) => this.infoOf(e));
+  }
+
+  /** The entries, project servers first, each scope by name. */
+  private sorted(): Entry[] {
+    return [...this.entries.values()].sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === 'project' ? -1 : 1));
   }
 
   private infoOf(e: Entry): McpServerInfo {
@@ -547,13 +550,13 @@ export class McpManager extends EventEmitter {
   }
 
   /**
-   * The `instructions` of each connected server that has tools to offer (what it tells a client about using it), at
-   * most MAX_INSTRUCTIONS characters. Untrusted text from the server: the system prompt quotes it as such.
+   * The `instructions` of each server whose tools are offered (what it tells a client about using it), at most
+   * MAX_INSTRUCTIONS characters; kept through a reconnect, as its tools are, so the system prompt does not change.
+   * Untrusted text from the server: the system prompt quotes it as such.
    */
   serverInstructions(): { server: string; scope: McpScope; instructions: string }[] {
-    return [...this.entries.values()]
-      .filter((e) => e.status === 'connected' && e.instructions && e.tools.length > 0)
-      .sort((a, b) => (a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === 'project' ? -1 : 1))
+    return this.sorted()
+      .filter((e) => this.offered(e) && e.instructions && e.tools.length > 0)
       .map((e) => ({ server: e.name, scope: e.scope, instructions: e.instructions! }));
   }
 
@@ -584,6 +587,7 @@ export class McpManager extends EventEmitter {
 
     const trusted = new Set(cfg.mcpTrusted?.[cwd] ?? []);
     const pending: Promise<unknown>[] = [];
+    const order = [...this.entries.keys()];
     // Drop entries that are gone or changed.
     for (const [key, e] of [...this.entries]) {
       const want = desired.get(key);
@@ -624,6 +628,9 @@ export class McpManager extends EventEmitter {
         pending.push(this.connect(e));
       }
     }
+    // An edited server keeps its place, so the tools after its own keep theirs in the request
+    const at = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
+    this.entries = new Map([...this.entries].sort((a, b) => at(a[0]) - at(b[0])));
     this.notify();
     await Promise.allSettled(pending);
   }
@@ -1066,11 +1073,14 @@ export class McpManager extends EventEmitter {
     void this.refreshSignedIn(e);
   }
 
-  /** One line per connected server for the system prompt, or '' when there is none. */
+  /**
+   * One line per server whose tools are offered, for the system prompt, or '' when there is none. A server that
+   * reconnects keeps its line, as it keeps its tools, so the prompt does not change.
+   */
   describe(): string {
     const lines: string[] = [];
-    for (const e of this.list()) {
-      if (e.status !== 'connected' || !e.tools.length) continue;
+    for (const e of this.sorted()) {
+      if (!this.offered(e) || !e.tools.length) continue;
       const names = e.tools.map((t) => t.name);
       const shown = names.slice(0, 15).join(', ') + (names.length > 15 ? `, … (${names.length} tools)` : '');
       lines.push(`- ${e.name} (${e.tools.length} tool${e.tools.length === 1 ? '' : 's'}): ${shown}`);

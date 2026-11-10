@@ -135,6 +135,12 @@ function actionText(a: ClassifiedAction, cwd: string): string {
 
 const tag = (name: string, body: string) => `<${name}>\n${body}\n</${name}>`;
 
+/**
+ * Per request message: how many of its characters stay the same on every check of the session (the user's notes and
+ * the instruction files, with the blank line after them). The native path marks that part for the prompt cache.
+ */
+const stableChars = new WeakMap<Msg, number>();
+
 /** The check's request: its instructions, then everything it reads, in one user message. */
 export function classifierRequest(s: Session, cfg: AppConfig, action: ClassifiedAction): Msg[] {
   const cwd = cfg.workingDirectory;
@@ -156,6 +162,7 @@ export function classifierRequest(s: Session, cfg: AppConfig, action: Classified
     files.push(`<file name="${f.label}">\n${text}\n</file>`);
   }
   if (files.length) parts.push(tag('instructions_files', files.join('\n')));
+  const stable = parts.length ? parts.join('\n\n').length + 2 : 0;
   const msgs = userMessages(s);
   // The first message (usually the task) and the latest ones
   const kept = msgs.length > MAX_MESSAGES ? [msgs[0], ...msgs.slice(-(MAX_MESSAGES - 1))] : msgs;
@@ -164,10 +171,30 @@ export function classifierRequest(s: Session, cfg: AppConfig, action: Classified
   parts.push(tag('tool_calls', calls.length ? calls.join('\n') : '(none yet)'));
   parts.push(tag('action', actionText(action, cwd)));
   parts.push('Decide on the action. Answer with the one line of JSON.');
-  return [
-    { role: 'system', content: CLASSIFIER_INSTRUCTIONS },
-    { role: 'user', content: parts.join('\n\n') },
-  ];
+  const user: Msg = { role: 'user', content: parts.join('\n\n') };
+  if (stable) stableChars.set(user, stable);
+  return [{ role: 'system', content: CLASSIFIER_INSTRUCTIONS }, user];
+}
+
+type NativeMessage = { role: 'user' | 'assistant'; content: string | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }[] };
+
+/**
+ * A message of the check as Anthropic's native API gets it. A user message whose start is the same on every check, and
+ * long enough with the instructions to be cached, is sent as two text blocks with a cache mark after that start; the
+ * model reads the same text either way.
+ */
+function nativeMessage(m: Msg, systemChars: number): NativeMessage {
+  const role = m.role as 'user' | 'assistant';
+  const text = String(m.content);
+  const stable = stableChars.get(m) ?? 0;
+  if (role !== 'user' || !stable || stable >= text.length || systemChars + stable < CACHE_MIN_CHARS) return { role, content: text };
+  return {
+    role,
+    content: [
+      { type: 'text', text: text.slice(0, stable), cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: text.slice(stable) },
+    ],
+  };
 }
 
 export interface Verdict {
@@ -273,9 +300,10 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
   const { client, model, native } = makeClient(cfg);
   if (native) {
     // Anthropic's own API: the instructions are the same on every check, so they are marked for its prompt cache
-    // (when long enough to be cached: 512 tokens on the Claude 5 models, about four characters each)
+    // (when long enough to be cached: 512 tokens on the Claude 5 models, about four characters each), and so are the
+    // user's notes and the instruction files at the start of the user message (nativeMessage)
     const system = messages.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n');
-    const rest = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
+    const rest = messages.filter((m) => m.role !== 'system').map((m) => nativeMessage(m, system.length));
     const thinking = thinkingFor(model);
     // A model that always thinks needs room for it before the one line of JSON
     const maxTokens = thinking?.type === 'adaptive' ? MAX_REPLY_TOKENS * 10 : MAX_REPLY_TOKENS;

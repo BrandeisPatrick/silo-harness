@@ -20,14 +20,23 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 (async () => {
   // ---- 1: pure ----
-  const specs = allTools('ask').map(toSpec);
-  check('1: the groups\' tool specs carry their group where JSON does not see it', G.groupOfSpec(specs.find((s) => s.function.name === 'browser_navigate')) === 'browser' && !JSON.stringify(specs).includes('group') && !G.groupOfSpec(specs.find((s) => s.function.name === 'bash')));
+  const plainSpecs = allTools('ask').map(toSpec);
+  check('1: the groups\' tool specs carry their group where JSON does not see it', G.groupOfSpec(plainSpecs.find((s) => s.function.name === 'browser_navigate')) === 'browser' && !JSON.stringify(plainSpecs).includes('group') && !G.groupOfSpec(plainSpecs.find((s) => s.function.name === 'bash')));
+  // A pool with groups to load always offers load_tools (Agent.toolsFor)
+  const specs = [...plainSpecs, toSpec(G.loadToolsTool(G.TOOL_GROUPS))];
   const brief = `[Context compacted]\nBrief.\n\n${G.FOLDED_GROUPS_HEADING}\nLoaded browser: browser_navigate, browser_click.\nBrowser rules…\n\n## Files touched\n- read: a`;
   check('1: the groups a brief says were loaded', same(G.foldedGroups(brief), ['browser']) && same(G.foldedGroups('no heading'), []));
   const plan = A.deferPlan('claude-haiku-5-5', [{ role: 'user', content: brief }, { role: 'user', content: 'go' }], specs);
   check('1: after a fold, the folded group is sent up front, the other deferred', !plan.deferred.has('browser_navigate') && plan.deferred.has('terminal_run') && [...plan.deferred].every((n) => /^(terminal_|web_)/.test(n)), [...plan.deferred]);
   const noGroups = A.deferPlan('claude-haiku-5-5', [{ role: 'user', content: 'q' }], specs.filter((s) => !G.groupOfSpec(s)));
   check('1: no groups, nothing deferred', noGroups.deferred.size === 0);
+  const noLoader = specs.filter((s) => s.function.name !== 'load_tools');
+  const plain = A.deferPlan('claude-haiku-5-5', [{ role: 'user', content: 'q' }], noLoader);
+  check('1: no load_tools in the list, nothing deferred and nothing dropped', plain.deferred.size === 0 && plain.refs.size === 0 && plain.specs === noLoader);
+  A.deferRefused.add('claude-refuses-test');
+  const plainRefused = A.deferPlan('claude-refuses-test', [{ role: 'user', content: 'q' }], noLoader);
+  check('1: …and the same for a model that refused deferred tools', plainRefused.deferred.size === 0 && plainRefused.specs === noLoader);
+  A.deferRefused.delete('claude-refuses-test');
 
   // ---- 2: through the agent ----
   const mock = await startMock();
@@ -100,6 +109,29 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('4: the old way: no group tools before the load, the browser\'s after it, no references', !r4[1].tools.some((t) => t.name.startsWith('browser_')) && r4[2].tools.some((t) => t.name === 'browser_navigate') && !JSON.stringify(r4[2].messages).includes('tool_reference'));
   check('4: remembered for the model', A.deferRefused.has('claude-old-model') && !A.deferRefused.has('claude-haiku-5-5'));
   state.rejectDeferred = false;
+
+  // ---- 5: no load_tools in the request (toolSet 'all', a session's own tool set): nothing deferred ----
+  reset();
+  config = { ...config, toolSet: 'all', providers: { claude: { ...config.providers.claude, model: 'claude-haiku-5-5' } } };
+  agent.session = store.create();
+  state.replies.push({ content: 'Hi.' });
+  await agent.run('Say hi');
+  const r5 = native();
+  const t5 = r5[0].tools;
+  check('5: toolSet all sends every tool up front, none deferred, no load_tools', r5.length === 1 && !JSON.stringify(t5).includes('defer_loading') && t5.some((t) => t.name === 'browser_navigate') && t5.some((t) => t.name === 'terminal_run') && !t5.some((t) => t.name === 'load_tools'), t5.map((t) => t.name));
+  reset();
+  config = { ...config, toolSet: 'auto' };
+  agent.session = store.create();
+  agent.session.tools = ['read_file', 'browser_navigate'];
+  state.replies.push({ content: 'Hi.' });
+  await agent.run('Say hi');
+  const t5b = native()[0].tools;
+  check('5: a session\'s own tool set gets its group tool undeferred', t5b.some((t) => t.name === 'browser_navigate' && !t.defer_loading) && !JSON.stringify(t5b).includes('defer_loading'), t5b.map((t) => t.name));
+  reset();
+  agent.session = store.create();
+  state.replies.push({ content: 'Hi.' });
+  await agent.run('Say hi');
+  check('5: auto is unchanged: the same tools as the first session\'s', JSON.stringify(native()[0].tools) === tools0);
 
   mock.close();
   done();

@@ -128,10 +128,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const gen0 = eventCount;
   await m.reload();
   check('reload without changes is quiet', by()['user:test'].status === 'connected' && eventCount - gen0 <= 1, eventCount - gen0);
+  const order0 = m.tools().map((t) => t.name);
   config = { ...config, mcpServers: { ...config.mcpServers, test: srv({ EXTRA: '1' }) } };
   await m.reload();
   res = await m.call('mcp__test__env', { name: 'EXTRA' });
   check('changed config reconnects with the new env', res.content === '1');
+  check('…and the edited server keeps its place: the tools in the same order', JSON.stringify(m.tools().map((t) => t.name)) === JSON.stringify(order0) && order0.some((n) => n.startsWith('mcp__test__')) && !order0[order0.length - 1].startsWith('mcp__test__'), order0);
 
   await m.close();
   check('close empties the list', m.list().length === 0 && m.tools().length === 0);
@@ -244,10 +246,14 @@ async function robustness() {
 
   // stdio respawn once
   const pid1 = (await m.call('mcp__x__pid', {})).content;
+  const promptText = () => JSON.stringify([m.describe(), m.serverInstructions()]);
+  const text0 = promptText();
   await m.call('mcp__x__exit', {});
   check('an exited stdio server: error, tools still offered', await until(() => by().x.status === 'error') && /restarts on the next tool call/.test(by().x.error) && m.tools().some((t) => t.name === 'mcp__x__pid'), by().x);
+  check('…and its line and notes stay in the prompt text', promptText() === text0 && /^- x \(/m.test(m.describe()), [text0, promptText()]);
   const pid2 = (await m.call('mcp__x__pid', {})).content;
   check('the next call respawns it', pid2 !== pid1 && /^\d+$/.test(pid2) && by().x.status === 'connected', [pid1, pid2]);
+  check('…the prompt text the same after the respawn', promptText() === text0);
   await m.call('mcp__x__exit', {});
   await until(() => by().x.status === 'error');
   fs.writeFileSync(marker, '1');
@@ -281,6 +287,8 @@ async function robustness() {
   check('remote instructions captured', rm.serverInstructions().some((i) => i.server === 'remote' && i.instructions === 'Remote instructions.'));
   res = await rm.call('mcp__remote__whoami', {});
   check('remote call works', res.content === 'hello from remote');
+  const remoteText = () => JSON.stringify([rm.describe(), rm.serverInstructions()]);
+  const rtext0 = remoteText();
 
   await mock.stopMcp();
   onSleep = async (n) => { if (n === 3) await mock.startMcp(); };
@@ -288,8 +296,10 @@ async function robustness() {
   try { await rm.call('mcp__remote__whoami', {}); } catch (e) { err = e.message; }
   check('a call that finds the server gone fails with one clear line', /^Lost the connection to MCP server "remote"; it is reconnecting/.test(err), err);
   check('status reconnecting, tools still offered', ['reconnecting'].includes(rs().status) && rm.tools().some((t) => t.name === 'mcp__remote__whoami'), rs().status);
+  check('…its line and notes stay in the prompt text while it reconnects', remoteText() === rtext0 && /^- remote \(2 tools\)/m.test(rm.describe()) && /Remote instructions/.test(rtext0), [rtext0, remoteText()]);
   res = await rm.call('mcp__remote__whoami', {});
   check('a call made while reconnecting waits and then runs', res.content === 'hello from remote' && rs().status === 'connected');
+  check('…and the prompt text is the same after it', remoteText() === rtext0);
   check('backoff 1 s, 2 s, 4 s …', delays.slice(0, 3).join(',') === '1000,2000,4000', delays);
 
   // give up after 5 tries

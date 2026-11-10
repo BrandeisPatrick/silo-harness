@@ -227,6 +227,8 @@ export function deferPlan(model: string, history: Msg[], specs: ToolSpec[]): { s
     if (g && s.type === 'function') groupOf.set(s.function.name, g);
   }
   if (!groupOf.size) return { specs, deferred, refs };
+  // Without load_tools nothing could load a deferred group (toolSet 'all', a session's own tool set): send the pool as it is
+  if (!specs.some((s) => s.type === 'function' && s.function.name === LOAD_TOOLS)) return { specs, deferred, refs };
   // The groups the history loaded (load_tools calls, by id) or used, in order, and those a brief says it loaded
   const loads = new Map<string, ToolGroup[]>();
   const order: ToolGroup[] = [];

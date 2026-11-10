@@ -1,6 +1,7 @@
 // Pruning in batches where a provider caches the prefix (Agent.pruneInBatches, context-view.ts batchMarks): over a
 // long session the bytes of the request prefix change only at a batch, never call after call; old screenshots go a
-// batch at a time; a provider that does not cache keeps the old way.
+// batch at a time; a provider that does not cache keeps the old way, and so does one assumed to cache that reports no
+// cache read or write on three warm requests in a row. After a pause longer than the cache lasts a batch starts at 60K.
 // Run: node test/prune-batches.js (after npm run build)
 const path = require('node:path');
 const fs = require('node:fs');
@@ -80,7 +81,9 @@ const { check, done } = require('./support/check.js');
     }
     return { reqs, breaks, tokens: reqs.map((r) => Math.ceil(JSON.stringify(r).length / 4)) };
   };
+  state.cachedTokens = 1000;
   const cached = await session(24);
+  state.cachedTokens = 0;
   const peak = Math.max(...cached.tokens);
   // (counted here as the request's characters over four; the agent's own estimate is what it compares)
   check('3: the long session reached the high-water mark', peak >= 85_000, peak);
@@ -93,6 +96,93 @@ const { check, done } = require('./support/check.js');
   config = { ...config, provider: 'local' };
   const uncached = await session(24);
   check('3: a provider that does not cache keeps the old way (the prefix changes turn after turn past 48K)', uncached.breaks.length > 8, uncached.breaks.length);
+  // A provider assumed to cache that never reports a cache read or write: after three warm misses, the old way too
+  config = { ...config, provider: 'portkey' };
+  const unreported = await session(24);
+  check('3: a gateway that reports no cache falls back to the old way', unreported.breaks.length > 8 && !agent.cachesPrefix(config), unreported.breaks.length);
+
+  // ---- 4: learning whether the session caches (injected clock and usage) ----
+  let clock = 1_000_000;
+  const timed = new Agent(() => config, { navigate: async (u) => u }, store, () => [], () => {}, undefined, undefined, undefined, { now: () => clock });
+  const usage = (read, write = 0, prompt = 5000) => ({ prompt_tokens: prompt, completion_tokens: 30, prompt_tokens_details: { cached_tokens: read, cache_write_tokens: write } });
+  /** One run of one request, `gap` ms after the last one answered; returns whether the session still counts as caching */
+  const step = async (gap, u) => {
+    clock += gap;
+    state.replies.push({ content: 'Ok.', usage: u });
+    await timed.run('Go on');
+    return timed.cachesPrefix(config);
+  };
+  const MIN = 60_000;
+  timed.session = store.create({ cwd });
+  const reading = [];
+  for (let i = 0; i < 6; i++) reading.push(await step(MIN, usage(i ? 4000 : 0, i ? 0 : 4000)));
+  check('4: reads reported: stays batching', reading.every(Boolean), reading);
+  timed.session = store.create({ cwd });
+  const warm = [];
+  for (let i = 0; i < 4; i++) warm.push(await step(MIN, usage(0)));
+  // The first request has no reply before it, so it is not a miss; the next three are
+  check('4: three warm misses in a row switch the session to the uncached rule', JSON.stringify(warm) === JSON.stringify([true, true, true, false]), warm);
+  check('4: …a later read switches it back', (await step(MIN, usage(3000))) === true);
+  check('4: …and a write alone counts too', (await step(MIN, usage(0))) && (await step(MIN, usage(0))) && (await step(MIN, usage(0))) === false && (await step(MIN, usage(0, 3000))) === true);
+  timed.session = store.create({ cwd });
+  const cold = [];
+  for (let i = 0; i < 5; i++) cold.push(await step(6 * MIN, usage(0)));
+  check('4: a request more than five minutes after the last reply is not a miss', cold.every(Boolean), cold);
+  timed.session = store.create({ cwd });
+  const short = [];
+  for (let i = 0; i < 5; i++) short.push(await step(MIN, usage(0, 0, 1500)));
+  check('4: nor is a prompt too short to cache', short.every(Boolean), short);
+  config = { ...config, provider: 'local' };
+  timed.session = store.create({ cwd });
+  check('4: LM Studio stays uncached, reads or not', (await step(MIN, usage(4000))) === false && (await step(MIN, usage(4000))) === false);
+  config = { ...config, provider: 'portkey' };
+
+  // ---- 5: a batch at a pause (injected clock) ----
+  clock = Date.now();
+  const paused = new Agent(() => config, { navigate: async (u) => u }, store, () => [], () => {}, undefined, undefined, undefined, { now: () => clock });
+  const pause = async (gap) => {
+    clock += gap;
+    state.replies.push({ content: 'Ok.' });
+    await paused.run('Go on');
+    return true;
+  };
+  state.cachedTokens = 1000;
+  /** A session of `reads` earlier file reads, last active `idle` ms ago */
+  const built = (reads, idle = 0) => {
+    const s = store.create({ cwd });
+    for (let i = 1; i <= reads; i++) {
+      s.messages.push({ role: 'user', content: `Read f${i}.txt` });
+      s.messages.push({ role: 'assistant', content: '', tool_calls: [{ id: `p${i}`, type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: `f${i}.txt` }) } }] });
+      s.messages.push({ role: 'tool', tool_call_id: `p${i}`, content: fs.readFileSync(path.join(cwd, `f${i}.txt`), 'utf8') });
+      s.messages.push({ role: 'assistant', content: `Read f${i}.` });
+    }
+    s.updatedAt = clock - idle;
+    paused.session = s;
+    return paused.contextInfo().tokens;
+  };
+  const set = () => (paused.session.prunedResults ?? []).length;
+  const at70 = built(11);
+  check('5: the test session is about 70K', at70 > 65_000 && at70 < 80_000, at70);
+  await pause(0);
+  check('5: warm at 70K: nothing set aside', set() === 0, set());
+  const before = paused.contextInfo().tokens;
+  await pause(6 * MIN);
+  const after = paused.contextInfo().tokens;
+  check('5: cold at 70K (the last reply over five minutes ago): set aside down to about 50K', set() > 0 && after < 55_000 && after > 40_000, { before, after, set: set() });
+  const at55 = built(8, 10 * MIN);
+  check('5: cold at 55K: nothing set aside', at55 > 50_000 && at55 < 60_000 && (await pause(0)) && set() === 0, { at55, set: set() });
+  built(11, 10 * MIN);
+  await pause(0);
+  check('5: cold by the stored session\'s last activity (reloaded): set aside too', set() > 0, set());
+  config = { ...config, provider: 'local' };
+  built(11);
+  await pause(0);
+  const warmLocal = set();
+  built(11, 10 * MIN);
+  await pause(0);
+  check('5: a provider that does not cache: the same with or without a pause', set() === warmLocal && warmLocal > 0, { warmLocal, cold: set() });
+  config = { ...config, provider: 'portkey' };
+  state.cachedTokens = 0;
 
   mock.close();
   done();

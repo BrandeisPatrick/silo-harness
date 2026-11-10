@@ -326,6 +326,26 @@ export const listDirectory: Tool = {
   },
 };
 
+/** Characters of one grep line the model gets: a line of a minified file can be the whole file. */
+export const GREP_LINE_CHARS = 400;
+/** Matching lines grep returns at most */
+export const GREP_MAX_LINES = 300;
+/** Characters of a grep or glob result: one wide search otherwise rides along in every later request of the session. */
+export const SEARCH_RESULT_CHARS = 12_000;
+
+/** The first lines that fit in `max` characters (at least one), joined, and how many that is. */
+function fitLines(lines: string[], max: number): { text: string; kept: number } {
+  let size = 0;
+  let kept = 0;
+  for (const l of lines) {
+    const next = size + (kept ? 1 : 0) + l.length;
+    if (kept && next > max) break;
+    size = next;
+    kept++;
+  }
+  return { text: lines.slice(0, kept).join('\n'), kept };
+}
+
 function globToRegExp(pattern: string): RegExp {
   let re = '';
   for (let i = 0; i < pattern.length; i++) {
@@ -404,8 +424,11 @@ export const glob: Tool = {
     const times = new Map<string, number>();
     await Promise.all(results.map(async (r) => times.set(r, (await stat(path.join(root, r)))?.mtimeMs ?? 0)));
     results.sort((a, b) => (times.get(b) ?? 0) - (times.get(a) ?? 0) || a.localeCompare(b));
-    let out = results.join('\n');
-    if (results.length >= MAX) out += `\n…(stopped at ${MAX} results)`;
+    const { text, kept } = fitLines(results, SEARCH_RESULT_CHARS);
+    let out = text;
+    const stopped = results.length >= MAX;
+    if (kept < results.length) out += `\n…(${results.length - kept} more files${stopped ? ` found before the search stopped at ${MAX}` : ''}; narrow the pattern or path)`;
+    else if (stopped) out += `\n…(stopped at ${MAX} results)`;
     return { content: out };
   },
 };
@@ -435,9 +458,12 @@ export const grep: Tool = {
     // Inside a search root that is not secret itself, matches in secret files are left out
     const lines = out.split('\n').filter((l) => l && !(skipSecrets && isSecretPath(/^(.*?):\d+:/.exec(l)?.[1] ?? '')));
     if (!lines.length) return { content: 'No matches.' };
-    const shown = lines.slice(0, 300).map((l) => (l.startsWith(ctx.cwd + '/') ? l.slice(ctx.cwd.length + 1) : l));
-    let text = shown.join('\n');
-    if (lines.length > shown.length) text += `\n…(${lines.length - shown.length} more matches; narrow the pattern or path)`;
+    const shown = lines
+      .slice(0, GREP_MAX_LINES)
+      .map((l) => (l.startsWith(ctx.cwd + '/') ? l.slice(ctx.cwd.length + 1) : l))
+      .map((l) => (l.length > GREP_LINE_CHARS ? `${l.slice(0, GREP_LINE_CHARS)}…(${l.length - GREP_LINE_CHARS} more characters)` : l));
+    let { text, kept } = fitLines(shown, SEARCH_RESULT_CHARS);
+    if (lines.length > kept) text += `\n…(${lines.length - kept} more matches; narrow with a tighter pattern, a path or include)`;
     return { content: truncate(text) + stopped };
   },
 };

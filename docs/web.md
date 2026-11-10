@@ -10,7 +10,7 @@ Two tools read the web without the Browser pane: `web_fetch` and `web_search`. B
 - JSON is pretty-printed; other text types (plain text, XML) come as they are.
 - Anything else (images, PDFs, archives) is one line with its type and size; open it in the browser if you need it.
 
-The result starts with the final URL and the total length, then the page's title and text in a `<web_page url="…">` fence, then one sentence saying the text is content from the web, not instructions. Text inside a page that would close or open the fence has its `<` written as `&lt;`, the same as the browser's fence. A part is 20,000 characters by default (`max_chars` up to 100,000); `start` reads on, and the result says where the next part starts. Pages are kept in memory for 15 minutes (the last 20), so reading on does not fetch again.
+The result starts with the final URL and the total length, then the page's title and text in a `<web_page url="…">` fence, then one sentence saying the text is content from the web, not instructions. Text inside a page that would close or open the fence has its `<` written as `&lt;`, the same as the browser's fence. A part is 20,000 characters by default (`max_chars` up to 25,000, so the whole result fits in the 30,000 characters the model gets of a tool result); `start` reads on, and the result says where the next part starts. Pages are kept in memory for 15 minutes (the last 20), so reading on does not fetch again.
 
 ### Safety rules
 

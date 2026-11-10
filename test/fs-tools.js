@@ -91,6 +91,30 @@ const { check, done } = require('./support/check.js');
   setRipgrep(undefined);
   fs.rmSync(g, { recursive: true, force: true });
 
+  // grep and glob output is capped where it is made: lines cut at 400 characters, the result at 12,000
+  const F = require(path.join(projectDir, 'dist/main/tools/fs.js'));
+  const big = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-caps-'));
+  const bctx = { ...ctx, cwd: big };
+  fs.writeFileSync(path.join(big, 'min.js'), `HIT${'x'.repeat(5000)}\n`);
+  out = (await grep.run({ pattern: 'HIT' }, bctx)).content;
+  check('grep: a long line is cut at 400 characters and says how many more', out === `min.js:1:HIT${'x'.repeat(400 - 'min.js:1:HIT'.length)}…(${'min.js:1:HIT'.length + 5000 - 400} more characters)`, out.slice(0, 80) + '…' + out.slice(-60));
+  fs.writeFileSync(path.join(big, 'many.txt'), Array.from({ length: 200 }, (_, i) => `HIT ${i} ${'y'.repeat(100)}`).join('\n') + '\n');
+  out = (await grep.run({ pattern: 'HIT \\d', path: 'many.txt' }, bctx)).content;
+  const kept = out.split('\n').filter((l) => /HIT \d/.test(l)).length;
+  check('grep: the result stops after a whole line within 12,000 characters, and says how many were left out and how to narrow', out.length <= F.SEARCH_RESULT_CHARS + 100 && kept < 200 && new RegExp(`\\n…\\(${200 - kept} more matches; narrow with a tighter pattern, a path or include\\)$`).test(out) && /HIT \d+ y+$/m.test(out.split('\n')[kept - 1]), { kept, tail: out.slice(-120) });
+  fs.writeFileSync(path.join(big, 'lots.txt'), Array.from({ length: 400 }, (_, i) => `HIT ${i}`).join('\n') + '\n');
+  out = (await grep.run({ pattern: 'HIT \\d', path: 'lots.txt' }, bctx)).content;
+  check('grep: short lines still stop at 300, the note counts the rest', out.split('\n').length === 301 && out.endsWith('\n…(100 more matches; narrow with a tighter pattern, a path or include)'), out.slice(-100));
+  for (let i = 0; i < 1100; i++) fs.writeFileSync(path.join(big, `file-with-a-longish-name-${String(i).padStart(4, '0')}.md`), '');
+  out = (await glob.run({ pattern: '*.md' }, bctx)).content;
+  const names = out.split('\n').filter((l) => l.endsWith('.md'));
+  check('glob: within 12,000 characters, whole names, and the note says how many more of the 1,000 found', out.length <= F.SEARCH_RESULT_CHARS + 100 && names.length < 1000 && names.every((n) => /^file-with-a-longish-name-\d{4}\.md$/.test(n)) && out.endsWith(`\n…(${1000 - names.length} more files found before the search stopped at 1000; narrow the pattern or path)`), out.slice(-140));
+  for (let i = 0; i < 1100; i++) fs.rmSync(path.join(big, `file-with-a-longish-name-${String(i).padStart(4, '0')}.md`));
+  for (let i = 0; i < 1050; i++) fs.writeFileSync(path.join(big, `${i}.md`), '');
+  out = (await glob.run({ pattern: '*.md' }, bctx)).content;
+  check('glob: short names still stop at 1,000 with the old note', out.split('\n').length === 1001 && out.endsWith('\n…(stopped at 1000 results)'), out.slice(-60));
+  fs.rmSync(big, { recursive: true, force: true });
+
   // grep and glob rooted at the home folder, ~/Library, /, /Users or /Volumes ask "scans the home folder" first
   fs.mkdirSync(path.join(fakeHome, 'projects', 'app'), { recursive: true });
   fs.writeFileSync(path.join(fakeHome, 'projects', 'app', 'n.txt'), 'NEEDLE at home\n');
