@@ -6,7 +6,7 @@ Sessions cost a fraction of what they did, the agent can search and read the web
 
 ### Highlights
 
-- **Sessions cost less.** The same 19-turn session costs $0.05 on Claude Haiku 5.5 instead of $0.38, and $0.23 where the provider has no prompt cache ([measurement](docs/token-bench.md)).
+- **Sessions cost less.** The same 19-turn session costs $0.05 on Claude Haiku 5.5 instead of $0.38, and $0.24 where the provider has no prompt cache ([measurement](docs/token-bench.md)).
   ![Cost of one 19-turn session in 0.12.0 and in 0.13.0, with and without a prompt cache](docs/releases/0.13.0/token-saving.png)
 - **Search and read the web.** `web_search` finds pages and `web_fetch` reads one as text, without opening the Browser pane and behind the same site approval.
   ![The agent searches the web, reads RFC 9110 and answers with links to the spec](docs/releases/0.13.0/web-tools.png)

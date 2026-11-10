@@ -221,17 +221,21 @@ against a live endpoint.
 
 ### On the release build
 
-One run each on November 10, 2026, on 8549857: after the second round of changes (search results capped, the check that the
-provider caches, the batch at a pause).
+Three runs with caching and two without on November 10, 2026, on 8549857: after the second round of changes (search results
+capped, the check that the provider caches, the batch at a pause).
 
 | | Requests (agent / check / title / compaction) | Input | Read share | Output | Largest request | Cost |
 |---|---|--:|--:|--:|--:|--:|
 | With caching | 69 (49 / 19 / 1 / 0) | 2,666,667 | 96% | 17,662 | 76,112 | $0.0469 |
+| | 72 (51 / 20 / 1 / 0) | 2,880,560 | 96% | 19,086 | 79,958 | $0.0503 |
+| | 67 (55 / 11 / 1 / 0) | 3,132,890 | 97% | 16,519 | 82,015 | $0.0499 |
 | Without caching (`--compat`) | 86 (55 / 30 / 1 / 0) | 2,178,562 | 0% | 24,448 | 48,395 | $0.2301 |
+| | 75 (58 / 16 / 1 / 0) | 2,355,399 | 0% | 23,684 | 51,310 | $0.2474 |
 
-88% and 40% less than before any cut ($0.3812). The run without caching shows the fallback at work: the endpoint reported no
-cache read or write, the session went back to the rule without caching, and no request passed 48,395 tokens. Tier 1, two
-runs: $0.0065 each, the same as before the second round. The release notes quote these two numbers.
+The means are $0.0490 and $0.2388: 87% and 37% less than before any cut ($0.3812). The runs without caching show the fallback
+at work: the endpoint reported no cache read or write, the session went back to the rule without caching, and no request
+passed 51,310 tokens. With caching no request reached 90K, so no batch was set aside. Tier 1, four runs: $0.0065, $0.0065,
+$0.0067 and $0.0069, about the same as before the second round. The release notes quote the two means.
 
 ### How it was run
 
@@ -394,4 +398,6 @@ them, and the live sub-session test has it load the sessions group.
 | Prompt caching: a tier 1 trial (Q), tier 1 (two runs) and tier 2 | $0.076 |
 | Prompt caching: API probes of deferred tools and the live checks (estimated) | about $0.03 |
 | Release build: tier 1 (two runs), tier 2 with and without caching | $0.290 |
-| **Total** | **about $3.33** |
+| Release build, a second set: tier 1 (two runs), tier 2 with caching (two runs) and without | $0.361 |
+| Release build: the four live scripts that need a key (not recorded, estimated) | about $0.05 |
+| **Total** | **about $3.74** |
