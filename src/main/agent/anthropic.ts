@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AgentEvent } from '../../shared/types';
 import type { ToolCall, ToolSpec, Usage } from '../ollama';
 import type { Msg } from '../sessions';
+import { idleWatch, StreamDropped } from './retry';
 
 type Block = Anthropic.ContentBlockParam;
 type MessageParam = Anthropic.MessageParam;
@@ -261,6 +262,10 @@ export interface NativeReply {
   toolCalls: ToolCall[];
   /** The reply's thinking blocks, for the stored message (THINKING_KEY) */
   thinking?: ThinkingBlock[];
+  /** stop_reason "max_tokens" (or "model_context_window_exceeded"): the reply stopped at the output limit */
+  cut?: boolean;
+  /** stop_reason "refusal": the model declined the request */
+  refused?: boolean;
 }
 
 /** Usage of a Messages response in our terms: the prompt is the whole input, cached tokens included. */
@@ -293,8 +298,9 @@ export function nativeError(err: unknown): Error {
   if (err instanceof Anthropic.APIError) {
     const body = err.error as { error?: { type?: string; message?: string } } | undefined;
     const detail = body?.error?.message || err.message;
-    // "overloaded_error", "rate_limit_error", …: the status says the same, the message is what the user reads
-    return Object.assign(new Error(detail), { status: err.status, error: { message: detail, type: body?.error?.type } });
+    // "overloaded_error", "rate_limit_error", …: the status says the same, the message is what the user reads. The
+    // headers go along for the retry loop (retry-after, x-should-retry).
+    return Object.assign(new Error(detail), { status: err.status, error: { message: detail, type: body?.error?.type }, headers: err.headers });
   }
   return err instanceof Error ? err : new Error(String(err));
 }
@@ -329,14 +335,29 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
 }
 
 async function stream(host: NativeHost, client: Anthropic, req: Anthropic.MessageCreateParamsStreaming, signal: AbortSignal, turn: number): Promise<NativeReply> {
-  const events = await client.messages.create(req, { signal });
+  // A stream with no event for STREAM_IDLE_MS is a dropped connection (agent/retry.ts)
+  const watch = idleWatch(signal);
+  try {
+    return await readEvents(host, client, req, watch, turn);
+  } catch (err) {
+    if (watch.idled()) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`);
+    throw err;
+  } finally {
+    watch.done();
+  }
+}
+
+async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.MessageCreateParamsStreaming, watch: ReturnType<typeof idleWatch>, turn: number): Promise<NativeReply> {
+  const events = await client.messages.create(req, { signal: watch.signal, maxRetries: 0 });
   let text = '';
   const calls: ToolCall[] = [];
   const thinking: ThinkingBlock[] = [];
   /** The block being streamed at each index */
   const open = new Map<number, { kind: 'text' } | { kind: 'tool'; call: ToolCall } | { kind: 'thinking'; block: ThinkingBlock }>();
   let usage: Usage | null = null;
+  let stop: string | null = null;
   for await (const ev of events) {
+    watch.touch();
     switch (ev.type) {
       case 'message_start':
         usage = nativeUsage(ev.message.usage);
@@ -379,6 +400,7 @@ async function stream(host: NativeHost, client: Anthropic, req: Anthropic.Messag
         open.delete(ev.index);
         break;
       case 'message_delta':
+        if (ev.delta?.stop_reason) stop = ev.delta.stop_reason;
         if (usage && ev.usage) {
           usage.completionTokens = Number(ev.usage.output_tokens) || usage.completionTokens;
           // Some gateways send the input counts only here
@@ -392,10 +414,15 @@ async function stream(host: NativeHost, client: Anthropic, req: Anthropic.Messag
         break;
     }
   }
+  // Every complete reply says why it stopped; without that the connection dropped mid-reply
+  if (!stop) throw new StreamDropped();
   // A tool call without arguments streams none
   for (const c of calls) if (!c.function.arguments) c.function.arguments = '{}';
   if (usage) host.reportUsage(usage);
-  return thinking.length ? { text, toolCalls: calls, thinking } : { text, toolCalls: calls };
+  const out: NativeReply = thinking.length ? { text, toolCalls: calls, thinking } : { text, toolCalls: calls };
+  if (stop === 'max_tokens' || stop === 'model_context_window_exceeded') out.cut = true;
+  if (stop === 'refusal') out.refused = true;
+  return out;
 }
 
 /** The client for a resolved provider: its key as the API key, its base URL without /v1, its headers (no gateway's own). */
@@ -411,5 +438,6 @@ export function anthropicClient(r: { baseURL: string; apiKey: string; bearer: st
   for (const [k, v] of Object.entries(r.headers)) if (!(onAnthropic && /^x-portkey-/i.test(k))) headers[k] = v;
   const key = r.apiKey || (r.bearer && r.bearer !== 'none' ? r.bearer : '');
   // authToken null: an ANTHROPIC_AUTH_TOKEN in the environment must not ride along with the provider's own key
-  return new Anthropic({ apiKey: key || null, authToken: null, baseURL, defaultHeaders: headers });
+  // maxRetries 0: the agent's own loop retries (agent/retry.ts); calls that want the SDK's pass their own
+  return new Anthropic({ apiKey: key || null, authToken: null, baseURL, defaultHeaders: headers, maxRetries: 0 });
 }

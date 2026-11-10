@@ -235,6 +235,8 @@ export function eventsFromAgent(ev: AgentEvent, sessionId: string): ModEventOut[
       return [{ name: 'message.assistant', data: { text: ev.text } }];
     case 'text_delta':
       return [{ name: 'message.delta', data: { text: ev.text } }];
+    case 'reply_discarded':
+      return [{ name: 'message.discarded', data: {} }];
     case 'tool_start':
       return [{ name: 'tool.started', data: { id: ev.id, name: ev.name, args: ev.args } }];
     case 'tool_end': {

@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import { StreamDropped } from './agent/retry';
 import { pairToolResults, type Msg } from './sessions';
 
 export type ToolSpec = OpenAI.Chat.Completions.ChatCompletionTool;
@@ -46,7 +47,9 @@ export function contextSize(numCtx: unknown): number {
 
 async function httpError(res: Response): Promise<Error> {
   const detail = (await res.text().catch(() => '')).slice(0, 300);
-  return new Error(`Ollama returned HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
+  // httpStatus, not status: the message stays Ollama's own (providerErrorMessage words errors with a status), while the
+  // retry loop (agent/retry.ts) still reads the code
+  return Object.assign(new Error(`Ollama returned HTTP ${res.status}${detail ? `: ${detail}` : ''}`), { httpStatus: res.status });
 }
 
 function parseArgs(raw: unknown): Record<string, unknown> {
@@ -127,7 +130,7 @@ export interface OllamaChatOptions {
  * OpenAI-compatible endpoint it honours options.num_ctx, so long agent prompts
  * are not silently truncated at the server's default context size.
  */
-export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; toolCalls: ToolCall[] }> {
+export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; toolCalls: ToolCall[]; cut?: boolean }> {
   const root = ollamaRoot(o.baseURL);
   const body: Record<string, unknown> = {
     model: o.model,
@@ -150,6 +153,8 @@ export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; 
   let text = '';
   const toolCalls: ToolCall[] = [];
   let usageReported = false;
+  let finished = false;
+  let cut = false;
   const handle = (line: string) => {
     const chunk = JSON.parse(line) as OllamaChunk;
     if (chunk.error) throw new Error(chunk.error);
@@ -167,11 +172,13 @@ export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; 
       });
     }
     if (chunk.done) {
+      finished = true;
       if (!usageReported) {
         usageReported = true;
         o.onUsage?.({ promptTokens: chunk.prompt_eval_count ?? 0, completionTokens: chunk.eval_count ?? 0 });
       }
-      if (chunk.done_reason === 'length') o.onWarning?.('The model hit its output limit; the reply may be cut off.');
+      // Cut at the output limit: the run loop asks the model to go on (agent.ts), so no warning here
+      if (chunk.done_reason === 'length') cut = true;
       if (chunk.prompt_eval_count && chunk.prompt_eval_count >= o.numCtx - 64) {
         o.onWarning?.(`The prompt filled the ${o.numCtx}-token context, so older messages were likely lost. Raise it in Settings.`);
       }
@@ -193,7 +200,9 @@ export async function ollamaChat(o: OllamaChatOptions): Promise<{ text: string; 
     }
   }
   if (buf.trim()) handle(buf.trim());
-  return { text, toolCalls };
+  // Every reply ends with a done chunk; without one the connection dropped mid-reply
+  if (!finished) throw new StreamDropped();
+  return cut ? { text, toolCalls, cut } : { text, toolCalls };
 }
 
 /** One short, non-streaming reply from /api/chat with no tools (used to generate session titles). */

@@ -174,7 +174,7 @@ function notify(a: AppHost, sessionId: string, ev: AgentEvent): void {
   let body: string;
   if (ev.type === 'run_end') {
     if (ev.reason === 'aborted') return;
-    title = ev.reason === 'error' ? `${APP_NAME} hit an error` : ev.reason === 'plan' ? `${APP_NAME} has a plan for you` : ev.reason === 'max_turns' ? `${APP_NAME} stopped at the turn limit` : `${APP_NAME} finished`;
+    title = ev.reason === 'error' ? `${APP_NAME} hit an error` : ev.reason === 'plan' ? `${APP_NAME} has a plan for you` : ev.reason === 'max_turns' ? `${APP_NAME} stopped at the turn limit` : ev.reason === 'loop' ? `${APP_NAME} stopped a repeating call` : `${APP_NAME} finished`;
     body = name;
   } else if (ev.type === 'approval_request') {
     title = `${APP_NAME} needs your approval`;
