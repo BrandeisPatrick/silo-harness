@@ -76,6 +76,7 @@ const SCALARS: Record<string, Check> = {
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
   checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
+  timingLog: describe(bool, "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."),
 };
 
 /** Sections a settings file may set field by field. */

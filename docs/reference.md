@@ -65,6 +65,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 | `/rename [new name]` | Rename this session; alone, it makes the title in the top bar editable |
 | `/schedules` | The scheduled tasks and their next run |
 | `/dream` | Dream now about this session's project (see Dreaming) |
+| `/timing` | Where the last run spent its time: model, tools, safety checks, your approvals ([latency.md](latency.md)) |
 | a mod's commands | Listed in the menu with the mod's name |
 
 A message starting with `#` is added to the project's instructions file after a confirmation (and recorded in the session's history log, where a dream sees it).

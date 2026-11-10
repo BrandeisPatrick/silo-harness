@@ -119,6 +119,10 @@
       "type": "boolean",
       "description": "Look for a newer release on GitHub once a day and show a quiet line when there is one."
     },
+    "timingLog": {
+      "type": "boolean",
+      "description": "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."
+    },
     "ollama": {
       "type": "object",
       "additionalProperties": false,

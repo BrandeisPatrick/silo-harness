@@ -137,7 +137,8 @@ function startMock() {
  * status and error type), delayMs, chunks (the text in pieces chunkDelayMs apart), failMidStream (an error event after
  * the first text). Non-streamed requests (Auto mode's check) take `nonStream` replies, as on the other routes.
  * `stopReason` replaces the stop reason ("max_tokens", "refusal"), `headers` go with a failing status, `drop` ends the
- * stream after the text without a stop reason, and a tool call's `rawArgs` is streamed as written.
+ * stream after the text without a stop reason, a tool call's `rawArgs` is streamed as written, and `thinkingChunks`
+ * streams the thinking in pieces chunkDelayMs apart.
  */
 function anthropic(state, payload, res, json) {
   const stream = !!payload.stream;
@@ -154,7 +155,7 @@ function anthropic(state, payload, res, json) {
   reply = reply ?? { content: stream ? 'Done.' : state.summary };
   const usage = { input_tokens: 300, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...(reply.usage || {}) };
   const blocks = [];
-  if (reply.thinking) blocks.push({ type: 'thinking', thinking: reply.thinking, signature: reply.signature ?? 'sig-mock' });
+  if (reply.thinking || reply.thinkingChunks) blocks.push({ type: 'thinking', thinking: reply.thinking ?? reply.thinkingChunks.join(''), signature: reply.signature ?? 'sig-mock' });
   if (reply.content || reply.chunks) blocks.push({ type: 'text', text: reply.content ?? reply.chunks.join('') });
   for (const c of reply.toolCalls ?? []) blocks.push({ type: 'tool_use', id: c.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`, name: c.name, input: c.args ?? {}, rawArgs: c.rawArgs });
   const stop = reply.stopReason ?? (reply.toolCalls?.length ? 'tool_use' : 'end_turn');
@@ -172,7 +173,11 @@ function anthropic(state, payload, res, json) {
     for (const [index, b] of blocks.entries()) {
       if (b.type === 'thinking') {
         send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } });
-        send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: b.thinking } });
+        // `thinkingChunks`: the thinking in pieces `chunkDelayMs` apart (a slow thinking phase)
+        for (const piece of reply.thinkingChunks ?? [b.thinking]) {
+          send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: piece } });
+          if (reply.thinkingChunks) await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+        }
         send('content_block_delta', { index, delta: { type: 'signature_delta', signature: b.signature } });
       } else if (b.type === 'text') {
         send('content_block_start', { index, content_block: { type: 'text', text: '' } });

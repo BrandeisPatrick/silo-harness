@@ -10,6 +10,7 @@ import type { ToolCall, ToolSpec, Usage } from '../ollama';
 import type { Msg } from '../sessions';
 import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requestedGroups, type ToolGroup } from '../tools/groups';
 import { idleWatch, StreamDropped } from './retry';
+import type { RequestTiming } from './perf';
 
 type Block = Anthropic.ContentBlockParam;
 type MessageParam = Anthropic.MessageParam;
@@ -349,6 +350,8 @@ export interface NativeHost {
   maxOutput(): number | undefined;
   /** Per session: thinking before this index of the history is no longer sent (the API refused it once) */
   thinking?: { stripBefore: number };
+  /** Where the request's time goes (agent/perf.ts) */
+  timing?: RequestTiming;
 }
 
 export interface NativeReply {
@@ -422,11 +425,13 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
     if (!signal.aborted && isDeferRefusal(err) && !deferRefused.has(model)) {
       deferRefused.add(model);
       console.warn(`[anthropic] ${model} refused deferred tools; tool groups load the old way:`, err.message);
+      host.timing?.fallback('deferred_tools');
       return completeAnthropic(host, client, model, history, specs, signal, turn);
     }
     if (signal.aborted || !isThinkingRefusal(err) || !history.slice(strip).some((m) => thinkingOf(m))) throw err;
     // Thinking blocks are bound to the history they were made in; a pruned or folded history refuses them
     if (host.thinking) host.thinking.stripBefore = history.length;
+    host.timing?.fallback('thinking_stripped');
     try {
       return await attempt(history.length);
     } catch (again) {
@@ -459,6 +464,7 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
   let stop: string | null = null;
   for await (const ev of events) {
     watch.touch();
+    host.timing?.event();
     switch (ev.type) {
       case 'message_start':
         usage = nativeUsage(ev.message.usage);
@@ -472,6 +478,7 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
             host.emit({ type: 'text_delta', text: b.text });
           }
         } else if (b.type === 'tool_use') {
+          host.timing?.toolDelta();
           const call: ToolCall = { id: b.id || `call_${turn}_${calls.length}`, type: 'function', function: { name: b.name, arguments: '' } };
           calls.push(call);
           open.set(ev.index, { kind: 'tool', call });

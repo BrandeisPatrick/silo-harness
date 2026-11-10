@@ -14,6 +14,7 @@ import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropi
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
 import { idleWatch, isRetryable, StreamDropped, withRetries } from './retry';
+import type { RequestTiming } from './perf';
 
 /** What the agent lends a model call: its events, its usage report and the memories kept across calls. */
 export interface CompletionHost {
@@ -29,6 +30,8 @@ export interface CompletionHost {
   thinking?: { stripBefore: number };
   /** The session's id: the key a provider's prompt cache is steered by (agent/gateway-cache.ts) */
   cacheKey?: string;
+  /** Where the request's time goes (agent/perf.ts): attempts, retries, fallbacks, the provider's events */
+  timing?: RequestTiming;
 }
 
 /** What a request adds for the provider's prompt cache (gateway-cache.ts), or nothing. */
@@ -133,6 +136,7 @@ export async function complete(
   return withRetries(
     async () => {
       shown = false;
+      host.timing?.attempt();
       try {
         return await completeAttempt(attemptHost, cfg, client, model, history, specs, signal, turn, native);
       } catch (err) {
@@ -145,6 +149,7 @@ export async function complete(
     {
       onWait: (text) => {
         waiting = true;
+        host.timing?.retryWait();
         host.emit({ type: 'retry_status', text });
       },
       onClear: clear,
@@ -190,6 +195,7 @@ async function completeAttempt(
       // An Ollama too old to report capabilities only tells us here: retry once as a plain chat.
       if (!specs.length || signal.aborted || !/does not support tools/i.test(errorMessage(err))) throw err;
       host.toolSupport.set(`${ol.baseURL}|${model}`, false);
+      host.timing?.fallback('plain_chat');
       host.emit({ type: 'error', kind: 'notice', message: noToolsNotice(model) });
       return chat([]);
     }
@@ -216,17 +222,20 @@ async function completeAttempt(
       // A gateway or provider that rejects stream_options still streams without it.
       if (includeUsage && /stream_options|include_usage/i.test(errorMessage(err))) {
         host.noStreamUsage.add(endpoint);
+        host.timing?.fallback('no_stream_usage');
         continue;
       }
       // A gateway that refuses the cache fields gets the request without them, now and for the rest of the process
       if (withFields && isFieldRefusal(err)) {
         console.warn('[agent] the provider refused the prompt-cache fields; sending without them:', errorMessage(err));
         noFields.add(client.baseURL);
+        host.timing?.fallback('no_cache_fields');
         continue;
       }
       // Some gateways/models reject streaming with tools; fall back to a single request
       // as long as nothing has been shown to the user yet.
       console.warn('[agent] streaming failed, retrying without streaming:', errorMessage(err));
+      host.timing?.fallback('non_streaming');
       return completeOnce(host, client, model, history, specs, signal, turn, decorate());
     }
   }
@@ -281,6 +290,7 @@ async function readStream(
 
   for await (const chunk of stream) {
     watch.touch();
+    host.timing?.event();
     // With include_usage the counts arrive on a final chunk whose choices array is empty.
     if (chunk.usage) usage = mergeUsage(usage, chunk.usage as RawUsage);
     const choice = chunk.choices?.[0];
@@ -301,6 +311,7 @@ async function readStream(
     }
     for (const tc of delta.tool_calls ?? []) {
       received = true;
+      host.timing?.toolDelta();
       let call: ToolCall;
       const fresh = (id: string): ToolCall => {
         const c: ToolCall = { id, type: 'function', function: { name: '', arguments: '' } };
@@ -364,6 +375,7 @@ async function completeOnce(
 ): Promise<Reply> {
   const d = decorate(history, specs);
   const res = await client.chat.completions.create({ model, messages: d.messages, tools: d.tools, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}), ...d.extra } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal, maxRetries: 0 });
+  host.timing?.event();
   if (res.usage) host.reportUsage(usageOf(res.usage as RawUsage));
   const msg = res.choices?.[0]?.message;
   const text = msg?.content ?? '';

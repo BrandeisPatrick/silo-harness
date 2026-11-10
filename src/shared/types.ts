@@ -320,6 +320,8 @@ export interface AppConfig {
   webSearch?: WebSearchConfig;
   /** Look for a newer release on GitHub once a day (absent: on) */
   checkForUpdates?: boolean;
+  /** Append each run's timing (numbers only, docs/latency.md) to <profile>/timing/timing.jsonl; SILO_TIMING=1 does the same */
+  timingLog?: boolean;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */

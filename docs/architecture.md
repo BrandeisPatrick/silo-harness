@@ -14,6 +14,8 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
                permissions.ts (the permission rules as a pure decision, and the card's labels), errors.ts (what a run's errors say),
                classifier.ts (Auto mode's safety check: its instructions, what it reads, its model, its answer),
                auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block)
+               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log)
+timing-service.ts  /timing, the last run's breakdown as a local note
 auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
