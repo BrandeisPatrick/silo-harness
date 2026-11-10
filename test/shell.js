@@ -4,7 +4,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const { bash } = require(path.join(projectDir, 'dist/main/tools/shell.js'));
+const { bash, shellResult } = require(path.join(projectDir, 'dist/main/tools/shell.js'));
+const { truncateMiddle } = require(path.join(projectDir, 'dist/main/tools/types.js'));
 const { check, done } = require('./support/check.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -26,6 +27,19 @@ const alive = (pid) => {
 
   const denied = await bash.run({ command: 'echo no' }, { cwd, approve: async () => ({ ok: false, message: 'Not permitted: test' }) });
   check('a denied command does not run', denied.content === 'Not permitted: test', denied.content);
+
+  // Long output keeps its start, its end and the exit code
+  const long = await bash.run({ command: 'seq 1 50000; exit 3' }, ctx());
+  const c = long.content;
+  check('long output ends with the exit code', c.endsWith('[exit code: 3]'), c.slice(-80));
+  check('… keeps its first and last lines', c.startsWith('1\n2\n') && c.includes('\n50000\n'), c.slice(-80));
+  check('… says what it left out, and stays under 31K characters', /\[… \d+ characters left out …\]\n/.test(c) && c.length < 31_000, c.length);
+  const both = shellResult('o'.repeat(100) + '\n' + 'x\n'.repeat(40_000), 'e\n'.repeat(20_000) + 'LAST ERROR\n', 2);
+  check('stdout and stderr share the budget, each keeping its end', both.includes('LAST ERROR') && both.includes('[stderr]') && both.endsWith('[exit code: 2]') && both.length < 31_000, both.length);
+  check('short output is unchanged', shellResult('hi\n', '', 0) === 'hi\n[exit code: 0]' && shellResult('a', 'b', 1) === 'a\n[stderr]\nb\n[exit code: 1]');
+  check('truncateMiddle: within the limit unchanged', truncateMiddle('abc\ndef', 100) === 'abc\ndef');
+  const cut = truncateMiddle(Array.from({ length: 1000 }, (_, i) => `line ${i}`).join('\n'), 1000);
+  check('truncateMiddle: cuts on line boundaries', /^line 0\n/.test(cut) && cut.endsWith('line 999') && cut.split('\n').every((l) => /^line \d+$|^\[… \d+ characters left out …\]$/.test(l)), cut.slice(0, 200));
 
   // Stop: the shell and the process it started are both gone, promptly.
   {

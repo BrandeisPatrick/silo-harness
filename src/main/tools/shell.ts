@@ -1,12 +1,28 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import type { Tool } from './types';
-import { truncate } from './types';
+import { truncateMiddle } from './types';
 
 const EXTRA_PATH = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', `${os.homedir()}/.local/bin`, `${os.homedir()}/.cargo/bin`, '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
 
 /** Output kept per stream; the tool result is cut much shorter than this anyway */
 const MAX_BUFFER = 20 * 1024 * 1024;
+/** What the result keeps of stdout and stderr together: their start and their end (the exit code comes after) */
+export const OUTPUT_BUDGET = 30_000;
+
+/** stdout and stderr cut to OUTPUT_BUDGET together, each keeping its start and end, then the exit code, which is never cut. */
+export function shellResult(stdout: string, stderr: string, code: string | number): string {
+  const total = stdout.length + stderr.length;
+  if (total > OUTPUT_BUDGET) {
+    // stderr gets its share, at least 6,000 characters when it has them (a failing build's errors)
+    const errBudget = Math.min(stderr.length, Math.max(6000, Math.floor((OUTPUT_BUDGET * stderr.length) / total)));
+    stdout = truncateMiddle(stdout, OUTPUT_BUDGET - errBudget);
+    stderr = truncateMiddle(stderr, errBudget);
+  }
+  let out = stdout;
+  if (stderr) out += (out ? '\n' : '') + '[stderr]\n' + stderr;
+  return out + `${out.endsWith('\n') || !out ? '' : '\n'}[exit code: ${code}]`;
+}
 
 function buildPath(): string {
   const current = (process.env.PATH ?? '').split(':').filter(Boolean);
@@ -52,10 +68,7 @@ export const bash: Tool = {
         settled = true;
         clearTimeout(timer);
         ctx.signal?.removeEventListener('abort', onAbort);
-        let out = stdout;
-        if (stderr) out += (out ? '\n' : '') + '[stderr]\n' + stderr;
-        out += `${out.endsWith('\n') || !out ? '' : '\n'}[exit code: ${code}]`;
-        resolve({ content: truncate(out) });
+        resolve({ content: shellResult(stdout, stderr, code) });
       };
       const outcome = (code: number | null, signal: NodeJS.Signals | null): string | number =>
         stopped === 'user' ? 'stopped by the user' : stopped === 'timeout' ? `killed (timeout after ${timeout} ms)` : signal ? `killed (${signal})` : (code ?? 0);

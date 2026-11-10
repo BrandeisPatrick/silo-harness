@@ -128,3 +128,20 @@ export function truncate(s: string, max = MAX_OUTPUT): string {
   if (s.length <= max) return s;
   return s.slice(0, max) + `\n…[truncated ${s.length - max} more characters]`;
 }
+
+/**
+ * Cuts the middle out of a long text, keeping its start (`headShare` of `max`) and its end, both on line boundaries,
+ * with a one-line marker saying how much was left out. Text within `max` comes back unchanged.
+ */
+export function truncateMiddle(text: string, max: number, headShare = 0.4): string {
+  if (text.length <= max) return text;
+  const headBudget = Math.floor(max * headShare);
+  const tailBudget = max - headBudget;
+  const nl = text.lastIndexOf('\n', headBudget - 1);
+  const headEnd = nl > 0 ? nl + 1 : headBudget;
+  const from = text.length - tailBudget;
+  const next = text.indexOf('\n', from);
+  const tailStart = next >= 0 && next < text.length - 1 ? next + 1 : from;
+  const left = tailStart - headEnd;
+  return `${text.slice(0, headEnd)}${text[headEnd - 1] === '\n' ? '' : '\n'}[… ${left} characters left out …]\n${text.slice(tailStart)}`;
+}

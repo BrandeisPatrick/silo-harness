@@ -68,8 +68,8 @@ A message starting with `#` is added to the project's instructions file after a 
 | Tool | Purpose |
 | --- | --- |
 | `read_file` `write_file` `edit_file` `list_directory` `glob` `grep` | Files. Reading a secret path (`~/.ssh`, `~/.aws`, `.env` but not `.env.example`, `*.pem`, the app's own data) asks "reads secrets" in every mode but Bypass, or goes to Auto mode's check; `grep` and `glob` over a folder leave secret files out |
-| `bash` | Shell command in the session's folder, with an optional short description of what it does (shown on its approval card); stopping the run stops the command and what it started |
-| `terminal_run` `terminal_read` `terminal_list` `terminal_stop` | Terminal pane tabs |
+| `bash` | Shell command in the session's folder, with an optional short description of what it does (shown on its approval card); stopping the run stops the command and what it started. Long output keeps its first 12K and last 18K characters, and the exit code always |
+| `terminal_run` `terminal_read` `terminal_list` `terminal_stop` | Terminal pane tabs; long output keeps its start and its end |
 | `browser_*` | Built-in browser, on the active tab: navigate, click and type by visible text, read, find, wait, scroll, press a key, screenshot, eval (see Browser) |
 | `browser_tabs` | The pane's tabs: `list`, `new` (with `url`; `background` keeps the current tab in front), `select` and `close` (`tab_id`) |
 | `show_image` | Put an image (a screenshot, a chart, a picture in the project) inline in the reply |
