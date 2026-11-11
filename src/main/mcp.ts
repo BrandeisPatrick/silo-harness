@@ -17,6 +17,7 @@ import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { AppConfig, McpCallNames, McpOAuthConfig, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
 import type { Tool, ToolResult } from './tools/types';
+import type { McpGroup } from './tools/groups';
 import { words } from './guard';
 import { expandEnvRefs } from './env';
 import { headerVarName, maskedConfig, VAR_REF } from './mcp-values';
@@ -89,6 +90,8 @@ interface Entry {
   signedIn?: boolean;
   /** Why the last connection attempt failed */
   lastError?: string;
+  /** The tool group its tools load as (mcp:<name>, unique), set while its tools are indexed */
+  group?: McpGroup;
 }
 
 export interface McpToolRef {
@@ -422,6 +425,9 @@ export function loginPath(): Promise<string> {
   });
   return loginPathPromise;
 }
+
+/** The longest server name an MCP group keeps (mcp:<name>) */
+const MAX_GROUP_NAME = 48;
 
 function sanitizeName(s: string): string {
   return s.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -1109,6 +1115,17 @@ export class McpManager extends EventEmitter {
   /** Assigns the model-facing names (mcp__server__tool, unique and at most 64 characters) and indexes them. */
   private rebuildIndex(): void {
     this.byFullName.clear();
+    // Each server's tool group: mcp: and its name, sanitised, lower case, unique (project servers first, by name)
+    const groups = new Set<string>();
+    for (const e of this.sorted()) {
+      e.group = undefined;
+      if (!this.offered(e) && e.status !== 'connecting') continue;
+      const base = `mcp:${sanitizeName(e.name).toLowerCase().slice(0, MAX_GROUP_NAME)}`;
+      let group = base;
+      for (let n = 2; groups.has(group); n++) group = `${base}_${n}`;
+      groups.add(group);
+      e.group = group as McpGroup;
+    }
     for (const e of this.entries.values()) {
       if (!this.offered(e) && e.status !== 'connecting') continue;
       e.tools.forEach((info, i) => {
@@ -1153,6 +1170,7 @@ export class McpManager extends EventEmitter {
         description,
         parameters,
         mcp: ref,
+        ...(entry.group ? { group: entry.group } : {}),
         run: async (args, ctx) => {
           const ok = await ctx.approve(info.fullName, approvalDetail(args));
           if (!ok.ok) return { content: ok.message };
@@ -1268,15 +1286,31 @@ export class McpManager extends EventEmitter {
    * One line per server whose tools are offered, for the system prompt, or '' when there is none. A server that
    * reconnects keeps its line, as it keeps its tools, so the prompt does not change.
    */
-  describe(): string {
+  describe(loadable = false): string {
     const lines: string[] = [];
     for (const e of this.sorted()) {
       if (!this.offered(e) || !e.tools.length) continue;
+      if (loadable && e.group) {
+        // Loaded when needed: the server's group and its tools' names, each clipped (the names are the server's text)
+        const names = e.tools.map((t) => sanitizeName(t.name).slice(0, 40));
+        let shown = names.slice(0, 15).join(', ');
+        if (shown.length > 300) shown = `${shown.slice(0, 300).replace(/,[^,]*$/, '')}, …`;
+        else if (names.length > 15) shown += ', …';
+        lines.push(`- ${e.group} (${e.tools.length} tool${e.tools.length === 1 ? '' : 's'}): ${shown}`);
+        continue;
+      }
       const names = e.tools.map((t) => t.name);
       const shown = names.slice(0, 15).join(', ') + (names.length > 15 ? `, … (${names.length} tools)` : '');
       lines.push(`- ${e.name} (${e.tools.length} tool${e.tools.length === 1 ? '' : 's'}): ${shown}`);
     }
     return lines.join('\n');
+  }
+
+  /** The servers whose tools a session can load: each one's group and its name as configured (for mcpGroupsForMessage). */
+  loadable(): { group: McpGroup; name: string }[] {
+    return this.sorted()
+      .filter((e) => this.offered(e) && e.tools.length > 0 && e.group)
+      .map((e) => ({ group: e.group!, name: e.name }));
   }
 
   /** Adds servers from what the user typed, persists them and connects. Returns the new list. */

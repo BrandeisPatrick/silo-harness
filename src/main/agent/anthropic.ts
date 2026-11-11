@@ -8,7 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AgentEvent } from '../../shared/types';
 import type { ToolCall, ToolSpec, Usage } from '../ollama';
 import type { Msg } from '../sessions';
-import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requestedGroups, type ToolGroup } from '../tools/groups';
+import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requestedGroups, type GroupId } from '../tools/groups';
 import { effortRefused, effortRefusedNotice, isEffortRefusal, nativeEffortFor, thinkingWithEffort } from './effort';
 import { idleWatch, StreamDropped } from './retry';
 import type { RequestTiming } from './perf';
@@ -234,7 +234,7 @@ export const deferRefused = new Set<string>();
 export function deferPlan(model: string, history: Msg[], specs: ToolSpec[]): { specs: ToolSpec[]; deferred: Set<string>; refs: Map<string, string[]> } {
   const deferred = new Set<string>();
   const refs = new Map<string, string[]>();
-  const groupOf = new Map<string, ToolGroup>();
+  const groupOf = new Map<string, GroupId>();
   for (const s of specs) {
     const g = groupOfSpec(s);
     if (g && s.type === 'function') groupOf.set(s.function.name, g);
@@ -243,12 +243,12 @@ export function deferPlan(model: string, history: Msg[], specs: ToolSpec[]): { s
   // Without load_tools nothing could load a deferred group (toolSet 'all', a session's own tool set): send the pool as it is
   if (!specs.some((s) => s.type === 'function' && s.function.name === LOAD_TOOLS)) return { specs, deferred, refs };
   // The groups the history loaded (load_tools calls, by id) or used, in order, and those a brief says it loaded
-  const loads = new Map<string, ToolGroup[]>();
-  const order: ToolGroup[] = [];
-  const add = (g: ToolGroup) => {
+  const loads = new Map<string, GroupId[]>();
+  const order: GroupId[] = [];
+  const add = (g: GroupId) => {
     if (!order.includes(g)) order.push(g);
   };
-  const folded: ToolGroup[] = [];
+  const folded: GroupId[] = [];
   for (const m of history) {
     if (m.role === 'user' && typeof m.content === 'string' && m.content.includes(FOLDED_GROUPS_HEADING)) for (const g of foldedGroups(m.content)) if (!folded.includes(g)) folded.push(g);
     if (m.role !== 'assistant') continue;
@@ -261,7 +261,7 @@ export function deferPlan(model: string, history: Msg[], specs: ToolSpec[]): { s
         } catch {
           /* a bare list of names is read as it is */
         }
-        const gs = requestedGroups(args).filter((g): g is ToolGroup => [...groupOf.values()].includes(g as ToolGroup)) as ToolGroup[];
+        const gs = requestedGroups(args).filter((g): g is GroupId => [...groupOf.values()].includes(g as GroupId)) as GroupId[];
         loads.set(tc.id, gs);
         gs.forEach(add);
       } else {

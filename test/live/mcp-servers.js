@@ -1,5 +1,6 @@
 // Live check of MCP servers in the real window. (A) A real stdio server named "acme.docs" (sanitised to acme_docs in
-// the model-facing names) with a tool named list__items, called by the scripted mock model: the approval card names
+// the model-facing names) with a tool named list__items. Its tools load when needed: the first request has none, the
+// scripted mock model loads the server with load_tools (no row for it) and then calls its tools: the approval card names
 // the real server and tool with the tool's title beside them, lists flat arguments as keys and values, keeps its
 // answers; the rows show titles with the real names inside; the folded line says "Used acme.docs". (B) Settings →
 // MCP servers from the debug stand-in: one action per row, the … menu above the Settings dialog, Trust's confirmation
@@ -36,11 +37,18 @@ async function realServer() {
   try {
     await app.waitFor(`Boolean(window.__oc_debug)`, 20_000, 'the app');
     await app.waitFor(`oc.mcp.list().then((l) => l.some((s) => s.name === 'acme.docs' && s.status === 'connected'))`, 30_000, 'acme.docs to connect');
-    app.mock.state.replies.push({ content: '', toolCalls: [{ id: 'call_add', name: 'mcp__acme_docs__add', args: { a: 2, b: 3 } }], when: lastUserHas('MCP-LIVE-1') });
+    app.mock.state.requests.length = 0;
+    app.mock.state.replies.push({ content: '', toolCalls: [{ id: 'call_load', name: 'load_tools', args: { groups: ['mcp:acme_docs'] } }], when: lastUserHas('MCP-LIVE-1') });
+    app.mock.state.replies.push({ content: '', toolCalls: [{ id: 'call_add', name: 'mcp__acme_docs__add', args: { a: 2, b: 3 } }], when: afterTool('call_load') });
     app.mock.state.replies.push({ content: '', toolCalls: [{ id: 'call_list', name: 'mcp__acme_docs__list__items', args: {} }], when: afterTool('call_add') });
     app.mock.state.replies.push({ content: 'Done.', when: afterTool('call_list') });
     await app.send('MCP-LIVE-1 add two numbers');
     await app.waitFor(`Boolean(document.querySelector('.approval.mcp'))`, 20_000, 'the approval card');
+    const reqs = app.mock.state.requests.filter((r) => r.url === '/v1/chat/completions' && r.payload.stream && !r.payload.messages?.some((m) => m.role === 'system' && /safety check/i.test(String(m.content))));
+    const mcpIn = (r) => (r.payload.tools ?? []).filter((t) => t.function.name.startsWith('mcp__acme_docs__')).length;
+    const sys = String(reqs[0]?.payload.messages?.[0]?.content ?? '');
+    check('load: the first request has no MCP tool, its prompt names the server and its tools', reqs.length >= 2 && mcpIn(reqs[0]) === 0 && /^- mcp:acme_docs \(9 tools\): echo, add, /m.test(sys), { n: reqs.length, first: reqs[0] && mcpIn(reqs[0]) });
+    check('load: after load_tools the server\'s tools are sent', mcpIn(reqs[reqs.length - 1]) === 9, reqs.map(mcpIn));
     const card = await app.evaluate(`(() => { const c = document.querySelector('.approval.mcp'); return { title: c.querySelector('.title')?.innerText, sub: c.querySelector('.prompt-sub')?.innerText, keys: [...c.querySelectorAll('.mcp-arg-key')].map((e) => e.innerText), vals: [...c.querySelectorAll('.mcp-arg-value')].map((e) => e.innerText), buttons: [...c.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') || b.innerText.trim()).filter(Boolean) }; })()`);
     check('approval: the heading has the real server and tool names', /^Call add on acme\.docs\?/.test(norm(card.title)), card);
     check("approval: the tool's title is secondary text beside it", card.sub === 'Add numbers', card);
@@ -59,6 +67,7 @@ async function realServer() {
     check('row: the title as its label, the real server in the pill', add && add.verb === 'Add numbers' && add.server === 'acme.docs', rows);
     check('row: the real names once open', add && add.names === 'acme.docs · add', add);
     check('row: a tool with "__" in its name is not split there', list && list.verb === 'list__items' && list.server === 'acme.docs' && list.names === 'acme.docs · list__items', list);
+    check('load: no row for load_tools', (await app.count('#messages details.tool[data-tool="load_tools"]')) === 0);
     const fold = await app.evaluate(`[...document.querySelectorAll('#messages details.tool-group > summary .group-verb')].map((e) => e.innerText)`);
     check('the folded line: "Used acme.docs"', fold.includes('Used acme.docs'), fold);
     const errs = app.console.filter((l) => /^\[(error|exception)\]/.test(l));

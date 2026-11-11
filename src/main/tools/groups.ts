@@ -14,11 +14,31 @@
 // Anthropic's native path does that (agent/anthropic.ts nativeRequest): every group's tools are in the request from the
 // first one, marked defer_loading, and a load's result carries tool_reference blocks that bring them into the model's
 // context, so the tools, and the cached prefix, never change when a group loads.
+//
+// Each connected MCP server is a group too, named mcp:<server> (McpManager assigns the names, lower case and unique).
+// Its tools load the same three ways (load_tools, a call by name, a user message that names the server); the system
+// prompt's MCP section lists each server's tool names, and a load brings their descriptions and schemas. Loading is
+// not permission: a loaded MCP tool's call asks exactly as before.
 
 import type { Tool } from './types';
 
 export const TOOL_GROUPS = ['browser', 'terminal', 'sessions', 'schedules', 'mods', 'web'] as const;
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
+/** An MCP server's group: `mcp:` and the server's name, sanitised (McpManager), lower case */
+export type McpGroup = `mcp:${string}`;
+/** A built-in group or an MCP server's */
+export type GroupId = ToolGroup | McpGroup;
+
+const MCP_GROUP = /^mcp:[a-z0-9_-]{1,64}$/;
+
+export function isMcpGroup(v: unknown): v is McpGroup {
+  return typeof v === 'string' && MCP_GROUP.test(v);
+}
+
+/** A built-in group or an MCP server's group name (an MCP group need not be connected now). */
+export function isGroupId(v: unknown): v is GroupId {
+  return isToolGroup(v) || isMcpGroup(v);
+}
 
 /** What each group is for: its line in load_tools' description (the same whether it is loaded or not). */
 const GROUP_LINES: Record<ToolGroup, string> = {
@@ -54,22 +74,22 @@ export const GROUP_GUIDANCE: Partial<Record<ToolGroup, string>> = {
  */
 export const GROUP_OF = Symbol('toolGroup');
 
-export function groupOfSpec(spec: object): ToolGroup | undefined {
+export function groupOfSpec(spec: object): GroupId | undefined {
   const g = (spec as Record<symbol, unknown>)[GROUP_OF];
-  return isToolGroup(g) ? g : undefined;
+  return isGroupId(g) ? g : undefined;
 }
 
 /** The heading a compaction brief puts over what the folded loads of groups told the model (Agent.foldedGroupsText). */
 export const FOLDED_GROUPS_HEADING = '## Tool groups loaded earlier in this session';
 
 /** The groups a brief says were loaded earlier ("Loaded <group>: …" lines under FOLDED_GROUPS_HEADING). */
-export function foldedGroups(text: string): ToolGroup[] {
+export function foldedGroups(text: string): GroupId[] {
   const at = text.indexOf(FOLDED_GROUPS_HEADING);
   if (at < 0) return [];
   const rest = text.slice(at + FOLDED_GROUPS_HEADING.length);
   const end = rest.search(/\n## /);
   const section = end >= 0 ? rest.slice(0, end) : rest;
-  return cleanGroups([...section.matchAll(/^Loaded (\w+):/gm)].map((m) => m[1]));
+  return cleanGroups([...section.matchAll(/^Loaded (mcp:[a-z0-9_-]+|\w+):/gm)].map((m) => m[1]));
 }
 
 /** The tool that loads groups. Internal: no tool row, no approval, no hooks; the transcript leaves its calls out. */
@@ -80,24 +100,29 @@ export function isToolGroup(v: unknown): v is ToolGroup {
 }
 
 /** The groups in the order given, without repeats or names that are not groups. */
-export function cleanGroups(groups: Iterable<unknown>): ToolGroup[] {
-  const out: ToolGroup[] = [];
-  for (const g of groups) if (isToolGroup(g) && !out.includes(g)) out.push(g);
+export function cleanGroups(groups: Iterable<unknown>): GroupId[] {
+  const out: GroupId[] = [];
+  for (const g of groups) if (isGroupId(g) && !out.includes(g)) out.push(g);
   return out;
 }
 
 /** The system prompt's line about the groups a session can load ('' when there are none). The same all session long. */
-export function groupsPromptLine(groups: readonly ToolGroup[]): string {
-  if (!groups.length) return '';
-  return `\nMore tools come in groups (${groups.join(', ')}): when the task needs one, load it with ${LOAD_TOOLS}.`;
+export function groupsPromptLine(groups: readonly GroupId[]): string {
+  const builtIn = groups.filter(isToolGroup);
+  if (!builtIn.length) return '';
+  return `\nMore tools come in groups (${builtIn.join(', ')}): when the task needs one, load it with ${LOAD_TOOLS}.`;
 }
 
 /**
  * load_tools as offered to a session that can load `groups` (those its mode and tool set allow, loaded or not): one
  * line per group, so the definition stays the same all session long. The agent runs its calls itself.
  */
-export function loadToolsTool(groups: readonly ToolGroup[]): Tool {
-  const lines = groups.map((g) => `- ${g}: ${GROUP_LINES[g]}`).join('\n');
+export function loadToolsTool(groups: readonly GroupId[]): Tool {
+  const lines = groups
+    .filter(isToolGroup)
+    .map((g) => `- ${g}: ${GROUP_LINES[g]}`)
+    .concat(groups.some(isMcpGroup) ? [`- ${MCP_GROUP_LINE}`] : [])
+    .join('\n');
   return {
     name: LOAD_TOOLS,
     description: `Load tool groups so their tools can be called, from your next step on. A group stays loaded for the rest of the session. The groups:\n${lines}`,
@@ -113,6 +138,9 @@ export function loadToolsTool(groups: readonly ToolGroup[]): Tool {
   };
 }
 
+/** load_tools' line for the MCP servers, which the system prompt lists */
+export const MCP_GROUP_LINE = "mcp:<server>: an MCP server's tools (the servers are listed in the system prompt)";
+
 /** The group names a load_tools call asks for, however the model wrote them (an array, one name, or a list in a string). */
 export function requestedGroups(args: unknown): string[] {
   const raw = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>).groups ?? (args as Record<string, unknown>).group : args;
@@ -125,6 +153,23 @@ const WEB_ADDRESS = /(?:\bhttps?:\/\/|\blocalhost:\d|\b127\.0\.0\.1:\d)/i;
 /** "open https://…", "visit localhost:3000": the message asks to open the address itself. */
 const OPEN_ADDRESS = /\b(?:open|visit|go to|navigate to)\s+<?(?:https?:\/\/|localhost:\d|127\.0\.0\.1:\d)/i;
 /** "a sub-session", "another session", "the session called atlas", "rename this session": not a bare "session". */
+/**
+ * The MCP groups a user message names: a server's name as a whole word ("ask docs for …", "the Tracker server"), any
+ * case. `servers` are the loadable ones with their names as configured; a name shorter than three characters never
+ * matches (too likely by chance).
+ */
+export function mcpGroupsForMessage(text: string, servers: readonly { group: McpGroup; name: string }[]): McpGroup[] {
+  const t = String(text ?? '');
+  const out: McpGroup[] = [];
+  for (const s of servers) {
+    const name = s.name.trim();
+    if (name.length < 3 || out.includes(s.group)) continue;
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_-])`, 'iu');
+    if (re.test(t)) out.push(s.group);
+  }
+  return out;
+}
+
 const OTHER_SESSIONS = /\b(?:sub-?sessions?|(?:other|another|new|parallel)\s+sessions?|sessions?\s+(?:called|named|titled)|(?:rename|call|name)\s+this\s+session)\b/i;
 
 /**

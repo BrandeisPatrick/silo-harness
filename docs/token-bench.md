@@ -367,6 +367,23 @@ measured 1,988,499, -8%, in 53 requests), so tier 2 needs several runs per side 
 open or browser, in a one-off live check, Haiku called load_tools by itself for the terminal and for a web page and then used
 them, and the live sub-session test has it load the sessions group.
 
+### MCP servers' tools loaded when needed (built since)
+
+Each connected MCP server is now a tool group, `mcp:<server>`: the system prompt lists its tool names, and its definitions come
+with a load. Measured with `scripts/mcp-token-bench.js` (mock model, no key, the app's own estimate of about four characters per
+token, a fresh session's first request "hello" in ask mode) with the test server given 20 tools worded like a tracker's. Raw
+numbers in `docs/releases/mcp/mcp-tools.json`.
+
+| Fixed part of a request (tool definitions + system prompt) | Before (e3db213) | After |
+|---|--:|--:|
+| First request, OpenAI-shaped path | 4,598 (MCP tools 1,890) | 2,764 (-40%; MCP tools 0) |
+| After the server is loaded | 4,598 | 4,654 |
+| First request, native Anthropic path (in context; deferred ones left out) | 4,378 (MCP tools 1,757) | 2,689 (-39%) |
+
+The prompt's MCP section grew from 92 to 123 tokens (the load instruction) and `load_tools` by one line; a session that loads
+the server pays about 56 tokens more than before on each later request, and one extra request for the load unless the message
+named the server or the model called a tool by name.
+
 ### Smaller ones
 
 - **The safety check's model.** It runs on the session's model unless `autoMode.model` names another. On Opus 5.5 ($4 per million

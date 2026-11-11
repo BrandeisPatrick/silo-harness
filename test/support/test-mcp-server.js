@@ -38,6 +38,25 @@ if (process.env.OC_TEST_EXTRA) {
   });
   server.registerTool('pid', { description: 'Reports the process id', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: String(process.pid) }] }));
 }
+if (process.env.OC_TEST_BENCH) {
+  // Twelve more tools, worded like a real tracker server's, so the usual eight become twenty (the token measurement in
+  // docs/token-bench.md). Made-up data only.
+  const text = (t) => async () => ({ content: [{ type: 'text', text: t }] });
+  const ro = { readOnlyHint: true };
+  const state = z.enum(['open', 'closed', 'all']).describe('Filter by state');
+  server.registerTool('list_issues', { description: 'List issues in a project, newest first. Use filters to narrow the result; results are paginated.', inputSchema: { project: z.string().describe('Project key, e.g. "WEB"'), state: state.optional(), assignee: z.string().optional().describe('Username of the assignee'), labels: z.array(z.string()).optional().describe('Only issues with all of these labels'), page: z.number().optional().describe('Page number, from 1'), per_page: z.number().optional().describe('Results per page, at most 100') }, annotations: ro }, text('[]'));
+  server.registerTool('get_issue', { description: 'Get one issue with its description, labels, assignees and the latest comments.', inputSchema: { project: z.string().describe('Project key'), number: z.number().describe('Issue number') }, annotations: ro }, text('{}'));
+  server.registerTool('create_issue', { description: 'Create an issue in a project. Returns the new issue with its number and URL.', inputSchema: { project: z.string().describe('Project key'), title: z.string().describe('Short summary'), body: z.string().optional().describe('Description in Markdown'), labels: z.array(z.string()).optional(), assignees: z.array(z.string()).optional().describe('Usernames to assign') } }, text('{}'));
+  server.registerTool('update_issue', { description: 'Change an issue: its title, description, state, labels or assignees. Fields left out stay as they are.', inputSchema: { project: z.string(), number: z.number(), title: z.string().optional(), body: z.string().optional(), state: z.enum(['open', 'closed']).optional(), labels: z.array(z.string()).optional(), assignees: z.array(z.string()).optional() } }, text('{}'));
+  server.registerTool('add_comment', { description: 'Add a comment to an issue or a pull request.', inputSchema: { project: z.string(), number: z.number().describe('Issue or pull request number'), body: z.string().describe('Comment text in Markdown') } }, text('{}'));
+  server.registerTool('list_projects', { description: 'List the projects the signed-in user can see, with their keys and names.', inputSchema: { query: z.string().optional().describe('Filter by name'), page: z.number().optional() }, annotations: ro }, text('[]'));
+  server.registerTool('search_code', { description: 'Search code across the repositories of a project. Supports exact phrases in quotes and path: and lang: filters.', inputSchema: { query: z.string().describe('Search query'), project: z.string().optional(), page: z.number().optional(), per_page: z.number().optional() }, annotations: ro }, text('[]'));
+  server.registerTool('get_file', { description: 'Get the contents of a file in a repository at a branch, tag or commit.', inputSchema: { repo: z.string().describe('owner/name'), path: z.string().describe('Path in the repository'), ref: z.string().optional().describe('Branch, tag or commit; the default branch if left out') }, annotations: ro }, text(''));
+  server.registerTool('list_branches', { description: 'List the branches of a repository with their latest commit.', inputSchema: { repo: z.string().describe('owner/name'), page: z.number().optional() }, annotations: ro }, text('[]'));
+  server.registerTool('get_pull_request', { description: 'Get a pull request with its description, status checks, reviews and changed files.', inputSchema: { repo: z.string(), number: z.number() }, annotations: ro }, text('{}'));
+  server.registerTool('list_pull_requests', { description: 'List pull requests of a repository.', inputSchema: { repo: z.string(), state: state.optional(), author: z.string().optional(), base: z.string().optional().describe('Base branch'), page: z.number().optional() }, annotations: ro }, text('[]'));
+  server.registerTool('get_user', { description: 'Get a user by username: display name, email visibility and team memberships.', inputSchema: { username: z.string() }, annotations: ro }, text('{}'));
+}
 if (process.env.OC_TEST_ODD) {
   // A tool whose name has "__" in it, for the interface's name checks
   server.registerTool('list__items', { description: 'Lists the items', inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: 'a, b' }] }));

@@ -7,6 +7,8 @@
 
 Servers come from Settings → MCP servers (stored in the app's `config.json` under `mcpServers`) and from a project's `.mcp.json` (Claude Code's format; off until you turn each one on). The model calls their tools as `mcp__<server>__<tool>`.
 
+A session starts without a server's tools: the system prompt names each connected server (`mcp:<server>`) with its tools' names, and the model loads a server with `load_tools`, by calling one of its tools, or because your message names the server. It stays loaded for the session. Loading changes nothing about approvals: each call asks as before. With Tools offered set to all, every server's tools are sent from the start.
+
 ## Config keys
 
 ```json

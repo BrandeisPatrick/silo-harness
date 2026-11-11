@@ -1,0 +1,67 @@
+{
+  "what": "The fixed part of an agent request (tool definitions sent in full plus the system prompt) with one MCP server of 20 tools connected, before and after MCP tools load when needed",
+  "conditions": {
+    "date": "2026-11-10",
+    "before": "e3db213 (rel-mcp after the 0.15.0 merge)",
+    "after": "this change",
+    "model": "mock (test/support/mock-model.js), no API key",
+    "server": "test/support/test-mcp-server.js with OC_TEST_BENCH (20 tools, stdio)",
+    "session": "a fresh session, first message \"hello\", ask mode, toolSet auto",
+    "estimate": "app estimate: ceil(chars / 4); tool definitions as JSON (compact.ts estimateSpecTokens)",
+    "script": "scripts/mcp-token-bench.js"
+  },
+  "before": {
+    "first": {
+      "toolsSent": 32,
+      "mcpToolsSent": 20,
+      "toolTokens": 3974,
+      "mcpToolTokens": 1890,
+      "deferredTokens": 0,
+      "systemTokens": 624,
+      "mcpPromptTokens": 92,
+      "fixedTokens": 4598
+    },
+    "nativeFirst": {
+      "toolsSent": 50,
+      "mcpToolsSent": 20,
+      "toolTokens": 3754,
+      "mcpToolTokens": 1757,
+      "deferredTokens": 2472,
+      "systemTokens": 624,
+      "mcpPromptTokens": 92,
+      "fixedTokens": 4378
+    }
+  },
+  "after": {
+    "first": {
+      "toolsSent": 12,
+      "mcpToolsSent": 0,
+      "toolTokens": 2109,
+      "mcpToolTokens": 0,
+      "deferredTokens": 0,
+      "systemTokens": 655,
+      "mcpPromptTokens": 123,
+      "fixedTokens": 2764
+    },
+    "loaded": {
+      "toolsSent": 32,
+      "mcpToolsSent": 20,
+      "toolTokens": 3999,
+      "mcpToolTokens": 1890,
+      "deferredTokens": 0,
+      "systemTokens": 655,
+      "mcpPromptTokens": 123,
+      "fixedTokens": 4654
+    },
+    "nativeFirst": {
+      "toolsSent": 50,
+      "mcpToolsSent": 20,
+      "toolTokens": 2034,
+      "mcpToolTokens": 0,
+      "deferredTokens": 4322,
+      "systemTokens": 655,
+      "mcpPromptTokens": 123,
+      "fixedTokens": 2689
+    }
+  }
+}
