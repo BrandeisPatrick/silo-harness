@@ -22,11 +22,13 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.13.0 | Cheaper sessions (prompt caching on Claude and through gateways, tools sent when needed, smaller tool results), `web_search` and `web_fetch`, a browser that treats pages as data and checks clicks, downloads, tabs and the clipboard, MCP sign-in with OAuth and reconnection, retries, `/create-skill` and `/create-mod`, and no macOS prompt the user did not cause | released 2026-11-10 |
 | 0.13.1 | Fix: a page in the Browser pane can no longer make its tab a window-drag area (clicks did not reach the Microsoft sign-in page after Teams) | released 2026-11-10 |
 | 0.14.0 | Latency: the reads of one reply run together, `/timing` and an opt-in timing log, a reasoning-effort pill and `/effort`, recognised `aws` reads without the safety check, shell sign-ins and wildcards fixed, a paused circle on the task card, lighter icons, themes removed, and evals for the safety check and for answers | released 2026-11-10 |
-| 0.15.0 | One tab strip for the side pane, long chats folded, sessions in tabs, the browser in Auto mode; fix: a site approval covers one origin, so approving https no longer allows http | planned |
+| 0.15.0 | One tab strip for the side pane, long chats folded, sessions in tabs, the browser in Auto mode; fix: a site approval covers one origin, so approving https no longer allows http | released 2026-11-10 |
 | 0.16.0 | Permission rules with patterns in Claude Code's format (deny beats allow, "Always allow" on a card writes the rule, hard refusals stay), a session's cost in dollars next to its tokens, Auto mode's safety check on Claude Haiku 5.5 by default | planned |
 | 0.17.0 | MCP polish (servers and connectors, with Claude as the reference) and MCP tools loaded only when needed | planned; it first runs against a real remote server |
 
-Decided on 2026-11-10 and not scheduled: a headless `silo run`, once the shell sandbox exists; for compaction, "dead ends" and "what was verified" sections in the summary brief, and the summary written inside the cached conversation.
+Decided on 2026-11-10 and not scheduled: a headless `silo run`, once the shell sandbox exists; a site approval card that names `http://` for a plain-http site (the card shows the host alone, so an http page and its https twin read the same).
+
+Compaction, after 0.17.0 (from arXiv 2611.05306, "You don't need long context"): compact below Claude Haiku 5.5's 100,000-token price step; a 32K default window for local models, or a warning below it (Ollama's default is 16,384); the summary brief gains the first request verbatim, the checks run, dead ends and the done-when condition. Measure before deciding: the summary written inside the cached conversation. Parked: a read-only search over what was folded. The 0.8 threshold stays.
 
 ## Done in earlier rounds
 

@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.15.0 — 2026-11-10
+
+The side pane has one tab strip, a finished turn folds under one line, each session has its own browser tabs, and Auto mode's safety check decides browser actions.
+
+### Highlights
+
+- **One tab strip.** Pages, Diff, Terminal and mod panes are tabs in one strip at the top of the side pane, and a blank tab lists the tools ([details](docs/reference.md#browser)).
+  ![The side pane with page tabs, Diff and Terminal in one strip](docs/releases/0.15.0/one-strip.png)
+- **Turns fold away.** A turn that used tools folds under a "Worked for 53s" line once it has its answer; click the line to see the work ([details](docs/reference.md#tools)).
+  ![A finished turn folded under its "Worked for" line, above the answer](docs/releases/0.15.0/worked-for.png)
+- **Browser in Auto mode.** In Auto mode the safety check decides new sites, acts on sign-in pages and page scripts, and shows the card when unsure ([details](docs/reference.md#auto-mode)).
+
+### New
+
+- **Tabs per session.** Each session has its own browser tabs: the pane shows those of the session on screen, and a background session browses in its own.
+- **Auto mode learns.** The safety check is given your earlier answers on approval cards; Settings → Permissions → Auto mode lists them, with "Remove", "Forget all" and a switch.
+
+### Improved
+
+- **Live tool line.** While a turn runs, its tool line names the call in flight with a shimmer; opened, it lists the calls one line each.
+- **Strip fits its room.** Short of room, long tab titles shorten, quiet tabs become icons, then the strip scrolls and keeps the active tab in view.
+- **One pane toggle.** One button at the window's top-right corner shows and hides the side pane.
+- **Quieter Terminal pane.** The Terminal pane shows its row of terminals only when there are two or more.
+- **Turn times kept.** A stored session keeps each turn's time, so "Worked for" reads the same after a restart.
+- **Blocked calls stay visible.** A call Auto mode blocked stays in sight when its turn folds.
+
+### Fixed
+
+- **Passkey requests don't hang.** A page that asks for a passkey is refused at once, and a bar says to choose another way to sign in.
+- **Model menu fits.** The model menu under the chat bar stays inside the window and scrolls when its list is long.
+
+### Security
+
+- **Approvals keep their scheme.** A site approval covers only the scheme it was given on: allowing `https://example.com` does not allow `http://example.com` ([details](docs/reference.md#browser)).
+- **Script approvals stay narrow.** In Auto mode, "Allow" on a blocked page script covers that script only.
+
+### For developers
+
+- **Mod tabs.** A mod's `tab` pane joins the strip once opened; its × takes it out of the strip and the page keeps running hidden ([details](docs/mods.md)).
+- **Turn header classes.** Looks can style `.turn-head`, `.turn-head-btn` and `.turn-hidden`.
+- **Learning switch.** `autoMode.learn` in the settings turns recording of your answers on or off (default on).
+
+### Upgrade notes
+
+- **Http sites ask again.** A saved site without a scheme covers https only, plus http on `localhost`, so an http site you allowed before asks once more.
+
+### Known issues
+
+- **No passkeys yet.** Passkeys need a build signed with a Developer ID, and a USB security key is untested.
+
 ## 0.14.0 — 2026-11-10
 
 Reads asked for in one reply run together, `/timing` shows where a run's time went, and a pill under the chat bar sets the reasoning effort.
