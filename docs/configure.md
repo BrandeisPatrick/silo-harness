@@ -270,6 +270,19 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 **Only your own settings.json may set `autoMode`.** A project's file may not, since a repository could otherwise allow its own actions or send your conversation to a model of its choosing; it is ignored there with a problem line.
 
+### Prices
+
+The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on Anthropic's own API. For any other model, or to override those, set `prices`: dollars per million tokens, by model id. `cacheRead` and `cacheWrite` are optional and default to the input price. A project's file replaces the whole table.
+
+```json
+{
+  "prices": {
+    "qwen3:8b": { "input": 0, "output": 0 },
+    "example-model": { "input": 1, "output": 5, "cacheRead": 0.1 }
+  }
+}
+```
+
 ### The other settings
 
 `permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.

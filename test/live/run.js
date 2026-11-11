@@ -76,6 +76,7 @@ const SCRIPTS = [
   { name: 'browser-hardening' },
   { name: 'browser-drag-regions', shots: 'none' },
   { name: 'chat-cards' },
+  { name: 'cost' },
 ];
 
 const words = process.argv.slice(2);

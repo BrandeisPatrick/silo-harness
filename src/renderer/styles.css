@@ -890,6 +890,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .status-time { margin-left: -4px; color: var(--text-400); font-variant-numeric: tabular-nums; }
 .status-tokens { color: var(--text-400); font-size: var(--fs-small); line-height: var(--lh-small); font-variant-numeric: tabular-nums; cursor: default; }
 .status-tokens.near-limit { color: var(--warn); }
+.status-cost { margin-left: -4px; }
 .stop-hint {
   display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; margin-right: -6px; border-radius: var(--r-control);
   font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); transition: background-color 0.12s, color 0.12s;

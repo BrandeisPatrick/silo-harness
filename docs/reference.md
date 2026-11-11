@@ -70,6 +70,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 | `/schedules` | The scheduled tasks and their next run |
 | `/dream` | Dream now about this session's project (see Dreaming) |
 | `/timing` | Where the last run spent its time: model, tools, safety checks, your approvals ([latency.md](latency.md)) |
+| `/cost` | The session's tokens and estimated cost (see Cost) |
 | `/effort [level]` | Show or set the reasoning effort of the provider in use (`low` … `max`, `default`) |
 | a mod's commands | Listed in the menu with the mod's name |
 
@@ -199,6 +200,14 @@ Every request starts with the same tools and system prompt, then the conversatio
 - **Others**: nothing extra is sent. Many cache a repeated start on their own.
 
 Where the start is cached, old tool output is set aside in batches (past 90K tokens, or 60K after a pause of more than five minutes, down to 50K, or less in a small window) and old screenshots four at a time, so the cached part is rewritten seldom. Ollama and LM Studio keep pruning as before, and so does a session whose provider reports no cache read or write on three requests in a row sent within five minutes of the last reply, until it reports one. The context meter's detail says what share of the last request was read from the cache, when the provider reports it.
+
+## Cost
+
+While a run goes on, the status line shows what the session has cost so far beside its tokens: `$0.04`, or `<$0.01` under a cent. It is an estimate from list prices; the provider's bill is the truth. `/cost` adds the token counts (uncached input, cache reads, cache writes, output).
+
+- **Counted:** every model call made for the session: its turns, Auto mode's checks (priced with the check's own model), the title, compaction summaries, and the summary of a sub-session or fork merged into it. A sub-session's own calls are its own. Not counted: mods' model calls, Settings' provider test, and calls whose provider reports no token counts.
+- **Prices:** Claude models on Anthropic's own API (a base URL on `api.anthropic.com`) use a built-in table read from [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) on 2026-11-10, with Claude Haiku 5.5's higher rates for prompts over 100,000 tokens applied per request. Any other model or provider shows nothing unless you set a price (`prices` in [configure.md](configure.md#prices)), which also overrides the table. Prices are never fetched.
+- If one call of the session has no known price, there is no figure at all, and `/cost` names the model. The totals are kept with the session and survive a restart; a session from before this was added counts only its calls from then on.
 
 ## Remote control
 

@@ -71,8 +71,9 @@ export function remoteEvent(ev: AgentEvent): unknown | null {
       return { type: 'image', image: image(ev.image) };
     case 'artifact':
       return { type: 'artifact', action: ev.action, artifact: artifact(ev.artifact) };
-    // Token counts and the context meter are desktop chrome; the remote has no use for them.
+    // Token counts, the cost and the context meter are desktop chrome; the remote has no use for them.
     case 'usage':
+    case 'cost':
     case 'context':
       return null;
     default:

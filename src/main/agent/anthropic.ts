@@ -370,10 +370,14 @@ export interface NativeReply {
 }
 
 /** Usage of a Messages response in our terms: the prompt is the whole input, cached tokens included. */
-export function nativeUsage(u: { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }): Usage {
+export function nativeUsage(u: { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_creation?: { ephemeral_1h_input_tokens?: number | null } | null }): Usage {
   const read = Number(u.cache_read_input_tokens) || 0;
   const write = Number(u.cache_creation_input_tokens) || 0;
-  return { promptTokens: (Number(u.input_tokens) || 0) + read + write, completionTokens: Number(u.output_tokens) || 0, cacheReadTokens: read, cacheWriteTokens: write };
+  const out: Usage = { promptTokens: (Number(u.input_tokens) || 0) + read + write, completionTokens: Number(u.output_tokens) || 0, cacheReadTokens: read, cacheWriteTokens: write };
+  // The hour-long writes, apart (they cost 2x the input price, the five-minute ones 1.25x)
+  const hour = Number(u.cache_creation?.ephemeral_1h_input_tokens) || 0;
+  if (hour > 0) out.cacheWrite1hTokens = Math.min(hour, write);
+  return out;
 }
 
 /** The request for a history and tool specs, marks included. */
@@ -530,7 +534,7 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
           // Some gateways send the input counts only here
           if (ev.usage.input_tokens != null || ev.usage.cache_read_input_tokens != null) {
             const late = nativeUsage({ ...ev.usage });
-            if (late.promptTokens > usage.promptTokens) Object.assign(usage, { promptTokens: late.promptTokens, cacheReadTokens: late.cacheReadTokens, cacheWriteTokens: late.cacheWriteTokens });
+            if (late.promptTokens > usage.promptTokens) Object.assign(usage, { promptTokens: late.promptTokens, cacheReadTokens: late.cacheReadTokens, cacheWriteTokens: late.cacheWriteTokens, cacheWrite1hTokens: late.cacheWrite1hTokens });
           }
         }
         break;

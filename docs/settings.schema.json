@@ -576,6 +576,40 @@
         ]
       }
     },
+    "prices": {
+      "type": "object",
+      "description": "Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic's API and price any other model.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "output"
+        ],
+        "properties": {
+          "input": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Input tokens."
+          },
+          "output": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Output tokens."
+          },
+          "cacheRead": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Tokens read from the prompt cache (default: the input price)."
+          },
+          "cacheWrite": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Tokens written to the prompt cache (default: the input price)."
+          }
+        }
+      }
+    },
     "hooks": {
       "type": "object",
       "description": "Commands and HTTP endpoints run before and after the agent acts, in Claude Code's format. A project file's hooks run only once you trust the file. See docs/hooks.md.",
