@@ -372,7 +372,7 @@ them, and the live sub-session test has it load the sessions group.
 Each connected MCP server is now a tool group, `mcp:<server>`: the system prompt lists its tool names, and its definitions come
 with a load. Measured with `scripts/mcp-token-bench.js` (mock model, no key, the app's own estimate of about four characters per
 token, a fresh session's first request "hello" in ask mode) with the test server given 20 tools worded like a tracker's. Raw
-numbers in `docs/releases/mcp/mcp-tools.json`.
+numbers in `docs/releases/0.17.0/mcp-tools.json`.
 
 | Fixed part of a request (tool definitions + system prompt) | Before (e3db213) | After |
 |---|--:|--:|
