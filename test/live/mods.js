@@ -434,6 +434,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       // An old theme (contributes.styles): listed with a note, never applied
       const tint = (await dbg(app, 'list()')).find((m) => m.key === 'tint');
       check('an old theme loads with a note, and its CSS never reaches the window', tint && tint.state !== 'invalid' && tint.problems.some((p) => p.warning && /Themes were removed/.test(p.message)) && (await app.evaluate(`!document.querySelector('style[data-mod]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`)), tint && tint.problems);
+      check('an old theme is not offered in the chat', await app.evaluate(`!document.querySelector('.mod-offer[data-mod="tint"]')`));
       await rpc(app, 'mods.setEnabled', 'tint', false);
       // The scheme: the app's tokens reach every mod page through theme.changed
       await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #1f66c4'`, 5000, 'the accent in the tab page').catch(() => {});

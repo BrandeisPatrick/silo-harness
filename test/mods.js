@@ -400,6 +400,11 @@ const resetHome = () => {
     writeMod(f.roots.user, 'delta', man('delta', { permissions: ['config:read', 'model'] }));
     check('a changed wanted set is offered again', await waitFor(() => offers().length === 2), offers().length);
     check('offers carry the ModInfo', offers()[1].payload.wants.join() === 'model,config:read' || offers()[1].payload.wants.includes('model'));
+    // An old theme (contributes.styles and nothing else) has nothing to turn on or use: listed, never offered.
+    const beforeOld = f.pushes.length;
+    writeMod(f.roots.user, 'oldtheme', man('oldtheme', { contributes: { styles: ['theme.css'] } }), { 'theme.css': ':root { --accent: #2b6cb0; }' });
+    await waitFor(() => f.pushes.slice(beforeOld).some((p) => p.channel === 'mods:changed' && p.payload.some((m) => m.id === 'oldtheme')));
+    check('a mod with nothing to turn on or use is listed and not offered', byId('oldtheme')?.state === 'off' && !f.pushes.some((p) => p.channel === 'mods:offer' && p.payload.id === 'oldtheme'), byId('oldtheme')?.state);
     const startup = f.pushes.filter((p) => p.channel === 'mods:offer' && p.payload.id === 'gamma');
     const paused = f.pushes.filter((p) => p.channel === 'mods:offer' && p.payload.id === 'beta');
     check('mods present at startup are not offered', startup.length === 0, startup.length);
