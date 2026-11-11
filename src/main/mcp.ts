@@ -1299,7 +1299,8 @@ export class McpManager extends EventEmitter {
         lines.push(`- ${e.group} (${e.tools.length} tool${e.tools.length === 1 ? '' : 's'}): ${shown}`);
         continue;
       }
-      const names = e.tools.map((t) => t.name);
+      // The names are the server's text: only the characters a tool name may have, clipped, as in the line above
+      const names = e.tools.map((t) => sanitizeName(t.name).slice(0, 40));
       const shown = names.slice(0, 15).join(', ') + (names.length > 15 ? `, … (${names.length} tools)` : '');
       lines.push(`- ${e.name} (${e.tools.length} tool${e.tools.length === 1 ? '' : 's'}): ${shown}`);
     }
