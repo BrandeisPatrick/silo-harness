@@ -197,7 +197,9 @@ from another session is held instead: see Messages between sessions). "Send now"
 `run_end { reason, continued: true }` with the agent still `running` and starts the next run with that message at once
 (`queue_delivered` when its UserPromptSubmit hooks accept it, `queue_dropped` when they refuse it). The rest of the queue
 stays and is delivered after that run's first model call. Listeners treat a `continued` end as no end at all: no
-notification, unread mark, sub-session report, schedule or dream status, and keep-awake holds.
+notification, unread mark, schedule or dream status, and keep-awake holds. A sub-session reports nothing at a
+`continued` end; when the cut run was one another session started, the run that follows keeps that origin and reports
+once, at its own end, with its reason and text (a turn the user drove stays unreported).
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
 `unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the

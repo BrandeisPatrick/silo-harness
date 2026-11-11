@@ -78,6 +78,11 @@ const one = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export class Subagents {
   /** Per session with a run in progress: the origin of the message that started it (set by its first user_message) */
   private readonly runOrigin = new Map<string, MessageOrigin | null>();
+  /**
+   * Sessions whose run another session started was cut by "Send now" (run_end `continued`): the run that follows is a
+   * steer inside that task, so it keeps origin 'session' and reports when it ends
+   */
+  private readonly carried = new Set<string>();
   /** Per parent: reports delivered since the user last wrote there, and whether the pause was announced */
   private readonly notes = new Map<string, number>();
   private readonly capNoticed = new Set<string>();
@@ -292,7 +297,11 @@ export class Subagents {
 
   /** Wired to app.events by setupSubagents. */
   onEvent(sessionId: string, ev: AgentEvent): void {
-    if (ev.type === 'run_start') this.runOrigin.set(sessionId, null);
+    if (ev.type === 'run_start') {
+      // After a Send now cut of a run another session started, the next run is that task's: its queued message does not
+      // make it a hand-driven turn
+      this.runOrigin.set(sessionId, this.carried.delete(sessionId) ? 'session' : null);
+    }
     else if (ev.type === 'user_message') {
       if (this.runOrigin.has(sessionId) && this.runOrigin.get(sessionId) === null) this.runOrigin.set(sessionId, ev.origin);
       // The user wrote here (typed, or queued while it ran): reports may flow again
@@ -304,8 +313,11 @@ export class Subagents {
       const origin = this.runOrigin.get(sessionId);
       this.runOrigin.delete(sessionId);
       // Only a run another session started (the spawn, or a session_send) reports back; a turn the user drove by hand does not.
-      // A run cut by "Send now" does not report either: the user took over, and the next run starts at once.
-      if (origin === 'session' && !ev.continued) this.report(sessionId, ev);
+      // A run cut by "Send now" does not report: the next run starts at once and, when this one was another session's,
+      // carries that origin and reports once at its own end (again and again through further cuts).
+      if (ev.continued) {
+        if (origin === 'session') this.carried.add(sessionId);
+      } else if (origin === 'session') this.report(sessionId, ev);
     } else if (ev.type === 'queue_delivered') this.inQueue.delete(ev.id);
     else if (ev.type === 'queue_dropped') {
       const m = this.inQueue.get(ev.id);
