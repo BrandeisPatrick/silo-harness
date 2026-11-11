@@ -28,6 +28,7 @@ import { between, bool, describe, intBetween, kind, nonNegative, oneOf, positive
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
 import { configDir, projectConfigDir } from './paths';
 import { hooksSchema, validateHooks } from './hooks/config';
+import { parseRule } from './agent/rules';
 
 type Scope = 'user' | 'project';
 
@@ -147,6 +148,18 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
     return first ? `${first.key}: ${first.message}` : null;
   }
   if (p === 'disableAllHooks') return bool(value);
+  if (p === 'permissions') {
+    if (!isRecord(value)) return `expected { "allow": [], "ask": [], "deny": [] }, got ${kind(value)}`;
+    for (const [list, v] of Object.entries(value)) {
+      if (list !== 'allow' && list !== 'ask' && list !== 'deny') return `permissions.${list}: not a permissions list (known: allow, ask, deny)`;
+      if (!Array.isArray(v)) return `permissions.${list}: expected a list of rules, got ${kind(v)}`;
+      for (const rule of v) {
+        const r = parseRule(rule, list);
+        if ('error' in r) return `permissions.${list}: ${typeof rule === 'string' ? rule : kind(rule)}: ${r.error}`;
+      }
+    }
+    return null;
+  }
   const [a, b, ...rest] = p.split('.');
   if (rest.length) return 'unknown';
   if (b === undefined) return a in SCALARS ? SCALARS[a](value) : 'unknown';
@@ -156,7 +169,7 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
 
 /** Every field path checkSetting knows, in schema order. */
 export function settableFields(): string[] {
-  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'hooks', 'disableAllHooks'];
+  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'hooks', 'disableAllHooks', 'permissions'];
 }
 
 /** The JSON Schema of settings.json, built from the checks above (docs/settings.schema.json is this, written out). */
@@ -177,6 +190,17 @@ export function settingsSchema(): Record<string, unknown> {
     additionalProperties: providerEntrySchema(),
   };
   properties.hooks = hooksSchema();
+  const ruleList = (desc: string) => ({ type: 'array', items: { type: 'string' }, description: desc });
+  properties.permissions = {
+    type: 'object',
+    additionalProperties: false,
+    description: 'Your own settings.json only: permission rules for every project, in Claude Code\'s format ("Bash(npm run test:*)", "Edit(//tmp/**)", "mcp__github"). A project\'s file may not set them. See docs/reference.md#permission-rules.',
+    properties: {
+      allow: ruleList('Run without asking (never covers a protected path, sudo, a browser card or Plan mode).'),
+      ask: ruleList('Always ask, in every mode.'),
+      deny: ruleList('Always refuse, in every mode.'),
+    },
+  };
   properties.disableAllHooks = { type: 'boolean', description: 'Turn off every hook from the settings files (mods\' hooks still run).' };
   return {
     $schema: 'http://json-schema.org/draft-07/schema#',
@@ -313,6 +337,39 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       for (const pr of block.problems) bad(pr.key, pr.message);
       info.keys.push(...block.keys);
       if (block.commands.length) info.hookCommands = block.commands;
+      continue;
+    }
+    if (key === 'permissions') {
+      // Rules for every project, from your own settings.json only: a repository must not grant itself permissions
+      // (nor take away yours), so a project's block is ignored, allow, ask and deny alike.
+      if (scope === 'project') {
+        bad(key, "a project's settings.json may not set permissions; it is ignored. Add rules in Settings → Permissions or your own settings.json");
+        continue;
+      }
+      if (!isRecord(value)) {
+        bad(key, `expected { "allow": [], "ask": [], "deny": [] }, got ${kind(value)}`);
+        continue;
+      }
+      const lists: Record<string, string[]> = {};
+      for (const [list, v] of Object.entries(value)) {
+        if (list !== 'allow' && list !== 'ask' && list !== 'deny') {
+          bad(`permissions.${list}`, 'not a permissions list (known: allow, ask, deny)');
+          continue;
+        }
+        if (!Array.isArray(v)) {
+          bad(`permissions.${list}`, `expected a list of rules, got ${kind(v)}`);
+          continue;
+        }
+        lists[list] = [];
+        v.forEach((rule, i) => {
+          const r = parseRule(rule, list);
+          // Kept even when it does not parse: Settings lists it with the reason, and it is ignored where rules apply
+          if ('error' in r) bad(`permissions.${list}[${i}]`, r.error);
+          if (typeof rule === 'string') lists[list].push(rule);
+        });
+      }
+      out.values.push({ path: 'permissions', value: lists });
+      info.keys.push(key);
       continue;
     }
     if (key === 'disableAllHooks') {

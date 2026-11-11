@@ -752,6 +752,34 @@
         }
       }
     },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Your own settings.json only: permission rules for every project, in Claude Code's format (\"Bash(npm run test:*)\", \"Edit(//tmp/**)\", \"mcp__github\"). A project's file may not set them. See docs/reference.md#permission-rules.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Run without asking (never covers a protected path, sudo, a browser card or Plan mode)."
+        },
+        "ask": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Always ask, in every mode."
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Always refuse, in every mode."
+        }
+      }
+    },
     "disableAllHooks": {
       "type": "boolean",
       "description": "Turn off every hook from the settings files (mods' hooks still run)."

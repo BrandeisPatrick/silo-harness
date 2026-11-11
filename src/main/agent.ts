@@ -66,6 +66,7 @@ import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectio
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCommand } from './guard';
+import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
 import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
 
@@ -726,14 +727,24 @@ export class Agent {
     return s;
   }
 
+  /** True when Plan mode refuses the call whatever is answered: an edit, or a command that is not read-only. */
+  private planRefuses(name: string, args: unknown): boolean {
+    if (this.sessionConfig().permissionMode !== 'plan') return false;
+    if (EDIT_TOOLS.has(name)) return true;
+    if (!BASH_TOOLS.has(name)) return false;
+    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
+    return typeof command !== 'string' || !isReadOnlyCommand(command);
+  }
+
   /**
    * Decides, per permission mode, whether an action runs, asks, or is refused (the rules are in agent/permissions.ts).
    * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown and no check runs (what the mode refuses
    * outright, plan mode's edits, stays refused, and a browser purchase or account card still asks, as it does in
-   * bypass mode). In Auto mode what the rules do not settle goes to the safety check (autoCheck); `call` is the tool
+   * bypass mode). 'rule': the user allowed the call on an ask rule's card, which skips the same cards but no browser
+   * card. In Auto mode what the rules do not settle goes to the safety check (autoCheck); `call` is the tool
    * call it belongs to.
    */
-  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false, call?: CallRef): Promise<ApprovalResult> {
+  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed: boolean | 'rule' = false, call?: CallRef): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
     const mode = cfg.permissionMode;
     const cwd = cfg.workingDirectory;
@@ -751,6 +762,7 @@ export class Agent {
         auto,
         cwd,
         rules: cfg.allowRules?.[cwd],
+        global: cfg.permissions,
         mcp: () => this.mcp?.lookup(name),
         allowed: {
           mcp: (server) => seen(this.sessionSet(this.mcpAllowed).has(server)),
@@ -775,7 +787,10 @@ export class Agent {
     // card or the safety check must decide
     const atOnce = (decision: ApprovalDecision): Promise<ApprovalResult> | null => {
       if (decision.kind === 'refuse' || decision.kind === 'allow') return settle(decision);
-      if (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
+      // A firm card (a write to the file that holds the permission rules) is the user's alone: no hook, no earlier Allow
+      if (decision.kind === 'ask' && decision.firm) return null;
+      // (an Allow on an ask rule's card does not answer a browser card: site approvals stay the browser's)
+      if (hookAllowed && !(hookAllowed === 'rule' && opts.browser) && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
       // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
       // by its card, site and first line, a page script also by its code: the model's reason under it may differ on the retry)
       if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve(done('allowed_before', { ok: true }));
@@ -2348,13 +2363,31 @@ export class Agent {
     }
     const hookContext = pre?.context ?? [];
     let hookApproval: HookApproval = pre?.permission === 'allow' ? 'allow' : pre?.permission === 'ask' ? 'ask' : null;
+    let askReason = pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call';
+    // The card came from an ask rule, not a hook: its Allow does not stand in for a browser card
+    let byRule = false;
+    // Permission rules (agent/rules.ts), after the hook and whatever it said: a deny rule refuses in every mode, Bypass
+    // included; an ask rule shows a card in every mode (but where Plan mode refuses the call anyway). A hook's allow
+    // beats neither.
+    const scfg = this.sessionConfig();
+    const verdict = ruleVerdict(compileRules(scfg.allowRules?.[ctx.cwd], scfg.permissions), name, args, ctx.cwd, name.startsWith('mcp__') ? this.mcp?.lookup(name)?.server : undefined);
+    if (verdict?.list === 'deny') {
+      const content = deniedByRule(verdict.rule);
+      this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
+      return end({ content }, 'blocked');
+    }
+    if (verdict?.list === 'ask' && !this.planRefuses(name, args)) {
+      hookApproval = 'ask';
+      byRule = pre?.permission !== 'ask';
+      askReason = `it matches your ask rule ${verdict.rule}`;
+    }
     if (hookApproval === 'ask') {
       // The card comes up whatever the mode says; once answered, the tool's own check asks no more. One card at a
       // time: it waits for the cards of calls still running before it.
       const input = toolInput();
       const what = typeof input.command === 'string' ? input.command : typeof input.file_path === 'string' ? input.file_path : truncate(JSON.stringify(args ?? {}), 800);
       const probe = timing?.permission();
-      const answer = await this.inLane(() => (ctx.signal?.aborted ? Promise.resolve<ApprovalResult>({ ok: false, message: INTERRUPTED }) : this.ask(name, what, this.getConfig().permissionMode, pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call', [], true, undefined, undefined, probe, call.id)));
+      const answer = await this.inLane(() => (ctx.signal?.aborted ? Promise.resolve<ApprovalResult>({ ok: false, message: INTERRUPTED }) : this.ask(name, what, this.getConfig().permissionMode, askReason, [], true, undefined, undefined, probe, call.id)));
       probe?.settle('hook', answer.ok);
       if (!answer.ok) {
         this.emit({ type: 'tool_end', id: call.id, name, result: answer.message, ok: false, durationMs: 0 });
@@ -2372,7 +2405,7 @@ export class Agent {
         approve: async (toolName, detail, target, approveOpts) => {
           const askedAt = Date.now();
           try {
-            return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow', { id: call.id, args: visible(args), timing });
+            return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow' ? (byRule ? 'rule' : true) : false, { id: call.id, args: visible(args), timing });
           } finally {
             waited += Date.now() - askedAt;
           }

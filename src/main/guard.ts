@@ -3,6 +3,7 @@
 // A heuristic over the command text, not a sandbox: it looks inside $(…), backticks, <(…), sh -c '…', eval, xargs
 // and find -exec, and at redirections, but a command can still hide what it runs (a script file, a variable).
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configDir } from './paths';
@@ -365,6 +366,15 @@ export function commandArgv(simple: string): string[] {
   return argvOf(simple).argv;
 }
 
+/**
+ * A simple command as the permission rules match it (agent/rules.ts): its program and arguments (see argvOf), whether
+ * it starts with a VAR=value assignment, and the files its redirections write.
+ */
+export function commandShape(simple: string): { argv: string[]; assigns: boolean; writes: string[] } {
+  const { argv, assigns, lexed } = argvOf(simple);
+  return { argv, assigns, writes: lexed.writes.filter((t) => !NULL_DEVICES.has(t)) };
+}
+
 /** The program a simple command runs: env assignments and wrappers like env/nohup/time are skipped; sudo counts as the program. */
 export function programOf(simple: string): string {
   return path.basename(argvOf(simple).argv[0] ?? '');
@@ -671,6 +681,61 @@ const OPEN_IN_PROJECT = ['.claude/skills', '.claude/commands', '.claude/agents',
 const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.bash_login', '.profile', '.gitconfig', '.config/git', '.ripgreprc', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
 /** In the user's config folder (~/.silo-harness): skills and the instructions file hold no executable configuration */
 const OPEN_IN_CONFIG = ['skills', 'SILOHARNESS.md', 'OPENHARNESS.md'];
+/** The app's data folder (config.json, with every project's saved rules), when the app has told the guard (index.ts) */
+let appDataDir: string | null = null;
+export function setAppDataDir(dir: string | null): void {
+  appDataDir = dir ? path.resolve(dir) : null;
+}
+
+/** The real path of `p`, or of its nearest existing folder with the rest appended */
+function realish(p: string): string {
+  let cur = p;
+  const rest: string[] = [];
+  for (let i = 0; i < 64; i++) {
+    try {
+      return path.join(fs.realpathSync(cur), ...rest.reverse());
+    } catch {
+      const up = path.dirname(cur);
+      if (up === cur) return p;
+      rest.push(path.basename(cur));
+      cur = up;
+    }
+  }
+  return p;
+}
+
+/**
+ * The files that hold permission rules: the user's settings.json (under every name the config folder has had) and
+ * the app's config.json (each project's saved rules). The agent must never write them itself.
+ */
+export function ruleFiles(): string[] {
+  const h = os.homedir();
+  const out = [configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')].map((d) => path.join(d, 'settings.json'));
+  for (const d of APP_DATA) out.push(path.join(h, d, 'config.json'));
+  if (appDataDir) out.push(path.join(appDataDir, 'config.json'));
+  return [...new Set(out.map((f) => path.resolve(f)))];
+}
+
+/** True when a write to `p` (from `cwd`) writes a file that holds permission rules, or moves or removes the folder it is in. Symlinks are followed. */
+export function writesRuleFile(p: string, cwd: string): boolean {
+  if (!p) return false;
+  const abs = path.resolve(cwd, expandHome(p));
+  const real = realish(abs);
+  // The file itself, or the folder that holds it (moved or removed): not every folder above it, whose removal the
+  // guard's own reasons (a critical folder, a broad path) already ask about
+  return ruleFiles().some((f) => [f, realish(f)].some((t) => [abs, real].some((x) => x === t || x === path.dirname(t))));
+}
+
+/** True when a shell command writes, moves or removes a file that holds permission rules (as far as its text shows). */
+export function commandWritesRuleFile(command: string, cwd: string): boolean {
+  for (const simple of allSimpleCommands(command.trim())) {
+    const { argv, lexed } = argvOf(simple);
+    const prog = path.basename(argv[0] ?? '');
+    if (writtenPaths(prog, argv.slice(1), lexed).some((p) => p && !NULL_DEVICES.has(p) && writesRuleFile(p, cwd))) return true;
+  }
+  return false;
+}
+
 /** The reasons no allow rule or "for this session" answer covers */
 export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protected file', 'modifies the .git directory']);
 
@@ -683,6 +748,8 @@ export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protect
 export function protectedWrite(abs: string, cwd: string): string | null {
   const file = path.resolve(cwd, expandHome(abs));
   const root = path.resolve(cwd);
+  // The files that hold permission rules, wherever the session works (even inside the config folder)
+  if (writesRuleFile(file, cwd)) return 'writes a protected file';
   if (holds(root, file) && file !== root) {
     if (path.relative(root, file).split(path.sep)[0] === '.git') return 'modifies the .git directory';
     const under = (list: string[]) => list.some((p) => holds(path.join(root, p), file));

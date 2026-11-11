@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AppConfig, AutoModeConfig, PermissionMode } from '../shared/types';
+import type { AppConfig, AutoModeConfig, PermissionMode, StoredRules } from '../shared/types';
+import { normalizeStoredRules } from './agent/rules';
 import type { DreamingConfig } from '../shared/dreaming';
 import type { BrowserConfig } from '../shared/browser';
 import { DEFAULT_DREAMING } from './dreaming/names';
@@ -145,6 +146,8 @@ export function readStoredConfig(file: string): AppConfig {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<AppConfig> & { schemaVersion?: number };
     const version = Number(raw.schemaVersion) || 1;
     delete raw.schemaVersion;
+    // Global permission rules come from the user's settings.json only, never from config.json
+    delete raw.permissions;
     return normalizeConfig({
       ...d,
       ...raw,
@@ -153,7 +156,7 @@ export function readStoredConfig(file: string): AppConfig {
       autoTitles: raw.autoTitles ?? d.autoTitles,
       autoCompact: raw.autoCompact ?? d.autoCompact,
       notifications: raw.notifications ?? d.notifications,
-      allowRules: raw.allowRules && typeof raw.allowRules === 'object' && !Array.isArray(raw.allowRules) ? raw.allowRules : {},
+      allowRules: normalizeAllowRules(raw.allowRules),
       recentDirs: Array.isArray(raw.recentDirs) ? raw.recentDirs.filter((d): d is string => typeof d === 'string') : [],
       mcpServers: raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers) ? raw.mcpServers : {},
       mcpTrusted: raw.mcpTrusted && typeof raw.mcpTrusted === 'object' && !Array.isArray(raw.mcpTrusted) ? raw.mcpTrusted : {},
@@ -246,6 +249,20 @@ export function normalizeAutoMode(raw: unknown): AutoModeConfig {
     model: typeof r.model === 'string' ? r.model.trim() : '',
     learn: r.learn !== false,
   };
+}
+
+/**
+ * Every project's saved rules in today's shape: the shape before 0.16 (programs, edits, mcp) read as the same rules
+ * (Bash(git:*), Edit, mcp__server), anything that is not a rules object dropped.
+ */
+export function normalizeAllowRules(raw: unknown): Record<string, StoredRules> {
+  const out: Record<string, StoredRules> = {};
+  if (!isRecord(raw)) return out;
+  for (const [cwd, r] of Object.entries(raw)) {
+    const n = isRecord(r) ? normalizeStoredRules(r as StoredRules) : undefined;
+    if (n) out[cwd] = n;
+  }
+  return out;
 }
 
 /** Keeps the legacy autoApprove flag consistent with permissionMode, and autoTitles a boolean (default on). */

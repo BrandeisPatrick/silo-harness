@@ -270,6 +270,22 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 **Only your own settings.json may set `autoMode`.** A project's file may not, since a repository could otherwise allow its own actions or send your conversation to a model of its choosing; it is ignored there with a problem line.
 
+### Permission rules
+
+The `permissions` block holds rules for every project, in Claude Code's format (see [Permission rules](reference.md#permission-rules)). Settings → Permissions lists them read-only; a project's own rules are added there.
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm run test:*)", "Edit(~/notes/**)"],
+    "ask": ["Bash(git push:*)"],
+    "deny": ["Bash(rm:*)", "Read(.env)"]
+  }
+}
+```
+
+**Only your own settings.json may set `permissions`.** A project's file may not, allow, ask and deny alike: a repository must not grant itself permissions. It is ignored there with a problem line. A rule that does not parse is ignored and listed with the reason.
+
 ### The other settings
 
 `permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.

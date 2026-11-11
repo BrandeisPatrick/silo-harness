@@ -301,6 +301,8 @@ export interface AppConfig {
   notifications: boolean;
   /** "Always allow … in this project" answers, by working directory (see ProjectRules) */
   allowRules: Record<string, StoredRules>;
+  /** Rules for every project, from the user's own settings.json only (never config.json, never a project's file) */
+  permissions?: PermissionLists;
   /** Working directories used before, most recent first (at most 8); the welcome screen offers them */
   recentDirs: string[];
   /** Keep the Mac awake: never, while a session is running, or whenever the app is open */
@@ -377,30 +379,55 @@ export interface BrowserCardInfo {
   site: string;
 }
 
-export interface StoredRules {
-  /** Programs (first word of a command: git, npm, …) that run without asking */
-  programs?: string[];
+/** Permission rules in Claude Code's format ("Bash(npm run test:*)", "Edit", "mcp__github"): see docs/reference.md#permission-rules */
+export interface PermissionLists {
+  allow?: string[];
+  ask?: string[];
+  deny?: string[];
+}
+
+/**
+ * A project's saved rules (AppConfig.allowRules[cwd]): rule strings, and guard reasons ("uses sudo") that no longer
+ * pause. Before 0.16 it held programs, edits and mcp: they are read as Bash(p:*), Edit and mcp__s (agent/rules.ts).
+ */
+export interface StoredRules extends PermissionLists {
   /** Auto-mode guard reasons ("uses sudo") that no longer pause */
   reasons?: string[];
-  /** Writes and edits inside the working directory run without asking (like Accept edits, but remembered) */
+  /** Before 0.16: programs (git, npm, …) that run without asking; a name the rule grammar cannot hold stays here */
+  programs?: string[];
+  /** Before 0.16: writes and edits inside the working directory run without asking */
   edits?: boolean;
-  /** MCP servers whose tools run without asking */
+  /** Before 0.16: MCP servers whose tools run without asking */
   mcp?: string[];
 }
 
-/** The saved rules for the current working directory, for Settings */
+export type RuleList = 'allow' | 'ask' | 'deny';
+
+/** One rule as Settings lists it; `error` when it does not parse (it is then ignored) */
+export interface RuleEntry {
+  text: string;
+  error?: string;
+}
+
+/** The rules for the current working directory and the global ones (the user's settings.json), for Settings */
 export interface ProjectRules {
   cwd: string;
-  programs: string[];
+  allow: RuleEntry[];
+  ask: RuleEntry[];
+  deny: RuleEntry[];
   reasons: string[];
-  edits: boolean;
-  mcp: string[];
+  /** From the user's settings.json: read-only here (edit the file) */
+  global: { file: string; allow: RuleEntry[]; ask: RuleEntry[]; deny: RuleEntry[] };
 }
 
 export interface RulesApi {
   list(): Promise<ProjectRules>;
-  /** Removes one rule (value is the program, reason or server name; edits needs none). Returns the remaining rules. */
-  remove(kind: 'program' | 'reason' | 'edits' | 'mcp', value?: string): Promise<ProjectRules>;
+  /** Removes one of the project's rules (a rule string, or a reason). Returns the rules left. */
+  remove(kind: RuleList | 'reason', value: string): Promise<ProjectRules>;
+  /** Adds a rule to one of the project's lists; throws with the reason when it does not parse. */
+  add(list: RuleList, text: string): Promise<ProjectRules>;
+  /** Why a rule would be refused, or null when it parses */
+  check(list: RuleList, text: string): Promise<string | null>;
 }
 
 /** One entry of the agent's own task list (the update_tasks tool); shown as a checklist card that updates in place */

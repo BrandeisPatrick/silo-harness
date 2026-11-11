@@ -1,6 +1,7 @@
 // The main process entry: build the App, register the core IPC, run the feature setups, open the window.
 // Features never edit this file; they get `app` in their setup function (see docs/architecture.md).
 // First: carry over the folders of the app's older names, before any other module reads them.
+import { setAppDataDir } from './guard';
 import './carry-over';
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
@@ -220,6 +221,8 @@ function notify(a: AppHost, sessionId: string, ev: AgentEvent): void {
 /** The core: config, sessions, runtime, terminal, artifacts and MCP servers, all reached through the App. */
 function buildApp(): AppHost {
   const userData = app.getPath('userData');
+  // config.json there holds every project's permission rules: a write to it by the agent always asks (guard.ts)
+  setAppDataDir(userData);
   const a = createApp({
     userData,
     appRoot: app.getAppPath(),
