@@ -100,6 +100,7 @@ When a choice is genuinely yours (a preference, an unclear requirement, which of
 | `/schedules` | The scheduled tasks and their next run |
 | `/dream` | Dream now about this session's project (see Dreaming) |
 | `/timing` | Where the last run spent its time: model, tools, safety checks, your approvals ([latency.md](latency.md)) |
+| `/report` | Where the whole session's time went, numbers only, safe to share ([latency.md](latency.md#report)) |
 | `/cost` | The session's tokens and estimated cost (see Cost) |
 | `/effort [level]` | Show or set the reasoning effort of the provider in use (`low` … `max`, `default`) |
 | a mod's commands | Listed in the menu with the mod's name |
@@ -215,6 +216,7 @@ Panels in the right-hand rail, tabs beside the Browser, a strip above the compos
 - Settings → History → **Delete all sessions** deletes every session at once, each the way a single delete does: into the trash for the period set there, or away at once when it is Off. Running sessions are stopped first, and the window opens on a fresh session.
 - Search in the sidebar looks through titles, messages, tool calls and what compactions folded away.
 - A session's menu exports it as Markdown; `history.export` also writes JSON or the raw log.
+- `/report` turns the log into a report of numbers only (turns, model and tool calls, waits on you, safety checks, retries, the longest silent stretches, tokens, compactions) that is safe to share; `node scripts/session-report.js <log>` does the same outside the app ([latency.md](latency.md#report)).
 
 ## Context and compaction
 
@@ -255,7 +257,7 @@ Settings → Remote control turns on a small web page, served by the app, for fo
 
 - **What is tried again**: a lost or refused connection, a stream that drops or sends nothing for 300 s (not on Ollama, where a local model may think long before its first token), and HTTP 408, 409, 429, 500, 502, 503, 504 and 529. Not: a bad request or key (400, 401, 403, 404, 413, 422), a request too long for the context (that compacts instead), an exhausted quota or billing, a Stop.
 - **How often**: 6 tries in all. The waits start at 1 s and double to at most 30 s, each moved by up to 20%. A provider's `Retry-After` (or `retry-after-ms`) sets the wait instead; over 60 s, there is no retry and the error says when to try again ("Rate limited. Try again in 5 min.").
-- **What you see**: one status line while it waits ("Connection lost. Retrying in 4 s (2 of 6)." or "Provider busy. …" for 429 and 5xx), gone when the reply starts. Text a dropped reply had shown is taken back; only the attempt that completes is kept and counted. When all 6 fail: "Could not reach the provider after 6 tries: …" with the provider's own message.
+- **What you see**: one status line while it waits ("Connection lost. Retrying in 4 s (2 of 6)." or "Provider busy. …" for 429 and 5xx), gone when the reply starts. Before that, after 30 s with nothing from the model the line says "No output for 45 s · retries at 5 min", counting up ([latency.md](latency.md#while-it-runs)). Text a dropped reply had shown is taken back; only the attempt that completes is kept and counted. When all 6 fail: "Could not reach the provider after 6 tries: …" with the provider's own message.
 - **A reply cut at the output limit**: a tool call whose arguments were cut is not run (its result tells the model to send it in smaller pieces); a cut reply without calls is asked to continue, twice at most per message.
 - **A call repeated with the same result**: the third time its result carries a note to try something else; the fifth time the run stops. Reading a terminal with `wait_ms` and listing sessions are exempt.
 
@@ -263,7 +265,7 @@ Settings → Remote control turns on a small web page, served by the app, for fo
 
 Settings is the place for all of it. On disk:
 
-- Data folder `~/Library/Application Support/Silo Harness/`: `config.json`, `sessions/`, `history/`, `trash/`, `artifacts/` (with each session's images), `schedules.json`, `dreaming.json` (the dreams, their proposals, what applying replaced, the per-project cursors), mod storage, and the Browser pane's: `Partitions/browser/` (its profile: cookies, site data, cache) and `browser/` (`permissions.json`, the saved permission answers; `zoom.json`, the zoom per site; `downloads.json`, the downloads list without their contents; `profile.json`, the one-time profile note).
+- Data folder `~/Library/Application Support/Silo Harness/`: `config.json`, `sessions/`, `history/`, `trash/`, `artifacts/` (with each session's images), `timing/` (the timing log, numbers only, [latency.md](latency.md#the-timing-log)), `schedules.json`, `dreaming.json` (the dreams, their proposals, what applying replaced, the per-project cursors), mod storage, and the Browser pane's: `Partitions/browser/` (its profile: cookies, site data, cache) and `browser/` (`permissions.json`, the saved permission answers; `zoom.json`, the zoom per site; `downloads.json`, the downloads list without their contents; `profile.json`, the one-time profile note).
 - Config folder `~/.silo-harness/` (or `SILO_HARNESS_CONFIG_DIR`): `settings.json`, `skills/`, `mods/`, `SILOHARNESS.md`.
 - Before the app was renamed these were `~/Library/Application Support/Open Harness/`, `~/.open-harness/` (with `OPEN_HARNESS_CONFIG_DIR` and `OPENHARNESS.md`) and a project's `.open-harness/`. The first launch moves the two folders in your home and leaves a link at `~/.open-harness`; the old names in a project, the old file names and the old variables are still read when the new ones are absent.
 - In a project: `.silo-harness/settings.json`, `.silo-harness/skills/`, `.silo-harness/mods/`, `.mcp.json`, and an instructions file (`SILOHARNESS.md`, `AGENTS.md` or `CLAUDE.md`).

@@ -16,8 +16,10 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
                auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block),
                learned.ts (the user's answers on cards, which the check reads as earlier decisions),
                schedule.ts (which calls of one reply run together: read-only ones, the rest alone, results in call order),
-               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log)
+               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log),
+               progress.ts (what the window hears while a request streams: a tool call's input being written, a long silence)
 timing-service.ts  /timing, the last run's breakdown as a local note
+report-service.ts  /report, the session's report (history/report.ts: numbers and fixed words from its history log) as a card
 auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs;
                the learned answers' store (auto-learned.json) and Settings → Permissions → Auto mode
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
