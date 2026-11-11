@@ -256,6 +256,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
 | `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: the session's own model. |
+| `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
 
 ```json
 {

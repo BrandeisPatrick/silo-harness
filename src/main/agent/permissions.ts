@@ -18,6 +18,8 @@ const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'pytho
 /** The tools that read files: they ask only for a secret path, or grep and glob for a walk of the home folder (tools/fs.ts) */
 const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_directory']);
 const SECRET_REASON = 'reads secrets';
+/** The browser cards Auto mode's safety check decides (allow, block or ask the user); purchase and account always ask. */
+export const CHECKED_BROWSER_CARDS: ReadonlySet<string> = new Set(['site', 'sensitive', 'eval']);
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
 
 /**
@@ -61,7 +63,7 @@ export interface ApprovalContext {
 /**
  * Decides, per permission mode, whether an action runs, asks, or is refused. A browser card asks: the browser policy
  * (browser/policy.ts siteDecision, clickRule) already weighed the mode, the site and the user's lists, and a purchase
- * or an account asks in every mode. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
+ * or an account asks in every mode; in Auto mode with its check running, a site, sensitive or eval card goes to the check. MCP tools: read-only ones run everywhere; the rest ask once per server (auto
  * mode asks only for destructive ones). A read of a secret path (read_file ~/.ssh/id_rsa) asks "reads secrets" in
  * every mode but Bypass, or goes to Auto mode's check. Plan mode refuses edits and commands that change anything, and asks for a read-only one the guard flags ("reads secrets"). Otherwise a protected
  * path asks every time (Allow and Deny only), a guard reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
@@ -79,7 +81,12 @@ export function decideApproval(name: string, detail: string, target: string | un
   // What the check would decide: an approval card instead while Auto mode is paused
   const check = (reason: string | null, programs: string[]): ApprovalDecision => (ctx.auto === 'paused' ? ask(reason, programs, !!reason && PROTECTED_REASONS.has(reason)) : { kind: 'classify', reason, programs });
   // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
-  if (opts.browser) return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
+  // In Auto mode with its check running, a site, sensitive or eval card goes to the check (which may still ask);
+  // purchase and account cards are the user's in every mode, and a paused or unavailable check shows the card.
+  if (opts.browser) {
+    if (mode === 'auto' && ctx.auto === 'check' && CHECKED_BROWSER_CARDS.has(opts.browser.card)) return { kind: 'classify', reason: opts.browser.reason ?? null, programs: [] };
+    return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
+  }
   if (opts.custom) {
     if (mode === 'plan') return refuse(PLAN_CUSTOM_BLOCKED);
     if (mode === 'bypass' && !opts.alwaysAsk) return allow;

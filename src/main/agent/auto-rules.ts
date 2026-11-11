@@ -130,6 +130,12 @@ export function actionLine(name: string, args: unknown, detail = ''): string {
     const p = s('path') || detail.split('\n')[0];
     return oneLine(`${name === 'write_file' ? 'write' : 'edit'} ${tilde(expandHome(p))}`);
   }
+  // A browser action: the card's first line, lower-cased for "Auto mode blocked open example.com" (a stored
+  // transcript has no card: the URL, or the tool)
+  if (name.startsWith('browser_') || name === 'web_fetch') {
+    const first = detail.split('\n')[0] || (s('url') ? `open ${s('url')}` : name);
+    return oneLine(first.charAt(0).toLowerCase() + first.slice(1));
+  }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) return oneLine(`${mcp[2]} on ${mcp[1]}`);
   return oneLine(detail.split('\n')[0] || name);

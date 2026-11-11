@@ -1,9 +1,9 @@
 // Auto mode's blocked actions in the window: the quiet line that stands for a call the safety check blocked ("Auto mode
 // blocked git push --force · Allow"), and Settings → Permissions → Recently blocked. Allow lets the action run once when
 // the agent tries it again (the agent is told it may). Wired from renderer.ts (setupAutoBlocked) and
-// settings/config-sections.ts (recentlyBlocked); the rest arrives through the bus and the transcript item registry.
+// settings/config-sections.ts (recentlyBlocked, learnedAnswers); the rest arrives through the bus and the transcript item registry.
 
-import type { AutoBlock, RecentBlock } from '../shared/auto-mode';
+import type { AutoBlock, LearnedAnswer, RecentBlock } from '../shared/auto-mode';
 import { bus } from './bus.js';
 import { escapeHtml, h } from './dom.js';
 import { icon } from './icons.js';
@@ -146,4 +146,63 @@ export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise
     if ((ev.type === 'auto_blocked' || ev.type === 'auto_allowed') && el.closest('dialog')?.open) void refresh();
   });
   return { el, refresh };
+}
+
+// ---------- Settings → Permissions → Auto mode: what it learned from your answers ----------
+
+/** The answers Auto mode learned from, newest first, each with Remove; Forget all on `forgetAll`. */
+export function learnedAnswers(ctx: Ctx): { el: HTMLElement; forgetAll: HTMLButtonElement; refresh(): Promise<void> } {
+  const el = h('div', { class: 'sp-rows auto-learned-list' });
+  let seq = 0;
+  let count = 0;
+  async function refresh(): Promise<void> {
+    const mine = ++seq;
+    let list: LearnedAnswer[] = [];
+    try {
+      const got = await ctx.call('auto.learned');
+      list = Array.isArray(got) ? got : [];
+    } catch {
+      list = [];
+    }
+    if (mine === seq) render(list);
+  }
+  function render(list: LearnedAnswer[]): void {
+    el.replaceChildren();
+    count = list.length;
+    forgetAll.disabled = !count;
+    [...list].reverse().forEach((a, i) => {
+      const times = a.count > 1 ? ` · ${a.count} times` : '';
+      const r = row(
+        { id: `auto-learned-${i}`, title: a.line, desc: `${a.decision === 'allow' ? 'Allowed' : 'Denied'}${times}`, keywords: 'auto mode learned answers remember preferences forget' },
+        button('Remove', async (btn) => {
+          btn.disabled = true;
+          try {
+            render(await ctx.call('auto.forget', a.id));
+          } catch (err) {
+            r.problem(ctx.cleanError(err));
+            btn.disabled = false;
+          }
+        }, { small: true, aria: `Remove ${a.line}` }),
+      );
+      r.el.querySelector('.sp-row-name')?.classList.add('auto-blocked-what');
+      el.append(r.el);
+    });
+    if (!list.length) el.append(note('Nothing learned yet.'));
+    ctx.refreshSearch();
+  }
+  const forgetAll = button('Forget all', async (btn) => {
+    if (!count) return;
+    const ok = await ctx.confirm({ title: 'Forget all answers?', description: 'Auto mode no longer sees them.', confirmLabel: 'Forget all', danger: true });
+    if (!ok) return;
+    btn.disabled = true;
+    try {
+      render(await ctx.call('auto.forget'));
+    } catch {
+      btn.disabled = false;
+    }
+  }, { small: true });
+  bus.on('agent-event', (ev) => {
+    if ((ev.type === 'approval_resolved' || ev.type === 'auto_allowed') && el.closest('dialog')?.open) void refresh();
+  });
+  return { el, forgetAll, refresh };
 }

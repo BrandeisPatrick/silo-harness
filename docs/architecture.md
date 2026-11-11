@@ -13,11 +13,13 @@ agent.ts       Agent: one run loop bound to one session for its life (approvals,
 agent/         prompt.ts (the system prompt and its parts), complete.ts (one model call, streamed or not, and its fallbacks),
                permissions.ts (the permission rules as a pure decision, and the card's labels), errors.ts (what a run's errors say),
                classifier.ts (Auto mode's safety check: its instructions, what it reads, its model, its answer),
-               auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block)
+               auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block),
+               learned.ts (the user's answers on cards, which the check reads as earlier decisions),
                schedule.ts (which calls of one reply run together: read-only ones, the rest alone, results in call order),
                perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log)
 timing-service.ts  /timing, the last run's breakdown as a local note
-auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs
+auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs;
+               the learned answers' store (auto-learned.json) and Settings → Permissions → Auto mode
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)

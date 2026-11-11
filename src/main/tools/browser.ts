@@ -79,7 +79,7 @@ function cardDetail(line: string, args: Record<string, unknown>, code?: string):
 }
 
 /** Shows a browser card and waits: null when allowed, else the message the model reads (DENIED). */
-async function askCard(ctx: ToolContext, name: string, detail: string, card: BrowserCard, site: Site, extra: { note?: string; reason?: string; page?: string } = {}): Promise<string | null> {
+async function askCard(ctx: ToolContext, name: string, detail: string, card: BrowserCard, site: Site, extra: { note?: string; reason?: string; page?: string; check?: { kind: 'read' | 'act' | 'eval'; url: string; code?: string } } = {}): Promise<string | null> {
   const r = await ctx.approve(name, detail, undefined, { browser: { site, card, ...extra } });
   return r.ok ? null : r.message;
 }
@@ -147,7 +147,7 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
   if (decision.kind === 'allow') return null;
   if (decision.kind === 'refuse') return decision.message;
   const detail = cardDetail(line ?? actionLine(name, args, decision.site), args, code);
-  return askCard(ctx, name, detail, decision.card, decision.site, { note: decision.note, reason: decision.reason, page: decision.card === 'sensitive' ? page ?? undefined : undefined });
+  return askCard(ctx, name, detail, decision.card, decision.site, { note: decision.note, reason: decision.reason, page: decision.card === 'sensitive' ? page ?? undefined : undefined, check: { kind: action === 'navigate' ? 'read' : action, url, code } });
 }
 
 /**
@@ -155,8 +155,9 @@ async function siteCheck(name: string, args: Record<string, unknown>, ctx: ToolC
  * account asks with a card of its own (Allow and Deny, in every mode, Bypass included), except on an exempt host,
  * which is the user's own app under development. What decides is what is really under the click point (hit-tested in
  * the safety world): a ref covered by something else, or changed since the outline, is refused; a click that lands in
- * a frame from another site asks with that site named (in every mode), and is refused when that site is a sensitive
- * one. `target` is what the rules saw, which the click checks again at the moment it clicks.
+ * a frame from another site asks with that site named (in every mode; in Auto mode the safety check decides it while
+ * it runs), and is refused when that site is a sensitive one. `target` is what the rules saw, which the click checks
+ * again at the moment it clicks.
  */
 async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: { ref: string } | { x: number; y: number }): Promise<{ stop: string | null; target: ClickTarget | null }> {
   const target = await askPage<ClickTarget | null>(() => ctx.browser.describeTarget(at), null);
@@ -171,7 +172,7 @@ async function clickCheck(args: Record<string, unknown>, ctx: ToolContext, at: {
     const name = frame?.display ?? target.frameOrigin;
     const sensitive = isSensitive(target.frameOrigin, lists(ctx).sensitive);
     if (sensitive.sensitive) return { stop: `Not permitted: this click lands in a frame from ${name} (${sensitive.note.replace(/^This/, 'this')}). Ask the user to click it in the Browser pane.`, target };
-    const stop = await askCard(ctx, 'browser_click', cardDetail(`Click inside a frame from ${name} on ${(site ?? NO_SITE).display}`, args), 'sensitive', frame ?? site ?? NO_SITE, { note: `This click goes into a frame from ${name}, another site` });
+    const stop = await askCard(ctx, 'browser_click', cardDetail(`Click inside a frame from ${name} on ${(site ?? NO_SITE).display}`, args), 'sensitive', frame ?? site ?? NO_SITE, { note: `This click goes into a frame from ${name}, another site`, check: { kind: 'act', url: target.frameOrigin } });
     if (stop) return { stop, target };
   }
   if (rule.kind === 'allow' || exempt) return { stop: null, target };
