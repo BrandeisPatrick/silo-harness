@@ -161,7 +161,9 @@ console.warn = (...a) => {
     events.push(ev);
     if (ev.type === 'approval_request' && answer !== null) setTimeout(() => agent.resolveApproval(ev.id, answer, false), 5);
   };
-  agent = new Agent(() => config, {}, store, () => [], emit, undefined, artifacts, undefined, { hooks: { has: (ev) => !!hooks && ev === 'PreToolUse', fire: async () => hooks } });
+  // (what each PreToolUse hook was handed, for 4p)
+  const fired = [];
+  agent = new Agent(() => config, {}, store, () => [], emit, undefined, artifacts, undefined, { hooks: { has: (ev) => !!hooks && ev === 'PreToolUse', fire: async (ev, c) => (fired.push(c), hooks) } });
   const call = (id, name, args) => ({ id, name, args });
   const reset = () => {
     events = [];
@@ -452,6 +454,91 @@ console.warn = (...a) => {
 
   // 4o. the session's context note tells the agent how blocks work
   check('context note: the Auto mode paragraph', /Blocked by Auto mode/.test(sessionContext({ ...config, permissionMode: 'auto' })));
+
+  // 4p. A read behind a leading cd, and the bash tool's path: the read-only shortcut runs it without the check, after
+  // the PreToolUse hook, the deny and ask rules and the always-ask reasons, in the same order as before; a change
+  // behind a cd still goes to the check
+  config = { ...config, providers: {}, autoMode: { ...config.autoMode, model: '' }, allowRules: {} };
+  agent.session = store.create({ cwd });
+  const subDir = path.join(cwd, 'sub');
+  fs.mkdirSync(subDir, { recursive: true });
+  fs.writeFileSync(path.join(subDir, 'a.txt'), 'CD-READ-A\n');
+  fs.writeFileSync(path.join(subDir, 'b.txt'), 'CD-READ-B\n');
+  const { bash } = require(path.join(projectDir, 'dist/main/tools/shell.js'));
+  const { deniedByRule } = require(path.join(projectDir, 'dist/main/agent/rules.js'));
+  const turn = async (id, args, label = `turn ${id}`) => {
+    state.replies.push({ toolCalls: [call(id, 'bash', args)] });
+    state.replies.push({ content: 'ok' });
+    await agent.run(label);
+  };
+  reset();
+  answer = null;
+  state.replies.push({ toolCalls: [call('cd_a', 'bash', { command: 'cd sub && cat a.txt' }), call('cd_b', 'bash', { command: 'cat b.txt', path: 'sub' })] });
+  state.replies.push({ content: 'read both' });
+  await agent.run('read the two files in sub');
+  check('cd read: cd sub && cat a.txt and cat b.txt in sub ran, without the check or a card', /CD-READ-A/.test(lastToolMsg('cd_a') ?? '') && /CD-READ-B/.test(lastToolMsg('cd_b') ?? '') && checkRequests().length === 0 && !of('approval_request').length, { a: lastToolMsg('cd_a'), b: lastToolMsg('cd_b'), checks: checkRequests().length });
+  const share = (args) => agent['shareable']('bash', args, [bash], cwd);
+  check('cd read: such calls run together with the other reads of a reply; changes and odd forms do not', share({ command: 'cd sub && cat a.txt' }) && share({ command: 'cat b.txt', path: 'sub' }) && share({ command: 'grep -rn x .', path: subDir }) && !share({ command: 'cd sub && rm a.txt' }) && !share({ command: 'rm a.txt', path: 'sub' }) && !share({ command: 'cd $D && cat a.txt' }) && !share({ command: 'cd ~/.ssh && cat id_rsa' }) && !share({ command: 'cat id_rsa', path: '~/.ssh' }));
+
+  reset();
+  await turn('cd_rm', { command: 'cd sub && rm a.txt' });
+  check('cd change: cd sub && rm a.txt goes to the check (here it blocks), nothing removed', checkRequests().length === 1 && fs.existsSync(path.join(subDir, 'a.txt')) && /^Blocked by Auto mode/.test(lastToolMsg('cd_rm') ?? ''), lastToolMsg('cd_rm'));
+  reset();
+  state.replies.push(classifierReply('block', '[Other] deletes a file in sub'));
+  await turn('p_rm', { command: 'rm a.txt', path: 'sub' });
+  const seenByCheck = JSON.stringify(checkRequests()[0]?.payload.messages ?? []);
+  check('path change: rm a.txt in sub goes to the check, which sees the path; nothing removed', checkRequests().length === 1 && seenByCheck.includes('rm a.txt') && seenByCheck.includes('\\"path\\":\\"sub\\"') && fs.existsSync(path.join(subDir, 'a.txt')), seenByCheck.slice(-400));
+
+  // The order, unchanged: a hook's deny, then the deny rules, then the ask rules, then the always-ask reasons, then the shortcut
+  reset();
+  hooks = { ran: 1, context: [], notices: [], permission: 'deny', permissionReason: 'no reads in sub' };
+  await turn('o_hook', { command: 'cd sub && cat a.txt' });
+  hooks = null;
+  check('order: a PreToolUse hook that denies blocks a cd read first', /hook denied/.test(lastToolMsg('o_hook') ?? '') && !/CD-READ/.test(lastToolMsg('o_hook') ?? '') && checkRequests().length === 0 && !of('approval_request').length, lastToolMsg('o_hook'));
+  config = { ...config, allowRules: { [cwd]: { deny: ['Bash(cat:*)'] } } };
+  reset();
+  await turn('o_deny', { command: 'cd sub && cat a.txt' });
+  await turn('o_deny_p', { command: 'cat a.txt', path: 'sub' });
+  check('order: a deny rule refuses a cd read, and the same read by path', lastToolMsg('o_deny') === deniedByRule('Bash(cat:*)') && lastToolMsg('o_deny_p') === deniedByRule('Bash(cat:*)') && checkRequests().length === 0 && !of('approval_request').length, [lastToolMsg('o_deny'), lastToolMsg('o_deny_p')]);
+  config = { ...config, allowRules: { [cwd]: { deny: ['Bash(cd:*)'] } } };
+  reset();
+  await turn('o_deny_cd', { command: 'cat a.txt', path: 'sub' });
+  check('order: a deny rule on cd covers a call by path (it is read as cd <folder> && <command>)', lastToolMsg('o_deny_cd') === deniedByRule('Bash(cd:*)'), lastToolMsg('o_deny_cd'));
+  config = { ...config, allowRules: { [cwd]: { ask: ['Bash(cat:*)'] } } };
+  reset();
+  answer = false;
+  await turn('o_ask', { command: 'cat a.txt', path: 'sub' });
+  const cdAskCard = of('approval_request')[0];
+  check('order: an ask rule shows its card for a read by path, the folder on it, never the check', of('approval_request').length === 1 && /ask rule Bash\(cat:\*\)/.test(cdAskCard.reason) && cdAskCard.detail === `cd '${subDir}' && cat a.txt` && checkRequests().length === 0 && !/CD-READ/.test(lastToolMsg('o_ask') ?? ''), cdAskCard);
+  config = { ...config, allowRules: {} };
+  reset();
+  answer = false;
+  await turn('o_sudo', { command: 'cd sub && sudo cat a.txt' });
+  check('order: sudo behind a cd shows its card, never the check', of('approval_request').length === 1 && of('approval_request')[0].reason === 'uses sudo' && checkRequests().length === 0, of('approval_request'));
+  reset();
+  answer = false;
+  await turn('o_crit', { command: 'rm -rf ~', path: 'sub' });
+  check('order: a critical delete by path shows its card, never the check', of('approval_request').length === 1 && of('approval_request')[0].reason === 'deletes a critical folder' && checkRequests().length === 0, of('approval_request'));
+  answer = null;
+
+  // A hook sees where a call by path runs
+  reset();
+  hooks = { ran: 1, context: [], notices: [] };
+  fired.length = 0;
+  await turn('o_seen', { command: 'cat a.txt', path: 'sub' });
+  hooks = null;
+  const input = fired.find((c) => c.fields?.tool_use_id === 'o_seen')?.fields;
+  check('hooks: a call by path reaches a PreToolUse hook as cd <folder> && <command>, its own arguments beside it', input?.tool_input?.command === `cd '${subDir}' && cat a.txt` && input?.silo_tool_input?.path === 'sub' && /CD-READ-A/.test(lastToolMsg('o_seen') ?? ''), input);
+
+  // Plan mode: a cd read runs, a cd change is refused
+  config = { ...config, permissionMode: 'plan' };
+  reset();
+  await turn('pl_read', { command: 'cd sub && cat a.txt' });
+  await turn('pl_path', { command: 'cat b.txt', path: 'sub' });
+  await turn('pl_rm', { command: 'cd sub && rm a.txt' });
+  check('plan: cd sub && cat a.txt and cat b.txt by path run', /CD-READ-A/.test(lastToolMsg('pl_read') ?? '') && /CD-READ-B/.test(lastToolMsg('pl_path') ?? ''), [lastToolMsg('pl_read'), lastToolMsg('pl_path')]);
+  check('plan: cd sub && rm a.txt is refused, nothing removed', /^Not permitted in plan mode/.test(lastToolMsg('pl_rm') ?? '') && fs.existsSync(path.join(subDir, 'a.txt')), lastToolMsg('pl_rm'));
+  config = { ...config, permissionMode: 'auto' };
 
   // ---------- 5. The runtime: Allow by session ----------
   const rtStore = new SessionStore(path.join(cwd, '..', `oh-auto-rt-${process.pid}`));

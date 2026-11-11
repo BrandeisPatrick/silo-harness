@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Fewer safety checks in Auto mode: reads in another folder run without one, and several edits to a file take one call.
+
+### Improved
+
+- **Several edits at once.** `edit_file` makes several replacements in one file in one call, all or nothing, with one card showing every change.
+
+### Security
+
+- **Reads after cd.** `cd repo && git log` and other reads behind a plain `cd` run without Auto mode's check, judged as if run in that folder ([details](docs/reference.md#auto-mode)).
+
+### For developers
+
+- **Folder for bash.** `bash` takes `path`, the folder a command starts in; its card and row show it as `cd <folder> && <command>`.
+
 ## 0.17.0 — 2026-11-11
 
 MCP servers get clearer rows in Settings, tool titles with a switch each, stricter trust for project servers, and tools that load only when a session needs them.

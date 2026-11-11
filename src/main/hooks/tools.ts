@@ -4,6 +4,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import { judgedCommand } from '../guard';
 
 /** This app's tool → Claude Code's. Tools without a counterpart keep their own name (MCP tools already match). */
 export const CLAUDE_TOOL_NAMES: Record<string, string> = {
@@ -48,7 +49,8 @@ export function claudeToolInput(native: string, args: unknown, cwd: string): Rec
   const a = isObj(args) ? args : {};
   switch (native) {
     case 'bash':
-      return defined({ command: a.command, timeout: a.timeout_ms, description: a.description });
+      // A call that starts in another folder (path) reads as `cd '<folder>' && <command>`, so a hook sees where it runs
+      return defined({ command: judgedCommand(native, a, cwd) ?? a.command, timeout: a.timeout_ms, description: a.description });
     case 'terminal_run':
       return defined({ command: a.command, tab_id: a.tab_id, timeout: a.timeout_ms });
     case 'read_file':
@@ -56,7 +58,7 @@ export function claudeToolInput(native: string, args: unknown, cwd: string): Rec
     case 'write_file':
       return defined({ file_path: abs(cwd, a.path), content: a.content });
     case 'edit_file':
-      return defined({ file_path: abs(cwd, a.path), old_string: a.old_string, new_string: a.new_string, replace_all: a.replace_all });
+      return defined({ file_path: abs(cwd, a.path), old_string: a.old_string, new_string: a.new_string, replace_all: a.replace_all, edits: a.edits });
     case 'glob':
       return defined({ pattern: a.pattern, path: abs(cwd, a.path) });
     case 'grep':

@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { commandArgv, splitCommands } from '../guard';
+import { commandArgv, commandIn, shellStart, splitCommands } from '../guard';
 import type { Tool } from './types';
 import { truncateMiddle } from './types';
 
@@ -71,11 +72,12 @@ function buildPath(): string {
 export const bash: Tool = {
   name: 'bash',
   description:
-    'Run a shell command (zsh) in the working directory and return stdout, stderr and the exit code. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
+    'Run a shell command (zsh) and return stdout, stderr and the exit code. Calls start in the working directory; path picks another folder. Edit files with edit_file or write_file, not scripts. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
   parameters: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'The command line to execute' },
+      path: { type: 'string', description: 'Folder to start in (default: working directory)' },
       description: { type: 'string', description: 'What the command does, in 5–10 words, for the user (shown when it asks for approval), e.g. "List the files in src"' },
       timeout_ms: { type: 'integer', description: 'Timeout in milliseconds (default 120000)' },
     },
@@ -87,8 +89,11 @@ export const bash: Tool = {
     // A sign-in that waits for the user cannot finish here (no terminal, no stdin): said at once, before any approval
     const login = interactiveLogin(command);
     if (login) return { content: loginRedirect(login) };
-    const approval = await ctx.approve('bash', command);
+    // Another folder (path) is approved, checked and shown as `cd '<folder>' && <command>` (guard.ts commandIn)
+    const start = shellStart(args.path, ctx.cwd);
+    const approval = await ctx.approve('bash', commandIn(command, start, ctx.cwd));
     if (!approval.ok) return { content: approval.message };
+    if (start !== path.resolve(ctx.cwd) && !(await fs.stat(start).then((st) => st.isDirectory(), () => false))) throw new Error(`path is not a folder: ${start}`);
     const timeout = Math.min(Math.max(1000, Number(args.timeout_ms) || 120_000), 600_000);
     return new Promise((resolve) => {
       let stopped: 'user' | 'timeout' | null = null;
@@ -99,7 +104,7 @@ export const bash: Tool = {
       // No stdin: a command that tries to read input sees end-of-file instead of waiting for ever.
       // An unmatched wildcard passes through as in bash (grep --include=*.ts), set after the login profile has run
       const child = spawn('/bin/zsh', ['-lc', `setopt nonomatch; ${command}`], {
-        cwd: ctx.cwd,
+        cwd: start,
         env: { ...process.env, PATH: buildPath(), TERM: 'dumb', CI: '1' },
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],

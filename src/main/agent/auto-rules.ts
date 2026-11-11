@@ -129,7 +129,8 @@ export function actionLine(name: string, args: unknown, detail = ''): string {
     }
   } else if (args && typeof args === 'object') a = args as Record<string, unknown>;
   const s = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : '');
-  if (name === 'bash' || name === 'terminal_run') return oneLine(s('command') || detail);
+  // (bash's path, as its row shows it: cd <path> && <command>)
+  if (name === 'bash' || name === 'terminal_run') return oneLine((name === 'bash' && s('path').trim() && s('command') ? `cd ${s('path').trim()} && ` : '') + (s('command') || detail));
   if (name === 'write_file' || name === 'edit_file') {
     const p = s('path') || detail.split('\n')[0];
     return oneLine(`${name === 'write_file' ? 'write' : 'edit'} ${tilde(expandHome(p))}`);

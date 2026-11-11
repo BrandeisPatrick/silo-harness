@@ -144,6 +144,40 @@ const alive = (pid) => {
   check('killed by a signal: names it', /\[exit code: killed \(SIGKILL\)\]$/.test(signalled.content), signalled.content);
   check('the description stays short', bash.description.length < 420, bash.description.length);
 
+  // path: the folder a call starts in. It is approved as `cd '<folder>' && <command>` (what the rules, the check and
+  // the card read), and the command runs there; the session's own folder, or none, changes nothing.
+  {
+    const real = fs.realpathSync(cwd);
+    fs.mkdirSync(path.join(cwd, 'sub', 'deeper'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'sub', 'f.txt'), 'made-up sub file\n');
+    const seen = [];
+    const at = (ok = true) => ({ cwd, approve: async (name, detail) => (seen.push([name, detail]), ok ? { ok: true } : { ok: false, message: 'Not permitted: test' }) });
+    const out = (r) => r.content.replace(/\n?\[exit code: \d+\]$/, '').trim();
+    let r = await bash.run({ command: 'pwd -P && cat f.txt', path: 'sub' }, at());
+    check('path: the command runs in that folder', out(r) === `${path.join(real, 'sub')}\nmade-up sub file`, r.content);
+    check('path: approved as cd <folder> && <command>', seen.pop()?.join('|') === `bash|cd '${path.join(cwd, 'sub')}' && pwd -P && cat f.txt`, seen);
+    r = await bash.run({ command: 'pwd -P', path: path.join(cwd, 'sub', 'deeper') }, at());
+    check('path: an absolute folder', out(r) === path.join(real, 'sub', 'deeper') && seen.pop()?.[1] === `cd '${path.join(cwd, 'sub', 'deeper')}' && pwd -P`, r.content);
+    r = await bash.run({ command: 'pwd -P' }, at());
+    check('path: none, the session folder, the command as it is', out(r) === real && seen.pop()?.[1] === 'pwd -P', r.content);
+    for (const p of ['', '.', cwd, `${cwd}/`]) {
+      r = await bash.run({ command: 'pwd -P', path: p }, at());
+      check(`path: ${JSON.stringify(p === cwd ? '<session folder>' : p === `${cwd}/` ? '<session folder>/' : p)} is the session folder, nothing added`, out(r) === real && seen.pop()?.[1] === 'pwd -P', r.content);
+    }
+    const marker = path.join(cwd, 'sub', 'ran.txt');
+    r = await bash.run({ command: 'touch ran.txt', path: 'sub' }, at(false));
+    check('path: denied, nothing runs', r.content === 'Not permitted: test' && !fs.existsSync(marker), r.content);
+    const err = (args) => bash.run(args, at()).then((x) => x.content, (e) => `ERROR: ${e.message}`);
+    let e = await err({ command: 'touch ran.txt', path: 'no-such-folder' });
+    check('path: a folder that is not there is an error, after the approval, and nothing runs', e === `ERROR: path is not a folder: ${path.join(cwd, 'no-such-folder')}` && seen.pop()?.[1].startsWith("cd '"), e);
+    e = await err({ command: 'touch ran.txt', path: 'sub/f.txt' });
+    check('path: a file is not a folder', e.startsWith('ERROR: path is not a folder') && !fs.existsSync(marker), e);
+    seen.length = 0;
+    r = await bash.run({ command: 'cat id_rsa', path: '~/.ssh' }, at(false));
+    check('path: ~ is the home folder (the call is only approved here, never run)', seen[0]?.[1] === `cd '${path.join(os.homedir(), '.ssh')}' && cat id_rsa` && r.content === 'Not permitted: test', seen);
+    check('path: in the schema, said in the description', bash.parameters.properties.path?.type === 'string' && /starts? in the working directory; path picks another folder/.test(bash.description) && /edit_file or write_file, not scripts/.test(bash.description), bash.description);
+  }
+
   fs.rmSync(cwd, { recursive: true, force: true });
   done();
 })().catch((e) => {

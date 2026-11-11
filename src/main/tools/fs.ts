@@ -128,48 +128,133 @@ export const editFile: Tool = {
       old_string: { type: 'string', description: 'Exact text to find' },
       new_string: { type: 'string', description: 'Replacement text' },
       replace_all: { type: 'boolean', description: 'Replace every occurrence (default false)' },
+      edits: {
+        type: 'array',
+        description: 'Several replacements instead of one, applied in order, all or nothing',
+        items: {
+          type: 'object',
+          properties: { old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } },
+          required: ['old_string', 'new_string'],
+        },
+      },
     },
-    required: ['path', 'old_string', 'new_string'],
+    required: ['path'],
   },
   async run(args, ctx) {
     const file = resolvePath(ctx.cwd, String(args.path));
-    const oldStr = String(args.old_string ?? '');
-    const newStr = String(args.new_string ?? '');
-    if (!oldStr) throw new Error('old_string must not be empty');
+    const { edits, multi } = editList(args);
     const stale = await staleError(ctx.sessionId, file);
     if (stale) throw new Error(stale);
     const before = await stat(file);
     const data = await fs.readFile(file, 'utf8');
-    let target = oldStr;
-    let count = data.split(target).length - 1;
-    let note = '';
-    if (count === 0) {
-      // Models often reproduce the text with slightly different whitespace. Fall back to a match that only treats
-      // runs of whitespace (and quote and dash styles) as equal and, if it is unique, edit that exact span instead.
-      const match = fuzzyMatch(data, oldStr);
-      if (match === null) {
-        const near = closestLines(data, oldStr);
-        throw new Error(`old_string was not found in ${file}, even ignoring whitespace differences.${near ? `\nThe closest lines in the file:\n${near}\n` : ' '}Read the file and copy the text exactly.`);
+    // Every replacement is found and made in memory first: one that does not match writes nothing
+    let updated = data;
+    const done: Applied[] = [];
+    for (const [i, e] of edits.entries()) {
+      try {
+        const r = applyEdit(updated, e, file);
+        updated = r.text;
+        done.push(r);
+      } catch (err) {
+        if (!multi) throw err;
+        throw new Error(`edits[${i}]: ${(err as Error).message} Nothing was written: none of the ${edits.length} edits was made.`);
       }
-      if (match === 'ambiguous') throw new Error('old_string matches several places (ignoring whitespace); include more surrounding lines to make it unique.');
-      target = match.text;
-      count = data.split(target).length - 1;
-      note = `; matched ignoring ${match.how} at ${match.startLine === match.endLine ? `line ${match.startLine}` : `lines ${match.startLine}–${match.endLine}`}`;
     }
-    if (count > 1 && !args.replace_all) throw new Error(`old_string occurs ${count} times; make it unique or set replace_all=true`);
-    const preview = `${file}\n--- old\n${truncate(target, 800)}\n+++ new\n${truncate(newStr, 800)}`;
+    // The card shows every change: one replacement as it is; several as the lines of the file they span, before and after
+    const shown = multi ? changedLines(data, updated) : { old: done[0].target, new: edits[0].newStr };
+    const max = multi ? 20_000 : 800;
+    const preview = `${file}\n--- old\n${truncate(shown.old, max)}\n+++ new\n${truncate(shown.new, max)}`;
     const approval = await ctx.approve('edit_file', preview, file);
     if (!approval.ok) return { content: approval.message };
     // The file changed while the card waited
     const after = await stat(file);
     if (!after || !before || after.mtimeMs !== before.mtimeMs || after.size !== before.size) throw new Error(`${file} changed on disk since you read it; read it again before editing.`);
     ctx.beforeChange(file);
-    const updated = args.replace_all ? data.split(target).join(newStr) : data.replace(target, () => newStr);
     await fs.writeFile(file, updated, 'utf8');
     await remember(ctx.sessionId, file);
-    return { content: `Edited ${file} (${count} replacement${count === 1 ? '' : 's'}${note})` };
+    const count = done.reduce((n, r) => n + r.count, 0);
+    const notes = done.map((r, i) => (r.note ? `; ${multi ? `edits[${i}] ` : ''}${r.note}` : '')).join('');
+    return { content: `Edited ${file} (${multi ? `${edits.length} edits, ` : ''}${count} replacement${count === 1 ? '' : 's'}${notes})` };
   },
 };
+
+/** One replacement of an edit_file call */
+interface OneEdit {
+  oldStr: string;
+  newStr: string;
+  all: boolean;
+}
+
+/** A replacement made in memory: the text after it, how many places, the exact text it replaced, and a note on a loose match */
+interface Applied {
+  text: string;
+  count: number;
+  target: string;
+  note: string;
+}
+
+/** The replacements an edit_file call asks for: old_string and new_string, or the edits list (also as a JSON string). */
+function editList(args: Record<string, unknown>): { edits: OneEdit[]; multi: boolean } {
+  let list = args.edits;
+  if (list === undefined || list === null) {
+    const oldStr = String(args.old_string ?? '');
+    if (!oldStr) throw new Error('old_string must not be empty');
+    return { multi: false, edits: [{ oldStr, newStr: String(args.new_string ?? ''), all: !!args.replace_all }] };
+  }
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list) as unknown;
+    } catch {
+      /* said below */
+    }
+  }
+  if (args.old_string !== undefined || args.new_string !== undefined) throw new Error('Give old_string and new_string, or edits, not both.');
+  if (!Array.isArray(list) || !list.length) throw new Error('edits must be a non-empty list of { old_string, new_string, replace_all? }.');
+  const edits = list.map((e, i): OneEdit => {
+    const o = e && typeof e === 'object' ? (e as Record<string, unknown>) : {};
+    const oldStr = typeof o.old_string === 'string' ? o.old_string : '';
+    if (!oldStr) throw new Error(`edits[${i}]: old_string must not be empty`);
+    return { oldStr, newStr: typeof o.new_string === 'string' ? o.new_string : String(o.new_string ?? ''), all: !!o.replace_all };
+  });
+  return { multi: true, edits };
+}
+
+/** One replacement in `data`, or an error that says why it cannot be made (not found, ambiguous, several places). */
+function applyEdit(data: string, e: OneEdit, file: string): Applied {
+  let target = e.oldStr;
+  let count = data.split(target).length - 1;
+  let note = '';
+  if (count === 0) {
+    // Models often reproduce the text with slightly different whitespace. Fall back to a match that only treats
+    // runs of whitespace (and quote and dash styles) as equal and, if it is unique, edit that exact span instead.
+    const match = fuzzyMatch(data, e.oldStr);
+    if (match === null) {
+      const near = closestLines(data, e.oldStr);
+      throw new Error(`old_string was not found in ${file}, even ignoring whitespace differences.${near ? `\nThe closest lines in the file:\n${near}\n` : ' '}Read the file and copy the text exactly.`);
+    }
+    if (match === 'ambiguous') throw new Error('old_string matches several places (ignoring whitespace); include more surrounding lines to make it unique.');
+    target = match.text;
+    count = data.split(target).length - 1;
+    note = `matched ignoring ${match.how} at ${match.startLine === match.endLine ? `line ${match.startLine}` : `lines ${match.startLine}–${match.endLine}`}`;
+  }
+  if (count > 1 && !e.all) throw new Error(`old_string occurs ${count} times; make it unique or set replace_all=true`);
+  const text = e.all ? data.split(target).join(e.newStr) : data.replace(target, () => e.newStr);
+  return { text, count, target, note };
+}
+
+/** The whole lines of `before` that differ from `after`, and what they became: the span from the first change to the last. */
+export function changedLines(before: string, after: string): { old: string; new: string } {
+  let pre = 0;
+  while (pre < before.length && pre < after.length && before[pre] === after[pre]) pre++;
+  let suf = 0;
+  while (suf < before.length - pre && suf < after.length - pre && before[before.length - 1 - suf] === after[after.length - 1 - suf]) suf++;
+  const start = pre === 0 ? 0 : before.lastIndexOf('\n', pre - 1) + 1;
+  const endOf = (t: string) => {
+    const nl = t.indexOf('\n', t.length - suf);
+    return nl < 0 ? t.length : nl;
+  };
+  return { old: before.slice(start, endOf(before)), new: after.slice(start, endOf(after)) };
+}
 
 /** Curly quotes, long dashes and no-break spaces folded to ASCII, one character for one so offsets stay put */
 function foldPunctuation(t: string): string {
