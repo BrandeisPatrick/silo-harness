@@ -24,12 +24,25 @@ export const CLASSIFIER_TIMEOUT_MS = 60_000;
 const MAX_REPLY_TOKENS = 400;
 
 /**
- * A faster model for the check, off while empty (the check then runs on the session's model, as before). Set, it is
- * used instead of the session's model when the session runs on Anthropic's own API with a larger Claude model than it
+ * A faster model for the check ('' turns it off: the check then runs on the session's model). It is used instead of
+ * the session's model when the session runs on Anthropic's own API with a larger Claude model than it
  * (classifierTarget); gateways and other providers keep the session's model, and autoMode.model always wins. Set it
- * only to a model that passed scripts/check-eval.js with no false allow (docs/evals.md).
+ * only to a model that passed scripts/check-eval.js with no false allow (docs/evals.md): Haiku 5.5 did, on 291
+ * checks (no false allow, four false blocks, median 0.87 s against 1.56 s on Opus 5.5, at a thirtieth of its cost).
  */
-export const CHECK_MODEL_CANDIDATE = '';
+export const CHECK_MODEL_CANDIDATE = 'claude-haiku-5-5';
+
+/**
+ * Faster check models the provider refused (isModelRefusal: the key may not use the model, or it is not there). The
+ * session's own model checks from then on, until the app restarts.
+ */
+export const candidateRefused = new Set<string>();
+
+/** The provider answered that the model does not exist or that this key may not use it (not a bad key: that is 401). */
+export function isModelRefusal(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return status === 404 || status === 403;
+}
 
 /**
  * What the check's request on Anthropic's own API sets for thinking and effort: the least thinking each model accepts
@@ -361,6 +374,8 @@ export function parseVerdict(raw: string, opts: { ask?: boolean } = {}): Verdict
 export interface ClassifierTarget {
   cfg: AppConfig;
   label: string;
+  /** Set when the model is the faster default (CHECK_MODEL_CANDIDATE), not the session's own or the user's choice */
+  candidate?: string;
 }
 
 /** `cfg` with `model` as the model of `provider`, which it puts in use. */
@@ -374,25 +389,30 @@ function withModel(cfg: AppConfig, provider: string, model: string): AppConfig {
 
 /**
  * The model the check runs on: autoMode.model ("<provider>:<model>", or a model id of the session's provider), else
- * `candidate` (CHECK_MODEL_CANDIDATE) when the session runs on Anthropic's own API with a larger Claude model, else
- * the session's own model. Null when there is none that can be called (no model set, a provider without its key or
- * not configured): Auto mode then asks with the approval cards, as it did before it had a check.
+ * `candidate` (CHECK_MODEL_CANDIDATE) when the session runs on Anthropic's own API with a larger Claude model and
+ * the provider has not refused it (candidateRefused), else the session's own model. Null when there is none that can
+ * be called (no model set, a provider without its key or not configured): Auto mode then asks with the approval
+ * cards, as it did before it had a check.
  */
 export function classifierTarget(cfg: AppConfig, candidate: string = CHECK_MODEL_CANDIDATE): ClassifierTarget | null {
   const spec = (cfg.autoMode?.model ?? '').trim();
   let use = cfg;
+  let faster = '';
   if (spec) {
     const at = spec.indexOf(':');
     const prefix = at > 0 ? spec.slice(0, at) : '';
     use = prefix && providerNames(cfg).includes(prefix) ? withModel(cfg, prefix, spec.slice(at + 1).trim()) : withModel(cfg, cfg.provider || 'ollama', spec);
-  } else if (candidate.trim()) {
+  } else if (candidate.trim() && !candidateRefused.has(candidate.trim())) {
     const own = resolveProvider(cfg);
     const size = claudeSize(candidate);
-    if (!own.error && isNativeAnthropic(own) && size > 0 && claudeSize(own.model) > size) use = withModel(cfg, own.name, candidate.trim());
+    if (!own.error && isNativeAnthropic(own) && size > 0 && claudeSize(own.model) > size) {
+      faster = candidate.trim();
+      use = withModel(cfg, own.name, faster);
+    }
   }
   const r = resolveProvider(use);
   if (r.error || !r.model) return null;
-  return { cfg: use, label: `${r.label} · ${r.model}` };
+  return { cfg: use, label: `${r.label} · ${r.model}`, ...(faster ? { candidate: faster } : {}) };
 }
 
 /** The provider could not be reached at all (as opposed to an error it answered with). */

@@ -115,6 +115,16 @@ const GATEWAY = (model) => ({ model, anthropic: false });
     const invalid = layer.info().files[0].invalid.map((i) => i.key).sort();
     layer.restoreEnv();
     check('5: settings.json prices: the good entry applies, each bad one is reported', JSON.stringify(cfg.prices) === JSON.stringify({ good: { input: 1, output: 5, cacheRead: 0.1 } }) && invalid.join() === 'prices.bad.input,prices.odd.foo,prices.partial', { prices: cfg.prices, invalid });
+    // A project's file may not price anything: the user's table stays
+    const proj = path.join(tmp, 'proj');
+    fs.mkdirSync(path.join(proj, '.silo-harness'), { recursive: true });
+    fs.writeFileSync(path.join(proj, '.silo-harness', 'settings.json'), JSON.stringify({ prices: { good: { input: 0, output: 0 }, free: { input: 0, output: 0 } } }));
+    const both = new SettingsLayer({ userFile: file });
+    const trusted = both.withTrust({ workingDirectory: proj, settingsTrusted: {} }, true);
+    const cfg2 = both.load({ provider: 'ollama', ollama: { baseURL: '', model: '', numCtx: 1, think: 'auto' }, portkey: {}, providers: {}, workingDirectory: proj, settingsTrusted: trusted.settingsTrusted });
+    const projInfo = both.info().files[1];
+    both.restoreEnv();
+    check("5: a project's settings.json may not set prices", JSON.stringify(cfg2.prices) === JSON.stringify({ good: { input: 1, output: 5, cacheRead: 0.1 } }) && projInfo.invalid.some((i) => i.key === 'prices' && /your own settings\.json/.test(i.message)) && !projInfo.keys.includes('prices'), { prices: cfg2.prices, projInfo });
     check('5: the schema has prices; checkSetting checks it', !!settingsSchema().properties.prices && checkSetting('prices', { a: { input: 1, output: 2 } }) === null && typeof checkSetting('prices', { a: { output: 2 } }) === 'string');
   }
 

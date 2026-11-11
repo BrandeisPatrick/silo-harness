@@ -63,7 +63,7 @@ import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
-import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
+import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCommand } from './guard';
@@ -844,7 +844,20 @@ export class Agent {
     const checkAt = Date.now();
     probe?.checkStarted();
     try {
-      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(checker.cfg), usage));
+      const ask = (t: ClassifierTarget) => runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage));
+      let raw: string;
+      try {
+        raw = await ask(checker);
+      } catch (err) {
+        // The faster default model is one this key may not use, or is not there: the session's own model checks
+        // instead, now and until the app restarts. Nothing is allowed without a verdict either way.
+        if (!checker.candidate || !isModelRefusal(err) || signal?.aborted) throw err;
+        candidateRefused.add(checker.candidate);
+        const own = classifierTarget(cfg);
+        if (!own || own.candidate) throw err;
+        console.warn(`[auto] ${checker.label} is not available to this key; the check runs on ${own.label}`);
+        raw = await ask(own);
+      }
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       probe?.checkEnded(verdict?.decision ?? 'error');

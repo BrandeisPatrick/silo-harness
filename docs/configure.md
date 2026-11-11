@@ -255,7 +255,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | --- | --- | --- |
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
-| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: the session's own model. |
+| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. |
 | `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
 
 ```json
@@ -272,7 +272,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 ### Prices
 
-The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on Anthropic's own API. For any other model, or to override those, set `prices`: dollars per million tokens, by model id. `cacheRead` and `cacheWrite` are optional and default to the input price. A project's file replaces the whole table.
+The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on Anthropic's own API. For any other model, or to override those, set `prices`: dollars per million tokens, by model id. `cacheRead` and `cacheWrite` are optional and default to the input price. Only your own settings.json sets prices: a project's file may not, so a repository cannot make its sessions look free.
 
 ```json
 {

@@ -362,7 +362,8 @@ export interface WebSearchConfig {
 /**
  * AppConfig.autoMode ("autoMode" in your own settings.json; a project's file may not set it). `environment` is free
  * text the check reads ("aisolutions-dev is a dev AWS account"); `allow` plain-language rules it allows; `model` the
- * check's model, "<provider>:<model>" or a model id of the session's provider ('' : the session's own model).
+ * check's model, "<provider>:<model>" or a model id of the session's provider ('' : classifierTarget's default,
+ * Claude Haiku 5.5 for a larger Claude model on Anthropic's API, else the session's own model).
  */
 export interface AutoModeConfig {
   environment: string;

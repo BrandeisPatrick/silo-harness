@@ -117,7 +117,7 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
   autoMode: {
     environment: describe(str, "What Auto mode's safety check should know about this Mac, e.g. \"aisolutions-dev is a dev AWS account\". Your own settings.json only."),
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
-    model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
+    model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic\'s API, else the session\'s own model. Your own settings.json only.'),
     learn: describe(bool, 'Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only.'),
   },
   webSearch: {
@@ -134,7 +134,7 @@ function pricesSchema(): Record<string, unknown> {
   const n = (description: string) => ({ type: 'number', minimum: 0, description });
   return {
     type: 'object',
-    description: 'Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic\'s API and price any other model.',
+    description: 'Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic\'s API and price any other model. Your own settings.json only.',
     additionalProperties: {
       type: 'object',
       additionalProperties: false,
@@ -379,7 +379,11 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       continue;
     }
     if (key === 'prices') {
-      // The whole table: a project's file replaces the user's, it does not add to it
+      // What a session costs is the user's to state: a cloned repository could otherwise price its models at zero
+      if (scope === 'project') {
+        bad(key, "a project's settings.json may not set prices; set them in your own settings.json");
+        continue;
+      }
       const r = validatePrices(value);
       for (const pr of r.problems) bad(pr.key, pr.message);
       if (isRecord(value)) {

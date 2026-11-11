@@ -292,7 +292,7 @@
         },
         "model": {
           "type": "string",
-          "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: the session's own model. Your own settings.json only."
+          "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's API, else the session's own model. Your own settings.json only."
         },
         "learn": {
           "type": "boolean",
@@ -578,7 +578,7 @@
     },
     "prices": {
       "type": "object",
-      "description": "Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic's API and price any other model.",
+      "description": "Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic's API and price any other model. Your own settings.json only.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
