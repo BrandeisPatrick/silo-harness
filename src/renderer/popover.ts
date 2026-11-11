@@ -217,7 +217,18 @@ export function openMenu(sections: MenuSection[], opts: MenuOptions): MenuHandle
   };
 
   render(sections);
-  document.body.appendChild(el);
+  // A menu opened from inside a modal dialog (Settings) lives in that dialog (what is outside a modal dialog is inert:
+  // it could not be clicked) and goes to the top layer too, or it would sit behind the dialog
+  const dialog = 'x' in opts.anchor ? null : opts.anchor.closest<HTMLDialogElement>('dialog[open]');
+  (dialog ?? document.body).appendChild(el);
+  if (dialog && typeof el.showPopover === 'function') {
+    el.setAttribute('popover', 'manual');
+    try {
+      el.showPopover();
+    } catch {
+      /* stays in the page */
+    }
+  }
   if (!('x' in opts.anchor)) opts.anchor.setAttribute('aria-expanded', 'true');
   position();
   window.addEventListener('keydown', onKey, true);

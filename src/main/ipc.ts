@@ -104,6 +104,8 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         providers: current.providers,
         mcpServers: current.mcpServers,
         mcpTrusted: current.mcpTrusted,
+        mcpTrustedEntries: current.mcpTrustedEntries,
+        mcpProjectValues: current.mcpProjectValues,
         allowRules: current.allowRules,
         // Global permission rules come from the user's settings.json alone
         permissions: current.permissions,
@@ -157,10 +159,13 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
     return app.mcp;
   };
   ipcMain.handle('mcp:list', () => app.mcp?.list() ?? []);
-  ipcMain.handle('mcp:add', (_e, name: string, spec: string, scope: McpScope, env?: unknown) => {
+  ipcMain.handle('mcp:add', (_e, name: string, spec: string, scope: McpScope, env?: unknown, headers?: unknown) => {
     const cleanEnv: Record<string, string> = {};
     if (env && typeof env === 'object' && !Array.isArray(env)) for (const [k, v] of Object.entries(env as Record<string, unknown>)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) cleanEnv[k] = String(v);
-    return requireMcp().add(String(name ?? ''), String(spec ?? ''), scope === 'project' ? 'project' : 'user', cleanEnv);
+    // Header names are HTTP tokens; a value with a line break is dropped (it could not be sent as one header)
+    const cleanHeaders: Record<string, string> = {};
+    if (headers && typeof headers === 'object' && !Array.isArray(headers)) for (const [k, v] of Object.entries(headers as Record<string, unknown>)) if (/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(k) && !/[\r\n]/.test(String(v))) cleanHeaders[k] = String(v);
+    return requireMcp().add(String(name ?? ''), String(spec ?? ''), scope === 'project' ? 'project' : 'user', cleanEnv, cleanHeaders);
   });
   ipcMain.handle('mcp:remove', (_e, name: string, scope: McpScope) => requireMcp().remove(String(name), scope === 'project' ? 'project' : 'user'));
   ipcMain.handle('mcp:set-enabled', (_e, name: string, scope: McpScope, enabled: boolean) => requireMcp().setEnabled(String(name), scope === 'project' ? 'project' : 'user', Boolean(enabled)));
@@ -173,6 +178,8 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
     return Promise.race([done, new Promise<McpServerInfo[]>((r) => setImmediate(() => r(mcp.list())))]);
   });
   ipcMain.handle('mcp:cancel-sign-in', (_e, name: string, scope: McpScope) => requireMcp().cancelSignIn(String(name), scope === 'project' ? 'project' : 'user'));
+  ipcMain.handle('mcp:set-tool-enabled', (_e, name: string, scope: McpScope, tool: string, enabled: boolean) => requireMcp().setToolEnabled(String(name), scope === 'project' ? 'project' : 'user', String(tool ?? ''), Boolean(enabled)));
+  ipcMain.handle('mcp:log', (_e, name: string, scope: McpScope) => requireMcp().log(String(name), scope === 'project' ? 'project' : 'user'));
   ipcMain.handle('mcp:sign-out', (_e, name: string, scope: McpScope) => requireMcp().signOut(String(name), scope === 'project' ? 'project' : 'user'));
 
   // ---------- Sessions: switching, creating and deleting no longer wait for runs; a running session is not forked, deleted or rewound ----------

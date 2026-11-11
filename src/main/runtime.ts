@@ -4,12 +4,13 @@
 // needs the user (SessionStatus). No Electron here: the headless tests drive it directly.
 
 import { cardRules, normalizeStoredRules } from './agent/rules';
-import type { AgentEvent, AppConfig, ApprovalScope, ImageAttachment, LiveState, PlanInfo, SendResult, SessionMeta, SessionOrigin, SessionStatus, StoredRules } from '../shared/types';
+import type { AgentEvent, AppConfig, McpCallNames, ApprovalScope, ImageAttachment, LiveState, PlanInfo, SendResult, SessionMeta, SessionOrigin, SessionStatus, StoredRules } from '../shared/types';
 import { Agent, PLAN_APPROVED_TEXT, type SendOptions } from './agent';
 import type { App, Disposer } from './app';
 import type { ArtifactStore } from './artifacts';
 import type { BrowserController } from './browser';
 import type { McpManager } from './mcp';
+import { withMcpNames } from './mcp-names';
 import { toMeta, type Session, type SessionStore } from './sessions';
 import type { Skill } from './skills';
 import type { TerminalManager } from './terminal';
@@ -68,7 +69,7 @@ interface Live {
   turnSeen?: boolean;
   text: string;
   thinking: string;
-  tools: Map<string, { id: string; name: string; args: unknown }>;
+  tools: Map<string, { id: string; name: string; args: unknown; mcp?: McpCallNames }>;
   approvals: Map<string, Extract<AgentEvent, { type: 'approval_request' }>>;
   /** ask_user cards waiting for an answer */
   questions: Map<string, Extract<AgentEvent, { type: 'question_request' }>>;
@@ -153,7 +154,7 @@ export class SessionRuntime {
     const session = this.opts.store.get(id);
     if (!session) throw new Error(`No conversation ${id}`);
     const o = this.opts;
-    const agent = new Agent(o.config, browserHandle(() => o.browser(id)), o.store, o.skills, (ev) => this.dispatch(id, ev), o.terminal, o.artifacts, o.mcp?.() ?? undefined, {
+    const agent = new Agent(o.config, browserHandle(() => o.browser(id)), o.store, o.skills, (ev) => this.dispatch(id, withMcpNames(ev, o.mcp?.())), o.terminal, o.artifacts, o.mcp?.() ?? undefined, {
       session,
       app: o.app,
       foreground: () => this.fg === id,
@@ -475,7 +476,7 @@ export class SessionRuntime {
         l.thinking = '';
         break;
       case 'tool_start':
-        l.tools.set(ev.id, { id: ev.id, name: ev.name, args: ev.args });
+        l.tools.set(ev.id, { id: ev.id, name: ev.name, args: ev.args, ...(ev.mcp ? { mcp: ev.mcp } : {}) });
         break;
       case 'tool_end':
         l.tools.delete(ev.id);

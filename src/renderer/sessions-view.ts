@@ -257,7 +257,7 @@ export function createSessionsView({ api, input: inputEl, running, renderTranscr
     }
     // Queued messages from elsewhere (a schedule, another session) get their bubble when delivered (user_message).
     for (const m of live.queue ?? []) if (!m.origin || m.origin === 'user' || m.origin === 'queue') queue.add(m);
-    for (const t of live.tools ?? []) handleEvent({ type: 'tool_start', id: t.id, name: t.name, args: t.args });
+    for (const t of live.tools ?? []) handleEvent({ type: 'tool_start', id: t.id, name: t.name, args: t.args, ...(t.mcp ? { mcp: t.mcp } : {}) });
     for (const a of live.approvals ?? []) handleEvent(a);
     for (const q of live.questions ?? []) handleEvent(q);
     if (live.thinking) handleEvent({ type: 'thinking_delta', text: live.thinking });

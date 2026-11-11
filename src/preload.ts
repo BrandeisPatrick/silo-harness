@@ -22,13 +22,15 @@ const api: SiloHarnessApi = {
   context: (): Promise<ContextInfo> => ipcRenderer.invoke('chat:context'),
   mcp: {
     list: (): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:list'),
-    add: (name: string, spec: string, scope: McpScope, env?: Record<string, string>): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:add', name, spec, scope, env ?? {}),
+    add: (name: string, spec: string, scope: McpScope, env?: Record<string, string>, headers?: Record<string, string>): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:add', name, spec, scope, env ?? {}, headers ?? {}),
     remove: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:remove', name, scope),
     setEnabled: (name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:set-enabled', name, scope, enabled),
     reconnect: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:reconnect', name, scope),
     signIn: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:sign-in', name, scope),
     cancelSignIn: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:cancel-sign-in', name, scope),
     signOut: (name: string, scope: McpScope): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:sign-out', name, scope),
+    log: (name: string, scope: McpScope): Promise<string[]> => ipcRenderer.invoke('mcp:log', name, scope),
+    setToolEnabled: (name: string, scope: McpScope, tool: string, enabled: boolean): Promise<McpServerInfo[]> => ipcRenderer.invoke('mcp:set-tool-enabled', name, scope, tool, enabled),
     onServers: (cb: (servers: McpServerInfo[]) => void): (() => void) => {
       const handler = (_e: IpcRendererEvent, servers: McpServerInfo[]) => cb(servers);
       ipcRenderer.on('mcp:servers', handler);

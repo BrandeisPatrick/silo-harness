@@ -245,12 +245,14 @@ const js = (v) => JSON.stringify(v);
     // MCP panel (debug mock): add, then remove a server
     await app.evaluate(`window.__oc_debug.mcp.mock([])`);
     await open(app, 'mcp');
+    await app.click('#mcp-add-open');
     await app.fill('#mcp-name', 'files');
     await app.fill('#mcp-spec', 'npx -y @modelcontextprotocol/server-filesystem /tmp');
     await app.click('#mcp-add-btn');
     await app.waitFor(`document.querySelectorAll('#mcp-list .mcp-row').length === 1`, 5000).catch(() => false);
     check('the MCP panel adds a server', (await app.count('#mcp-list .mcp-row')) === 1);
-    await app.click('#mcp-list .mcp-remove');
+    await app.click('#mcp-list .mcp-more');
+    await app.evaluate(`[...document.querySelectorAll('.popover.mcp-menu button')].find((b) => /Remove/.test(b.textContent)).click()`);
     await app.waitFor(`document.querySelector('#confirm-dialog').open`, 3000).catch(() => false);
     if (await app.evaluate(`document.querySelector('#confirm-dialog').open`)) await app.click('#confirm-ok');
     await app.waitFor(`document.querySelectorAll('#mcp-list .mcp-row').length === 0`, 5000).catch(() => false);

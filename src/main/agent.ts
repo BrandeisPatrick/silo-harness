@@ -38,7 +38,7 @@ import {
 } from './compact';
 import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
-import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isToolGroup, loadToolsTool, requestedGroups, type ToolGroup } from './tools/groups';
+import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isMcpGroup, isToolGroup, loadToolsTool, mcpGroupsForMessage, requestedGroups, type GroupId, type McpGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
@@ -428,7 +428,7 @@ export class Agent {
   }
 
   /** The groups the prompt names as loadable (undefined: every group is offered up front, or none is a group here). */
-  private promptGroups(cfg: AppConfig): ToolGroup[] | undefined {
+  private promptGroups(cfg: AppConfig): GroupId[] | undefined {
     if (this.ownTools() || allGroupsUpFront(cfg)) return undefined;
     return this.loadableGroups(cfg);
   }
@@ -464,17 +464,33 @@ export class Agent {
   }
 
   /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
-  private loadedGroups(): ToolGroup[] {
+  private loadedGroups(): GroupId[] {
     return cleanGroups(this.session.toolGroups ?? []);
+  }
+
+  /**
+   * A tool's group, when it is one the tool may belong to: an MCP tool only its own server's (mcp:…), any other tool
+   * only a built-in group. So no tool can load, or be loaded with, a server it does not come from.
+   */
+  private groupOf(t: Tool): GroupId | undefined {
+    const g = t.group;
+    if (!g) return undefined;
+    return t.mcp ? (isMcpGroup(g) ? g : undefined) : isToolGroup(g) ? g : undefined;
   }
 
   /**
    * The groups this session loads when it needs them, loaded yet or not: those with tools in the pool, in their fixed
    * order. None when every group is offered up front (AppConfig.toolSet 'all') or the session has a tool set of its own.
    */
-  private loadableGroups(cfg: AppConfig, pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+  private loadableGroups(cfg: AppConfig, pool: Tool[] = this.toolPool(cfg)): GroupId[] {
     if (this.ownTools() || allGroupsUpFront(cfg)) return [];
-    return TOOL_GROUPS.filter((g) => pool.some((t) => t.group === g));
+    const out: GroupId[] = TOOL_GROUPS.filter((g) => pool.some((t) => this.groupOf(t) === g));
+    // Then each MCP server with tools in the pool (connected, and in plan mode with a read-only tool), in its order
+    for (const t of pool) {
+      const g = this.groupOf(t);
+      if (g && isMcpGroup(g) && !out.includes(g)) out.push(g);
+    }
+    return out;
   }
 
   /**
@@ -488,7 +504,7 @@ export class Agent {
     const pool = this.toolPool(cfg);
     const loadable = this.loadableGroups(cfg, pool);
     if (!loadable.length) return pool;
-    const offered = pool.filter((t) => !t.group);
+    const offered = pool.filter((t) => !this.groupOf(t));
     const builtIn = new Set(allTools(cfg.permissionMode));
     let at = 0;
     offered.forEach((t, i) => {
@@ -496,7 +512,7 @@ export class Agent {
     });
     offered.splice(at, 0, loadToolsTool(loadable));
     const groups = this.defersGroups(cfg) ? loadable : this.loadedGroups().filter((g) => loadable.includes(g));
-    for (const g of groups) offered.push(...pool.filter((t) => t.group === g));
+    for (const g of groups) offered.push(...pool.filter((t) => this.groupOf(t) === g));
     return offered;
   }
 
@@ -514,7 +530,7 @@ export class Agent {
    * session (saved with it), after those it had. Returns those that were not loaded before; groups the session cannot
    * use are left out.
    */
-  private loadGroups(cfg: AppConfig, groups: readonly ToolGroup[], pool: Tool[] = this.toolPool(cfg)): ToolGroup[] {
+  private loadGroups(cfg: AppConfig, groups: readonly GroupId[], pool: Tool[] = this.toolPool(cfg)): GroupId[] {
     const loadable = this.loadableGroups(cfg, pool);
     const loaded = this.loadedGroups();
     const fresh = cleanGroups(groups).filter((g) => loadable.includes(g) && !loaded.includes(g));
@@ -526,9 +542,11 @@ export class Agent {
    * What a group's load tells the model: its tools, and what it needs to know about them (the browser's rules, the
    * registered prompt sections of the group), which a system prompt that never changes cannot carry.
    */
-  private groupLoadText(cfg: AppConfig, group: ToolGroup, pool: Tool[]): string {
-    const names = pool.filter((t) => t.group === group).map((t) => t.name);
+  private groupLoadText(cfg: AppConfig, group: GroupId, pool: Tool[]): string {
+    const names = pool.filter((t) => this.groupOf(t) === group).map((t) => t.name);
     const parts = [`Loaded ${group}: ${names.join(', ')}.`];
+    // An MCP server's load says nothing of its own: its tools' descriptions are the server's text, in their definitions
+    if (isMcpGroup(group)) return parts[0];
     if (GROUP_GUIDANCE[group]) parts.push(GROUP_GUIDANCE[group]!);
     if (this.opts.prompt) {
       try {
@@ -542,7 +560,7 @@ export class Agent {
   }
 
   /** A load_tools call the agent makes itself, for a load the model did not ask for (see loadForCalls, run). */
-  private syntheticLoad(groups: ToolGroup[]): ToolCall {
+  private syntheticLoad(groups: GroupId[]): ToolCall {
     return { id: `call_load_${randomUUID().slice(0, 8)}`, type: 'function', function: { name: LOAD_TOOLS, arguments: JSON.stringify({ groups }) } };
   }
 
@@ -553,9 +571,9 @@ export class Agent {
    * agent's own (so their result, like every load's, is in the conversation). The run loop stores the results
    * without a tool row, an approval or hooks.
    */
-  private loadForCalls(calls: ToolCall[], cfg: AppConfig): { results: Map<string, string>; implied: ToolGroup[] } {
+  private loadForCalls(calls: ToolCall[], cfg: AppConfig): { results: Map<string, string>; implied: GroupId[] } {
     const results = new Map<string, string>();
-    const implied: ToolGroup[] = [];
+    const implied: GroupId[] = [];
     if (this.ownTools()) return { results, implied };
     const pool = this.toolPool(cfg);
     for (const call of calls) {
@@ -569,7 +587,8 @@ export class Agent {
       results.set(call.id, this.loadToolsResult(cfg, pool, requestedGroups(args)));
     }
     for (const call of calls) {
-      const group = call.function.name === LOAD_TOOLS ? undefined : pool.find((t) => t.name === call.function.name)?.group;
+      const hit = call.function.name === LOAD_TOOLS ? undefined : pool.find((t) => t.name === call.function.name);
+      const group = hit && this.groupOf(hit);
       if (group) implied.push(...this.loadGroups(cfg, [group], pool));
     }
     return { results, implied };
@@ -582,12 +601,18 @@ export class Agent {
     const out: string[] = [];
     const had: string[] = [];
     const missing: string[] = [];
-    for (const name of asked) {
-      if (!isToolGroup(name) || !known.includes(name)) missing.push(name);
-      else if (this.loadGroups(cfg, [name], pool).length) out.push(this.groupLoadText(cfg, name, pool));
+    const servers: string[] = [];
+    for (const asked1 of asked) {
+      // A server may be named without its "mcp:" when no built-in group has that name
+      const name = !isToolGroup(asked1) && !asked1.startsWith('mcp:') && known.includes(`mcp:${asked1}` as McpGroup) ? `mcp:${asked1}` : asked1;
+      if (!known.includes(name as GroupId)) (name.startsWith('mcp:') ? servers : missing).push(clip(name, 70));
+      else if (this.loadGroups(cfg, [name as GroupId], pool).length) out.push(this.groupLoadText(cfg, name as GroupId, pool));
       else had.push(name);
     }
     if (had.length) out.push(`Already loaded: ${had.join(', ')}.`);
+    // An MCP server that is off, not trusted, signed out or not connected has nothing to load: said plainly, no guess
+    const plan = cfg.permissionMode === 'plan';
+    for (const s of servers) out.push(`${out.length ? '' : 'Error: '}${s} is not an MCP server with tools to load here${plan ? ' in plan mode' : ''}.`);
     if (missing.length) out.push(`${out.length ? 'Not' : 'Error: not'} a tool group here: ${missing.join(', ')}. The groups are ${known.join(', ') || 'none'}.`);
     return out.join('\n\n');
   }
@@ -611,7 +636,7 @@ export class Agent {
       }
     }
     const pool = this.toolPool(cfg);
-    const groups = this.loadedGroups().filter((g) => !inKept.has(g) && pool.some((t) => t.group === g));
+    const groups = this.loadedGroups().filter((g) => !inKept.has(g) && pool.some((t) => this.groupOf(t) === g));
     return groups.length ? `${FOLDED_GROUPS_HEADING}\n${groups.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n')}` : '';
   }
 
@@ -1244,7 +1269,9 @@ export class Agent {
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
       // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
       // A message from another session is answered with session_send, so it loads the sessions group.
-      const wanted = groupsForMessage(userText);
+      const wanted: GroupId[] = groupsForMessage(userText);
+      // …and a message that names an MCP server (a whole word) loads that server's tools
+      if (this.mcp && !this.ownTools() && !allGroupsUpFront(cfg)) wanted.push(...mcpGroupsForMessage(userText, this.mcp.loadable()));
       if (origin === 'session' && !wanted.includes('sessions')) wanted.push('sessions');
       const early = this.ownTools() ? [] : this.loadGroups(cfg, wanted);
       if (early.length) {

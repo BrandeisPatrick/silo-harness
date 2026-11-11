@@ -274,21 +274,23 @@
             <p id="rules-status" class="rules-status" role="alert" hidden></p>
           </div>
           <div id="mcp-section" class="mcp-panel">
+            <div class="mcp-head"><button type="button" id="mcp-add-open" class="btn sm" aria-expanded="false" aria-controls="mcp-add"><span data-icon="plus" data-icon-size="14"></span><span>Add server</span></button></div>
             <div id="mcp-list" class="mcp-list" role="list" aria-label="MCP servers"></div>
             <p id="mcp-status" class="mcp-status" role="alert" hidden></p>
-            <div id="mcp-add" class="mcp-add" role="group" aria-labelledby="mcp-add-title">
-              <div class="mcp-add-title" id="mcp-add-title">Add a server</div>
+            <div id="mcp-add" class="mcp-add" role="group" aria-label="Add a server" hidden>
+              <label class="field"><span class="field-label">Config</span><textarea id="mcp-spec" class="mono" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents&#10;https://mcp.example.com/mcp&#10;{&quot;mcpServers&quot;: { … }}"></textarea></label>
+              <p id="mcp-understood" class="hint mcp-understood">A command, a URL or JSON from the server's README.</p>
               <div class="field-grid">
                 <label class="field"><span class="field-label" id="mcp-name-label">Name</span><input id="mcp-name" placeholder="e.g. github" spellcheck="false" autocomplete="off" autocapitalize="off"></label>
                 <label class="field"><span class="field-label">Scope</span><span class="select"><select id="mcp-scope"><option value="user">This Mac (settings)</option><option value="project">This project (.mcp.json)</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span></label>
               </div>
-              <label class="field"><span class="field-label">Config</span><textarea id="mcp-spec" class="mono" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents&#10;https://mcp.example.com/mcp&#10;{&quot;command&quot;: &quot;npx&quot;, &quot;args&quot;: [&quot;-y&quot;, &quot;@scope/server&quot;]}"></textarea></label>
-              <p class="hint">A command, a URL or a JSON snippet. An <code>mcpServers</code> block adds every server in it.</p>
-              <label class="field"><span class="field-label">Environment <span class="field-opt">· KEY=value per line, for command-line servers</span></span><textarea id="mcp-env" class="mono" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="GITHUB_TOKEN=ghp_…&#10;ONE_PER_LINE=value"></textarea></label>
+              <label class="field"><span class="field-label" id="mcp-env-label">Environment <span class="field-opt">· KEY=value per line</span></span><textarea id="mcp-env" class="mono" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="GITHUB_TOKEN=ghp_…"></textarea></label>
+              <p id="mcp-values-hint" class="hint" hidden>Values stay on this Mac. .mcp.json gets ${KEY}.</p>
               <div class="mcp-add-foot">
                 <div id="mcp-add-error" class="mcp-add-error" role="alert" hidden></div>
                 <span class="spacer"></span>
-                <button type="button" id="mcp-add-btn" class="btn"><span data-icon="plus" data-icon-size="14"></span><span>Add server</span></button>
+                <button type="button" id="mcp-add-cancel" class="btn">Cancel</button>
+                <button type="button" id="mcp-add-btn" class="btn primary"><span>Add</span></button>
               </div>
             </div>
           </div>

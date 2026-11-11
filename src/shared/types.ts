@@ -187,6 +187,15 @@ export interface McpToolInfo {
   readOnly: boolean;
   /** destructiveHint === true: auto mode pauses for these like it does for risky commands */
   destructive: boolean;
+  /** The tool's `title` (else `annotations.title`), one line, at most 64 characters: for the interface only */
+  title?: string;
+}
+
+/** The real names behind an MCP tool's model-facing name (mcp__<server>__<tool> is sanitised and may be shortened) */
+export interface McpCallNames {
+  server: string;
+  tool: string;
+  title?: string;
 }
 
 /**
@@ -207,11 +216,18 @@ export interface McpServerInfo {
   error?: string;
   /** Empty unless connected */
   tools: McpToolInfo[];
-  /** The server's own name and version from the handshake */
-  serverInfo?: { name: string; version: string };
+  /** The server's own name, version and title from the handshake (untrusted text) */
+  serverInfo?: { name: string; version: string; title?: string };
+  /** The config with every env and header value written as a ${VAR} reference (no secret leaves the main process) */
   config: McpServerConfig;
+  /** The ${VAR} references in the config: what reads each (`to`: the host a remote server sends it to) and whether it is set */
+  vars?: { name: string; to?: string; set: boolean }[];
+  /** Referenced variables that are not set (and have no default) */
+  unset?: string[];
   /** Tools the server offers that enabledTools/disabledTools keep from the model */
   hiddenTools?: string[];
+  /** The same tools, described, for Settings to list them as off */
+  offTools?: McpToolInfo[];
   /** A remote server with OAuth tokens stored */
   signedIn?: boolean;
 }
@@ -225,7 +241,7 @@ export interface McpApi {
    * Rejects with a message when the name is taken, the spec cannot be read, or a project file cannot be written.
    * Returns the new list.
    */
-  add(name: string, spec: string, scope: McpScope, env?: Record<string, string>): Promise<McpServerInfo[]>;
+  add(name: string, spec: string, scope: McpScope, env?: Record<string, string>, headers?: Record<string, string>): Promise<McpServerInfo[]>;
   remove(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** User servers: the disabled flag. Project servers: enabled=true trusts the server for this working directory (status blocked → connecting). */
   setEnabled(name: string, scope: McpScope, enabled: boolean): Promise<McpServerInfo[]>;
@@ -235,6 +251,10 @@ export interface McpApi {
   cancelSignIn(name: string, scope: McpScope): Promise<McpServerInfo[]>;
   /** Deletes the server's tokens and client registration */
   signOut(name: string, scope: McpScope): Promise<McpServerInfo[]>;
+  /** Turns one tool of a user server off (disabledTools) or back on */
+  setToolEnabled?(name: string, scope: McpScope, tool: string, enabled: boolean): Promise<McpServerInfo[]>;
+  /** A local server's last lines of stderr, secrets cut (for Show log) */
+  log?(name: string, scope: McpScope): Promise<string[]>;
   /** The full list whenever a server's status or tools change */
   onServers(cb: (servers: McpServerInfo[]) => void): () => void;
 }
@@ -295,6 +315,16 @@ export interface AppConfig {
   mcpServers: Record<string, McpServerConfig>;
   /** Project .mcp.json servers the user enabled, by working directory */
   mcpTrusted: Record<string, string[]>;
+  /**
+   * What each trusted project server was trusted for: the SHA-256 of its .mcp.json entry, by working directory and
+   * name. An entry that changes since is not trusted. (A separate key, so older builds still read mcpTrusted.)
+   */
+  mcpTrustedEntries?: Record<string, Record<string, string>>;
+  /**
+   * Values typed for a project's MCP servers, kept on this Mac (the .mcp.json gets ${KEY} references): by working
+   * directory, server name and variable. Used only to expand that server's own references.
+   */
+  mcpProjectValues?: Record<string, Record<string, Record<string, string>>>;
   /** Summarise the conversation on its own when it nears the context window (see ContextInfo.threshold) */
   autoCompact: boolean;
   /** macOS notifications when a run ends or waits for approval while the window is in the background */
@@ -504,7 +534,7 @@ export type AgentEvent =
   | { type: 'text_done' }
   | { type: 'thinking_delta'; text: string }
   | { type: 'thinking_done' }
-  | { type: 'tool_start'; id: string; name: string; args: unknown }
+  | { type: 'tool_start'; id: string; name: string; args: unknown; mcp?: McpCallNames }
   | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }
   /**
    * Token usage of one model call (prompt = input incl. history and cached tokens, completion = generated). Emitted
@@ -524,7 +554,7 @@ export type AgentEvent =
    * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
    * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; callId?: string }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; mcp?: McpCallNames; callId?: string }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */
@@ -625,7 +655,7 @@ export interface LiveState {
   text: string;
   thinking: string;
   /** Tool calls that have started and not finished */
-  tools: { id: string; name: string; args: unknown }[];
+  tools: { id: string; name: string; args: unknown; mcp?: McpCallNames }[];
   /** Approval cards waiting for an answer */
   approvals: Extract<AgentEvent, { type: 'approval_request' }>[];
   /** Question cards (ask_user) waiting for an answer; missing from an older main process */

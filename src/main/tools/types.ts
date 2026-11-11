@@ -5,7 +5,7 @@ import type { BrowserCard, Site } from '../browser/policy';
 import type { Skill } from '../skills';
 import type { TerminalManager } from '../terminal';
 import type { App } from '../app';
-import type { ToolGroup } from './groups';
+import type { GroupId } from './groups';
 
 /** Options for ToolContext.approve. */
 export interface ApproveOptions {
@@ -111,8 +111,8 @@ export interface Tool {
   readOnly?: boolean;
   /** Not essential: left out when the tool set is trimmed for a small context window (see AppConfig.toolSet) */
   optional?: boolean;
-  /** Offered only once the session loaded this group (tools/groups.ts), or from the start with AppConfig.toolSet 'all' */
-  group?: ToolGroup;
+  /** Offered only once the session loaded this group (tools/groups.ts), or from the start with AppConfig.toolSet 'all'; an MCP tool's is its server's (mcp:<server>) */
+  group?: GroupId;
   /** Offered only to a session whose own tool set (Session.tools) names it, never to the others (a dream's tools) */
   scoped?: boolean;
   /** Set for tools an MCP server provides: which server, its own tool name and the annotations the approval rules use */

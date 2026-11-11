@@ -24,7 +24,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.14.0 | Latency: the reads of one reply run together, `/timing` and an opt-in timing log, a reasoning-effort pill and `/effort`, recognised `aws` reads without the safety check, shell sign-ins and wildcards fixed, a paused circle on the task card, lighter icons, themes removed, and evals for the safety check and for answers | released 2026-11-10 |
 | 0.15.0 | One tab strip for the side pane, long chats folded, sessions in tabs, the browser in Auto mode; fix: a site approval covers one origin, so approving https no longer allows http | released 2026-11-11 |
 | 0.16.0 | Permission rules with patterns in Claude Code's format (deny beats allow, "Always allow" on a card writes the rule, hard refusals stay), a session's cost in dollars next to its tokens, Auto mode's safety check on Claude Haiku 5.5 by default; the command guard follows `cd` and `../`, and deny rules look through `sudo` | released 2026-11-11 |
-| 0.17.0 | MCP polish (servers and connectors, with Claude as the reference) and MCP tools loaded only when needed | planned; it first runs against a real remote server |
+| 0.17.0 | MCP polish (one status and one action per server, tool titles with a switch each, trust that follows a project server's changes, values kept off `.mcp.json`) and MCP tools loaded only when needed; checked against two public remote servers | released 2026-11-11 |
 
 Decided on 2026-11-10 and not scheduled: a headless `silo run`, once the shell sandbox exists; a site approval card that names `http://` for a plain-http site (the card shows the host alone, so an http page and its https twin read the same).
 

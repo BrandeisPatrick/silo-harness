@@ -37,7 +37,8 @@ import { createArtifactCard, type ArtifactAction, type ArtifactCard } from './ar
 import { createChatCards } from './chat-cards.js';
 import { createQueueList } from './queue.js';
 import { normalizeContext } from './context.js';
-import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
+import { createMcpPanel, installMcpActions, mcpCardHtml, mockMcpSource, type MockMcpSource } from './mcp.js';
+import { rememberMcpNames } from './mcp-labels.js';
 import { createMentionPicker, normalizeMention } from './mentions.js';
 import { createRulesPanel, mockRulesSource } from './rules.js';
 import { cleanTasks, createTaskList } from './tasks.js';
@@ -1075,6 +1076,7 @@ const callArgs = new Map<string, unknown>();
 const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', ...PROPOSAL_TOOLS]);
 
 function handleEvent(ev: AgentEvent, synthetic = false): void {
+  if ((ev.type === 'tool_start' || ev.type === 'approval_request') && ev.mcp) rememberMcpNames(ev.name, ev.mcp);
   switch (ev.type) {
     case 'run_start':
       setRunning(true);
@@ -1847,6 +1849,7 @@ async function syncOwnedConfig(): Promise<void> {
         ...config,
         mcpServers: latest.mcpServers ?? config.mcpServers,
         mcpTrusted: latest.mcpTrusted ?? config.mcpTrusted,
+        mcpTrustedEntries: latest.mcpTrustedEntries ?? config.mcpTrustedEntries,
         allowRules: latest.allowRules ?? config.allowRules,
         recentDirs: latest.recentDirs ?? config.recentDirs,
       };
@@ -1891,6 +1894,9 @@ function subscribeMcp(): void {
     /* an older app without the event */
   }
 }
+
+// The /mcp card's links and a failed MCP call's "Sign in" / "Open MCP servers" (mcp.ts installMcpActions)
+installMcpActions(document, { source: mcpSource, servers: () => mcpPanel.servers(), openSettings: () => openSettings('mcp-section'), panel: mcpPanel, cleanError, notify: (m) => void addSystemMessage(m, 'error') });
 
 /** /mcp: the servers with their status and tool names (or how to add one), and a way into Settings. */
 async function addMcpCard(): Promise<void> {

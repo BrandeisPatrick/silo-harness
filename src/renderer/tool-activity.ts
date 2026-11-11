@@ -14,6 +14,8 @@ export interface ActivityCall {
   url?: string;
   /** A denied call did not happen: it is left out of the words and counted on its own */
   denied?: boolean;
+  /** An MCP call's real server name (mcp-labels.ts); else it is parsed from the name */
+  server?: string;
 }
 
 interface Kind {
@@ -85,8 +87,8 @@ const SHARED: Record<string, string> = { glob: 'search', grep: 'search', bash: '
 
 function kindOf(c: ActivityCall): Kind {
   const name = c.name;
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
-  if (mcp) return { key: `mcp:${mcp[1]}`, one: `called a tool on ${mcp[1]}`, many: (n) => `called ${n} tools on ${mcp[1]}` };
+  const server = name.startsWith('mcp__') ? c.server || /^mcp__(.+?)__(.+)$/.exec(name)?.[1] : undefined;
+  if (server) return { key: `mcp:${server}`, one: `called a tool on ${server}`, many: (n) => `called ${n} tools on ${server}` };
   if (name === 'write_file') return { key: c.created ? 'create' : 'write', ...files(c.created ? 'created' : 'wrote'), target: c.path || undefined };
   if (name === 'read_file' || name === 'edit_file') return { key: name, ...KINDS[name], target: c.path || undefined };
   if (name === 'browser_navigate') {

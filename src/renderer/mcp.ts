@@ -5,19 +5,14 @@
 import type { McpApi, McpScope, McpServerConfig, McpServerInfo, McpStatus, McpToolInfo } from '../shared/types';
 import type { ConfirmOptions } from './changes.js';
 import { escapeHtml } from './dom.js';
-import { icon } from './icons.js';
+import { icon, type IconName } from './icons.js';
 import { tilde } from './home.js';
+import { noteMcpServers } from './mcp-labels.js';
+import { parseHeaders, suggestName, understood, toolGroups, type ToolEntry, hasSwitch, MENU_LABELS, menuActions, primaryAction, reasonLine, safeLines, serverSubtitle, STATUS_WORDS, statusText, statusTone, trustLines, unsetText, copyText, plural, type MenuKind } from './mcp-model.js';
+import { openMenu, type MenuItem } from './popover.js';
 
-export const MCP_STATUS_LABEL: Record<McpStatus, string> = {
-  connected: 'Connected',
-  connecting: 'Connecting…',
-  reconnecting: 'Reconnecting',
-  'needs-auth': 'Sign in needed',
-  authorizing: 'Waiting for browser…',
-  error: 'Failed to connect',
-  disabled: 'Disabled',
-  blocked: 'Not enabled for this project',
-};
+/** The status words (mcp-model.ts), kept under the old name for the debug hook and tests */
+export const MCP_STATUS_LABEL = STATUS_WORDS;
 
 const STATUSES = new Set<string>(Object.keys(MCP_STATUS_LABEL));
 
@@ -40,12 +35,9 @@ export function cleanServers(list: unknown): McpServerInfo[] {
     }));
 }
 
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-/** "Connected · 12 tools", "Connecting…", "Failed to connect", … */
+/** "Connected · 12 tools", "Connecting…", "Failed", … */
 export function mcpStatusText(s: McpServerInfo): string {
-  if (s.status === 'connected') return `Connected · ${s.tools.length ? plural(s.tools.length, 'tool') : 'no tools'}${s.hiddenTools?.length ? ` · ${s.hiddenTools.length} off` : ''}`;
-  return MCP_STATUS_LABEL[s.status] ?? s.status;
+  return statusText(s);
 }
 
 /** KEY=value per line (blank lines and # comments are skipped; "export " and surrounding quotes are allowed). */
@@ -113,6 +105,8 @@ export interface McpPanel {
   servers(): McpServerInfo[];
   /** Clears the messages left from last time (Settings opened again) */
   resetMessages(): void;
+  /** Scrolls to a server's row and focuses it; with `trust`, its Trust confirmation opens */
+  showRow(key: string, trust?: boolean): void;
 }
 
 const slug = (key: string): string => key.replace(/[^A-Za-z0-9_-]+/g, '-');
@@ -121,17 +115,23 @@ function shortDir(p: string): string {
   return tilde(p).replace(/\/+$/, '');
 }
 
-function toolHtml(t: McpToolInfo): string {
-  const desc = typeof t.description === 'string' ? t.description.trim() : '';
-  const tags =
-    (t.readOnly ? `<span class="mcp-tag ro" title="Read-only: runs without asking">${icon('eye', 12)}<span>read-only</span></span>` : '') +
-    (t.destructive ? `<span class="mcp-tag danger" title="Destructive: auto mode asks before running it">destructive</span>` : '');
+function toolHtml(t: ToolEntry, key: string, switchable: boolean): string {
+  const desc = t.description;
+  const sw = switchable
+    ? `<label class="mcp-tool-switch" title="${escapeHtml(t.off ? `Turn ${t.name} on` : `Turn ${t.name} off`)}"><input type="checkbox" class="switch sm" data-tool="${escapeHtml(t.name)}" ${t.off ? '' : 'checked'} aria-label="${escapeHtml(`${t.title} on`)}" data-focus-key="${escapeHtml(`${key}|tool|${t.name}`)}"></label>`
+    : '';
   return (
-    `<div class="mcp-tool" role="listitem"><div class="mcp-tool-head"><code class="mcp-tool-name">${escapeHtml(t.name)}</code>${tags}</div>` +
+    `<div class="mcp-tool${t.off ? ' off' : ''}" role="listitem"><div class="mcp-tool-text"><div class="mcp-tool-head"><span class="mcp-tool-title">${escapeHtml(t.title)}</span>` +
+    (t.showName ? `<code class="mcp-tool-name">${escapeHtml(t.name)}</code>` : '') +
+    (t.destructive ? `<span class="mcp-tag danger" title="Destructive: auto mode asks before running it">destructive</span>` : '') +
+    (t.off ? '<span class="mcp-tool-off">off</span>' : '') +
+    `</div>` +
     (desc ? `<div class="mcp-tool-desc" title="${escapeHtml(desc.length > 1200 ? `${desc.slice(0, 1200)}…` : desc)}">${escapeHtml(desc)}</div>` : '') +
-    `</div>`
+    `</div>${sw}</div>`
   );
 }
+
+const MENU_ICONS: Record<MenuKind, IconName> = { reconnect: 'refresh', 'sign-out': 'x', log: 'terminal', copy: 'copy', remove: 'trash' };
 
 export function createMcpPanel(opts: McpPanelOptions): McpPanel {
   const { els } = opts;
@@ -152,8 +152,25 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.status.hidden = true;
     els.status.textContent = '';
   };
+  // The form's other parts, found by id (the panel's hookup in renderer.ts names only the original ones)
+  const form = {
+    root: document.getElementById('mcp-add'),
+    open: document.getElementById('mcp-add-open') as HTMLButtonElement | null,
+    cancel: document.getElementById('mcp-add-cancel') as HTMLButtonElement | null,
+    understood: document.getElementById('mcp-understood'),
+    envLabel: document.getElementById('mcp-env-label'),
+    valuesHint: document.getElementById('mcp-values-hint'),
+  };
+  const errorHome = { parent: els.error.parentElement, next: els.error.nextSibling };
+  /** An error sits under the field it is about (or in the form's foot) */
   const showAddError = (message: string, focus?: HTMLElement) => {
     els.error.innerHTML = `${icon('circle-alert', 14)}<span>${escapeHtml(message)}</span>`;
+    const inField = focus?.closest('.field');
+    // A field in the two-column row (Name, Scope): the line goes under that row, not into it
+    const field = inField?.parentElement?.classList.contains('field-grid') ? inField.parentElement : inField;
+    if (field) field.after(els.error);
+    else if (errorHome.parent) errorHome.parent.insertBefore(els.error, errorHome.next);
+    els.error.classList.toggle('by-field', !!field);
     els.error.hidden = false;
     focus?.focus();
   };
@@ -161,92 +178,157 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.error.hidden = true;
     els.error.textContent = '';
   };
+  /** The name the form filled in last (a name the user typed is never replaced) */
+  let suggested = '';
+  const formOpen = () => !!form.root && !form.root.hidden;
+  const setFormOpen = (open: boolean, focus = true) => {
+    if (!form.root) return;
+    form.root.hidden = !open;
+    form.open?.setAttribute('aria-expanded', String(open));
+    if (open && focus) els.spec.focus();
+    if (!open) {
+      hideAddError();
+      if (focus) form.open?.focus();
+    }
+  };
 
   const syncForm = () => {
     const kind = specKind(els.spec.value);
     const block = kind === 'block';
-    els.nameLabel.textContent = block ? 'Name (optional for an mcpServers block)' : 'Name';
+    const url = kind === 'url' || (kind === 'json' && /"url"\s*:/.test(els.spec.value));
+    els.nameLabel.textContent = block ? 'Name (from the block)' : 'Name';
     els.name.placeholder = block ? 'Taken from the block' : 'e.g. github';
-    els.env.disabled = kind === 'url';
-    els.env.placeholder = kind === 'url' ? 'Not used by URL servers' : 'GITHUB_TOKEN=ghp_…\nONE_PER_LINE=value';
+    els.name.disabled = block;
+    // A URL takes headers ("Name: value"), a command takes environment variables ("KEY=value")
+    if (form.envLabel) form.envLabel.innerHTML = url ? 'Headers <span class="field-opt">· Name: value per line</span>' : 'Environment <span class="field-opt">· KEY=value per line</span>';
+    els.env.placeholder = url ? 'Authorization: Bearer …' : 'GITHUB_TOKEN=ghp_…';
+    els.env.setAttribute('aria-label', url ? 'Headers' : 'Environment');
+    if (form.understood) form.understood.textContent = understood(els.spec.value);
+    if (form.valuesHint) form.valuesHint.hidden = els.scope.value !== 'project';
+    const next = block ? '' : suggestName(els.spec.value);
+    if (!els.name.value.trim() || els.name.value === suggested) {
+      els.name.value = next;
+      suggested = next;
+    }
     // Stays enabled while adding (keeps keyboard focus); the busy class and the `adding` guard stop a second click.
     els.add.disabled = unavailable;
   };
 
+  /** Rows whose Trust confirmation or log is open, by scope:name */
+  const confirming = new Set<string>();
+  const logs = new Map<string, string[] | 'loading' | 'unavailable'>();
+  /** A row whose config was just copied: its status line says so for a moment */
+  let copiedKey = '';
+
   const row = (s: McpServerInfo): HTMLElement => {
     const key = mcpKey(s);
     const name = s.name;
+    const fk = escapeHtml(key);
     const pending = busy.get(key);
     const on = pending?.enabled ?? (s.status !== 'disabled' && s.status !== 'blocked');
     const tools = s.tools;
-    const open = expanded.has(key) && tools.length > 0;
+    const listed = tools.length + (s.offTools?.length ?? 0);
+    const open = expanded.has(key) && listed > 0;
     const toolsId = `mcp-tools-${slug(key)}`;
+    const tone = statusTone(s.status);
     const el = document.createElement('div');
-    el.className = `mcp-row ${s.status}${busy.has(key) ? ' busy' : ''}${flashKeys.has(key) ? ' flash' : ''}`;
+    el.className = `mcp-row ${s.status} tone-${tone}${busy.has(key) ? ' busy' : ''}${flashKeys.has(key) ? ' flash' : ''}`;
     el.setAttribute('role', 'listitem');
     el.dataset.key = key;
     el.dataset.name = name;
     el.dataset.scope = s.scope;
     el.dataset.status = s.status;
 
-    let state = '';
-    const hidden = s.hiddenTools?.length ? `<span class="mcp-state" title="${escapeHtml(`Off: ${s.hiddenTools.join(', ')}`)}">${s.hiddenTools.length} off</span>` : '';
-    const authBtn = (cls: string, label: string) => `<button type="button" class="mcp-auth-btn ${cls}" data-focus-key="${escapeHtml(key)}|${cls}">${label}</button>`;
-    if (s.status === 'connected') {
-      state =
-        (s.signedIn ? authBtn('sign-out', 'Sign out') : '') +
-        hidden +
-        (tools.length
-          ? `<button type="button" class="mcp-tools-toggle" aria-expanded="${open}" aria-controls="${toolsId}" data-focus-key="${escapeHtml(key)}|tools"><span>${plural(tools.length, 'tool')}</span>${icon('chevron-down', 14)}</button>`
-          : '<span class="mcp-state">No tools</span>');
-    } else if (s.status === 'connecting') state = '<span class="mcp-state">Connecting…</span>';
-    else if (s.status === 'reconnecting') state = '<span class="mcp-state">Reconnecting</span>';
-    else if (s.status === 'needs-auth') state = authBtn('sign-in primary', 'Sign in');
-    else if (s.status === 'authorizing') state = '<span class="mcp-state">Waiting for browser…</span>' + authBtn('cancel-sign-in', 'Cancel');
-    else if (s.status === 'error') state = '<span class="mcp-state err">Failed</span>';
-    else if (s.status === 'disabled') state = '<span class="mcp-state">Disabled</span>';
-
-    const version = s.serverInfo?.version ? `<span class="mcp-version" title="${escapeHtml(`${s.serverInfo.name || name} ${s.serverInfo.version}`)}">v${escapeHtml(String(s.serverInfo.version).replace(/^v/, ''))}</span>` : '';
-    const scopeTip = s.scope === 'project' ? "From the project's .mcp.json" : "Stored in Silo Harness's settings on this Mac";
+    const words = STATUS_WORDS[s.status];
+    const primary = primaryAction(s);
+    let primaryHtml = '';
+    if (primary?.kind === 'tools') {
+      primaryHtml = `<button type="button" class="btn sm mcp-primary mcp-tools-toggle" aria-expanded="${open}" aria-controls="${toolsId}" data-focus-key="${fk}|tools"><span>${escapeHtml(primary.label)}</span>${icon('chevron-down', 14)}</button>`;
+    } else if (primary) {
+      const extra = primary.kind === 'trust' ? ` aria-expanded="${confirming.has(key)}"` : '';
+      primaryHtml = `<button type="button" class="btn sm mcp-primary" data-action="${primary.kind}" data-focus-key="${fk}|${primary.kind}"${extra}>${escapeHtml(primary.label)}</button>`;
+    }
+    const reason = s.status === 'error' || s.status === 'reconnecting' || s.status === 'needs-auth' || (s.status === 'blocked' && s.error) ? reasonLine(s) : '';
+    const unset = unsetText(s);
+    const copied = copiedKey === key;
+    const statusHtml =
+      `<span class="mcp-words">${escapeHtml(copied ? 'Config copied' : words)}</span>` +
+      (!copied && reason ? `<span class="mcp-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</span>` : '') +
+      (!copied && unset ? `<span class="mcp-unset">${escapeHtml(unset)}</span>` : '');
+    const sub = serverSubtitle(s);
+    const pill = s.scope === 'project' ? `<span class="mcp-scope project" title="${escapeHtml(`${shortDir(opts.projectDir()) || 'This project'}/.mcp.json`)}">project</span>` : '';
     const target = s.target || (s.transport === 'stdio' ? '' : s.transport);
-    const switchTip = s.status === 'blocked' ? `Enable ${name} for this project` : on ? `Disable ${name}` : `Enable ${name}`;
+    const initial = (Array.from(name)[0] ?? '?').toUpperCase();
     el.innerHTML =
       `<div class="mcp-main">` +
-      `<span class="mcp-dot ${s.status}" role="img" aria-label="${escapeHtml(MCP_STATUS_LABEL[s.status])}" title="${escapeHtml(MCP_STATUS_LABEL[s.status])}"></span>` +
-      `<div class="mcp-info"><div class="mcp-line"><span class="mcp-name">${escapeHtml(name)}</span><span class="mcp-scope ${s.scope}" title="${escapeHtml(scopeTip)}">${s.scope}</span>${version}</div>` +
+      `<span class="mcp-tile" aria-hidden="true">${escapeHtml(initial)}<span class="mcp-dot ${s.status}"></span></span>` +
+      `<div class="mcp-info"><div class="mcp-line"><span class="mcp-name">${escapeHtml(name)}</span>${pill}${sub ? `<span class="mcp-sub" title="${escapeHtml(sub)}">${escapeHtml(sub)}</span>` : ''}</div>` +
       (target ? `<div class="mcp-target" title="${escapeHtml(target)}">${escapeHtml(target)}</div>` : '') +
+      `<div class="mcp-status-line tone-${tone}" role="status">${statusHtml}</div>` +
       `</div>` +
-      state +
-      `<label class="mcp-switch" title="${escapeHtml(switchTip)}">${s.status === 'blocked' ? '<span class="mcp-switch-label">Enable</span>' : ''}` +
-      `<input type="checkbox" class="switch" ${on ? 'checked' : ''} aria-label="${escapeHtml(s.status === 'blocked' ? `Enable ${name} for this project` : `Enable ${name}`)}" data-focus-key="${escapeHtml(key)}|switch"></label>` +
-      `<button type="button" class="icon-btn sm mcp-reconnect" aria-label="${escapeHtml(`Reconnect ${name}`)}" title="Reconnect" data-focus-key="${escapeHtml(key)}|reconnect"${on ? '' : ' disabled'}>${icon('refresh', 14)}</button>` +
-      `<button type="button" class="icon-btn sm mcp-remove" aria-label="${escapeHtml(`Remove ${name}`)}" title="Remove" data-focus-key="${escapeHtml(key)}|remove">${icon('trash', 14)}</button>` +
+      primaryHtml +
+      (hasSwitch(s)
+        ? `<label class="mcp-switch" title="${escapeHtml(on ? `Turn ${name} off` : `Turn ${name} on`)}"><input type="checkbox" class="switch" ${on ? 'checked' : ''} aria-label="${escapeHtml(`${name} on`)}" data-focus-key="${fk}|switch"></label>`
+        : '<span class="mcp-switch-space" aria-hidden="true"></span>') +
+      `<button type="button" class="icon-btn sm mcp-more" aria-label="${escapeHtml(`More for ${name}`)}" aria-haspopup="menu" title="More" data-focus-key="${fk}|more">${icon('more', 16)}</button>` +
       `</div>`;
 
-    if (s.status === 'error' || ((s.status === 'needs-auth' || s.status === 'reconnecting') && s.error?.trim())) {
-      el.insertAdjacentHTML('beforeend', `<div class="mcp-error">${icon('circle-alert', 14)}<span>${escapeHtml(s.error?.trim() || 'Could not connect to the server.')}</span></div>`);
-    } else if (s.status === 'blocked') {
-      const why = s.error?.trim() || "This server comes from the project's .mcp.json. Turn it on to trust it for this project; it starts then.";
-      el.insertAdjacentHTML('beforeend', `<div class="mcp-note">${icon('shield-check', 14)}<span>${escapeHtml(why)}</span></div>`);
+    if (confirming.has(key) && s.status === 'blocked') {
+      const box = document.createElement('div');
+      box.className = 'mcp-confirm';
+      box.setAttribute('role', 'group');
+      box.setAttribute('aria-label', `Trust ${name}?`);
+      box.tabIndex = -1;
+      box.innerHTML =
+        `<ul class="mcp-confirm-lines">${trustLines(s).map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` +
+        `<div class="mcp-confirm-foot"><button type="button" class="btn sm mcp-confirm-cancel" data-focus-key="${fk}|confirm-cancel">Cancel</button>` +
+        `<button type="button" class="btn sm primary mcp-confirm-ok" data-focus-key="${fk}|confirm-ok">Trust</button></div>`;
+      el.appendChild(box);
     }
-    if (tools.length) {
+    const log = logs.get(key);
+    if (log) {
+      const box = document.createElement('div');
+      box.className = 'mcp-log';
+      const pre = document.createElement('pre');
+      pre.className = 'mcp-log-text';
+      pre.textContent = log === 'loading' ? 'Loading…' : log === 'unavailable' ? 'The log needs the updated app.' : log.length ? log.join('\n') : 'Nothing printed yet.';
+      box.appendChild(pre);
+      el.appendChild(box);
+    }
+    if (listed) {
       const list = document.createElement('div');
       list.className = 'mcp-tools';
       list.id = toolsId;
       list.setAttribute('role', 'list');
       list.setAttribute('aria-label', `${name} tools`);
       list.hidden = !open;
-      list.innerHTML = tools.map(toolHtml).join('');
+      // A user server's tools have a switch each (it writes disabledTools); a project server's file is shared: read-only here
+      const switchable = s.scope === 'user' && typeof opts.source()?.setToolEnabled === 'function';
+      const offCount = s.offTools?.length ?? s.hiddenTools?.length ?? 0;
+      list.innerHTML =
+        (offCount && !s.offTools?.length ? `<div class="mcp-tools-head">${escapeHtml(`${offCount} off`)}</div>` : '') +
+        toolGroups(s)
+          .map((g) => `<div class="mcp-tools-group" role="presentation">${escapeHtml(g.label)}</div>` + g.tools.map((t) => toolHtml(t, key, switchable)).join(''))
+          .join('');
       el.appendChild(list);
+      list.querySelectorAll<HTMLInputElement>('input.switch[data-tool]').forEach((box) => {
+        box.addEventListener('change', () => {
+          const tool = box.dataset.tool ?? '';
+          if (busy.has(key) || !tool) {
+            box.checked = !box.checked;
+            return;
+          }
+          void act(s, box.checked ? 'enable a tool of' : 'turn off a tool of', (api) => api.setToolEnabled!(name, s.scope, tool, box.checked));
+        });
+      });
     }
 
-    const sw = el.querySelector<HTMLInputElement>('input.switch')!;
-    const reconnect = el.querySelector<HTMLButtonElement>('.mcp-reconnect')!;
-    const remove = el.querySelector<HTMLButtonElement>('.mcp-remove')!;
+    const sw = el.querySelector<HTMLInputElement>('input.switch');
+    const more = el.querySelector<HTMLButtonElement>('.mcp-more')!;
     const toggle = el.querySelector<HTMLButtonElement>('.mcp-tools-toggle');
     // While an action runs the controls stay focusable (a re-render keeps keyboard focus) but do nothing.
-    if (busy.has(key)) [sw, reconnect, remove].forEach((c) => c.setAttribute('aria-disabled', 'true'));
-    sw.addEventListener('change', () => {
+    if (busy.has(key)) [sw, more].forEach((c) => c?.setAttribute('aria-disabled', 'true'));
+    sw?.addEventListener('change', () => {
       if (busy.has(key)) {
         sw.checked = !sw.checked;
         return;
@@ -254,27 +336,57 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       const enabled = sw.checked;
       void act(s, enabled ? 'enable' : 'disable', (api) => api.setEnabled(name, s.scope, enabled), enabled);
     });
-    reconnect.onclick = () => void act(s, 'reconnect', (api) => api.reconnect(name, s.scope));
-    const authAction = (sel: string, action: 'sign in' | 'cancel sign-in for' | 'sign out of', run: (api: McpApi) => Promise<McpServerInfo[]>) => {
-      const b = el.querySelector<HTMLButtonElement>(sel);
-      if (b) b.onclick = () => void act(s, action, run);
-    };
-    authAction('.mcp-auth-btn.sign-in', 'sign in', (api) => api.signIn(name, s.scope));
-    authAction('.mcp-auth-btn.cancel-sign-in', 'cancel sign-in for', (api) => api.cancelSignIn(name, s.scope));
-    authAction('.mcp-auth-btn.sign-out', 'sign out of', (api) => api.signOut(name, s.scope));
-    remove.onclick = async () => {
+    const primaryBtn = el.querySelector<HTMLButtonElement>('.mcp-primary[data-action]');
+    if (primaryBtn) {
+      primaryBtn.onclick = () => {
+        if (busy.has(key)) return;
+        switch (primaryBtn.dataset.action) {
+          case 'sign-in':
+            return void act(s, 'sign in', (api) => api.signIn(name, s.scope));
+          case 'cancel':
+            return void act(s, 'cancel sign-in for', (api) => api.cancelSignIn(name, s.scope));
+          case 'retry':
+            return void act(s, 'reconnect', (api) => api.reconnect(name, s.scope));
+          case 'trust':
+            if (confirming.has(key)) confirming.delete(key);
+            else confirming.add(key);
+            panel.render(current);
+            // The confirmation takes focus as a whole, not its Trust button
+            if (confirming.has(key)) els.list.querySelector<HTMLElement>(`.mcp-row[data-key="${CSS.escape(key)}"] .mcp-confirm`)?.focus();
+            return;
+        }
+      };
+    }
+    el.querySelector<HTMLButtonElement>('.mcp-confirm-cancel')?.addEventListener('click', () => {
+      confirming.delete(key);
+      panel.render(current);
+      els.list.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(`${key}|trust`)}"]`)?.focus();
+    });
+    el.querySelector<HTMLButtonElement>('.mcp-confirm-ok')?.addEventListener('click', () => {
+      confirming.delete(key);
+      void act(s, 'enable', (api) => api.setEnabled(name, s.scope, true), true);
+    });
+    el.querySelector<HTMLElement>('.mcp-confirm')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        confirming.delete(key);
+        panel.render(current);
+      }
+    });
+    more.onclick = () => {
       if (busy.has(key)) return;
-      const dir = opts.projectDir();
-      const ok = await opts.confirm({
-        title: `Remove ${name}?`,
-        description:
-          s.scope === 'project'
-            ? `This edits the project's .mcp.json${dir ? ` (${shortDir(dir)}/.mcp.json)` : ''}: the server is deleted from the file, for everyone who uses it.`
-            : "Silo Harness disconnects it and deletes it from this Mac's settings.",
-        confirmLabel: 'Remove',
-        danger: true,
+      const kinds = menuActions(s);
+      const item = (k: MenuKind): MenuItem => ({
+        label: k === 'log' && logs.has(key) ? 'Hide log' : MENU_LABELS[k],
+        icon: MENU_ICONS[k],
+        danger: k === 'remove',
+        onSelect: () => void menuAction(s, k),
       });
-      if (ok) await act(s, 'remove', (api) => api.remove(name, s.scope));
+      openMenu(
+        [{ items: kinds.filter((k) => k !== 'remove').map(item) }, { items: kinds.filter((k) => k === 'remove').map(item) }],
+        { anchor: more, placement: 'bottom-end', className: 'mcp-menu', minWidth: 160 },
+      );
     };
     if (toggle) {
       toggle.onclick = () => {
@@ -290,9 +402,76 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     return el;
   };
 
-  const VERBS: Record<string, string> = { enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove', 'sign in': 'sign in to', 'cancel sign-in for': 'cancel sign-in for', 'sign out of': 'sign out of' };
+  async function menuAction(s: McpServerInfo, k: MenuKind): Promise<void> {
+    const key = mcpKey(s);
+    const name = s.name;
+    const focusMore = () => els.list.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(`${key}|more`)}"]`)?.focus();
+    switch (k) {
+      case 'reconnect':
+        return act(s, 'reconnect', (api) => api.reconnect(name, s.scope));
+      case 'sign-out':
+        return act(s, 'sign out of', (api) => api.signOut(name, s.scope));
+      case 'copy':
+        try {
+          await navigator.clipboard.writeText(copyText(s));
+          copiedKey = key;
+          panel.render(current);
+          window.setTimeout(() => {
+            if (copiedKey !== key) return;
+            copiedKey = '';
+            panel.render(current);
+          }, 1600);
+        } catch (err) {
+          showStatus(`Couldn't copy the config of ${name}: ${opts.cleanError(err)}`);
+        }
+        focusMore();
+        return;
+      case 'log': {
+        if (logs.has(key)) {
+          logs.delete(key);
+          panel.render(current);
+          focusMore();
+          return;
+        }
+        const api = opts.source();
+        if (!api || typeof api.log !== 'function') {
+          logs.set(key, 'unavailable');
+          panel.render(current);
+          return;
+        }
+        logs.set(key, 'loading');
+        panel.render(current);
+        try {
+          const lines = safeLines(await api.log(name, s.scope));
+          if (logs.has(key)) logs.set(key, lines);
+        } catch (err) {
+          logs.delete(key);
+          showStatus(`Couldn't read the log of ${name}: ${opts.cleanError(err)}`);
+        }
+        panel.render(current);
+        focusMore();
+        return;
+      }
+      case 'remove': {
+        const dir = opts.projectDir();
+        const ok = await opts.confirm({
+          title: `Remove ${name}?`,
+          description:
+            s.scope === 'project'
+              ? `This edits the project's .mcp.json${dir ? ` (${shortDir(dir)}/.mcp.json)` : ''}: the server is deleted from the file, for everyone who uses it.`
+              : "Silo Harness disconnects it and deletes it from this Mac's settings.",
+          confirmLabel: 'Remove',
+          danger: true,
+        });
+        if (ok) await act(s, 'remove', (api) => api.remove(name, s.scope));
+        return;
+      }
+    }
+  }
 
-  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove' | 'sign in' | 'cancel sign-in for' | 'sign out of', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
+  const VERBS: Record<string, string> = { 'enable a tool of': 'turn on a tool of', 'turn off a tool of': 'turn off a tool of', enable: 'enable', disable: 'disable', reconnect: 'reconnect', remove: 'remove', 'sign in': 'sign in to', 'cancel sign-in for': 'cancel sign-in for', 'sign out of': 'sign out of' };
+
+  async function act(s: McpServerInfo, action: 'enable' | 'disable' | 'reconnect' | 'remove' | 'sign in' | 'cancel sign-in for' | 'sign out of' | 'enable a tool of' | 'turn off a tool of', run: (api: McpApi) => Promise<McpServerInfo[]>, enabled?: boolean): Promise<void> {
     const key = mcpKey(s);
     if (busy.has(key)) return;
     const api = opts.source();
@@ -307,7 +486,11 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       const next = await run(api);
       busy.delete(key);
       hideStatus();
-      if (action === 'remove') expanded.delete(key);
+      if (action === 'remove') {
+        expanded.delete(key);
+        logs.delete(key);
+        confirming.delete(key);
+      }
       panel.render(Array.isArray(next) ? next : current);
       opts.onMutated?.();
     } catch (err) {
@@ -319,13 +502,25 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
 
   async function add(): Promise<void> {
     if (adding) return;
-    const name = els.name.value.trim();
     const spec = els.spec.value.trim();
     const kind = specKind(spec);
-    if (kind === 'empty') return showAddError("Paste the server's command line, its URL, or the JSON from its README.", els.spec);
-    if (!name && kind !== 'block') return showAddError('Give the server a name.', els.name);
-    const parsed = parseEnv(kind === 'url' ? '' : els.env.value);
+    const name = kind === 'block' ? '' : els.name.value.trim();
+    if (kind === 'empty') return showAddError('Paste a command, a URL or JSON.', els.spec);
+    if (kind === 'json') {
+      try {
+        JSON.parse(spec);
+      } catch {
+        return showAddError("That JSON doesn't parse.", els.spec);
+      }
+    }
+    if (!name && kind !== 'block') return showAddError('Give it a name.', els.name);
+    if (name && !/^[\w.-]{1,64}$/.test(name)) return showAddError('Letters, digits, ".", "-" and "_" only.', els.name);
+    const isUrl = kind === 'url' || (kind === 'json' && /"url"\s*:/.test(spec));
+    const parsed = isUrl ? { env: {}, error: undefined } : parseEnv(els.env.value);
     if (parsed.error) return showAddError(parsed.error, els.env);
+    const parsedHeaders = isUrl ? parseHeaders(els.env.value) : { headers: {}, error: undefined };
+    if (parsedHeaders.error) return showAddError(parsedHeaders.error, els.env);
+    if (current.some((x) => x.name === name && x.scope === (els.scope.value === 'project' ? 'project' : 'user'))) return showAddError(`There is already a server named ${name}.`, els.name);
     const api = opts.source();
     if (!api) return showAddError('Adding servers needs the updated app. Restart Silo Harness and try again.');
     const scope: McpScope = els.scope.value === 'project' ? 'project' : 'user';
@@ -335,12 +530,14 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     els.add.querySelector('span:last-child')!.textContent = 'Adding…';
     syncForm();
     try {
-      const next = await api.add(name, spec, scope, Object.keys(parsed.env).length ? parsed.env : undefined);
+      const next = await api.add(name, spec, scope, Object.keys(parsed.env).length ? parsed.env : undefined, Object.keys(parsedHeaders.headers).length ? parsedHeaders.headers : undefined);
       hideAddError();
       hideStatus();
       els.name.value = '';
+      suggested = '';
       els.spec.value = '';
       els.env.value = '';
+      setFormOpen(false, false);
       const list = cleanServers(next);
       flashKeys = new Set(list.map(mcpKey).filter((k) => !before.has(k)));
       panel.render(list);
@@ -350,11 +547,13 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       }, 1600);
       opts.onMutated?.();
     } catch (err) {
-      showAddError(opts.cleanError(err));
+      const msg = opts.cleanError(err);
+      // An error about the name or the config sits under that field
+      showAddError(msg, /named|name/i.test(msg) ? els.name : /secret|Environment|env/i.test(msg) ? els.env : /JSON|command|url|mcpServers|transport|args/i.test(msg) ? els.spec : undefined);
     } finally {
       adding = false;
       els.add.classList.remove('busy');
-      els.add.querySelector('span:last-child')!.textContent = 'Add server';
+      els.add.querySelector('span:last-child')!.textContent = 'Add';
       syncForm();
     }
   }
@@ -379,6 +578,19 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
     syncForm();
     if (!els.error.hidden) hideAddError();
   });
+  els.scope.addEventListener('change', () => syncForm());
+  els.env.addEventListener('input', () => {
+    if (!els.error.hidden) hideAddError();
+  });
+  form.open?.addEventListener('click', () => setFormOpen(!formOpen()));
+  form.cancel?.addEventListener('click', () => setFormOpen(false));
+  form.root?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !e.isComposing) {
+      e.preventDefault();
+      e.stopPropagation(); // the form closes, not Settings
+      setFormOpen(false);
+    }
+  });
   els.name.addEventListener('input', () => {
     if (!els.error.hidden) hideAddError();
   });
@@ -386,21 +598,32 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
   const panel: McpPanel = {
     render(servers: McpServerInfo[]) {
       current = cleanServers(servers);
+      noteMcpServers(current);
       const active = document.activeElement as HTMLElement | null;
       const focusKey = active && els.list.contains(active) ? active.dataset.focusKey : undefined;
+      // An opened tools list keeps its scroll position across the rebuild (a switch, a status update, a reconnect)
+      const scrolls = new Map<string, number>();
+      for (const t of els.list.querySelectorAll<HTMLElement>('.mcp-row > .mcp-tools')) {
+        const k = (t.parentElement as HTMLElement).dataset.key;
+        if (k && t.scrollTop > 0) scrolls.set(k, t.scrollTop);
+      }
       els.list.innerHTML = '';
       els.list.classList.toggle('is-empty', !current.length);
       if (unavailable) {
         els.list.innerHTML = `<div class="mcp-empty">${icon('plug', 16)}<p>MCP servers need the updated app. Restart Silo Harness and try again.</p></div>`;
       } else if (!current.length) {
-        els.list.innerHTML =
-          `<div class="mcp-empty">${icon('plug', 16)}<p>No MCP servers yet. Add one below with its command line, its URL, or the JSON from its README. ` +
-          `A project's <code>.mcp.json</code> (Claude Code's format) is picked up automatically.</p></div>`;
+        els.list.innerHTML = `<div class="mcp-empty">${icon('plug', 16)}<p>No servers yet.</p></div>`;
       } else {
         for (const s of current) els.list.appendChild(row(s));
+        for (const [k, top] of scrolls) {
+          const t = els.list.querySelector<HTMLElement>(`.mcp-row[data-key="${CSS.escape(k)}"] > .mcp-tools`);
+          if (t && !t.hidden) t.scrollTop = top;
+        }
       }
       const keys = new Set(current.map(mcpKey));
       for (const k of [...expanded]) if (!keys.has(k)) expanded.delete(k);
+      for (const k of [...logs.keys()]) if (!keys.has(k)) logs.delete(k);
+      for (const k of [...confirming]) if (!keys.has(k) || current.find((x) => mcpKey(x) === k)?.status !== 'blocked') confirming.delete(k);
       if (focusKey) els.list.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus();
       syncForm();
     },
@@ -422,6 +645,15 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       }
     },
     servers: () => current,
+    showRow(key: string, trust = false) {
+      const s = current.find((x) => mcpKey(x) === key);
+      if (!s) return;
+      if (trust && s.status === 'blocked') confirming.add(key);
+      panel.render(current);
+      const el = els.list.querySelector<HTMLElement>(`.mcp-row[data-key="${CSS.escape(key)}"]`);
+      el?.scrollIntoView({ block: 'center' });
+      (el?.querySelector<HTMLElement>('.mcp-confirm') ?? el?.querySelector<HTMLElement>('.mcp-primary, .mcp-more'))?.focus();
+    },
     resetMessages() {
       hideStatus();
       hideAddError();
@@ -433,34 +665,74 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
 
 // ---------- /mcp notice card ----------
 
-/** The body of the /mcp card: each server with its status dot and tool names, or how to add one. */
+/**
+ * The body of the /mcp card: one line per server (dot, name, status words with the count, and its action as a link:
+ * Sign in, Retry, or Trust, which opens Settings at that row), or how to add one. The links send an "mcp-action"
+ * event (see installMcpActions).
+ */
 export function mcpCardHtml(servers: McpServerInfo[], note?: string): string {
   const list = cleanServers(servers);
   let html = '<div class="md"><p><strong>MCP servers</strong></p>';
   if (note) html += `<p>${escapeHtml(note)}</p>`;
-  if (!list.length) {
-    return (
-      html +
-      `<p>No servers yet. Add one in Settings with its command line, its URL, or the JSON from its README. ` +
-      `A project's <code>.mcp.json</code> (Claude Code's format) is picked up automatically.</p></div>`
-    );
-  }
+  if (!list.length) return html + '<p>No servers yet. Add one in Settings → MCP servers.</p></div>';
   html += '</div><ul class="mcp-card-list">';
   for (const s of list) {
-    const names = s.tools.map((t) => t.name);
-    const shown = names.slice(0, 40);
-    let detail = '';
-    if (s.status === 'connected' && shown.length) {
-      detail = `<div class="mcp-card-tools">${shown.map((n) => `<code>${escapeHtml(n)}</code>`).join('')}${names.length > shown.length ? `<span class="mcp-card-more">+${names.length - shown.length} more</span>` : ''}</div>`;
-    } else if ((s.status === 'error' || s.status === 'blocked') && s.error?.trim()) {
-      detail = `<div class="mcp-card-note${s.status === 'error' ? ' err' : ''}">${escapeHtml(s.error.trim().split('\n')[0])}</div>`;
-    }
+    const p = primaryAction(s);
+    const action = p && p.kind !== 'tools' ? (p.kind === 'cancel' ? null : p) : null;
+    const link = action
+      ? `<button type="button" class="link-btn mcp-card-action" data-action="${action.kind}" data-name="${escapeHtml(s.name)}" data-scope="${s.scope}">${escapeHtml(action.label)}</button>`
+      : '';
     html +=
-      `<li class="mcp-card-item" data-name="${escapeHtml(s.name)}" data-status="${s.status}"><div class="mcp-card-head"><span class="mcp-dot ${s.status}" aria-hidden="true"></span>` +
-      `<span class="mcp-card-name">${escapeHtml(s.name)}</span><span class="mcp-scope ${s.scope}">${s.scope}</span>` +
-      `<span class="mcp-card-status">${escapeHtml(mcpStatusText(s))}</span></div>${detail}</li>`;
+      `<li class="mcp-card-item" data-name="${escapeHtml(s.name)}" data-status="${s.status}"><span class="mcp-dot ${s.status}" aria-hidden="true"></span>` +
+      `<span class="mcp-card-name">${escapeHtml(s.name)}</span>${s.scope === 'project' ? '<span class="mcp-scope project">project</span>' : ''}` +
+      `<span class="mcp-card-status tone-${statusTone(s.status)}">${escapeHtml(statusText(s))}</span>${link}</li>`;
   }
   return html + '</ul>';
+}
+
+export interface McpActionsOptions {
+  source: () => McpApi | null;
+  servers: () => McpServerInfo[];
+  /** Opens Settings at MCP servers */
+  openSettings: () => void;
+  panel: McpPanel;
+  cleanError: (err: unknown) => string;
+  /** Where a failure is said (the row's own line stays as it was) */
+  notify: (message: string) => void;
+}
+
+/**
+ * Answers the "mcp-action" events of the /mcp card's links and of a failed call's row: Sign in and Retry act on the
+ * server (only on that click), Trust and "Open MCP servers" open Settings at the row (Trust with its confirmation open).
+ */
+export function installMcpActions(root: HTMLElement | Document, o: McpActionsOptions): void {
+  const handle = async (ev: Event) => {
+    const d = (ev as CustomEvent).detail as { action?: string; server?: string; scope?: string } | undefined;
+    const name = typeof d?.server === 'string' ? d.server : '';
+    if (!name) return;
+    const find = () => o.servers().find((x) => x.name === name && (!d?.scope || x.scope === d.scope)) ?? o.servers().find((x) => x.name === name);
+    if (!find()) await o.panel.refresh();
+    const s = find();
+    const api = o.source();
+    try {
+      if (d?.action === 'sign-in' && s && api && s.status === 'needs-auth') await api.signIn(s.name, s.scope);
+      else if (d?.action === 'retry' && s && api) await api.reconnect(s.name, s.scope);
+      else {
+        o.openSettings();
+        // After Settings has opened and re-read the list
+        if (s) window.setTimeout(() => o.panel.showRow(mcpKey(s), d?.action === 'trust'), 250);
+      }
+    } catch (err) {
+      o.notify(`Couldn't ${d?.action === 'retry' ? 'reconnect' : 'sign in to'} ${name}: ${o.cleanError(err)}`);
+    }
+  };
+  root.addEventListener('mcp-action', (ev) => void handle(ev));
+  // The /mcp card's links
+  root.addEventListener('click', (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest?.<HTMLButtonElement>('.mcp-card-action');
+    if (!btn) return;
+    btn.dispatchEvent(new CustomEvent('mcp-action', { bubbles: true, detail: { action: btn.dataset.action, server: btn.dataset.name, scope: btn.dataset.scope } }));
+  });
 }
 
 // ---------- In-memory stand-in for oc.mcp (debug hook) ----------
@@ -536,7 +808,7 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
       if (!entries.length) throw new Error('Nothing to add.');
       for (const [n] of entries) {
         if (!n.trim()) throw new Error('Give the server a name.');
-        if (servers.some((x) => x.name === n && x.scope === scope)) throw new Error(`A ${scope} server named "${n}" already exists.`);
+        if (servers.some((x) => x.name === n && x.scope === scope)) throw new Error(`There is already a server named ${n}.`);
       }
       for (const [n, c] of entries) {
         const s = mockServerFrom(n.trim(), c, scope);
@@ -584,6 +856,24 @@ export function mockMcpSource(initial: McpServerInfo[]): MockMcpSource {
       delete s.signedIn;
       s.status = 'needs-auth';
       return done();
+    },
+    async setToolEnabled(name: string, scope: McpScope, tool: string, enabled: boolean) {
+      const s = find(name, scope);
+      const on = s.tools.find((t) => t.name === tool);
+      const off = (s.offTools ?? []).find((t) => t.name === tool);
+      if (!enabled && on) {
+        s.tools = s.tools.filter((t) => t !== on);
+        s.offTools = [...(s.offTools ?? []), on];
+      } else if (enabled && off) {
+        s.offTools = (s.offTools ?? []).filter((t) => t !== off);
+        s.tools = [...s.tools, off];
+      }
+      s.hiddenTools = (s.offTools ?? []).map((t) => t.name);
+      return done();
+    },
+    async log(name: string, scope: McpScope) {
+      const s = find(name, scope) as McpServerInfo & { mockLog?: unknown };
+      return Array.isArray(s.mockLog) ? s.mockLog.filter((l): l is string => typeof l === 'string') : [];
     },
     onServers(cb: (servers: McpServerInfo[]) => void) {
       listeners.add(cb);
