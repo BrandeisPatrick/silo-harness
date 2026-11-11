@@ -340,6 +340,16 @@ export interface AppConfig {
   timingLog?: boolean;
   /** How many read-only tool calls of one reply run at the same time (1 to 10; absent: 4; 1: one after another) */
   toolConcurrency?: number;
+  /** Prices the user set, by model id (src/main/cost.ts): they override the built-in table and price any other model */
+  prices?: Record<string, ModelPrice>;
+}
+
+/** AppConfig.prices: dollars per million tokens; cacheRead and cacheWrite default to the input price. */
+export interface ModelPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
@@ -473,6 +483,11 @@ export type AgentEvent =
    * after each call. The cache counts, of the prompt, only when the provider reports them.
    */
   | { type: 'usage'; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+  /**
+   * What the session has cost so far, after each model call it counts (src/main/cost.ts): the estimate in dollars and
+   * its short label ("$0.04", "<$0.01"); neither when a call of the session has no known price.
+   */
+  | { type: 'cost'; usd?: number; label?: string }
   /**
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text

@@ -57,7 +57,8 @@ import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
 import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, usageOf, type CompletionHost, type RawUsage, type Reply } from './agent/complete';
+import { callSource, chargeSession, type CallSource } from './cost';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
@@ -288,6 +289,8 @@ export class Agent {
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
   private lastUsage: Usage | null = null;
+  /** The model and API of the run's (or /compact's) own calls, which their usage is charged to (cost.ts) */
+  private costSource: CallSource | null = null;
   /** Per session: whether its provider was seen caching (cachesPrefix, noteCache) */
   private cacheSeen = new Map<string, CacheSeen>();
   /** When the current main model call was sent */
@@ -841,7 +844,7 @@ export class Agent {
     const checkAt = Date.now();
     probe?.checkStarted();
     try {
-      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal);
+      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(checker.cfg), usage));
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       probe?.checkEnded(verdict?.decision ?? 'error');
@@ -1208,6 +1211,7 @@ export class Agent {
       const { client, model, maxOutput, native } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined, native: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
+      this.costSource = callSource(cfg, model);
       timer.setModel(this.providerType(cfg), model);
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
       // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
@@ -1626,6 +1630,18 @@ export class Agent {
     this.noteCache(usage);
     this.turnTimer?.usage(usage);
     this.emit({ type: 'usage', ...usage });
+    this.charge(this.costSource, usage);
+  }
+
+  /**
+   * Counts one model call toward the session's cost (cost.ts) and tells the window the new total. Every kind of call
+   * the session makes comes here: its turns, Auto mode's checks, the title, a compaction summary.
+   */
+  private charge(src: CallSource | null, usage: Usage): void {
+    if (!src) return;
+    const s = this.session;
+    const ev = chargeSession(s, src, usage, this.getConfig());
+    if (this.store.get(s.id) === s) this.emit(ev);
   }
 
   /** What a model call (agent/complete.ts) may use of this agent. */
@@ -1747,6 +1763,7 @@ export class Agent {
       const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
+      this.costSource = callSource(cfg, model);
       const r = await this.compact('manual', focus, signal, cfg, client, model);
       return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'The summary could not be produced.' };
     } catch (err) {
@@ -2063,6 +2080,7 @@ export class Agent {
             // num_ctx matches the agent's requests so Ollama keeps the model loaded as it is.
             options: { num_ctx: contextSize(ollamaOf(cfg).numCtx), num_predict: maxTokens, temperature: 0.2 },
             signal: timeout,
+            onUsage: (usage) => this.charge(callSource(cfg, model), usage),
           });
         try {
           return await call(false);
@@ -2073,6 +2091,7 @@ export class Agent {
         }
       }
       const res = await client.chat.completions.create({ model, messages, max_tokens: maxTokens, stream: false }, { signal: timeout, maxRetries: 1 });
+      if (res.usage) this.charge(callSource(cfg, model), usageOf(res.usage as RawUsage));
       return res.choices?.[0]?.message?.content ?? '';
     };
     const budget = summaryBudgetChars(limit);
@@ -2221,7 +2240,9 @@ export class Agent {
     const prompt = titlePrompt(session);
     if (!prompt) return;
     this.titleAttempts.add(session.id);
-    const title = await generateTitle(cfg, prompt);
+    const title = await generateTitle(cfg, prompt, (usage) => {
+      if (session === this.session) this.charge(callSource(cfg), usage);
+    });
     // The user may have renamed or deleted the session, or turned the feature off, while the model answered.
     if (!title || title === session.title || session.titleLocked) return;
     if (this.store.get(session.id) !== session || !this.getConfig().autoTitles) return;

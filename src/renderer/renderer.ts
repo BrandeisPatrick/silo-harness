@@ -1167,6 +1167,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     case 'usage':
       statusLine.reportUsage(Number(ev.promptTokens) || 0, Number(ev.completionTokens) || 0);
       break;
+    case 'cost':
+      statusLine.reportCost(typeof ev.label === 'string' ? ev.label : undefined);
+      break;
     case 'hook_status':
     case 'retry_status':
       // A hook's statusMessage while it runs, or the wait before a model call is tried again (one line; the status

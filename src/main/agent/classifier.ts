@@ -10,11 +10,12 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { AppConfig, NamedProviderConfig } from '../../shared/types';
 import { isSyntheticUser } from '../compact';
 import { loadInstructions } from '../instructions';
-import { contextSize, ollamaComplete } from '../ollama';
+import { contextSize, ollamaComplete, type Usage } from '../ollama';
 import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
 import { LOAD_TOOLS } from '../tools/groups';
-import { isNativeAnthropic, nativeError } from './anthropic';
+import { isNativeAnthropic, nativeError, nativeUsage } from './anthropic';
+import { usageOf, type RawUsage } from './complete';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
 import { errorMessage } from './errors';
 
@@ -401,9 +402,10 @@ export function isConnectionError(err: unknown): boolean {
 
 /**
  * One call of the check; resolves with the model's raw answer. Throws on a provider error or the timeout. `onUsage`
- * gets the tokens it used, when the provider reports them (the evals count them).
+ * gets the tokens it used, when the provider reports them (the evals count them); `onCallUsage` gets them in the
+ * agent's terms (the whole prompt, the cache counts of it), Ollama's included, for the session's cost.
  */
-export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal, onUsage?: (u: CheckUsage) => void): Promise<string> {
+export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal, onUsage?: (u: CheckUsage) => void, onCallUsage?: (u: Usage) => void): Promise<string> {
   const timeout = signal ? AbortSignal.any([signal, AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS)]) : AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
   const cfg = target.cfg;
   if (isOllama(cfg)) {
@@ -417,6 +419,7 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
         // num_ctx as the agent's own requests: another value would make Ollama load the model again
         options: { num_ctx: contextSize(ol.numCtx), num_predict: MAX_REPLY_TOKENS, temperature: 0 },
         signal: timeout,
+        onUsage: onCallUsage,
       });
     try {
       return await call(false);
@@ -448,6 +451,7 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
       );
       const u = res.usage;
       if (u) onUsage?.({ inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0 });
+      if (u) onCallUsage?.(nativeUsage(u));
       return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
     } catch (err) {
       throw nativeError(err);
@@ -455,6 +459,7 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
   }
   const res = await client.chat.completions.create({ model, messages, max_tokens: MAX_REPLY_TOKENS, stream: false }, { signal: timeout, maxRetries: 0 });
   if (res.usage) onUsage?.({ inputTokens: res.usage.prompt_tokens ?? 0, outputTokens: res.usage.completion_tokens ?? 0, ...(res.usage.prompt_tokens_details?.cached_tokens ? { cacheReadTokens: res.usage.prompt_tokens_details.cached_tokens } : {}) });
+  if (res.usage) onCallUsage?.(usageOf(res.usage as RawUsage));
   return res.choices?.[0]?.message?.content ?? '';
 }
 

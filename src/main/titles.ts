@@ -1,6 +1,7 @@
 import type { AppConfig } from '../shared/types';
 import { clip, displayText, type Msg, type Session } from './sessions';
-import { contextSize, ollamaComplete } from './ollama';
+import { contextSize, ollamaComplete, type Usage } from './ollama';
+import { usageOf, type RawUsage } from './agent/complete';
 import { isOllama, makeClient, ollamaOf } from './providers';
 import { isCompactPreamble } from './compact';
 
@@ -49,8 +50,8 @@ export function sanitizeTitle(raw: string): string {
   return t;
 }
 
-/** Asks the configured model for a short session title. Resolves to '' when the reply holds nothing usable. */
-export async function generateTitle(cfg: AppConfig, prompt: string): Promise<string> {
+/** Asks the configured model for a short session title. Resolves to '' when the reply holds nothing usable. `onUsage` gets the call's tokens. */
+export async function generateTitle(cfg: AppConfig, prompt: string, onUsage?: (u: Usage) => void): Promise<string> {
   const messages: Msg[] = [
     { role: 'system', content: SYSTEM },
     { role: 'user', content: prompt },
@@ -68,10 +69,12 @@ export async function generateTitle(cfg: AppConfig, prompt: string): Promise<str
       // num_ctx matches the agent's own requests: a different value would make Ollama reload the model now and again on the next message.
       options: { num_ctx: contextSize(ol.numCtx), num_predict: 32, temperature: 0.2 },
       signal,
+      onUsage,
     });
   } else {
     const { client, model } = makeClient(cfg);
     const res = await client.chat.completions.create({ model, messages, max_tokens: 32, stream: false }, { signal, maxRetries: 0 });
+    if (res.usage) onUsage?.(usageOf(res.usage as RawUsage));
     raw = res.choices?.[0]?.message?.content ?? '';
   }
   return sanitizeTitle(raw);

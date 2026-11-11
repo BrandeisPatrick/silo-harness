@@ -10,6 +10,8 @@ import type { App } from '../app';
 import { MAX_RUNNING } from '../runtime';
 import { clip, toMeta, type Msg, type Session, type Turn } from '../sessions';
 import { writeMergeReport } from './summary';
+import { callSource, chargeSession } from '../cost';
+import type { Usage } from '../ollama';
 import { TIERS, ago, matchTier, nameDistance, normName, unquote, type Tier } from './names';
 
 /** A sub-session of a sub-session may not spawn: depth counts the parent links above a session. */
@@ -66,7 +68,7 @@ export interface MergeOutcome {
 
 export interface SubagentsOptions {
   /** The merge report; default: the configured model (summary.ts). Tests and the live rig use the real one. */
-  summarize?: (title: string, kind: 'sub-session' | 'fork', messages: Msg[]) => Promise<string>;
+  summarize?: (title: string, kind: 'sub-session' | 'fork', messages: Msg[], onUsage?: (u: Usage) => void) => Promise<string>;
   /** Delay before a report that could not be delivered (all run slots busy) is tried again */
   retryMs?: number;
 }
@@ -98,7 +100,7 @@ export class Subagents {
     private readonly app: App,
     opts: SubagentsOptions = {},
   ) {
-    this.summarize = opts.summarize ?? ((title, kind, messages) => writeMergeReport(app.config(), title, kind, messages));
+    this.summarize = opts.summarize ?? ((title, kind, messages, onUsage) => writeMergeReport(app.config(), title, kind, messages, onUsage));
     this.retryMs = opts.retryMs ?? 3000;
   }
 
@@ -599,7 +601,11 @@ export class Subagents {
     this.merging.add(from.id);
     let report: string;
     try {
-      report = await this.summarize(from.title, kind, messages);
+      // The summary's tokens count toward the session it is merged into (which asked for it)
+      report = await this.summarize(from.title, kind, messages, (usage) => {
+        const s = this.app.store.get(into.id);
+        if (s) this.emit(s.id, chargeSession(s, callSource(this.app.config()), usage, this.app.config()));
+      });
     } catch (err) {
       return { ok: false, error: `The merge summary could not be written: ${err instanceof Error ? err.message : String(err)}` };
     } finally {

@@ -127,6 +127,44 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
   },
 };
 
+/** `prices`: dollars per million tokens by model id (cost.ts); cacheRead and cacheWrite default to the input price. */
+const PRICE_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
+
+function pricesSchema(): Record<string, unknown> {
+  const n = (description: string) => ({ type: 'number', minimum: 0, description });
+  return {
+    type: 'object',
+    description: 'Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic\'s API and price any other model.',
+    additionalProperties: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['input', 'output'],
+      properties: { input: n('Input tokens.'), output: n('Output tokens.'), cacheRead: n('Tokens read from the prompt cache (default: the input price).'), cacheWrite: n('Tokens written to the prompt cache (default: the input price).') },
+    },
+  };
+}
+
+/** The valid entries of a `prices` value, and what is wrong with the rest. */
+export function validatePrices(value: unknown): { prices: Record<string, Record<string, number>>; problems: { key: string; message: string }[] } {
+  const prices: Record<string, Record<string, number>> = {};
+  const problems: { key: string; message: string }[] = [];
+  if (!isRecord(value)) return { prices, problems: [{ key: 'prices', message: `expected an object of model ids, e.g. { "my-model": { "input": 1, "output": 5 } }, got ${kind(value)}` }] };
+  for (const [model, raw] of Object.entries(value)) {
+    const key = `prices.${model}`;
+    if (!model.trim()) problems.push({ key, message: 'expected a model id' });
+    else if (!isRecord(raw)) problems.push({ key, message: `expected { "input": …, "output": … }, got ${kind(raw)}` });
+    else {
+      const extra = Object.keys(raw).find((f) => !(PRICE_FIELDS as readonly string[]).includes(f));
+      const bad = PRICE_FIELDS.find((f) => raw[f] !== undefined && !(typeof raw[f] === 'number' && Number.isFinite(raw[f]) && (raw[f] as number) >= 0));
+      if (extra) problems.push({ key: `${key}.${extra}`, message: `not a price field (known: ${PRICE_FIELDS.join(', ')})` });
+      else if (bad) problems.push({ key: `${key}.${bad}`, message: `expected dollars per million tokens (a number, 0 or more), got ${kind(raw[bad])}` });
+      else if (raw.input === undefined || raw.output === undefined) problems.push({ key, message: 'needs "input" and "output"' });
+      else prices[model] = Object.fromEntries(PRICE_FIELDS.filter((f) => raw[f] !== undefined).map((f) => [f, raw[f] as number]));
+    }
+  }
+  return { prices, problems };
+}
+
 /** Fields of the built-in blocks that hold a secret: never shown, never accepted from a project's file. */
 export const SECRET_FIELDS = ['portkey.apiKey', 'portkey.providerApiKey', 'webSearch.apiKey'];
 
@@ -147,6 +185,10 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
     return first ? `${first.key}: ${first.message}` : null;
   }
   if (p === 'disableAllHooks') return bool(value);
+  if (p === 'prices') {
+    const first = validatePrices(value).problems[0];
+    return first ? `${first.key}: ${first.message}` : null;
+  }
   const [a, b, ...rest] = p.split('.');
   if (rest.length) return 'unknown';
   if (b === undefined) return a in SCALARS ? SCALARS[a](value) : 'unknown';
@@ -156,7 +198,7 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
 
 /** Every field path checkSetting knows, in schema order. */
 export function settableFields(): string[] {
-  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'hooks', 'disableAllHooks'];
+  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'prices', 'hooks', 'disableAllHooks'];
 }
 
 /** The JSON Schema of settings.json, built from the checks above (docs/settings.schema.json is this, written out). */
@@ -176,6 +218,7 @@ export function settingsSchema(): Record<string, unknown> {
     propertyNames: { pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$', not: { enum: [...BUILT_IN_PROVIDERS] } },
     additionalProperties: providerEntrySchema(),
   };
+  properties.prices = pricesSchema();
   properties.hooks = hooksSchema();
   properties.disableAllHooks = { type: 'boolean', description: 'Turn off every hook from the settings files (mods\' hooks still run).' };
   return {
@@ -332,6 +375,16 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
           out.values.push({ path: `providers.${name}`, value: r.entry });
           info.keys.push(`providers.${name}`);
         }
+      }
+      continue;
+    }
+    if (key === 'prices') {
+      // The whole table: a project's file replaces the user's, it does not add to it
+      const r = validatePrices(value);
+      for (const pr of r.problems) bad(pr.key, pr.message);
+      if (isRecord(value)) {
+        out.values.push({ path: 'prices', value: r.prices });
+        info.keys.push('prices');
       }
       continue;
     }
