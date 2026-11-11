@@ -1649,6 +1649,8 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-status-line.tone-attention .mcp-words { color: var(--warn); }
 .mcp-status-line.tone-failed .mcp-words, .mcp-status-line.tone-failed .mcp-reason { color: var(--danger); }
 .mcp-reason { flex: 1 1 auto; }
+/* A failure reason is never cut short: it wraps, up to three lines (a server's long last output line stays bounded) */
+.mcp-status-line > .mcp-reason { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .mcp-reason::before, .mcp-unset::before { content: '·'; margin-right: 6px; color: var(--text-400); }
 .mcp-unset { flex: none; color: var(--warn); }
 .mcp-primary { flex: none; }
@@ -1670,7 +1672,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .mcp-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .mcp-log-text { margin: 0; max-height: 180px; overflow: auto; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-control); background: var(--code-bg); font: var(--fs-micro)/var(--lh-micro) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-tools-head { padding: 6px 10px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); border-bottom: 1px solid var(--border-subtle); }
-.mcp-tools { margin: -2px 12px 12px 50px; max-height: 320px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--r-control); }
+.mcp-tools { margin: -2px 12px 12px 50px; max-height: 480px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--r-control); }
 .mcp-tools-group { padding: 8px 10px 2px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 600; color: var(--text-400); }
 .mcp-tools-group ~ .mcp-tools-group { margin-top: 2px; border-top: 1px solid var(--border-subtle); }
 .mcp-tool { display: flex; align-items: center; gap: 10px; padding: 6px 10px; }

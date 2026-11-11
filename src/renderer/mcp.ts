@@ -601,6 +601,12 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
       noteMcpServers(current);
       const active = document.activeElement as HTMLElement | null;
       const focusKey = active && els.list.contains(active) ? active.dataset.focusKey : undefined;
+      // An opened tools list keeps its scroll position across the rebuild (a switch, a status update, a reconnect)
+      const scrolls = new Map<string, number>();
+      for (const t of els.list.querySelectorAll<HTMLElement>('.mcp-row > .mcp-tools')) {
+        const k = (t.parentElement as HTMLElement).dataset.key;
+        if (k && t.scrollTop > 0) scrolls.set(k, t.scrollTop);
+      }
       els.list.innerHTML = '';
       els.list.classList.toggle('is-empty', !current.length);
       if (unavailable) {
@@ -609,6 +615,10 @@ export function createMcpPanel(opts: McpPanelOptions): McpPanel {
         els.list.innerHTML = `<div class="mcp-empty">${icon('plug', 16)}<p>No servers yet.</p></div>`;
       } else {
         for (const s of current) els.list.appendChild(row(s));
+        for (const [k, top] of scrolls) {
+          const t = els.list.querySelector<HTMLElement>(`.mcp-row[data-key="${CSS.escape(k)}"] > .mcp-tools`);
+          if (t && !t.hidden) t.scrollTop = top;
+        }
       }
       const keys = new Set(current.map(mcpKey));
       for (const k of [...expanded]) if (!keys.has(k)) expanded.delete(k);

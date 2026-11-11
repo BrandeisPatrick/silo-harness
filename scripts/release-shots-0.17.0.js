@@ -147,6 +147,18 @@ async function fitWidth(s) {
   throw new Error('could not fit the crop to the width');
 }
 
+/**
+ * The crop's bottom edge moved off any settings navigation item it would cut through: up to the item's top when that
+ * still leaves `least` under the section, else down to the item's bottom.
+ */
+async function navSafe(app, bottom, least) {
+  const cut = await app.evaluate(`[...document.querySelectorAll('#settings-nav .sp-nav-item, #settings-nav .sp-nav-sep')].map((b) => b.getBoundingClientRect()).filter((r) => r.height && r.top < ${bottom} && r.bottom > ${bottom}).map((r) => ({ top: r.top, bottom: r.bottom }))[0] ?? null`);
+  if (!cut) return bottom;
+  const to = cut.top >= least ? cut.top : cut.bottom;
+  console.log(`bottom edge ${bottom} cuts a navigation item (${cut.top}–${cut.bottom}): ${to}`);
+  return to;
+}
+
 /** What the rows say, for the log (and the report). */
 async function rows(app) {
   return app.evaluate(`[...document.querySelectorAll('#mcp-list .mcp-row')].map((r) => [r.dataset.name, r.dataset.status, r.querySelector('.mcp-target')?.innerText ?? '', r.querySelector('.mcp-sub')?.innerText ?? '', r.querySelector('.mcp-status-line').innerText.replace(/\\s+/g, ' '), r.querySelector('.mcp-primary')?.innerText.trim() ?? ''].join(' | '))`);
@@ -171,8 +183,7 @@ async function sceneServers(mcpServers) {
     if (content.scrollTop !== 0 || content.scrollHeight > content.clientHeight + 1) throw new Error('the section scrolls: make the window taller');
     // From just under the dialog's header (the title sits about MARGIN below it) to MARGIN under the last row
     const y = Math.max(main.top + 1, title.top - MARGIN);
-    const bottom = last.bottom + MARGIN;
-    console.log('nav items cut:', await app.evaluate(`[...document.querySelectorAll('#settings-nav .sp-nav-item')].filter((b) => { const r = b.getBoundingClientRect(); return r.top < ${bottom} && r.bottom > ${bottom}; }).map((b) => b.innerText)`));
+    const bottom = await navSafe(app, last.bottom + MARGIN, last.bottom + 16);
     await capture(s, { x: fit.x, y, width: fit.width, height: bottom - y }, path.join(OUT, 'mcp-servers.png'));
   } finally {
     await stop(s, mock);
@@ -192,20 +203,15 @@ async function sceneTools(mcpServers) {
     // Open the tools as a user would, then turn "Close issue" off with its switch
     await app.click(`${row} .mcp-tools-toggle`);
     await sleep(300);
-    const list0 = await app.evaluate(`(() => { const t = document.querySelector('${row} .mcp-tools'); const r = t.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight }; })()`);
-    console.log('tools list:', js(list0));
-    // The switch's label, in view, clicked with the mouse
+    // The switch, in view, clicked with the mouse
     await app.evaluate(`document.querySelector('${row} input.switch[data-tool="close_issue"]').closest('label').scrollIntoView({ block: 'nearest' })`);
     await sleep(300);
     const sw = await rect(app, `${row} input.switch[data-tool="close_issue"]`);
     const x = sw.left + sw.width / 2;
     const yy = sw.top + sw.height / 2;
-    console.log('switch:', js(sw), 'hit:', await app.evaluate(`(() => { const e = document.elementFromPoint(${x}, ${yy}); return e ? e.outerHTML.slice(0, 160) : null; })()`));
     await app.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: yy });
     await app.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y: yy, button: 'left', clickCount: 1 });
     await app.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y: yy, button: 'left', clickCount: 1 });
-    await sleep(500);
-    console.log('after click:', await app.evaluate(`document.querySelector('${row} input.switch[data-tool="close_issue"]')?.checked`));
     await app.waitFor(`Boolean(document.querySelector('${row} .mcp-tool.off input.switch[data-tool="close_issue"]')) && !document.querySelector('${row}.busy')`, 10_000, 'Close issue turned off');
     await app.waitFor(`oc.mcp.list().then((l) => l.find((x) => x.name === 'tracker')?.status === 'connected')`, 10_000, 'tracker connected');
     await sleep(800);
@@ -225,7 +231,8 @@ async function sceneTools(mcpServers) {
     const next = await app.evaluate(`(() => { const n = document.querySelector('${row}').nextElementSibling; if (!n) return null; const r = n.querySelector('.mcp-main').getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; })()`);
     const tr = await rect(app, row);
     const y = Math.max(main.top + 1, title.top - MARGIN);
-    const bottom = (next ? next.bottom : (await rect(app, '#mcp-list')).bottom) + MARGIN;
+    const end = next ? next.bottom : (await rect(app, '#mcp-list')).bottom;
+    const bottom = await navSafe(app, end + MARGIN, end + 16);
     if (bottom > main.bottom) throw new Error('the crop runs past the dialog');
     console.log('geometry:', js({ title, tracker: tr, next, y, bottom }));
     await capture(s, { x: fit.x, y, width: fit.width, height: bottom - y }, path.join(OUT, 'mcp-tools.png'));

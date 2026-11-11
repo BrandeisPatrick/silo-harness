@@ -5,7 +5,8 @@
 // answers; the rows show titles with the real names inside; the folded line says "Used acme.docs". (B) Settings →
 // MCP servers from the debug stand-in: one action per row, the … menu above the Settings dialog, Trust's confirmation
 // (focus not on Trust), Show log, the Add form behind its button (Config first, a suggested name, Headers for a URL,
-// Escape closes it), a tool's switch, the /mcp card's links, and a failed call's "Sign in" line.
+// Escape closes it), a tool's switch, the /mcp card's links, a failed call's "Sign in" line, and the layout: a long
+// failure reason wraps whole, six described tools fit, a scrolled tools list keeps its place across a re-render.
 // Run: npm run build && node test/live/mcp-servers.js [root]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -181,6 +182,33 @@ async function settingsUi() {
     await ev(`document.querySelector('details.tool[data-tool="mcp__tracker__create_issue"] .tool-mcp-problem button').click()`);
     await app.waitFor(`document.querySelector('${row('tracker')}')?.dataset.status !== 'needs-auth'`, 5000, 'sign-in to start').catch(() => false);
     check('Sign in starts on that click', ['authorizing', 'connecting', 'connected'].includes(await ev(`document.querySelector('${row('tracker')}')?.dataset.status`)));
+
+    // Layout: a long failure reason wraps whole; six tools with a description each fit without inner scrolling; a
+    // list that does scroll keeps its place when a switch re-renders it
+    const tool = (srv, i, readOnly) => ({ name: `tool_${i}`, fullName: `mcp__${srv}__tool_${i}`, title: `Tool ${i}`, description: `Does thing number ${i} with the project.`, readOnly, destructive: false });
+    await ev(`window.__oc_debug.mcp.mock(${js([
+      { name: 'broken', scope: 'user', transport: 'stdio', target: 'missing-mcp', status: 'error', error: 'Command not found: atlas-metrics-mcp. Check that it is installed and on your PATH. '.repeat(3).trim(), tools: [], config: {} },
+      { name: 'six', scope: 'user', transport: 'stdio', target: 'six-mcp', status: 'connected', tools: Array.from({ length: 6 }, (_, i) => tool('six', i, i < 3)), config: {} },
+      { name: 'many', scope: 'user', transport: 'stdio', target: 'many-mcp', status: 'connected', tools: Array.from({ length: 20 }, (_, i) => tool('many', i, true)), config: {} },
+    ])})`);
+    await ev(`(() => { document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-mcp').click(); })()`);
+    await app.waitFor(`document.querySelectorAll('#mcp-list .mcp-row').length === 3`, 5000, 'the layout rows');
+    await sleep(300);
+    const reason = await ev(`(() => { const r = document.querySelector('${row('broken')} .mcp-reason'); const w = document.querySelector('${row('broken')} .mcp-words'); const lh = parseFloat(getComputedStyle(r).lineHeight); return { lines: Math.round(r.clientHeight / lh), clipped: r.scrollHeight > r.clientHeight + 1, wordsLines: Math.round(w.getBoundingClientRect().height / lh), sameTop: Math.abs(w.getBoundingClientRect().top - r.getBoundingClientRect().top) < 2, title: r.title.length }; })()`);
+    check('a long failure reason wraps, at most three lines, the status word on one line beside its first', reason.lines >= 2 && reason.lines <= 3 && reason.wordsLines === 1 && reason.sameTop && reason.title > 0, reason);
+    await app.click(`${row('six')} .mcp-tools-toggle`);
+    await sleep(200);
+    const six = await ev(`(() => { const t = document.querySelector('${row('six')} .mcp-tools'); return { scroll: t.scrollHeight, client: t.clientHeight }; })()`);
+    check('six tools with a description each: no inner scrolling', six.scroll <= six.client + 1, six);
+    await app.click(`${row('many')} .mcp-tools-toggle`);
+    await sleep(200);
+    const before = await ev(`(() => { const t = document.querySelector('${row('many')} .mcp-tools'); t.scrollTop = 200; return { top: t.scrollTop, max: t.scrollHeight - t.clientHeight }; })()`);
+    await ev(`(() => { const b = document.querySelector('${row('many')} input.switch[data-tool="tool_9"]'); b.click(); })()`);
+    await app.waitFor(`Boolean(document.querySelector('${row('many')} .mcp-tool.off')) && !document.querySelector('${row('many')}.busy')`, 5000, 'tool_9 off').catch(() => false);
+    await sleep(200);
+    const after = await ev(`(() => { const t = document.querySelector('${row('many')} .mcp-tools'); return { top: t.scrollTop, off: Boolean(document.querySelector('${row('many')} .mcp-tool.off')) }; })()`);
+    check('a scrolled tools list keeps its place when a switch re-renders it', before.max > 200 && before.top === 200 && after.off && Math.abs(after.top - 200) < 1, { before, after });
+    await ev(`document.querySelector('#settings').close()`);
     const errs = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('(B) no renderer errors', errs.length === 0, errs.slice(0, 3));
   } finally {

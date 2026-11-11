@@ -2,8 +2,8 @@
 // server, named by SHOTS_MCP_SERVER or else by its own file name (the script copies it into the made-up home as
 // tracker.js, docs.js, …). Newline-delimited JSON-RPC with no dependency, so a copy runs from anywhere; the tools
 // answer with made-up data. Like test/support/test-mcp-server.js, but with the tools, titles and read-only /
-// destructive annotations a real issue tracker or docs server announces. The tracker's tools carry no description:
-// with a line of description each, its six tools are taller than the opened list's 320 px and the list scrolls.
+// destructive annotations a real issue tracker or docs server announces. The tracker's tools carry no description,
+// which keeps its opened list (and the release image) short.
 const path = require('node:path');
 
 const ro = { readOnlyHint: true };
