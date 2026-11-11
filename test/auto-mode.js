@@ -361,13 +361,13 @@ console.warn = (...a) => {
   agent.session = store.create({ cwd });
   reset();
   answer = null;
-  const site = (key) => ({ key, display: key, scheme: 'https', host: key, port: '', path: '/' });
+  const site = (key) => ({ key, origin: `https://${key}`, display: key, scheme: 'https', host: key, port: '', path: '/' });
   const browse = (name, detail, b, id) => agent['requestApproval'](name, detail, undefined, { browser: b }, false, { id, args: { url: 'https://x', reason: 'MODEL-REASON-3' } });
   const sites = () => agent['sessionSet'](agent['allowedSites']);
   // allow on a site card: no card, the site allowed for the session
   state.replies.push(classifierReply('allow', '[Browsing] the site the user named'));
   res = await browse('browser_navigate', 'Open docs.example\nMODEL-REASON-3', { site: site('docs.example'), card: 'site', check: { kind: 'read', url: 'https://docs.example/start?q=1' } }, 'b_allow');
-  check('browser allow: runs without a card, the site allowed for the session', res.ok === true && !of('approval_request').length && sites().has('docs.example'), res);
+  check('browser allow: runs without a card, the site allowed for the session', res.ok === true && !of('approval_request').length && sites().has('https://docs.example') && !sites().has('docs.example'), res);
   let req = JSON.stringify(checkRequests()[0]?.payload.messages ?? []);
   check('browser check: told the tool, kind, site, URL and the card\'s line', /tool: browser_navigate\\nkind: read\\nsite: docs.example\\nurl: https:\/\/docs.example\/start\?q=1/.test(req) && req.includes('Open docs.example'), req.slice(-600));
   check('browser check: not the model\'s reason, not the arguments', !req.includes('MODEL-REASON-3'));

@@ -174,11 +174,11 @@ const describe = (i) => `(() => {
     r = await call('browser_navigate', { url: `${C}/landing.html` }, ['always-menu']);
     check('a subdomain is a site of its own', r.cards.length === 1 && r.card.title === `Let the agent use always.fixture.example:${P}?`, r.card);
     const cfg = await app.evaluate('oc.getConfig()');
-    check('"Always allow" puts the site into the config', Array.isArray(cfg.browser?.alwaysAllowed) && cfg.browser.alwaysAllowed.includes(`always.fixture.example:${P}`), cfg.browser);
+    check('"Always allow" puts the site into the config', Array.isArray(cfg.browser?.alwaysAllowed) && cfg.browser.alwaysAllowed.includes(`http://always.fixture.example:${P}`), cfg.browser);
     check('… not into the project\'s rules', !Object.keys(cfg.allowRules || {}).length, cfg.allowRules);
     check('… and the page opened', /^Now at <page_content site="always\.fixture\.example:\d+">http:\/\/always\.fixture\.example:\d+\/landing\.html/.test(r.result ?? '') && (await decision('browser_navigate')) === `Always allowed always.fixture.example:${P}`, r.result);
     const saved = JSON.parse(fs.readFileSync(path.join(app.profile, 'config.json'), 'utf8'));
-    check('… saved on disk', saved.browser?.alwaysAllowed?.includes(`always.fixture.example:${P}`), saved.browser);
+    check('… saved on disk', saved.browser?.alwaysAllowed?.includes(`http://always.fixture.example:${P}`), saved.browser);
 
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));

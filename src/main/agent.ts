@@ -87,7 +87,7 @@ const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'bash', 'terminal_run
 
 /**
  * What answering an approval card changes besides the pending call: a mode switch, or a rule to save for the project
- * (kind 'site': a site key for AppConfig.browser.alwaysAllowed, saved on this Mac rather than for the project).
+ * (kind 'site': a site's origin for AppConfig.browser.alwaysAllowed, saved on this Mac rather than for the project).
  */
 export interface ApprovalOutcome {
   setMode?: PermissionMode;
@@ -114,7 +114,7 @@ const USER_ONLY_CARDS = new Set(['purchase', 'account']);
 
 /** What an answer concerned, for what Auto mode learns: the site, the MCP server, the programs, a tool's own key. */
 function learnKey(name: string, programs: string[], browser?: BrowserApproval, sessionKey?: string): string {
-  if (browser) return browser.site.key;
+  if (browser) return browser.site.origin;
   if (name.startsWith('mcp__')) return programs[0] ?? '';
   if (name === 'bash' || name === 'terminal_run') return programs.join(', ');
   return sessionKey ?? '';
@@ -126,7 +126,7 @@ function learnKey(name: string, programs: string[], browser?: BrowserApproval, s
  */
 function browserActionKey(name: string, detail: string, b: BrowserApproval): string {
   const code = b.card === 'eval' ? (b.check?.code ?? '') : '';
-  return actionKey(name, [b.card, b.site.key, detail.split('\n')[0] ?? '', code].join('\u0000'));
+  return actionKey(name, [b.card, b.site.origin, detail.split('\n')[0] ?? '', code].join('\u0000'));
 }
 
 /** What Auto mode's check is told about a browser card (classifier.ts): never the page's text or the model's reason. */
@@ -136,7 +136,7 @@ function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
     card: b.card,
     kind,
     site: b.site.display,
-    siteKey: b.site.key,
+    siteKey: b.site.origin,
     ...(b.check?.url ? { url: b.check.url } : {}),
     ...(b.note ? { note: b.note } : {}),
     ...(b.reason ? { flag: b.reason } : {}),
@@ -654,9 +654,9 @@ export class Agent {
       // field from asking again this session.
       const b = p.browser;
       if (ok && b.card === 'sensitive' && b.page) this.sessionSet(this.signInPages).add(b.page);
-      if (ok && always && b.card === 'site' && b.site.key) {
-        this.sessionSet(this.allowedSites).add(b.site.key);
-        if (scope === 'project') out.rule = { kind: 'site', values: [b.site.key] };
+      if (ok && always && b.card === 'site' && b.site.origin) {
+        this.sessionSet(this.allowedSites).add(b.site.origin);
+        if (scope === 'project') out.rule = { kind: 'site', values: [b.site.origin] };
       }
       p.resolve(ok ? { ok: true } : { ok: false, message: DENIED });
       this.emit({ type: 'approval_resolved', id, ok, scope: ok && always ? scope : 'once' });
@@ -861,7 +861,7 @@ export class Agent {
     if (signal?.aborted) return { ok: false, message: INTERRUPTED };
     if (verdict?.decision === 'allow') {
       st.inARow = 0;
-      if (browser?.card === 'site' && browser.site.key) this.sessionSet(this.allowedSites).add(browser.site.key);
+      if (browser?.card === 'site' && browser.site.origin) this.sessionSet(this.allowedSites).add(browser.site.origin);
       return { ok: true };
     }
     // A browser action the check left to the user, or could not decide: the card, as without the check

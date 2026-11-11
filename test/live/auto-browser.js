@@ -138,7 +138,7 @@ const WATCH = `(() => {
     // ---------- Learning: the user's answers above were recorded, and the last check was given them ----------
     const lastUser = requests.filter((q) => isClassifierRequest(q.payload)).at(-1)?.payload.messages.find((m) => m.role === 'user')?.content ?? '';
     const answers = /<user_answers>[\s\S]*?<\/user_answers>/.exec(lastUser)?.[0] ?? '';
-    check('learning: the next check got the user\'s answers, not its own verdicts', answers.includes(`- denied browser_click on fixture.example:${P}: click "Pay now" on fixture.example:${P}`) && answers.includes(`- allowed browser_navigate on ask.fixture.example:${P}: open ask.fixture.example:${P}`) && answers.includes(`- denied browser_navigate on down.fixture.example:${P}`) && !answers.includes('landing') && !answers.includes(`open fixture.example:${Q}`), answers);
+    check('learning: the next check got the user\'s answers, not its own verdicts', answers.includes(`- denied browser_click on http://fixture.example:${P}: click "Pay now" on fixture.example:${P}`) && answers.includes(`- allowed browser_navigate on http://ask.fixture.example:${P}: open ask.fixture.example:${P}`) && answers.includes(`- denied browser_navigate on http://down.fixture.example:${P}`) && !answers.includes('landing') && !answers.includes(`open fixture.example:${Q}`), answers);
     const onDisk = JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers;
     check('learning: kept in the profile folder, its own file', onDisk.length === 4, onDisk.map((e) => `${e.decision} ${e.line}`));
     await app.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-permissions')?.click(); })()`);

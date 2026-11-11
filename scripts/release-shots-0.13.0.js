@@ -324,7 +324,7 @@ async function sceneBrowser() {
       mock,
       size,
       args: [`--host-resolver-rules=MAP ${DATA_HOST} 127.0.0.1:${site.port}`],
-      config: { browser: { downloadsDir: downloads, alwaysAllowed: [DATA_HOST] } },
+      config: { browser: { downloadsDir: downloads, alwaysAllowed: [`http://${DATA_HOST}`] } },
     });
     const { app, inspect, ids } = s;
     const ev = app.evaluate;

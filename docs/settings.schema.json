@@ -254,7 +254,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Sites the agent may use without asking (example.com, *.example.com, localhost:3000)."
+          "description": "Sites the agent may use without asking (https://example.com, *.example.com, localhost:3000). An entry without a scheme covers https only (and http on localhost)."
         },
         "sensitive": {
           "type": "array",

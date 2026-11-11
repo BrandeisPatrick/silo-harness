@@ -110,7 +110,7 @@ console.warn = (...a) => {
   };
   agent = new Agent(() => config, {}, sessions, () => [], emit, undefined, artifacts, undefined, { learned });
   const approve = (name, detail, opts = {}, id = `c_${Math.random()}`) => agent['requestApproval'](name, detail, undefined, opts, false, { id, args: name === 'bash' ? { command: detail } : {} });
-  const site = (key) => ({ key, display: key, scheme: 'https', host: key, port: '', path: '/' });
+  const site = (key) => ({ key, origin: `https://${key}`, display: key, scheme: 'https', host: key, port: '', path: '/' });
 
   // ask mode: a denied command card and an allowed site card
   answer = false;
@@ -119,7 +119,7 @@ console.warn = (...a) => {
   await approve('browser_navigate', 'Open docs.example\nTo read the docs', { browser: { site: site('docs.example'), card: 'site' } });
   let all = learned.all();
   check('recorded: a denial on a command card, with its programs', all.some((e) => e.tool === 'bash' && e.key === 'npm' && e.line === 'npm publish --tag next' && e.decision === 'deny'), all);
-  check('recorded: an allow on a site card, by its site, the card\'s line only', all.some((e) => e.tool === 'browser_navigate' && e.key === 'docs.example' && e.line === 'open docs.example' && e.decision === 'allow'), all);
+  check('recorded: an allow on a site card, by its site, the card\'s line only', all.some((e) => e.tool === 'browser_navigate' && e.key === 'https://docs.example' && e.line === 'open docs.example' && e.decision === 'allow'), all);
 
   // Auto mode: the check's own verdicts are not recorded; its request carries the answers
   config = { ...config, permissionMode: 'auto' };
@@ -132,7 +132,7 @@ console.warn = (...a) => {
   await approve('bash', 'npm publish', {}, blockedId);
   check('not recorded: the check\'s own allow and block', learned.all().length === before, learned.all());
   const checkReq = JSON.stringify(state.requests.filter((r) => isClassifierRequest(r.payload)).at(-1)?.payload.messages ?? []);
-  check('the check is given the answers', checkReq.includes('<user_answers>') && checkReq.includes('- denied bash on npm: npm publish --tag next') && checkReq.includes('- allowed browser_navigate on docs.example: open docs.example'), checkReq.slice(0, 800));
+  check('the check is given the answers', checkReq.includes('<user_answers>') && checkReq.includes('- denied bash on npm: npm publish --tag next') && checkReq.includes('- allowed browser_navigate on https://docs.example: open docs.example'), checkReq.slice(0, 800));
 
   // the user's Allow after a block is recorded
   agent.allowBlocked(blockedId);

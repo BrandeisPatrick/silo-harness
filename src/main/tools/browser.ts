@@ -62,7 +62,7 @@ function lists(ctx: ToolContext): { exempt: string[]; alwaysAllowed: string[]; s
 }
 
 /** The card's name for a page with no site (about:blank): a purchase card there still says where. */
-const NO_SITE: Site = { key: '', display: 'this page', scheme: '', host: '', port: '', path: '' };
+const NO_SITE: Site = { key: '', origin: '', display: 'this page', scheme: '', host: '', port: '', path: '' };
 
 /** browser_eval's code on its card: as much as the user can read before deciding. */
 const MAX_CARD_CODE = 4000;
@@ -185,12 +185,12 @@ const REASON = { reason: { type: 'string', description: 'Why, in one sentence (s
 /** The tools that return what a page says, which must come from the page that was checked. */
 const READS = new Set(['browser_get_text', 'browser_read_page', 'browser_find', 'browser_wait_for']);
 
-/** The active tab and its page's site key ('' when the browser cannot say). */
+/** The active tab and its page's origin ('' when the browser cannot say). */
 function pageNow(ctx: ToolContext): { tabId: string; url: string; key: string } {
   try {
     const s = ctx.browser.state();
     const url = String(s.url ?? '');
-    return { tabId: String(s.activeId ?? ''), url, key: siteOf(url)?.key ?? url };
+    return { tabId: String(s.activeId ?? ''), url, key: siteOf(url)?.origin ?? url };
   } catch {
     return { tabId: '', url: '', key: '' };
   }

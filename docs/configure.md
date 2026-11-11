@@ -235,7 +235,7 @@ The `browser` block is what Settings → Browser edits.
 | `keepCookies` | `true` | Keep the Browser pane's cookies and site data when the app quits; `false` clears them at quit. |
 | `downloadsDir` | `""` | Where the pane's downloads are saved (`~` allowed); empty is the Downloads folder. |
 | `openChatLinksInPane` | `false` | Web links (http, https) clicked in the chat open in a new tab of the pane instead of the default browser. |
-| `alwaysAllowed` | `[]` | Sites the agent may read and act on without the site card: what "Always allow example.com" saves (`example.com`, `localhost:3000`, `file:/path`), or a pattern (`*.example.com`). A sensitive site still asks before acting. |
+| `alwaysAllowed` | `[]` | Sites the agent may read and act on without the site card: what "Always allow example.com" saves (`https://example.com`, `http://localhost:3000`, `file:/path`), or a pattern (`*.example.com`). An entry covers only its scheme; one without a scheme covers https only, and http too on `localhost`, `127.0.0.1` and `[::1]`. A sensitive site still asks before acting. |
 | `sensitive` | `[]` | Your own sites that always ask before the agent acts, beside the built-in list: `host` (and its subdomains), `*.host`, `host:port`, or a prefix such as `login.`. |
 | `exempt` | `[]` | Your own hosts the agent may use with no card and where it may type test passwords, beside `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` and `*.test`: `host`, `*.host`, `host:port`, or a folder (`/path`, `~/path`) whose files count. |
 

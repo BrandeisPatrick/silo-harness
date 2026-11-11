@@ -85,15 +85,22 @@ function makeCtx(over = {}) {
     check('web_fetch asks with the browser site card for a site not yet allowed', asked.length === 1 && asked[0].name === 'web_fetch' && asked[0].opts.browser?.card === 'site' && asked[0].opts.browser.site.key === SITE && asked[0].detail === `Fetch ${u('/article')}` && !asked[0].opts.custom, asked);
     check('…and fetches once allowed', /^URL: [^\n]+\nLength: [^\n]+\n<web_page url="[^"]+">\nTitle: An & article\n/.test(r.content), r.content.slice(0, 160));
 
-    ctx.sessionSites.add(SITE); // what "Allow site for this session" does (the agent keeps it, the browser shares it)
+    ctx.sessionSites.add(`http://${SITE}`); // what "Allow site for this session" does (the agent keeps it, the browser shares it)
     asked.length = 0;
     await fetchTool.run({ url: u('/long') }, ctx);
     check('a site allowed for this session does not ask again (the same list the browser uses)', asked.length === 0);
   }
   {
-    const { ctx, asked } = makeCtx({ config: { browser: { alwaysAllowed: [SITE], sensitive: [], exempt: [] } } });
+    const { ctx, asked } = makeCtx({ config: { browser: { alwaysAllowed: [`http://${SITE}`], sensitive: [], exempt: [] } } });
     await fetchTool.run({ url: u('/long') }, ctx);
     check('a site in "Always allow" (Settings → Browser) does not ask', asked.length === 0);
+  }
+  {
+    const { ctx, asked } = makeCtx({ config: { browser: { alwaysAllowed: [SITE], sensitive: [], exempt: [] } } });
+    ctx.sessionSites.add(`https://${SITE}`);
+    cache.clear();
+    await fetchTool.run({ url: u('/long') }, ctx);
+    check('an https approval or an entry without a scheme does not cover the http site: it asks', asked.length === 1 && asked[0].opts.browser?.card === 'site', asked);
   }
   {
     const { ctx, asked } = makeCtx({ answer: () => ({ ok: false, message: DENIED }) });
@@ -115,7 +122,7 @@ function makeCtx(over = {}) {
   }
   {
     const { ctx, asked } = makeCtx({ config: { browser: { alwaysAllowed: [], sensitive: [], exempt: [] } } });
-    ctx.sessionSites.add(SITE);
+    ctx.sessionSites.add(`http://${SITE}`);
     cache.clear();
     const r = await fetchTool.run({ url: u('/www') }, ctx);
     check('a redirect to another host of the same site asks for that host first', asked.length === 1 && asked[0].opts.browser.site.key === `www.site.example:${srv.port}` && /redirected/.test(asked[0].detail) && /Line 0/.test(r.content), { asked: asked.map((a) => a.detail), r: r.content.slice(0, 80) });

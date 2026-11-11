@@ -98,7 +98,7 @@ function fixtures(P) {
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-browser-hardening-'));
   const downloadsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-hardening-dl-')));
-  const app = await launch({ profile, mode: 'ask', mock: true, args: HOSTS, config: { browser: { downloadsDir, alwaysAllowed: [`shop.example:${P}`, `other.example:${P}`] } } });
+  const app = await launch({ profile, mode: 'ask', mock: true, args: HOSTS, config: { browser: { downloadsDir, alwaysAllowed: [`http://shop.example:${P}`, `http://other.example:${P}`] } } });
   const dbg = () => app.evaluate('window.__oc_debug.mods.browser()');
   const activeTab = async () => {
     const d = await dbg();
