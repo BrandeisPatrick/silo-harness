@@ -115,6 +115,8 @@ function logoPng(size = 240) {
       await app.send('Open https://example.com in the browser, take a screenshot, and include the screenshot in your answer with show_image. One sentence is enough.');
       await app.waitIdle(240_000);
       await imagesLoaded(app);
+      // The finished turn is folded under its "Worked for" line: open it, so its tool rows are laid out
+      await app.unfold();
       // The browser calls fold into one line (Tool activity: Summary), which carries the screenshot's thumbnail;
       // opened, it shows the screenshot's own row
       // (the row that carries a picture: in a hidden window a first attempt can fail, and the model then takes another)
