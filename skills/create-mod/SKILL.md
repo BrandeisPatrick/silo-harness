@@ -9,7 +9,7 @@ A mod is a folder named by its id, holding `mod.json` and the files it names. A 
 | The user wants | Contributes |
 | --- | --- |
 | a panel beside the chat | a view, `"seat": "rail"` |
-| a full tab next to Browser, Diff, Terminal | a view, `"seat": "tab"` (page `height: 100%`, scroll inside) |
+| a full tab in the side pane's strip, beside the pages, Diff and Terminal | a view, `"seat": "tab"` (page `height: 100%`, scroll inside) |
 | one compact row above the composer | a view, `"seat": "composer"` (up to 120 px) |
 | something that reacts to tool calls or prompts, no UI | a view, `"seat": "worker"`, plus `contributes.hooks` and the `hooks` permission |
 | an animated or pictured backdrop | a view, `"seat": "background"` (takes no clicks; `pointer` event `{ x, y }`) |

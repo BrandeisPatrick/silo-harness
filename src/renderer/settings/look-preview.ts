@@ -206,19 +206,19 @@ function conversationHtml(): string {
 function windowHtml(): string {
   const nav = (name: 'plus' | 'search', label: string) => `<div class="nav-row"><span class="nav-icon">${icon(name)}</span><span class="nav-label">${label}</span></div>`;
   const session = (title: string, active = false) => `<div class="session-item${active ? ' active' : ''}"><span class="label">${escapeHtml(title)}</span><span class="trail"></span></div>`;
-  const top = (name: 'terminal' | 'file-diff' | 'globe' | 'more', on = false) => `<span class="icon-btn top-btn${on ? ' active' : ''}">${icon(name)}</span>`;
+  const top = (name: 'panel-list' | 'panel-right' | 'more', on = false) => `<span class="icon-btn top-btn${on ? ' active' : ''}">${icon(name)}</span>`;
   return (
     `<div class="shell">` +
     `<aside class="sidebar"><div class="sidebar-top"></div><nav class="sidebar-nav">${nav('plus', 'New session')}${nav('search', 'Search')}</nav>` +
     `<nav class="session-list">${session('Retry backoff', true)}${session('Flaky login test')}${session('Release notes for 1.2')}${session('Dependency updates')}</nav></aside>` +
-    `<main class="main"><header class="topbar"><div class="title-block"><div class="session-title">Retry backoff</div><span class="cwd-btn">${icon('folder', 12)}<span>~/code/app</span></span></div><span class="spacer"></span><div class="topbar-actions">${top('terminal')}${top('file-diff')}${top('globe', true)}${top('more')}</div></header>` +
+    `<main class="main"><div class="chat-col"><header class="topbar"><div class="title-block"><div class="session-title">Retry backoff</div><span class="cwd-btn">${icon('folder', 12)}<span>~/code/app</span></span></div><span class="spacer"></span><div class="topbar-actions">${top('panel-list', true)}${top('more')}${top('panel-right')}</div></header>` +
     `<div class="content"><section class="transcript-wrap"><div id="messages" class="transcript">` +
     `<div class="msg user"><div class="bubble">Make the retry backoff configurable.</div></div>` +
     `<div class="msg assistant"><div class="md"><p>Sure. The retry loop in <code>login.ts</code> waits a fixed three seconds; I'll take the delay from the options instead.</p></div></div>` +
     `<div class="mod-offer lp-card"><div class="mod-offer-head"><span class="mod-offer-icon">${icon('puzzle')}</span><div class="mod-offer-heading"><div class="mod-offer-kicker">New mod</div><div class="mod-offer-title">Turn on Word count?</div></div></div>` +
     `<div class="lp-switch-row"><span>Update while streaming</span><input type="checkbox" class="switch" checked tabindex="-1"></div>` +
     `<div class="mod-offer-row"><span class="spacer"></span><button type="button" class="btn" tabindex="-1">Not now</button><button type="button" class="btn primary" tabindex="-1">Turn on</button></div></div>` +
-    `</div><div class="composer-wrap">${chatbarHtml()}</div></section></div></main></div>`
+    `</div><div class="composer-wrap">${chatbarHtml()}</div></section></div></div></main></div>`
   );
 }
 

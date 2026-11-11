@@ -161,8 +161,8 @@ const THEMES = {
   light: { bg: '#ffffff', text: '#191919', grey: '#666666', line: 'rgba(0,0,0,0.08)', hover: '#e9e9e9', frame: '#d9d9d9' },
   dark: { bg: '#1d1d1d', text: '#f0f0f0', grey: '#a1a1a1', line: 'rgba(255,255,255,0.08)', hover: '#292929', frame: '#3a3a3a' },
 };
-const GLOBE = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.6 1.65 2.5 3.8 2.5 6s-.9 4.35-2.5 6c-1.6-1.65-2.5-3.8-2.5-6S6.4 3.65 8 2z"/></svg>';
-const CROSS = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+const GLOBE = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.6 1.65 2.5 3.8 2.5 6s-.9 4.35-2.5 6c-1.6-1.65-2.5-3.8-2.5-6S6.4 3.65 8 2z"/></svg>';
+const CROSS = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
 
 /** The bar's page: the app's look in a 32 px strip (favicon or globe, title, host in grey, × at the right). */
 export function popupBarHtml(dark: boolean): string {

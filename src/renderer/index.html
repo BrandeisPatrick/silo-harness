@@ -46,161 +46,170 @@
     </aside>
 
     <main class="main">
-      <header class="topbar drag">
-        <div class="title-block">
-          <div class="session-title" id="session-title" tabindex="0" role="textbox" aria-label="Session title" data-tip="Rename" data-tip-kbd="F2" spellcheck="false">New session</div>
-          <button id="cwd-btn" class="cwd-btn" data-tip="Change working directory"><span data-icon="folder" data-icon-size="12"></span><span id="cwd-label">~</span></button>
-        </div>
-        <span class="spacer"></span>
-        <div class="topbar-actions">
-          <button id="rail-toggle" class="icon-btn top-btn" aria-label="Details panel" aria-pressed="false" data-tip="Toggle details" data-tip-kbd="⌘ ⇧ E"><span data-icon="panel-list"></span></button>
-          <button id="terminal-toggle" class="icon-btn top-btn" aria-label="Terminal" aria-pressed="false" data-tip="Toggle terminal" data-tip-kbd="⌘ ⇧ T"><span data-icon="terminal"></span><span id="terminal-busy" class="busy-dot" hidden></span></button>
-          <button id="diff-toggle" class="icon-btn top-btn" aria-label="Diff" aria-pressed="false" data-tip="Toggle diff" data-tip-kbd="⌘ ⇧ D"><span data-icon="file-diff"></span><span id="diff-count" class="count-badge" hidden>0</span></button>
-          <button id="browser-toggle" class="icon-btn top-btn active" aria-label="Browser" aria-pressed="true" data-tip="Toggle browser" data-tip-kbd="⌘ ⇧ B"><span data-icon="globe"></span></button>
-          <button id="mods-more" class="icon-btn top-btn" aria-label="More panes and mods" aria-haspopup="menu" aria-expanded="false" data-tip="Mod tabs and mods"><span data-icon="more"></span></button>
-        </div>
-      </header>
-
-      <div class="content">
-        <section class="transcript-wrap">
-          <div id="messages" class="transcript">
-            <div class="empty" id="empty-state">
-              <div class="empty-mark" id="empty-mark"></div>
-              <h1 class="empty-title">What should we build?</h1>
-              <div id="setup-strip" class="setup-strip" role="list" aria-label="Finish setting up" hidden></div>
-              <div id="folder-row" class="folder-row" role="group" aria-label="Working folder" hidden></div>
-            </div>
-            <div id="task-list" class="task-list" role="region" aria-label="Task list" hidden></div>
+      <div class="chat-col">
+        <header class="topbar drag">
+          <div class="title-block">
+            <div class="session-title" id="session-title" tabindex="0" role="textbox" aria-label="Session title" data-tip="Rename" data-tip-kbd="F2" spellcheck="false">New session</div>
+            <button id="cwd-btn" class="cwd-btn" data-tip="Change working directory"><span data-icon="folder" data-icon-size="12"></span><span id="cwd-label">~</span></button>
           </div>
+          <span class="spacer"></span>
+          <div class="topbar-actions">
+            <button id="rail-toggle" class="icon-btn top-btn" aria-label="Details panel" aria-pressed="false" data-tip="Toggle details" data-tip-kbd="⌘ ⇧ E"><span data-icon="panel-list"></span></button>
+          </div>
+        </header>
 
-          <div class="composer-wrap">
-            <button type="button" id="jump-latest" class="jump-latest" hidden><span data-icon="arrow-down" data-icon-size="14"></span><span>Jump to latest</span></button>
-            <div id="queue" class="queue" role="list" aria-label="Queued messages" hidden></div>
-            <div id="conn-banner" class="conn-banner" role="status" hidden>
-              <span data-icon="circle-alert" aria-hidden="true"></span>
-              <span id="conn-text" class="conn-text"></span>
-              <span class="spacer"></span>
-              <button type="button" id="conn-retry" class="btn sm">Retry</button>
-              <button type="button" id="conn-settings" class="btn sm ghost">Settings</button>
+        <div class="content">
+          <section class="transcript-wrap">
+            <div id="messages" class="transcript">
+              <div class="empty" id="empty-state">
+                <div class="empty-mark" id="empty-mark"></div>
+                <h1 class="empty-title">What should we build?</h1>
+                <div id="setup-strip" class="setup-strip" role="list" aria-label="Finish setting up" hidden></div>
+                <div id="folder-row" class="folder-row" role="group" aria-label="Working folder" hidden></div>
+              </div>
+              <div id="task-list" class="task-list" role="region" aria-label="Task list" hidden></div>
             </div>
-            <div id="status-line" class="status-line" hidden>
-              <span class="spinner" aria-hidden="true"></span>
-              <span id="status-icon" class="status-icon" data-icon="clipboard" data-icon-size="14" aria-hidden="true"></span>
-              <span id="status-text" class="status-text">Working…</span>
-              <span id="status-time" class="status-time"></span>
-              <span class="spacer"></span>
-              <span id="status-tokens" class="status-tokens" hidden></span>
-              <button id="stop-btn" class="stop-hint" data-tip="Stop the run"><kbd>esc</kbd><span>to interrupt</span></button>
-              <span id="status-hint" class="status-hint"><kbd>↵</kbd><span>build</span><kbd>esc</kbd><span>keep planning</span></span>
-            </div>
-            <div id="status-flash" class="status-flash" role="status" aria-live="polite"></div>
-            <div id="slash-menu" class="slash-menu" role="listbox" hidden></div>
-            <div id="mention-menu" class="slash-menu mention-menu" role="listbox" aria-label="Files" hidden></div>
-            <div id="mod-strip" class="mod-strip" role="region" aria-label="Mod strip" hidden></div>
-            <div class="chatbar" id="chatbar">
-              <div class="composer" id="composer">
-                <div id="attachments" class="attachments" role="group" aria-label="Attached images" hidden></div>
-                <div id="attach-note" class="attach-note" role="status" hidden></div>
-                <div class="composer-row">
-                  <button type="button" id="attach-btn" class="icon-btn composer-plus" aria-label="Attach image" data-tip="Attach image" data-icon="plus-lg"></button>
-                  <input type="file" id="attach-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden tabindex="-1" aria-hidden="true">
-                  <textarea id="input" rows="1" placeholder="Describe a task, / for skills, @ for files, ⇧Tab to change mode" spellcheck="true" aria-label="Message"></textarea>
-                  <button id="send-btn" class="send" aria-label="Send" data-tip="Send" data-tip-kbd="↵" disabled></button>
+
+            <div class="composer-wrap">
+              <button type="button" id="jump-latest" class="jump-latest" hidden><span data-icon="arrow-down" data-icon-size="14"></span><span>Jump to latest</span></button>
+              <div id="queue" class="queue" role="list" aria-label="Queued messages" hidden></div>
+              <div id="conn-banner" class="conn-banner" role="status" hidden>
+                <span data-icon="circle-alert" aria-hidden="true"></span>
+                <span id="conn-text" class="conn-text"></span>
+                <span class="spacer"></span>
+                <button type="button" id="conn-retry" class="btn sm">Retry</button>
+                <button type="button" id="conn-settings" class="btn sm ghost">Settings</button>
+              </div>
+              <div id="status-line" class="status-line" hidden>
+                <span class="spinner" aria-hidden="true"></span>
+                <span id="status-icon" class="status-icon" data-icon="clipboard" data-icon-size="14" aria-hidden="true"></span>
+                <span id="status-text" class="status-text">Working…</span>
+                <span id="status-time" class="status-time"></span>
+                <span class="spacer"></span>
+                <span id="status-tokens" class="status-tokens" hidden></span>
+                <button id="stop-btn" class="stop-hint" data-tip="Stop the run"><kbd>esc</kbd><span>to interrupt</span></button>
+                <span id="status-hint" class="status-hint"><kbd>↵</kbd><span>build</span><kbd>esc</kbd><span>keep planning</span></span>
+              </div>
+              <div id="status-flash" class="status-flash" role="status" aria-live="polite"></div>
+              <div id="slash-menu" class="slash-menu" role="listbox" hidden></div>
+              <div id="mention-menu" class="slash-menu mention-menu" role="listbox" aria-label="Files" hidden></div>
+              <div id="mod-strip" class="mod-strip" role="region" aria-label="Mod strip" hidden></div>
+              <div class="chatbar" id="chatbar">
+                <div class="composer" id="composer">
+                  <div id="attachments" class="attachments" role="group" aria-label="Attached images" hidden></div>
+                  <div id="attach-note" class="attach-note" role="status" hidden></div>
+                  <div class="composer-row">
+                    <button type="button" id="attach-btn" class="icon-btn composer-plus" aria-label="Attach image" data-tip="Attach image" data-icon="plus-lg"></button>
+                    <input type="file" id="attach-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden tabindex="-1" aria-hidden="true">
+                    <textarea id="input" rows="1" placeholder="Describe a task, / for skills, @ for files, ⇧Tab to change mode" spellcheck="true" aria-label="Message"></textarea>
+                    <button id="send-btn" class="send" aria-label="Send" data-tip="Send" data-tip-kbd="↵" disabled></button>
+                  </div>
+                </div>
+                <div class="composer-foot" id="composer-foot">
+                  <button id="model-btn" class="foot-btn" aria-haspopup="menu" data-tip="Model">…</button>
+                  <button id="effort-btn" class="foot-btn" aria-haspopup="menu" data-tip="Effort" hidden></button>
+                  <button id="mode-btn" class="foot-btn" aria-haspopup="menu" data-tip="Permission mode" data-tip-kbd="⇧ Tab">Ask</button>
+                  <button type="button" id="context-meter" class="foot-btn context-meter" aria-haspopup="menu" data-tip="Context" hidden></button>
                 </div>
               </div>
-              <div class="composer-foot" id="composer-foot">
-                <button id="model-btn" class="foot-btn" aria-haspopup="menu" data-tip="Model">…</button>
-                <button id="effort-btn" class="foot-btn" aria-haspopup="menu" data-tip="Effort" hidden></button>
-                <button id="mode-btn" class="foot-btn" aria-haspopup="menu" data-tip="Permission mode" data-tip-kbd="⇧ Tab">Ask</button>
-                <button type="button" id="context-meter" class="foot-btn context-meter" aria-haspopup="menu" data-tip="Context" hidden></button>
+            </div>
+          </section>
+
+          <aside class="mod-rail" id="mod-rail" aria-label="Details" hidden>
+            <div class="mod-rail-edge" id="mod-rail-edge" role="separator" aria-orientation="vertical" aria-label="Resize details panel" tabindex="-1"></div>
+            <div class="mod-rail-sections" id="mod-rail-sections"></div>
+          </aside>
+        </div>
+      </div>
+
+      <div class="pane-resizer" id="pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize side pane" tabindex="-1"></div>
+
+      <section class="side-pane" id="side-pane" aria-label="Side pane">
+        <!-- The one strip: page tabs and tool tabs in the order they were opened (side-pane.ts arranges them), then + -->
+        <div class="pane-strip drag">
+          <div id="pane-tabs" class="pane-tabs" role="tablist" aria-label="Side pane tabs">
+            <button type="button" id="pane-tab-diff" class="pane-tab strip-tab" role="tab" aria-label="Diff" aria-selected="false" aria-controls="diff-pane" data-tab="diff" data-tip="Diff" data-tip-kbd="⌘ ⇧ D" tabindex="-1" hidden><span class="tab-icon" data-icon="file-diff"></span><span class="tab-title">Diff</span><span id="pane-diff-count" class="count-badge" hidden>0</span><span class="tab-close" aria-hidden="true" data-tip="Close Diff" data-icon="x" data-icon-size="14"></span></button>
+            <button type="button" id="pane-tab-terminal" class="pane-tab strip-tab" role="tab" aria-label="Terminal" aria-selected="false" aria-controls="terminal-pane" data-tab="terminal" data-tip="Terminal" data-tip-kbd="⌘ ⇧ T" tabindex="-1" hidden><span class="tab-icon" data-icon="terminal"></span><span class="tab-title">Terminal</span><span id="pane-terminal-busy" class="busy-dot" hidden></span><span class="tab-close" aria-hidden="true" data-tip="Close Terminal" data-icon="x" data-icon-size="14"></span></button>
+          </div>
+          <button type="button" id="browser-tab-new" class="icon-btn chrome-btn strip-new" aria-label="New tab" data-tip="New tab" data-tip-kbd="⌘ ⇧ N" data-icon="plus"></button>
+        </div>
+
+        <section class="browser" id="browser-pane" role="tabpanel" aria-label="Browser">
+          <div class="browser-bar">
+            <div class="bar-start">
+              <div class="bar-group">
+                <button id="back-btn" class="icon-btn chrome-btn" aria-label="Back" data-tip="Back" data-icon="arrow-left"></button>
+                <button id="fwd-btn" class="icon-btn chrome-btn" aria-label="Forward" data-tip="Forward" data-icon="arrow-right"></button>
+                <button id="reload-btn" class="icon-btn chrome-btn" aria-label="Reload" data-tip="Reload" data-icon="refresh"></button>
               </div>
             </div>
-          </div>
-        </section>
-
-        <aside class="mod-rail" id="mod-rail" aria-label="Details" hidden>
-          <div class="mod-rail-edge" id="mod-rail-edge" role="separator" aria-orientation="vertical" aria-label="Resize details panel" tabindex="-1"></div>
-          <div class="mod-rail-sections" id="mod-rail-sections"></div>
-        </aside>
-
-        <div class="pane-resizer" id="pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize side pane" tabindex="-1"></div>
-
-        <section class="side-pane" id="side-pane" aria-label="Side pane">
-          <div class="pane-tabs" role="tablist" aria-label="Side pane">
-            <button id="pane-tab-browser" class="pane-tab active" role="tab" aria-selected="true" aria-controls="browser-pane"><span data-icon="globe" data-icon-size="14"></span><span class="pane-tab-label">Browser</span></button>
-            <button id="pane-tab-diff" class="pane-tab" role="tab" aria-selected="false" aria-controls="diff-pane"><span data-icon="file-diff" data-icon-size="14"></span><span class="pane-tab-label">Diff</span><span id="pane-diff-count" class="count-badge" hidden>0</span></button>
-            <button id="pane-tab-terminal" class="pane-tab" role="tab" aria-selected="false" aria-controls="terminal-pane"><span data-icon="terminal" data-icon-size="14"></span><span class="pane-tab-label">Terminal</span><span id="pane-terminal-busy" class="busy-dot" hidden></span></button>
-            <span class="spacer"></span>
-            <button id="pane-close" class="icon-btn sm" aria-label="Close pane" data-tip="Close pane" data-icon="x"></button>
-          </div>
-
-          <section class="browser" id="browser-pane" role="tabpanel" aria-labelledby="pane-tab-browser">
-            <div class="browser-tabs">
-              <div id="browser-tabs" class="browser-tab-strip" role="tablist" aria-label="Browser tabs"></div>
-              <button type="button" id="browser-tab-new" class="icon-btn sm browser-tab-new" aria-label="New tab" data-tip="New tab" data-tip-kbd="⌘ ⇧ N" data-icon="plus"></button>
-            </div>
-            <div class="browser-bar">
-              <button id="back-btn" class="icon-btn" aria-label="Back" data-tip="Back" data-icon="arrow-left"></button>
-              <button id="fwd-btn" class="icon-btn" aria-label="Forward" data-tip="Forward" data-icon="arrow-right"></button>
-              <button id="reload-btn" class="icon-btn" aria-label="Reload" data-tip="Reload" data-icon="refresh"></button>
-              <div class="url-pill">
-                <span id="url-icon" class="url-icon" data-icon="globe" data-icon-size="14"></span>
-                <input id="url" class="url" spellcheck="false" autocomplete="off" placeholder="Enter a URL or search" aria-label="Address">
+            <div class="url-pill">
+              <span id="url-icon" class="url-icon" data-icon="globe" data-icon-size="14"></span>
+              <span class="url-field">
+                <input id="url" class="url" spellcheck="false" autocomplete="off" placeholder="Search or enter a URL" aria-label="Address">
                 <span id="browser-title" class="browser-title"></span>
-                <button type="button" id="zoom-chip" class="zoom-chip" data-tip="Reset zoom" data-tip-kbd="⌘ 0" hidden></button>
-              </div>
+              </span>
+              <button type="button" id="zoom-chip" class="zoom-chip" data-tip="Reset zoom" data-tip-kbd="⌘ 0" hidden></button>
+            </div>
+            <div class="bar-end">
               <span id="browsing-pill" class="browsing-pill" role="status" hidden><span class="pulse" aria-hidden="true"></span><span>Agent is browsing</span></span>
-              <button id="open-external-btn" class="icon-btn" aria-label="Open in browser" data-tip="Open in browser" data-icon="external-link"></button>
-              <button type="button" id="downloads-btn" class="icon-btn downloads-btn" aria-label="Downloads" aria-haspopup="dialog" aria-expanded="false" aria-controls="downloads-pop" data-tip="Downloads" hidden></button>
-              <div class="browser-progress" id="browser-progress"></div>
-            </div>
-            <div id="browser-note" class="browser-note" role="status" hidden>
-              <span>The browser has its own profile now; some sites may ask you to sign in again.</span>
-              <button type="button" id="browser-note-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
-            </div>
-            <!-- Find in page (browser-find.ts) and the blocked-popup strip (browser-pane.ts): pane chrome, above the page's slot -->
-            <div id="browser-find" class="browser-find" role="search" aria-label="Find in page" hidden>
-              <span class="browser-find-icon" data-icon="search" data-icon-size="14"></span>
-              <input id="browser-find-input" class="browser-find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page" aria-label="Find in page" aria-describedby="browser-find-count">
-              <span id="browser-find-count" class="browser-find-count" aria-live="polite"></span>
-              <button type="button" id="browser-find-prev" class="icon-btn sm" aria-label="Previous match" data-tip="Previous match" data-tip-kbd="⇧ ↵" data-icon="chevron-up" data-icon-size="14"></button>
-              <button type="button" id="browser-find-next" class="icon-btn sm" aria-label="Next match" data-tip="Next match" data-tip-kbd="↵" data-icon="chevron-down" data-icon-size="14"></button>
-              <button type="button" id="browser-find-close" class="icon-btn sm" aria-label="Close find bar" data-tip="Close" data-tip-kbd="Esc" data-icon="x" data-icon-size="14"></button>
-            </div>
-            <div id="browser-popup-note" class="browser-note browser-popup-note" role="status" hidden>
-              <span class="browser-popup-text"></span>
-              <span class="browser-popup-dot" aria-hidden="true">·</span>
-              <button type="button" id="browser-popup-show" class="browser-popup-show">Show</button>
-              <span class="spacer"></span>
-              <button type="button" id="browser-popup-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
-            </div>
-            <!-- The permission bar and the agent's download bar (browser-bars.ts): pane chrome, never part of the page -->
-            <div id="browser-bars" class="browser-bars" aria-live="polite" hidden></div>
-            <div id="browser-view" class="browser-view">
-              <div class="browser-placeholder">
-                <span class="placeholder-icon" data-icon="globe" data-icon-size="20"></span>
-                <span>Type a URL or ask the agent to open a page.</span>
+              <div class="bar-group">
+                <button id="open-external-btn" class="icon-btn chrome-btn" aria-label="Open in browser" data-tip="Open in browser" data-icon="external-link"></button>
+                <button type="button" id="downloads-btn" class="icon-btn chrome-btn downloads-btn" aria-label="Downloads" aria-haspopup="dialog" aria-expanded="false" aria-controls="downloads-pop" data-tip="Downloads" hidden></button>
               </div>
-              <div id="browser-interstitial" class="browser-interstitial" role="alert" hidden></div>
             </div>
-            <div id="downloads-pop" class="tray-pop downloads-pop" role="dialog" aria-label="Downloads" tabindex="-1" hidden></div>
-          </section>
-
-          <section class="changes" id="diff-pane" role="tabpanel" aria-labelledby="pane-tab-diff" hidden>
-            <div id="change-list" class="change-list" role="listbox" aria-label="Changed files" hidden></div>
-            <div id="change-detail" class="change-detail" hidden></div>
-            <div id="changes-empty" class="changes-empty"></div>
-          </section>
-
-          <section class="terminal term-pane" id="terminal-pane" role="tabpanel" aria-labelledby="pane-tab-terminal" hidden>
-            <div class="term-bar">
-              <div id="terminal-tabs" class="term-tabs" role="tablist" aria-label="Terminals"></div>
-              <button type="button" id="terminal-new" class="icon-btn sm term-new" aria-label="New terminal" data-tip="New terminal" data-tip-kbd="⌘ T" data-icon="plus"></button>
-            </div>
-            <div id="terminal-host" class="term-host"></div>
-            <div id="terminal-empty" class="term-empty" hidden></div>
-          </section>
+            <div class="browser-progress" id="browser-progress"></div>
+          </div>
+          <div id="browser-note" class="browser-note" role="status" hidden>
+            <span>The browser has its own profile now; some sites may ask you to sign in again.</span>
+            <button type="button" id="browser-note-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
+          </div>
+          <!-- Find in page (browser-find.ts) and the blocked-popup strip (browser-pane.ts): pane chrome, above the page's slot -->
+          <div id="browser-find" class="browser-find" role="search" aria-label="Find in page" hidden>
+            <span class="browser-find-icon" data-icon="search" data-icon-size="14"></span>
+            <input id="browser-find-input" class="browser-find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page" aria-label="Find in page" aria-describedby="browser-find-count">
+            <span id="browser-find-count" class="browser-find-count" aria-live="polite"></span>
+            <button type="button" id="browser-find-prev" class="icon-btn sm" aria-label="Previous match" data-tip="Previous match" data-tip-kbd="⇧ ↵" data-icon="chevron-up" data-icon-size="14"></button>
+            <button type="button" id="browser-find-next" class="icon-btn sm" aria-label="Next match" data-tip="Next match" data-tip-kbd="↵" data-icon="chevron-down" data-icon-size="14"></button>
+            <button type="button" id="browser-find-close" class="icon-btn sm" aria-label="Close find bar" data-tip="Close" data-tip-kbd="Esc" data-icon="x" data-icon-size="14"></button>
+          </div>
+          <div id="browser-popup-note" class="browser-note browser-popup-note" role="status" hidden>
+            <span class="browser-popup-text"></span>
+            <span class="browser-popup-dot" aria-hidden="true">·</span>
+            <button type="button" id="browser-popup-show" class="browser-popup-show">Show</button>
+            <span class="spacer"></span>
+            <button type="button" id="browser-popup-close" class="icon-btn sm" aria-label="Dismiss" data-tip="Dismiss" data-icon="x" data-icon-size="14"></button>
+          </div>
+          <!-- The permission bar and the agent's download bar (browser-bars.ts): pane chrome, never part of the page -->
+          <div id="browser-bars" class="browser-bars" aria-live="polite" hidden></div>
+          <div id="browser-view" class="browser-view">
+            <!-- The New tab page (new-tab-page.ts): a blank tab's page, plain DOM (the native view hides for a blank tab) -->
+            <div id="new-tab-page" class="new-tab-page" role="region" aria-label="New tab" hidden></div>
+            <div id="browser-interstitial" class="browser-interstitial" role="alert" hidden></div>
+          </div>
+          <div id="downloads-pop" class="tray-pop downloads-pop" role="dialog" aria-label="Downloads" tabindex="-1" hidden></div>
         </section>
+
+        <section class="changes" id="diff-pane" role="tabpanel" aria-label="Diff" hidden>
+          <div id="change-list" class="change-list" role="listbox" aria-label="Changed files" hidden></div>
+          <div id="change-detail" class="change-detail" hidden></div>
+          <div id="changes-empty" class="changes-empty"></div>
+        </section>
+
+        <section class="terminal term-pane" id="terminal-pane" role="tabpanel" aria-label="Terminal" hidden>
+          <div id="terminal-bar" class="term-bar" hidden>
+            <div id="terminal-tabs" class="term-tabs" role="tablist" aria-label="Terminals"></div>
+            <button type="button" id="terminal-new" class="icon-btn sm term-new" aria-label="New terminal" data-tip="New terminal" data-tip-kbd="⌘ T" data-icon="plus"></button>
+          </div>
+          <div id="terminal-host" class="term-host"></div>
+          <div id="terminal-empty" class="term-empty" hidden></div>
+        </section>
+      </section>
+
+      <!-- At the window's top-right corner, over the strip or the top bar: the ⋯ menu and the pane's one toggle -->
+      <div class="window-actions">
+        <button id="mods-more" class="icon-btn top-btn chrome-btn" aria-label="More panes and mods" aria-haspopup="menu" aria-expanded="false" data-tip="Mod tabs and mods"><span data-icon="more"></span></button>
+        <button id="pane-toggle" class="icon-btn top-btn chrome-btn" aria-label="Side pane" aria-pressed="true" data-tip="Toggle side pane"><span data-icon="panel-right"></span></button>
       </div>
     </main>
   </div>

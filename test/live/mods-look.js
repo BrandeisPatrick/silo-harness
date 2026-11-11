@@ -238,7 +238,7 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
     check('a stale composer-pill entry from an older profile: no such mod, no styles, no error', stale.length === 0 && !(await app.exists('style[data-mod="composer-pill"]')) && errors.length === 0, { stale, errors });
     const tokens = (await dbg(app, 'theme()')).tokens;
     check('the tokens sent to mods include the Markdown ones', ['--code-bg', '--code-hover', '--bubble', '--tok-kw', '--tok-str', '--tok-com', '--tok-num', '--tok-pun'].every((k) => tokens[k]), Object.keys(tokens).filter((k) => /code|bubble|tok/.test(k)));
-    if (await app.exists('#pane-close')) await app.click('#pane-close');
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
     await seed(app);
     await app.evaluate(`document.activeElement.blur()`);
     await sleep(400);

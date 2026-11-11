@@ -1,6 +1,6 @@
-// Live check of the Browser pane's tabs in the real app, with the mock model scripted to call the browser tools and
-// the fixture site from support/site.js: the strip (one tab and the +, then more), the + button, the one-time
-// profile note, browser_tabs (list, new, select, close), a ⌘-click on a link, the shortcuts (⌘⇧N, ⌘W in the pane's
+// Live check of the browser's page tabs in the real app, with the mock model scripted to call the browser tools and
+// the fixture site from support/site.js: the page tabs in the side pane's strip (one tab and the +, then more), the
+// New tab page in a blank tab, the + button, the one-time profile note, browser_tabs (list, new, select, close), a ⌘-click on a link, the shortcuts (⌘⇧N, ⌘W in the pane's
 // chrome and inside the page), the cap at 12, and that closing the last tab leaves a blank one.
 // Run: npm run build && node test/live/browser-tabs.js [screenshot-dir]
 const fs = require('node:fs');
@@ -36,10 +36,10 @@ const { check, done } = checker();
     // ---------- One tab, the + and the note ----------
     let d = await dbg();
     check('the pane starts with one blank tab, drawn in the strip, active', d.tabs.length === 1 && d.activeId === d.tabs[0].id && d.drawn.length === 1 && d.drawn[0].active && d.drawn[0].title === 'New tab', d);
-    check('the strip shows with one tab: the tab and the + button', (await app.count('#browser-tabs .browser-tab')) === 1 && (await app.evaluate(`!document.querySelector('#browser-tab-new').hidden && document.querySelector('#browser-tab-new').offsetHeight > 0`)));
-    const look = await app.evaluate(`(() => { const row = document.querySelector('.browser-tabs'); const tab = document.querySelector('.browser-tab.active'); const s = getComputedStyle(tab); const p = document.createElement('span'); p.style.background = 'var(--bg-000)'; document.body.append(p); const surface = getComputedStyle(p).backgroundColor; p.remove(); return { h: row.getBoundingClientRect().height, bg: s.backgroundColor, surface, bt: s.borderTopWidth, bb: s.borderBottomWidth, tabH: tab.getBoundingClientRect().height }; })()`);
-    check('the strip is 32 px tall, the active tab 28 px, on the page surface (white in light, the dark surface in dark), with a hairline above and none below', look.h === 32 && look.bt === '1px' && look.bb === '0px' && look.tabH === 28 && look.bg === look.surface, look);
-    check('the placeholder shows for the blank tab', await app.evaluate(`!document.querySelector('.browser-placeholder').hidden`));
+    check('the strip shows with one tab: the tab and the + button', (await app.count('#pane-tabs .browser-tab')) === 1 && (await app.evaluate(`!document.querySelector('#browser-tab-new').hidden && document.querySelector('#browser-tab-new').offsetHeight > 0`)));
+    const look = await app.evaluate(`(() => { const row = document.querySelector('.pane-strip'); const tab = document.querySelector('.browser-tab.active'); const s = getComputedStyle(tab); const p = document.createElement('span'); p.style.background = 'var(--bg-000)'; document.body.append(p); const surface = getComputedStyle(p).backgroundColor; p.remove(); return { h: row.getBoundingClientRect().height, topbar: document.querySelector('.topbar').getBoundingClientRect().height, bg: s.backgroundColor, surface, bt: s.borderTopWidth, bb: s.borderBottomWidth, tabH: tab.getBoundingClientRect().height }; })()`);
+    check('the strip is as tall as the top bar (45 px), the active tab 30 px, on the page surface (white in light, the dark surface in dark), with a hairline all round', look.h === 45 && look.topbar === 45 && look.bt === '1px' && look.bb === '1px' && look.tabH === 30 && look.bg === look.surface, look);
+    check('the New tab page shows for the blank tab, the native view hidden', (await app.evaluate(`!document.querySelector('#new-tab-page').hidden`)) && d.visible === false, { visible: d.visible });
     check('the one-time note about the profile is shown', d.noteShown && /its own profile now/.test(await app.text('#browser-note')), await app.text('#browser-note'));
     await app.screenshotOf(path.join(shots, 'tabs-1-note.png'), '#side-pane', 0);
     await app.click('#browser-note-close');
@@ -53,7 +53,8 @@ const { check, done } = checker();
     d = await dbg();
     const first = d.tabs[0].id;
     check('the tab shows the page title; the URL bar the address', d.drawn[0].title === 'Popup opener' && (await app.evaluate(`document.querySelector('#url').value`)) === `${site.base}/popup.html`, d.drawn);
-    check('the placeholder is gone', await app.evaluate(`document.querySelector('.browser-placeholder').hidden`));
+    check('the New tab page is gone and the page shows', (await app.evaluate(`document.querySelector('#new-tab-page').hidden`)) && d.visible === true, { visible: d.visible });
+    check('the pill shows the page\'s title centred while it is not being edited', (await app.evaluate(`document.querySelector('#browser-title').textContent`)) === 'Popup opener' && (await app.evaluate(`getComputedStyle(document.querySelector('#browser-title')).justifyContent`)) === 'center');
 
     // ---------- The + button ----------
     await app.click('#browser-tab-new');
@@ -61,7 +62,7 @@ const { check, done } = checker();
     d = await dbg();
     const second = d.tabs[1].id;
     check('+ opens a blank tab and makes it active', d.tabs.length === 2 && d.activeId === second && d.drawn[1].active && d.drawn[1].title === 'New tab' && !d.drawn[0].active, d);
-    check('… the URL bar empties and the placeholder is back', (await app.evaluate(`document.querySelector('#url').value`)) === '' && (await app.evaluate(`!document.querySelector('.browser-placeholder').hidden`)));
+    check('… the URL bar empties, its placeholder says what to do, and the New tab page is back', (await app.evaluate(`document.querySelector('#url').value`)) === '' && (await app.evaluate(`document.querySelector('#url').placeholder`)) === 'Search or enter a URL' && (await app.evaluate(`!document.querySelector('#new-tab-page').hidden`)));
     const s2 = await state();
     check('the state carries every tab and the active one flat', s2.tabs.length === 2 && s2.activeId === second && isBlank(s2.url) && s2.tabs[0].url === `${site.base}/popup.html` && s2.tabs[0].title === 'Popup opener' && typeof s2.tabs[0].canGoBack === 'boolean' && s2.tabs[0].blockedPopups === 0, s2);
 
@@ -157,14 +158,14 @@ const { check, done } = checker();
     check('the 13th tab is refused', /Close a tab first: the browser keeps at most 12/.test(refused) && (await tabs()).length === 12, refused);
     r = await app.callTool('browser_tabs', { action: 'new', url: `${site.base}/landing.html` });
     check('… through browser_tabs too, as an error the model reads', /Close a tab first: the browser keeps at most 12/.test(r ?? '') && (await tabs()).length === 12, r);
-    check('twelve tabs scroll in the strip, no arrows', await app.evaluate(`(() => { const s = document.querySelector('#browser-tabs'); return s.scrollWidth >= s.clientWidth && getComputedStyle(s).overflowX === 'auto' && document.querySelectorAll('.browser-tab').length === 12; })()`));
+    check('twelve tabs shrink, then scroll in the strip, no arrows; + and the corner\'s buttons stay in view', await app.evaluate(`(() => { const s = document.querySelector('#pane-tabs'); const plus = document.querySelector('#browser-tab-new').getBoundingClientRect(); const corner = document.querySelector('.window-actions').getBoundingClientRect(); return s.scrollWidth >= s.clientWidth && getComputedStyle(s).overflowX === 'auto' && document.querySelectorAll('.browser-tab').length === 12 && plus.width > 0 && plus.right <= corner.left && corner.right <= window.innerWidth; })()`));
     await app.screenshotOf(path.join(shots, 'tabs-3-twelve.png'), '#side-pane', 0);
 
     // ---------- Closing the last tab leaves a blank one ----------
     for (const t of await tabs()) await app.evaluate(`oc.rpc('browser.closeTab', ${JSON.stringify(t.id)})`);
     await waitTabs(1);
     d = await dbg();
-    check('closing every tab leaves one blank tab, active, with the placeholder', d.tabs.length === 1 && isBlank(d.tabs[0].url) && d.activeId === d.tabs[0].id && d.drawn.length === 1 && d.drawn[0].title === 'New tab' && (await app.evaluate(`!document.querySelector('.browser-placeholder').hidden`)), d);
+    check('closing every tab leaves one blank tab, active, with the New tab page', d.tabs.length === 1 && isBlank(d.tabs[0].url) && d.activeId === d.tabs[0].id && d.drawn.length === 1 && d.drawn[0].title === 'New tab' && (await app.evaluate(`!document.querySelector('#new-tab-page').hidden`)), d);
     const popupTargets = await app.pageTargets(site.base);
     check('the closed tabs\' pages are gone', popupTargets.length === 0, popupTargets.map((t) => t.url));
 

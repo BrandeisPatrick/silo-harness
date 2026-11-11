@@ -64,7 +64,7 @@ function setUp() {
     return Date.now() - t0;
   };
   try {
-    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-close').catch(() => undefined);
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle').catch(() => undefined);
 
     // ---------- 1. Three reads together ----------
     replies.push({ content: '', toolCalls: [read('r1', 'a.txt'), read('r2', 'b.txt'), read('r3', 'c.txt')], when: userSays('Read three') });

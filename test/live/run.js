@@ -64,6 +64,7 @@ const SCRIPTS = [
   { name: 'browser-cert' },
   { name: 'browser-downloads' },
   { name: 'browser-tabs' },
+  { name: 'pane-strip' },
   { name: 'browser-oauth' },
   { name: 'browser-approvals' },
   { name: 'browser-polish' },

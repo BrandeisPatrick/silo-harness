@@ -64,7 +64,7 @@ echo "unknown command" >&2; exit 1
   };
   /** The reading column at its full width: the details rail and the side pane shut */
   const wide = async () => {
-    await app.evaluate(`(() => { const r = document.querySelector('#rail-toggle'); if (r && r.getAttribute('aria-pressed') === 'true') r.click(); const p = document.querySelector('#side-pane'); if (p && p.getBoundingClientRect().width > 0) document.querySelector('#pane-close')?.click(); })()`);
+    await app.evaluate(`(() => { const r = document.querySelector('#rail-toggle'); if (r && r.getAttribute('aria-pressed') === 'true') r.click(); const p = document.querySelector('#side-pane'); if (p && p.getBoundingClientRect().width > 0) document.querySelector('#pane-toggle')?.click(); })()`);
     await sleep(300);
   };
   const blocks = () =>
@@ -186,8 +186,8 @@ echo "unknown command" >&2; exit 1
       if (page?.md) break;
     }
     check('7: the note opens in the viewer in the Browser pane, rendered', page && page.h1 === 'Trend log' && /^trend-log\.md · /.test(page.meta) && /Cards in the chat/.test(page.md), page);
-    const paneOn = await app.waitFor(`!document.querySelector('.pane-hidden') && document.querySelector('#pane-tab-browser').classList.contains('active')`, 5_000, 'the Browser tab').catch(() => false);
-    check('7: the Browser tab came forward', paneOn === true, await app.evaluate(`({ hidden: Boolean(document.querySelector('.pane-hidden')), active: document.querySelector('.pane-tab.active')?.id })`));
+    const paneOn = await app.waitFor(`!document.querySelector('.pane-hidden') && window.__oc_debug.mods.browser().tab === 'browser' && Boolean(document.querySelector('.browser-tab.active'))`, 5_000, 'the browser in front').catch(() => false);
+    check('7: the browser came forward, its page tab active in the strip', paneOn === true, await app.evaluate(`({ hidden: Boolean(document.querySelector('.pane-hidden')), tab: window.__oc_debug.mods.browser().tab, active: document.querySelector('.strip-tab.active')?.dataset.tab })`));
     await wide();
 
     // ---------- Screenshots, light and dark ----------

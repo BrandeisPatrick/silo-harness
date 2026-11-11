@@ -789,7 +789,7 @@ async function main() {
     };
     const box = (sel) => ev(`(() => { const r = document.querySelector(${js(sel)}).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
     const paneOpen = async (open) => {
-      await ev(`(() => { const hidden = document.querySelector('.shell').classList.contains('pane-hidden'); if (${open} && hidden) document.querySelector('#browser-toggle').click(); if (!${open} && !hidden) document.querySelector('#pane-close').click(); })()`);
+      await ev(`(() => { const hidden = document.querySelector('.shell').classList.contains('pane-hidden'); if (${open} === hidden) document.querySelector('#pane-toggle').click(); })()`);
       await sleep(400);
     };
     // Scrolled to the end, the top edge of the transcript can cut through a line of text or a box. Scroll back just
