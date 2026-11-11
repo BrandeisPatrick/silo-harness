@@ -640,6 +640,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* The live line: the call in flight, faint, with a shimmer running through it and a fade where it meets the edge */
 .tool-group.live > summary { opacity: 0.8; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); }
 .tool-group.live > summary .group-verb { flex: none; }
+/* Its words change with every call, so no chevron rides on their end while it is live (the turn's header hides its own
+   too); the whole line still opens and shuts the list */
+.tool-group.live > summary .tool-chevron { display: none; }
 .tool-group.live > summary :is(.group-verb, .group-arg) {
   text-overflow: clip; color: transparent;
   background: linear-gradient(90deg, var(--text-400) 0 35%, var(--text-100) 50%, var(--text-400) 65% 100%) 0 0 / 300% 100%;

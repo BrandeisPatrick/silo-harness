@@ -1,9 +1,9 @@
 // Tool rows, and the runs of them that fold into one line. With Tool activity set to Summary (the default) every run of
 // calls in a turn, a single call included, is one quiet `.tool-group` line ("Ran a command", "Read 3 files, ran 2
-// commands  +49 −2"), with the thinking between the calls inside it; opened, it shows the rows (a lone row opens with
-// it). With Every call only runs of three or more reads, searches, listings and MCP calls fold, as they always did. A
-// run is whatever stands between two other things (a reply, a waiting approval or question card, a plan, an image, a
-// notice), so a stored session folds the same way. An answered approval leaves no line of its own: the call's row
+// commands  +49 −2"), with the thinking between the calls inside it; opened, it shows the rows (a lone row of a
+// finished run opens with it). With Every call only runs of three or more reads, searches, listings and MCP calls
+// fold, as they always did. A run is whatever stands between two other things (a reply, a waiting approval or question
+// card, a plan, an image, a notice), so a stored session folds the same way. An answered approval leaves no line of its own: the call's row
 // says what was decided.
 
 import type { AppConfig } from '../shared/types';
@@ -140,11 +140,12 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
   function createGroup(): HTMLDetailsElement {
     const group = document.createElement('details');
     group.className = 'tool-group';
-    // A line that stands for one call opens straight to that call's details
+    // A finished line that stands for one call opens straight to that call's details. Not a live one: more calls can
+    // join it, and that row would stay open among them.
     group.addEventListener('toggle', () => {
       if (!group.open) return;
       const cards = groupCards(group);
-      if (cards.length === 1) cards[0].el.open = true;
+      if (cards.length === 1 && !group.classList.contains('live')) cards[0].el.open = true;
       syncCap(group);
     });
     group.innerHTML =

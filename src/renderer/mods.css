@@ -77,7 +77,19 @@
 :root.mod-bg .main { background: color-mix(in srgb, var(--bg-100) var(--mod-cover, 82%), transparent); }
 :root.mod-bg .sidebar { background: color-mix(in srgb, var(--bg-200) var(--mod-cover, 82%), transparent); }
 :root.mod-bg .side-pane, :root.mod-bg .mod-rail, :root.mod-bg .term-pane { background: transparent; }
-:root.mod-bg .status-line { background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bg-100) var(--mod-cover, 82%), transparent) 35%); }
+/* The status line and the queued messages float over the transcript's foot. Over a background they paint no band of
+   their own (a band shows as a strip across the picture, and the status line's would cover .main's cover twice): the
+   window shows through them as it does round them, the queued row stays a card like the composer, and the transcript's
+   foot fades out instead, transparent under the rows (the status line's 44px, the queue's --queue-h) and opaque 20px
+   above them, only while one of them shows. */
+:root.mod-bg .status-line, :root.mod-bg .queue { background: none; }
+:root.mod-bg .transcript-wrap { --foot-status: 0px; --foot-queue: 0px; }
+:root.mod-bg .transcript-wrap:has(> .composer-wrap > .status-line:not([hidden])) { --foot-status: 44px; }
+:root.mod-bg .transcript-wrap:has(> .composer-wrap > .queue:not([hidden])) { --foot-queue: var(--queue-h, 0px); }
+:root.mod-bg .transcript-wrap:has(> .composer-wrap > :is(.status-line, .queue):not([hidden])) > .transcript {
+  -webkit-mask-image: linear-gradient(to top, transparent calc(var(--foot-status) + var(--foot-queue)), #000 calc(var(--foot-status) + var(--foot-queue) + 20px));
+  mask-image: linear-gradient(to top, transparent calc(var(--foot-status) + var(--foot-queue)), #000 calc(var(--foot-status) + var(--foot-queue) + 20px));
+}
 
 /* ---------- The "turn on" card ---------- */
 .mod-offer {
