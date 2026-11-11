@@ -111,7 +111,7 @@ A view is one HTML page in one seat.
 | Seat | Where | Notes |
 | --- | --- | --- |
 | `rail` | a section in the right-hand rail, between the chat and the side pane | sized to its content up to `maxHeight` (default 360); `order` sorts sections, lower first (bundled ones use 10 to 90); the user can collapse a section, and opens and closes the rail with the top bar's first icon (⌘⇧E) |
-| `tab` | a tab in the side pane, next to Browser, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections); the user can close the tab with its × (or Delete), which unloads the page until the ⋯ menu shows it again ("Show …"), or a command or `harness.ui.open` brings it back |
+| `tab` | a tab in the side pane's strip, beside the page tabs, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections); the tab is in the strip only once opened (from the New tab page, the ⋯ menu, a command or `harness.ui.open`); its × (or Delete) takes it out of the strip and the page keeps running hidden |
 | `composer` | a strip directly above the composer | one row, sized to its content up to 120 px |
 | `worker` | nowhere: a hidden page, loaded whenever the mod is on | for a mod that handles hooks (or listens to events) without a panel; it is never visible, takes no input and does not report a size. *Added in 0.8.0.* |
 | `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); a look: one background is in use, chosen in Settings → Mods → Background (with your own picture and Dim); the app's surfaces turn translucent over it |
@@ -171,6 +171,7 @@ They are removed when the look goes away. A setting is how a look offers a choic
 | `.tool-status`, `.tool-status.spin`, `.tool-status.err` | the row's icon: `.spin` while the tool runs, `.err` when it failed |
 | `.tool-group` | several rows folded into one (a `<details>` like `.tool`) |
 | `.tool-group > summary`, `.group-stat`, `.group-failed`, `.group-denied` | the folded line (`.live` on the group while its calls run), and on its right the lines added and removed, the failed count and the denied count |
+| `.turn-head`, `.turn-head-btn`, `.turn-hidden` | the "Working for 18s" / "Worked for 53s" header over a turn's process (`.live` while it runs, `.folded` when folded), and the process nodes it hides |
 | `.cmd`, `.out pre` | a command and its output inside a tool row |
 | `.approval` | an approval card (restyle with care: it has to stay readable) |
 | `.plan-card`, `.task-list`, `.task-row` (`data-status`: `pending`, `in_progress`, `completed`) | a plan, the task list card and its rows |

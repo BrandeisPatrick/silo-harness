@@ -86,8 +86,12 @@ const ROWS = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id
     await sleep(300);
     const freshA = await rows();
     // A stored transcript has no tool durations ("· 6.0s"), whichever way the window got there: compare without them.
-    const plain = (list) => JSON.stringify(list.map((r) => ({ ...r, text: r.text.replace(/ · \d+(\.\d+)?m?s$/, '') })));
-    check('A joined mid-run shows the same rows as A rendered afresh (none missing, none doubled)', plain(freshA) === plain(liveA), { liveA, freshA });
+    // A folded turn's rows are hidden, so a row reads as its whole text and the duration sits in the middle of it.
+    const plain = (list) => list.map((r) => JSON.stringify({ ...r, text: r.text.replace(/ · \d+(\.\d+)?m?s\b/g, '') }));
+    const [live, fresh] = [plain(liveA), plain(freshA)];
+    // The first row that differs (a check's detail is clipped, so the two whole lists would not show it)
+    const differ = live.length !== fresh.length ? { live: live.length, fresh: fresh.length } : live.map((row, i) => (row === fresh[i] ? null : { live: row, fresh: fresh[i] })).find(Boolean);
+    check('A joined mid-run shows the same rows as A rendered afresh (none missing, none doubled)', !differ, differ);
     check('no unread or attention dots left', (await app.count('.status-dot')) === 0);
     await shot('5-a-fresh');
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));

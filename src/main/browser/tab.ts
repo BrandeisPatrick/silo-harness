@@ -5,10 +5,12 @@
 // stopped at (certificates.ts), which the pane covers with the interstitial.
 
 import { WebContentsView, type ContextMenuParams, type WebContents } from 'electron';
+import { randomUUID } from 'node:crypto';
 import type { CertErrorState, FindResultState, TabState } from '../../shared/browser';
 import { pageSecurity } from './certificates';
 import { noPageDragRegions } from './drag-regions';
 import { PageFinder } from './find';
+import { passkeyGuardScript, passkeyWatchScript } from './page-scripts';
 import { inSafetyWorld, SAFETY_WORLD } from './safety';
 import { browserSession, BROWSER_PARTITION, cleanUserAgent } from './session';
 import { zoomOf } from './zoom';
@@ -133,6 +135,8 @@ export async function fetchFavicon(url: string): Promise<string | null> {
 }
 
 let seq = 0;
+/** The event a page's passkey request raises for the watcher: a name of this app run's own */
+const PASSKEY_EVENT = `silo-passkey-${randomUUID()}`;
 
 export class BrowserTab {
   readonly id = `tab-${++seq}`;
@@ -144,6 +148,12 @@ export class BrowserTab {
   blockedPopupUrl: string | null = null;
   /** The certificate error the main frame stopped at (the interstitial shows), until the tab navigates on */
   certError: CertErrorState | null = null;
+  /** The page asked for a passkey, which cannot work here yet: the pane's notice shows until dismissed */
+  passkeyNotice = false;
+  /** The notice came for this page load already (it shows once per load) */
+  private passkeyShown = false;
+  /** Counts page loads, so a watcher of an earlier page cannot bring the notice to a later one */
+  private passkeyLoad = 0;
   private disposed = false;
   private readonly finder: PageFinder;
 
@@ -159,6 +169,9 @@ export class BrowserTab {
     });
     // A new page starts with no icon, a clean popup count and no search; the generic listeners below then report the state.
     wc.on('did-navigate', () => {
+      this.passkeyLoad++;
+      this.passkeyShown = false;
+      this.passkeyNotice = false;
       this.favicon = null;
       this.blockedPopups = 0;
       this.blockedPopupUrl = null;
@@ -169,6 +182,7 @@ export class BrowserTab {
     this.watchCertificates(wc);
     // Start watching each page's credential fields as soon as it is there (see pagePrelude in safety.ts)
     wc.on('dom-ready', () => void wc.executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: inSafetyWorld('return true;') }]).catch(() => undefined));
+    wc.on('dom-ready', () => this.watchPasskeys(wc));
     wc.on('before-input-event', (event, input) => {
       const action = shortcutOf(input);
       if (!action) return;
@@ -181,6 +195,32 @@ export class BrowserTab {
     wc.on('context-menu', (_e, params) => {
       if (!this.disposed) this.hooks.onContextMenu?.(this, params);
     });
+  }
+
+  /**
+   * A web page's modal passkey request shows the pane's notice, once per page load (page-scripts.ts
+   * passkeyGuardScript, which also refuses a request that would hang). The page can only raise it: the text is ours.
+   */
+  private watchPasskeys(wc: WebContents): void {
+    if (!/^https?:/i.test(wc.getURL())) return;
+    const load = this.passkeyLoad;
+    void wc.executeJavaScript(passkeyGuardScript(PASSKEY_EVENT)).catch(() => undefined);
+    void wc
+      .executeJavaScriptInIsolatedWorld(SAFETY_WORLD, [{ code: passkeyWatchScript(PASSKEY_EVENT) }])
+      .then((asked: unknown) => {
+        if (asked !== true || this.disposed || load !== this.passkeyLoad || this.passkeyShown) return;
+        this.passkeyShown = true;
+        this.passkeyNotice = true;
+        this.changed();
+      })
+      .catch(() => undefined);
+  }
+
+  /** The notice's OK: it goes for the rest of this page load. */
+  dismissPasskeyNotice(): void {
+    if (!this.passkeyNotice) return;
+    this.passkeyNotice = false;
+    this.changed();
   }
 
   /** The find bar's search on this page: a new text, or the next (previous) match of the same one; '' stops it. */
@@ -257,7 +297,7 @@ export class BrowserTab {
   state(): TabState {
     const wc = this.view.webContents;
     if (this.disposed || wc.isDestroyed()) {
-      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups, blockedPopupUrl: null, certError: null, security: 'none', zoom: 100 };
+      return { id: this.id, url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, blockedPopups: this.blockedPopups, blockedPopupUrl: null, certError: null, security: 'none', zoom: 100, passkeyNotice: false };
     }
     const url = wc.getURL();
     return {
@@ -273,6 +313,7 @@ export class BrowserTab {
       certError: this.certError ? { ...this.certError } : null,
       security: this.certError ? 'none' : pageSecurity(url),
       zoom: zoomOf(wc),
+      passkeyNotice: this.passkeyNotice,
     };
   }
 

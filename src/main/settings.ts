@@ -110,7 +110,7 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     keepCookies: describe(bool, "Keep the Browser pane's cookies and site data when the app quits."),
     downloadsDir: describe(str, 'Where downloads are saved; empty for the Downloads folder.'),
     openChatLinksInPane: describe(bool, 'Open links from the chat in the Browser pane instead of the default browser.'),
-    alwaysAllowed: describe(stringList, 'Sites the agent may use without asking (example.com, *.example.com, localhost:3000).'),
+    alwaysAllowed: describe(stringList, 'Sites the agent may use without asking (https://example.com, *.example.com, localhost:3000). An entry without a scheme covers https only (and http on localhost).'),
     sensitive: describe(stringList, 'Sites that always ask before the agent acts, beside the built-in list.'),
     exempt: describe(stringList, 'Hosts the agent may use freely, like localhost; a folder makes the files in it exempt.'),
   },
@@ -118,6 +118,7 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     environment: describe(str, "What Auto mode's safety check should know about this Mac, e.g. \"aisolutions-dev is a dev AWS account\". Your own settings.json only."),
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
     model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
+    learn: describe(bool, 'Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only.'),
   },
   webSearch: {
     provider: describe(oneOf('duckduckgo', 'brave', 'tavily', 'exa', 'searxng'), 'The web_search backend. duckduckgo needs no key.'),

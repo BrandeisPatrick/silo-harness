@@ -42,7 +42,7 @@ import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGr
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
-import { clip, latestPlan, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
+import { clip, latestPlan, shownUserCount, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
 import { generateTitle, titlePrompt } from './titles';
 import { TerminalManager } from './terminal';
 import { ArtifactStore, type ArtifactInput } from './artifacts';
@@ -60,8 +60,9 @@ import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
-import { approvalLabels, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
-import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
+import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
+import { answerText, forCheck, LearnedStore } from './agent/learned';
+import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCommand } from './guard';
@@ -77,8 +78,6 @@ export { contextLimit, essentialToolsOnly } from './context-window';
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
 
-/** What a browser_* call from a session that is not on screen gets back (the pane belongs to the session on screen). */
-export const BROWSER_BACKGROUND = 'Error: the built-in browser is only available while this session is on screen, and the user is looking at another session. Continue without the browser (use bash with curl for plain pages), or say that the user should open this session to let you browse.';
 const SUMMARY_TIMEOUT_MS = 240_000;
 /** How many times Stop hooks may send one run back to work (a hook that keeps blocking is stopped here) */
 const MAX_STOP_CONTINUES = 8;
@@ -88,7 +87,7 @@ const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'bash', 'terminal_run
 
 /**
  * What answering an approval card changes besides the pending call: a mode switch, or a rule to save for the project
- * (kind 'site': a site key for AppConfig.browser.alwaysAllowed, saved on this Mac rather than for the project).
+ * (kind 'site': a site's origin for AppConfig.browser.alwaysAllowed, saved on this Mac rather than for the project).
  */
 export interface ApprovalOutcome {
   setMode?: PermissionMode;
@@ -106,10 +105,45 @@ interface PendingApproval {
   sessionKey?: string;
   /** A browser tool's card: what its answer allows (the site, or the sign-in page) */
   browser?: BrowserApproval;
+  /** What Auto mode learns from the answer (agent/learned.ts): the tool, its target and the card's line */
+  learn: { tool: string; key: string; line: string };
 }
 
 /** Browser cards a PreToolUse hook's "allow" does not skip: money and accounts are the user's, as in bypass mode. */
 const USER_ONLY_CARDS = new Set(['purchase', 'account']);
+
+/** What an answer concerned, for what Auto mode learns: the site, the MCP server, the programs, a tool's own key. */
+function learnKey(name: string, programs: string[], browser?: BrowserApproval, sessionKey?: string): string {
+  if (browser) return browser.site.origin;
+  if (name.startsWith('mcp__')) return programs[0] ?? '';
+  if (name === 'bash' || name === 'terminal_run') return programs.join(', ');
+  return sessionKey ?? '';
+}
+
+/**
+ * What a browser action Allow on its Auto mode block lets through once: the tool, the card, the site and the card's
+ * first line. A page script also by its code: the Allow covers the script that was blocked, not another on that site.
+ */
+function browserActionKey(name: string, detail: string, b: BrowserApproval): string {
+  const code = b.card === 'eval' ? (b.check?.code ?? '') : '';
+  return actionKey(name, [b.card, b.site.origin, detail.split('\n')[0] ?? '', code].join('\u0000'));
+}
+
+/** What Auto mode's check is told about a browser card (classifier.ts): never the page's text or the model's reason. */
+function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
+  const kind = b.check?.kind === 'eval' || b.card === 'eval' ? 'page script' : b.check?.kind === 'act' || b.card === 'sensitive' ? 'act' : 'read';
+  return {
+    card: b.card,
+    kind,
+    site: b.site.display,
+    siteKey: b.site.origin,
+    ...(b.check?.url ? { url: b.check.url } : {}),
+    ...(b.note ? { note: b.note } : {}),
+    ...(b.reason ? { flag: b.reason } : {}),
+    what: detail.split('\n')[0] ?? '',
+    ...(b.check?.code !== undefined ? { code: b.check.code } : {}),
+  };
+}
 
 /** What a call stopped while it waited gets back. */
 const INTERRUPTED = 'Tool call was interrupted before it produced a result.';
@@ -190,6 +224,8 @@ export interface AgentOptions {
   hooks?: HookEngine | null;
   /** The clock for the cache bookkeeping (default Date.now; tests pass their own) */
   now?: () => number;
+  /** Where Auto mode keeps what it learns from the user's answers (default: the app's 'auto-learned' service; none in bare tests) */
+  learned?: LearnedStore | null;
 }
 
 /**
@@ -243,7 +279,7 @@ export class Agent {
   /** Per session: Auto mode's counters and pause (see AutoState) */
   private autoStates = new Map<string, AutoState>();
   /** Per session: the actions Auto mode blocked in this app session, by call id, with the key Allow lets through once */
-  private autoBlocks = new Map<string, Map<string, { block: AutoBlock; key: string }>>();
+  private autoBlocks = new Map<string, Map<string, { block: AutoBlock; key: string; learn: { tool: string; key: string; line: string } }>>();
   /** Per session: blocked actions the user allowed (actionKey); each runs once without the check */
   private autoAllowed = new Map<string, Set<string>>();
   /** Per session: notes for the model (an allowed block) waiting for the run's next model call */
@@ -271,6 +307,9 @@ export class Agent {
   private smallWindowNoticed = new Set<string>();
   /** The checkpoint that file changes are recorded on during a run (the latest user message) */
   private currentTurn: Turn | null = null;
+  /** When this run began, and the turn whose working time is being counted (its key in Session.turnTimes) */
+  private runStartedAt = 0;
+  private turnClock: { at: number; startedAt: number } | null = null;
   running = false;
   /** True while /compact runs outside a run (stop() cancels it). */
   compacting = false;
@@ -602,6 +641,8 @@ export class Agent {
     const p = this.pendingApprovals.get(id);
     if (!p) return {};
     this.pendingApprovals.delete(id);
+    // The user's own answer (a click in the window or on the phone): Auto mode learns from it
+    this.learnAnswer(p.learn, ok ? 'allow' : 'deny');
     const out: ApprovalOutcome = {};
     // A tool's own question has no wider answer, except the "for this session" one its key offers (never a project rule)
     const keep = p.custom && ok && always && !!p.sessionKey;
@@ -613,9 +654,9 @@ export class Agent {
       // field from asking again this session.
       const b = p.browser;
       if (ok && b.card === 'sensitive' && b.page) this.sessionSet(this.signInPages).add(b.page);
-      if (ok && always && b.card === 'site' && b.site.key) {
-        this.sessionSet(this.allowedSites).add(b.site.key);
-        if (scope === 'project') out.rule = { kind: 'site', values: [b.site.key] };
+      if (ok && always && b.card === 'site' && b.site.origin) {
+        this.sessionSet(this.allowedSites).add(b.site.origin);
+        if (scope === 'project') out.rule = { kind: 'site', values: [b.site.origin] };
       }
       p.resolve(ok ? { ok: true } : { ok: false, message: DENIED });
       this.emit({ type: 'approval_resolved', id, ok, scope: ok && always ? scope : 'once' });
@@ -729,13 +770,15 @@ export class Agent {
       const session = d.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
       return done('card', await this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session, probe, call?.id));
     };
+    const onceKey = opts.browser ? (CHECKED_BROWSER_CARDS.has(opts.browser.card) ? browserActionKey(name, detail, opts.browser) : null) : opts.custom ? null : actionKey(name, detail);
     // What the rules settle at once (run, refuse, a hook's allow, a blocked action the user allowed), or null when a
     // card or the safety check must decide
     const atOnce = (decision: ApprovalDecision): Promise<ApprovalResult> | null => {
       if (decision.kind === 'refuse' || decision.kind === 'allow') return settle(decision);
       if (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
-      // An action Auto mode blocked and the user then allowed runs once, without the check or a card
-      if (!opts.browser && !opts.custom && this.sessionSet(this.autoAllowed).delete(actionKey(name, detail))) return Promise.resolve(done('allowed_before', { ok: true }));
+      // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
+      // by its card, site and first line, a page script also by its code: the model's reason under it may differ on the retry)
+      if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve(done('allowed_before', { ok: true }));
       return null;
     };
     const level = (): AutoLevel => (mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
@@ -756,7 +799,8 @@ export class Agent {
         this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
         return settle(decide('guard'));
       }
-      const r = await this.autoCheck(checker, cfg, { name, detail, args: call?.args, callId: call?.id }, () => settle(decide('guard')), probe);
+      const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}) };
+      const r = await this.autoCheck(checker, cfg, action, () => settle(decide('guard')), { key: onceKey ?? actionKey(name, detail), browser: opts.browser }, probe);
       return probe ? done('check', r) : r;
     });
   }
@@ -784,18 +828,23 @@ export class Agent {
    * Auto mode's safety check on one action: allowed, it runs; blocked, the agent reads why (and the window shows the
    * quiet line). Fails closed: an error, a timeout or an answer that is not one blocks. Only when the model cannot be
    * reached before it ever answered does the session fall back to the rule guard (`fallback`) until its next run.
+   * A browser action (`on.browser`) has a third answer, ask, which shows its card (`fallback`) without counting toward
+   * the pause, and a check that fails shows the card too: it is never allowed because the check could not run. An
+   * allowed site card allows the site for the session, as the user's "for this session" does; an act on a sensitive
+   * page and page script are checked each time. `on.key` is what the user's Allow on a block lets through once.
    */
-  private async autoCheck(checker: ClassifierTarget, cfg: AppConfig, action: ClassifiedAction, fallback: () => Promise<ApprovalResult>, probe?: PermissionProbe): Promise<ApprovalResult> {
+  private async autoCheck(checker: ClassifierTarget, cfg: AppConfig, action: ClassifiedAction, fallback: () => Promise<ApprovalResult>, on: { key: string; browser?: BrowserApproval }, probe?: PermissionProbe): Promise<ApprovalResult> {
     const st = this.autoState();
     const signal = this.abortController?.signal;
+    const browser = on.browser;
     let verdict: Verdict | null = null;
     const checkAt = Date.now();
     probe?.checkStarted();
     try {
-      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action), signal);
+      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal);
       st.reached = true;
-      verdict = parseVerdict(raw);
-      probe?.checkEnded(verdict?.decision === 'allow' ? 'allow' : verdict ? 'block' : 'error');
+      verdict = parseVerdict(raw, { ask: !!browser });
+      probe?.checkEnded(verdict?.decision ?? 'error');
       if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
     } catch (err) {
       const timedOut = !signal?.aborted && ((err as { name?: string })?.name === 'TimeoutError' || Date.now() - checkAt >= CLASSIFIER_TIMEOUT_MS - 250);
@@ -812,19 +861,48 @@ export class Agent {
     if (signal?.aborted) return { ok: false, message: INTERRUPTED };
     if (verdict?.decision === 'allow') {
       st.inARow = 0;
+      if (browser?.card === 'site' && browser.site.origin) this.sessionSet(this.allowedSites).add(browser.site.origin);
       return { ok: true };
     }
-    return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON);
+    // A browser action the check left to the user, or could not decide: the card, as without the check
+    if (browser && verdict?.decision !== 'block') return fallback();
+    return this.autoBlock(action, verdict?.reason || UNAVAILABLE_REASON, on.key);
+  }
+
+  /** Where Auto mode's answers are kept: the option, else the app's service (none in bare tests). */
+  private learnedStore(): LearnedStore | null {
+    if (this.opts.learned !== undefined) return this.opts.learned;
+    return this.opts.app?.service<LearnedStore>('auto-learned') ?? null;
+  }
+
+  /** Records the user's answer, unless learning is off (Settings → Permissions → Auto mode). Only the user's clicks reach here. */
+  private learnAnswer(learn: { tool: string; key: string; line: string } | undefined, decision: 'allow' | 'deny'): void {
+    if (!learn || this.getConfig().autoMode?.learn === false) return;
+    try {
+      this.learnedStore()?.record({ ...learn, decision });
+    } catch (err) {
+      console.warn('[auto] could not record the answer:', errorMessage(err));
+    }
+  }
+
+  /** The user's earlier answers the check is given, one line each (none while learning is off). */
+  private learnedLines(cfg: AppConfig): string[] {
+    if (cfg.autoMode?.learn === false) return [];
+    try {
+      return forCheck(this.learnedStore()?.all() ?? []).map(answerText);
+    } catch {
+      return [];
+    }
   }
 
   /** Records a block, tells the window, pauses Auto mode after too many, and returns what the agent reads. */
-  private autoBlock(action: ClassifiedAction, reason: string): ApprovalResult {
+  private autoBlock(action: ClassifiedAction, reason: string, key = actionKey(action.name, action.detail)): ApprovalResult {
     const st = this.autoState();
     st.inARow++;
     st.total++;
     const id = action.callId || `block_${randomUUID()}`;
     const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
-    this.sessionMap(this.autoBlocks).set(id, { block, key: actionKey(action.name, action.detail) });
+    this.sessionMap(this.autoBlocks).set(id, { block, key, learn: { tool: action.name, key: action.browser ? action.browser.siteKey ?? action.browser.site : '', line: block.what } });
     this.emit({ type: 'auto_blocked', block: { ...block } });
     if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {
       st.paused = true;
@@ -844,6 +922,7 @@ export class Agent {
     if (rec.block.allowed) return { ok: true };
     rec.block.allowed = true;
     this.sessionSet(this.autoAllowed).add(rec.key);
+    this.learnAnswer(rec.learn, 'allow');
     // The user's Allow ends a run of blocks, as an action the check allows does
     this.autoState().inARow = 0;
     const note = allowedNote(rec.block.what);
@@ -888,6 +967,7 @@ export class Agent {
    */
   private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval, session?: { key: string; label: string }, probe?: PermissionProbe, callId?: string): Promise<ApprovalResult> {
     const id = randomUUID();
+    const learn = { tool: name, key: learnKey(name, programs, browser, session?.key), line: actionLine(name, undefined, detail) };
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
     // A browser card names its kind and site for the renderer's wording, and carries the amber note
     const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
@@ -901,13 +981,13 @@ export class Agent {
     if (custom) {
       // Allow and Deny (and the tool's own "for this session" answer): the renderer hides the buttons whose label is empty.
       return new Promise((resolve) => {
-        this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, custom: true, browser, ...(session ? { sessionKey: session.key } : {}) });
+        this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, custom: true, browser, learn, ...(session ? { sessionKey: session.key } : {}) });
         this.emit({ type: 'approval_request', id, name, detail, mode, ...(reason ? { reason } : {}), alwaysLabel: session?.label ?? '', projectLabel: '', ...extra, ...owner });
       });
     }
     const { alwaysLabel, projectLabel } = approvalLabels(name, reason, programs, browser?.card === 'site' ? browser.site : undefined);
     return new Promise((resolve) => {
-      this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, browser });
+      this.pendingApprovals.set(id, { resolve: answered(resolve), name, programs, reason, browser, learn });
       this.emit({ type: 'approval_request', id, name, detail, mode, reason: reason ?? undefined, alwaysLabel, projectLabel, ...extra, ...owner });
     });
   }
@@ -1093,6 +1173,8 @@ export class Agent {
     // any, nothing here waits, so the message is in the conversation by the time send() returns.
     const early = (!this.sessionStarted && this.hasHooks('SessionStart')) || this.hasHooks('UserPromptSubmit');
     let accepted: { ok: boolean; context: string[] } = { ok: true, context: [] };
+    this.runStartedAt = Date.now();
+    this.turnClock = null;
     if (early) {
       this.emit({ type: 'run_start' });
       await this.startSessionHooks();
@@ -1399,6 +1481,7 @@ export class Agent {
         this.emit({ type: 'error', message: providerErrorMessage(err, cfg) });
       }
     } finally {
+      this.stopTurnClock();
       this.currentTurn = null;
       this.shownArgs.clear();
       this.repairTail();
@@ -2062,11 +2145,23 @@ export class Agent {
 
   /** user_message for the message just added; `turn` is its checkpoint. */
   private emitUserMessage(text: string, images: number, origin: MessageOrigin, from?: string): void {
+    // The turn before (a message delivered during the run) has ended; this one starts (the run's first: when the run did)
+    const first = !this.turnClock;
+    this.stopTurnClock();
+    this.turnClock = { at: shownUserCount(this.session) - 1, startedAt: first ? this.runStartedAt || Date.now() : Date.now() };
     const turns = this.session.turns ?? [];
     const ev: Extract<AgentEvent, { type: 'user_message' }> = { type: 'user_message', text, images, origin };
     if (turns.length) ev.turn = turns.length - 1;
     if (from) ev.from = from;
     this.emit(ev);
+  }
+
+  /** Records how long the turn being counted worked (Session.turnTimes; the window's "Worked for 53s"). */
+  private stopTurnClock(): void {
+    const c = this.turnClock;
+    this.turnClock = null;
+    if (!c || c.at < 0) return;
+    (this.session.turnTimes ??= {})[c.at] = Math.max(0, Date.now() - c.startedAt);
   }
 
   /** Opens a checkpoint for the user message about to be pushed; file changes until the next one are recorded on it. */
@@ -2217,11 +2312,6 @@ export class Agent {
       for (const k of hidden) if (k in o) o[k] = shown![k];
       return o;
     };
-    if (name.startsWith('browser_') && !this.isForeground()) {
-      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
-      this.emit({ type: 'tool_end', id: call.id, name, result: BROWSER_BACKGROUND, ok: false, durationMs: 0 });
-      return end({ content: BROWSER_BACKGROUND }, 'failed');
-    }
     const tool = tools.find((t) => t.name === name);
     if (!tool) {
       this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });

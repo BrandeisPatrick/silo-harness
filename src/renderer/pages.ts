@@ -49,7 +49,7 @@ export interface PageHost {
 
 export interface PagesDeps {
   shell: HTMLElement;
-  /** <main class="main"> */
+  /** The chat column (.chat-col): a page takes its place under the top bar */
   main: HTMLElement;
   topbar: HTMLElement;
   /** The page opened or closed: hide or bring back the native browser view, re-render the sidebar */

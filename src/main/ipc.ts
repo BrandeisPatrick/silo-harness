@@ -6,7 +6,7 @@ import { app as electronApp, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
+import type { AppConfig, ApprovalScope, Bounds, BrowserState, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
 import type { AppHost } from './app';
 import { ARTIFACT_SCHEME } from './artifacts';
 import type { BrowserController } from './browser';
@@ -49,8 +49,10 @@ export function validateAttachments(raw: unknown): ImageAttachment[] {
 }
 
 export interface CoreIpcDeps {
-  /** The window's browser pane */
-  browser: () => BrowserController | null;
+  /** The tabs of the session in front; `create` makes them when it has none */
+  browser: (create?: boolean) => BrowserController | null;
+  /** The window's pane: its slot and visibility (for every session's tabs) and the state it shows */
+  pane: () => { setBounds(b: Bounds): void; setVisible(v: boolean): void; state(): BrowserState } | null;
 }
 
 export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
@@ -96,6 +98,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         dreaming: { ...current.dreaming, ...next.dreaming },
         browser: { ...current.browser, ...next.browser },
         webSearch: { ...current.webSearch, ...next.webSearch },
+        autoMode: { ...current.autoMode, ...next.autoMode } as AppConfig['autoMode'],
         // Named providers change through the files, the command line and providers.setModel only.
         providers: current.providers,
         mcpServers: current.mcpServers,
@@ -305,7 +308,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   ipcMain.handle('artifacts:content', (_e, id: string) => app.artifacts!.content(fgSession(), String(id)));
   ipcMain.handle('artifacts:open', async (_e, id: string) => {
     const info = artifactOf(id);
-    await deps.browser()?.navigate(info.url);
+    await deps.browser(true)?.navigate(info.url);
   });
   ipcMain.handle('artifacts:save-as', async (_e, id: string) => {
     const info = artifactOf(id);
@@ -329,13 +332,13 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   ipcMain.on('terminal:resize', (_e, id: string, cols: number, rows: number) => terminal?.resize(String(id), Number(cols), Number(rows)));
   ipcMain.handle('terminal:close', (_e, id: string) => terminal?.close(String(id)));
 
-  ipcMain.on('browser:bounds', (_e, b: Bounds) => deps.browser()?.setBounds(b));
-  ipcMain.on('browser:visible', (_e, v: boolean) => deps.browser()?.setVisible(Boolean(v)));
-  ipcMain.handle('browser:navigate', (_e, url: string) => deps.browser()?.navigate(String(url)));
+  ipcMain.on('browser:bounds', (_e, b: Bounds) => deps.pane()?.setBounds(b));
+  ipcMain.on('browser:visible', (_e, v: boolean) => deps.pane()?.setVisible(Boolean(v)));
+  ipcMain.handle('browser:navigate', (_e, url: string) => deps.browser(true)?.navigate(String(url)));
   ipcMain.handle('browser:back', () => deps.browser()?.navigate('back'));
   ipcMain.handle('browser:forward', () => deps.browser()?.navigate('forward'));
   ipcMain.handle('browser:reload', () => deps.browser()?.reload());
-  ipcMain.handle('browser:state', () => deps.browser()?.state());
+  ipcMain.handle('browser:state', () => deps.pane()?.state());
   ipcMain.handle('browser:open-external', async (_e, url?: string) => {
     const target = (typeof url === 'string' && url.trim() ? url.trim() : deps.browser()?.state().url) ?? '';
     if (!target || target === 'about:blank') return;

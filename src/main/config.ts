@@ -65,7 +65,7 @@ export function defaultConfig(): AppConfig {
     dreaming: { ...DEFAULT_DREAMING },
     providers: {},
     browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] },
-    autoMode: { environment: '', allow: [], model: '' },
+    autoMode: { environment: '', allow: [], model: '', learn: true },
   };
 }
 
@@ -244,6 +244,7 @@ export function normalizeAutoMode(raw: unknown): AutoModeConfig {
     environment: typeof r.environment === 'string' ? r.environment.trim() : '',
     allow: Array.isArray(r.allow) ? [...new Set(r.allow.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim()))] : [],
     model: typeof r.model === 'string' ? r.model.trim() : '',
+    learn: r.learn !== false,
   };
 }
 

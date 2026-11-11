@@ -49,7 +49,7 @@ const { check, done } = checker();
     check('… with its host, size and tab', l[0].host === site.host && l[0].total === 22 && l[0].received === 22 && l[0].tabId === (await dbg()).activeId, l[0]);
     await app.waitFor(`window.__oc_debug.mods.browser().safety.tray.shown`, 5000, 'the tray button');
     let tray = (await dbg()).safety.tray;
-    check('the tray button shows at the right of the browser bar, with a dot for the finished download', tray.shown && tray.dot && (await app.evaluate(`document.querySelector('.browser-bar').lastElementChild.previousElementSibling.id`)) === 'downloads-btn', tray);
+    check('the tray button shows at the right of the browser bar, last of the right-hand group, with a dot for the finished download', tray.shown && tray.dot && (await app.evaluate(`document.querySelector('.browser-bar .bar-end .bar-group').lastElementChild.id`)) === 'downloads-btn', tray);
     await userClick(ws, 'user-file');
     await waitList((l) => l.filter((d) => d.state === 'completed').length === 2, 'the second download');
     check('the same name again is saved as "report (2).txt"', JSON.stringify(files()) === JSON.stringify(['report (2).txt', 'report.txt']), files());

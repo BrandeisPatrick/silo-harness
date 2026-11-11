@@ -76,11 +76,16 @@ export const READ_ONLY_BROWSER_TOOLS: ReadonlySet<string> = new Set(['browser_na
 /** A site as approvals know it. */
 export interface Site {
   /**
-   * What approvals are remembered under: the lower-case host, with the port when it is not the scheme's default
+   * The site without its scheme: the lower-case host, with the port when it is not the scheme's default
    * (`example.com`, `www.example.com`, `localhost:3000`); `file:` and the path for a local file. Subdomains are
    * separate sites, as in Claude Code.
    */
   key: string;
+  /**
+   * What approvals are remembered under: a web site's origin, scheme, host and port (`https://example.com`,
+   * `http://localhost:3000`), so approving https never approves http; the key for a file or an artifact.
+   */
+  origin: string;
   /**
    * The site as the card names it: the host (and port); both forms of an internationalised name
    * (`xn--pple-43d.com (аpple.com)`) so a look-alike shows; a local file's path with the home folder as ~.
@@ -139,15 +144,16 @@ export function siteOf(url: string): Site | null {
   const scheme = schemeOf(u);
   if (scheme === 'file') {
     const p = decodePath(u.pathname);
-    return { key: `file:${p}`, display: tilde(p), scheme, host: '', port: '', path: p };
+    return { key: `file:${p}`, origin: `file:${p}`, display: tilde(p), scheme, host: '', port: '', path: p };
   }
   const host = u.hostname;
   if (!host) return null;
   const port = u.port;
-  if (scheme === 'artifact') return { key: `artifact:${host}${u.pathname}`, display: 'this artifact', scheme, host, port, path: u.pathname };
+  if (scheme === 'artifact') return { key: `artifact:${host}${u.pathname}`, origin: `artifact:${host}${u.pathname}`, display: 'this artifact', scheme, host, port, path: u.pathname };
   const unicode = domainToUnicode(host);
   const name = unicode && unicode !== host ? `${host} (${unicode})` : host;
-  return { key: port ? `${host}:${port}` : host, display: port ? `${name}:${port}` : name, scheme, host, port, path: u.pathname + u.search };
+  const key = port ? `${host}:${port}` : host;
+  return { key, origin: `${scheme}://${key}`, display: port ? `${name}:${port}` : name, scheme, host, port, path: u.pathname + u.search };
 }
 
 const isWeb = (site: Site): boolean => site.scheme === 'http' || site.scheme === 'https';
@@ -183,8 +189,42 @@ function matchesFolder(pattern: string, filePath: string): boolean {
   return insideFolder(filePath, decodePath(p.replace(/^~(?=$|\/)/, os.homedir())));
 }
 
-const matchesAny = (site: Site, patterns: readonly string[], subdomains: boolean): boolean =>
-  site.scheme === 'file' ? patterns.some((p) => matchesFolder(p, site.path) || p.trim() === site.key) : patterns.some((p) => matchesHost(p, site.host, site.port, subdomains));
+/** Loopback hosts, where an approval saved without a scheme still covers http (local servers keep working). */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const DEFAULT_PORTS: Record<string, string> = { http: '80', https: '443' };
+
+/** What an approval saved without a scheme covers: https, and http on a loopback host. */
+const legacyCovers = (site: Site): boolean => site.scheme === 'https' || (site.scheme === 'http' && LOOPBACK_HOSTS.has(site.host));
+
+/**
+ * Whether one approval entry (a session's, or one of "Sites the agent may always use") covers a web site. An entry
+ * with a scheme (what cards save: `https://example.com`) covers that origin only: the same scheme, the host or a
+ * `*.host` / `prefix.` pattern, and the same port (the scheme's default when it names none). An entry without a
+ * scheme (saved before approvals kept it, or typed so) covers https only, any port unless it names one; on a loopback
+ * host (localhost, 127.0.0.1, [::1]) it covers http too.
+ */
+export function approvalCovers(entry: string, site: Site): boolean {
+  if (!isWeb(site)) return false;
+  const e = String(entry ?? '').trim();
+  const m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(e);
+  if (!m) return legacyCovers(site) && matchesHost(e, site.host, site.port, false);
+  const scheme = m[1].toLowerCase();
+  if (scheme !== site.scheme) return false;
+  const h = /^(\[[^\]]*\]|[^:/?#]*)(?::(\d+))?(?:[/?#]|$)/.exec(e.slice(m[0].length).toLowerCase());
+  if (!h || !h[1]) return false;
+  const port = h[2] && h[2] !== DEFAULT_PORTS[scheme] ? h[2] : '';
+  return port === site.port && matchesHost(h[1], site.host, site.port, false);
+}
+
+/** Whether a session's approvals cover a site: its origin, or an entry without a scheme by the rule above. */
+function sessionCovers(allowed: ReadonlySet<string>, site: Site): boolean {
+  if (allowed.has(site.origin)) return true;
+  return isWeb(site) && allowed.has(site.key) && legacyCovers(site);
+}
+
+/** Whether the user's saved sites cover a site: a file by its folder or key, a web site by approvalCovers. */
+const matchesSaved = (site: Site, patterns: readonly string[]): boolean =>
+  site.scheme === 'file' ? patterns.some((p) => matchesFolder(p, site.path) || p.trim() === site.key) : patterns.some((p) => approvalCovers(p, site));
 
 const isBuiltInExempt = (site: Site): boolean => isWeb(site) && BUILT_IN_EXEMPT.some((p) => matchesHost(p, site.host, site.port, false));
 
@@ -304,7 +344,7 @@ export interface SiteDecisionInput {
   cwd: string;
   /** The user's lists from Settings → Browser */
   settings: { exempt: readonly string[]; alwaysAllowed: readonly string[]; sensitive: readonly string[] };
-  /** Site keys the user allowed for this session ("Allow example.com for this session") */
+  /** Site origins the user allowed for this session ("Allow example.com for this session"), as Site.origin */
   sessionAllowed: ReadonlySet<string>;
   /** The page shows a password field (a sign-in page off the list); the caller passes it until the first act is approved */
   pageHasPasswordField?: boolean;
@@ -330,8 +370,8 @@ export type SiteDecision = Allow | Refuse | { kind: 'ask'; card: SiteCard; site:
  * the site card, whatever the action (reading included: that is where an injection enters); on an allowed site a
  * browser_eval asks in ask and acceptEdits mode, and in auto mode when the eval guard sees the code reach for site
  * data or the network (the reason goes on the card) or the site is sensitive; an act on a sensitive site (the list,
- * the user's patterns, or a password field on the page) asks with the amber note. `alwaysAllowed` holds site keys
- * as the card saves them and the exempt patterns' forms.
+ * the user's patterns, or a password field on the page) asks with the amber note. `alwaysAllowed` holds origins
+ * as the card saves them and the exempt patterns' forms (approvalCovers).
  */
 export function siteDecision(input: SiteDecisionInput): SiteDecision {
   const { action, mode, cwd, settings, sessionAllowed } = input;
@@ -348,7 +388,7 @@ export function siteDecision(input: SiteDecisionInput): SiteDecision {
   const page = looksLikeSignInPage({ hasPasswordField: Boolean(input.pageHasPasswordField) });
   const note = listed.sensitive ? listed.note : page.sensitive ? page.note : undefined;
   const ask = (card: SiteCard, extra: { note?: string; reason?: string } = {}): SiteDecision => ({ kind: 'ask', card, site, ...(extra.note ? { note: extra.note } : {}), ...(extra.reason ? { reason: extra.reason } : {}) });
-  if (!sessionAllowed.has(site.key) && !matchesAny(site, settings.alwaysAllowed, false)) return ask('site', { note });
+  if (!sessionCovers(sessionAllowed, site) && !matchesSaved(site, settings.alwaysAllowed)) return ask('site', { note });
   if (action === 'eval') {
     if (mode !== 'auto') return ask('eval', { note });
     const reason = evalGuard(input.evalCode ?? '');
@@ -538,7 +578,7 @@ export type BrowserCard = SiteCard | 'purchase' | 'account';
  */
 export function signInPageKey(url: string): string | null {
   const site = siteOf(url);
-  return site ? `${site.key}${site.scheme === 'file' ? '' : site.path.replace(/\?.*$/, '')}` : null;
+  return site ? `${site.origin}${site.scheme === 'file' ? '' : site.path.replace(/\?.*$/, '')}` : null;
 }
 
 /** The site card's wider answers: "Allow example.com for this session", "Always allow example.com" (saved on this Mac). */

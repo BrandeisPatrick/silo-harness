@@ -122,9 +122,10 @@ export function parseUrl(text: string): Parsed<string> {
 /**
  * A site for one of Settings → Browser's lists, as the browser's policy reads them: `example.com`, `*.example.com`,
  * `localhost:3000`, `[::1]`; a pasted URL keeps its host (and port). `prefixes`: `login.` (every host that starts
- * with it) is allowed too; `folders`: a folder (`/path`, `~/path`, `file:///path`) makes the files in it count.
+ * with it) is allowed too; `folders`: a folder (`/path`, `~/path`, `file:///path`) makes the files in it count;
+ * `schemes`: a typed `http://` or `https://` is kept (`http://example.com`), since an approval covers one scheme.
  */
-export function parseSitePattern(text: string, opts: { prefixes?: boolean; folders?: boolean } = {}): Parsed<string> {
+export function parseSitePattern(text: string, opts: { prefixes?: boolean; folders?: boolean; schemes?: boolean } = {}): Parsed<string> {
   const t = String(text ?? '').trim();
   if (!t) return { ok: false, error: 'Enter a site, like example.com.' };
   if (/^(\/|~\/|~$|file:\/\/)/i.test(t)) {
@@ -132,6 +133,7 @@ export function parseSitePattern(text: string, opts: { prefixes?: boolean; folde
     const p = t.replace(/^file:\/\//i, '').replace(/(.)\/+$/, '$1');
     return /^[/~]/.test(p) ? { ok: true, value: p } : { ok: false, error: 'A folder starts with / or ~/.' };
   }
+  const scheme = opts.schemes ? (/^(https?):\/\//i.exec(t)?.[1].toLowerCase() ?? '') : '';
   let v = t.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '');
   if (/[^\x00-\x7f]/.test(v)) {
     try {
@@ -144,7 +146,7 @@ export function parseSitePattern(text: string, opts: { prefixes?: boolean; folde
   const ipv6 = /^\[[0-9a-f:.]+\](:\d{1,5})?$/;
   const host = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:\d{1,5})?$/;
   const prefix = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+$/;
-  if (ipv6.test(v) || host.test(v)) return { ok: true, value: v };
+  if (ipv6.test(v) || host.test(v)) return { ok: true, value: scheme ? `${scheme}://${v}` : v };
   if (opts.prefixes && prefix.test(v)) return { ok: true, value: v };
   return { ok: false, error: 'Enter a site like example.com, *.example.com or localhost:3000.' };
 }

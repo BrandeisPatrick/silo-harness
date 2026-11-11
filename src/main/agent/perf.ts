@@ -88,7 +88,7 @@ export interface PermissionSpan {
   /** Auto mode's check: how long, when it began, what it said, and whether it ran out of time */
   checkMs?: number;
   checkAt?: number;
-  check?: 'allow' | 'block' | 'error';
+  check?: 'allow' | 'block' | 'ask' | 'error';
   timedOut?: boolean;
 }
 
@@ -417,7 +417,7 @@ export class PermissionProbe {
   private humanMs = 0;
   private checkAt = -1;
   private checkMs: number | undefined;
-  private checkSaid: 'allow' | 'block' | 'error' | undefined;
+  private checkSaid: 'allow' | 'block' | 'ask' | 'error' | undefined;
   private timedOut = false;
   private settled = false;
 
@@ -442,10 +442,10 @@ export class PermissionProbe {
     this.checkAt = this.run.now();
   }
 
-  checkEnded(said: 'allow' | 'block' | 'error', timedOut = false): void {
+  checkEnded(said: 'allow' | 'block' | 'ask' | 'error', timedOut = false): void {
     if (this.checkAt < 0) return;
     this.checkMs = this.run.now() - this.checkAt;
-    this.checkSaid = said === 'allow' || said === 'block' ? said : 'error';
+    this.checkSaid = said === 'allow' || said === 'block' || said === 'ask' ? said : 'error';
     this.timedOut = timedOut === true;
   }
 

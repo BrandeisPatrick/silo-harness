@@ -16,8 +16,11 @@ const { startMock } = require('../test/support/mock-model.js');
 const OUT = path.resolve(process.argv[2] || path.join(__dirname, '..', 'docs', 'screenshots'));
 const js = JSON.stringify;
 
+// Each reply is held back so the whole turn takes about 53 s and its header reads "Worked for 53s", as in the README
+const STEP_MS = Number(process.env.TOOL_SHOT_STEP_MS || 7550);
+
 function scriptTurn(mock) {
-  const main = (r) => mock.state.replies.push({ ...r, when: F.isMain });
+  const main = (r) => mock.state.replies.push({ delayMs: STEP_MS, ...r, when: F.isMain });
   main({ promptTokens: 8400, toolCalls: [F.call('read_file', { path: 'src/routes.js' }), F.call('read_file', { path: 'src/products.json' }), F.call('read_file', { path: 'test/routes.test.js' })] });
   main({
     promptTokens: 9100,
@@ -84,12 +87,16 @@ async function main() {
     await app.click(`.session-item[data-id=${js(ids.main)}]`);
     await app.waitFor(`document.querySelector('.session-item.active')?.dataset.id === ${js(ids.main)}`, 10_000, 'the main session');
     // The reading column on its own: the side pane and the rail closed
-    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
+    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); const r = document.querySelector('#rail-toggle'); if (r && !r.hidden && r.getAttribute('aria-pressed') === 'true') r.click(); })()`);
 
     scriptTurn(mock);
     await app.send('A missing product should say which id it could not find. Add a test for it, fix it, and run the tests.');
-    await app.waitFor(`document.querySelector('#status-line').hidden && !document.querySelector('.session-item.active.running') && document.querySelectorAll('#messages > .tool-group').length >= 2`, 90_000, 'the turn to end');
+    await app.waitFor(`document.querySelector('#status-line').hidden && !document.querySelector('.session-item.active.running') && document.querySelectorAll('#messages > .tool-group').length >= 2`, 120_000, 'the turn to end');
     await sleep(800);
+    console.log('header:', await ev(`[...document.querySelectorAll('#messages > .turn-head')].pop()?.innerText.trim()`));
+    // The turn folded its working under "Worked for …": open it, so its tool lines show under the header
+    await ev(`(() => { const b = [...document.querySelectorAll('#messages > .turn-head button')].pop(); if (b && b.getAttribute('aria-expanded') === 'false') b.click(); })()`);
+    await sleep(300);
     const words = await ev(`[...document.querySelectorAll('#messages > .tool-group')].map((g) => g.querySelector(':scope > summary').innerText.replace(/\\s+/g, ' ').trim())`);
     console.log('lines:', words.join(' | '));
 

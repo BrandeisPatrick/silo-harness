@@ -1,17 +1,11 @@
 /* Styles for the mod host: the rail, mod tabs, the composer strip, backgrounds. Tokens come from styles.css. */
 
-/* ---------- Top bar: icon-only buttons (rail, Terminal, Diff, Browser, ⋯) ---------- */
+/* ---------- The corner's icon-only buttons (details, ⋯, the side pane), pressed while what they open shows ---------- */
 .top-btn { position: relative; color: var(--text-400); }
 .top-btn > span:first-child { display: inline-flex; }
-.top-btn.active, .top-btn[aria-pressed="true"] { background: var(--bg-300); color: var(--text-200); }
+.top-btn.active, .top-btn[aria-pressed="true"] { background: var(--bg-300); color: var(--text-100); }
 .top-btn.active:hover, .top-btn[aria-pressed="true"]:hover { background: var(--bg-400); }
 .top-btn[aria-expanded="true"] { background: var(--hover); color: var(--text-100); }
-.top-btn .count-badge {
-  position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 4px; margin: 0;
-  background: var(--text-200); color: var(--bg-100); font-size: var(--fs-micro); line-height: var(--lh-micro);
-  box-shadow: 0 0 0 1.5px var(--bg-100); pointer-events: none;
-}
-.top-btn .busy-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 1.5px var(--bg-100); pointer-events: none; }
 
 /* ---------- The rail: sections between the chat and the side pane ---------- */
 .mod-rail {
@@ -60,21 +54,7 @@
 .mod-failed .link-btn { font-size: var(--fs-small); line-height: var(--lh-small); }
 .mod-icon-img { display: inline-block; flex: none; background: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 
-/* ---------- Mod tabs in the side pane ---------- */
-/* The strip's tabs, built-in and mod alike: fitPaneTabs (mods-host.ts) shortens the titles (an inline max-width)
-   or makes a tab icon-only when the row is too narrow. An icon-only tab keeps its title for screen readers. */
-.pane-tab { position: relative; min-width: 0; }
-.pane-tab .icon, .pane-tab .mod-icon-img { flex: none; }
-.pane-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mod-pane-tab .pane-tab-label { max-width: 160px; }
-.pane-tab.icon-only { padding: 0 8px; }
-.pane-tab.icon-only .pane-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-/* A mod tab's ×: takes it out of the strip (the ⋯ menu shows it again). Quiet until the tab is hovered or in front;
-   an icon-only tab in the back has none, so the row's fitting stays tight. */
-.pane-tab-close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; margin: 0 -4px 0 -2px; border-radius: 4px; color: var(--text-400); opacity: 0; transition: opacity 0.1s, background-color 0.1s, color 0.1s; }
-.mod-pane-tab:hover .pane-tab-close, .mod-pane-tab.active .pane-tab-close, .mod-pane-tab:focus-visible .pane-tab-close { opacity: 1; }
-.pane-tab-close:hover { background: var(--hover); color: var(--text-100); }
-.mod-pane-tab.icon-only:not(.active) .pane-tab-close { display: none; }
+/* ---------- Mod panes in the side pane (their tabs are the strip's, styled in styles.css) ---------- */
 .mod-tab-panel { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .mod-tab-panel > .mod-frame { flex: 1; min-height: 0; height: 100%; }
 .mod-tab-panel > .mod-frame.mod-frame-next { bottom: 0; height: 100%; }

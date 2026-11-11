@@ -16,7 +16,7 @@ const t = (label, cond, detail) => {
   check(label, cond, detail);
 };
 
-const { siteOf, isExempt, BUILT_IN_EXEMPT, isSensitive, looksLikeSignInPage, SENSITIVE_PATTERNS, navigationRule, siteDecision, evalGuard, clickRule, typeRule, keyRule, typesACharacter, CREDENTIAL_REFUSAL, READ_ONLY_BROWSER_TOOLS, actionOf, siteCardLabels, actionLine, signInPageKey } = policy;
+const { siteOf, isExempt, BUILT_IN_EXEMPT, isSensitive, looksLikeSignInPage, SENSITIVE_PATTERNS, navigationRule, siteDecision, evalGuard, clickRule, typeRule, keyRule, typesACharacter, CREDENTIAL_REFUSAL, READ_ONLY_BROWSER_TOOLS, actionOf, siteCardLabels, actionLine, signInPageKey, approvalCovers } = policy;
 const home = os.homedir();
 const cwd = '/Users/ada/Projects/site';
 
@@ -229,7 +229,7 @@ for (const mode of ['ask', 'acceptEdits', 'auto']) {
 }
 t('8: the approval is by key: another port or a subdomain is another site', decide('https://example.com:8443/', 'read', 'ask', { sessionAllowed: allowed }).kind === 'ask' && decide('https://www.example.com/', 'read', 'ask', { sessionAllowed: allowed }).kind === 'ask');
 const always = (list) => ({ settings: { ...settings, alwaysAllowed: list } });
-t('8: always-allowed patterns: *.host covers the subdomains, host:port that port', decide('https://api.example.org/', 'read', 'ask', always(['*.example.org'])).kind === 'allow' && decide('https://example.org/', 'read', 'ask', always(['*.example.org'])).kind === 'ask' && decide('http://example.org:8080/', 'read', 'ask', always(['example.org:8080'])).kind === 'allow' && decide('http://example.org:9090/', 'read', 'ask', always(['example.org:8080'])).kind === 'ask');
+t('8: always-allowed patterns: *.host covers the subdomains, host:port that port', decide('https://api.example.org/', 'read', 'ask', always(['*.example.org'])).kind === 'allow' && decide('https://example.org/', 'read', 'ask', always(['*.example.org'])).kind === 'ask' && decide('https://example.org:8080/', 'read', 'ask', always(['example.org:8080'])).kind === 'allow' && decide('https://example.org:9090/', 'read', 'ask', always(['example.org:8080'])).kind === 'ask');
 for (const mode of ['ask', 'acceptEdits']) {
   const r = decide('https://example.com/', 'eval', mode, { sessionAllowed: allowed, evalCode: 'document.title' });
   t(`8: ${mode}: eval on an allowed site asks with the eval card, harmless code or not`, r.kind === 'ask' && r.card === 'eval' && r.reason === undefined && r.note === undefined, r);
@@ -282,8 +282,26 @@ const long = actionLine('browser_click', { text: `Accept ${'terms '.repeat(40)}`
 t('9: long texts are clipped to 80 characters', long.length < 110 && long.includes('…') && long.endsWith(' on example.com'), long);
 t('9: a file page is named by its path', actionLine('browser_navigate', { url: `file://${home}/notes/a.html` }, siteOf(`file://${home}/notes/a.html`)) === 'Open ~/notes/a.html');
 t('9: newlines in a text collapse into one line', actionLine('browser_click', { text: 'Sign\n  in' }, ex) === 'Click "Sign in" on example.com');
-t('9: a sign-in page is remembered by site and path, the query left out', signInPageKey('https://example.com/login?next=/a') === 'example.com/login' && signInPageKey('https://example.com/login?next=/b') === 'example.com/login' && signInPageKey('https://example.com/signup') === 'example.com/signup' && signInPageKey('http://shop.example:8080/pay#x') === 'shop.example:8080/pay');
-t('9: … another subdomain is another page; no site, no key', signInPageKey('https://www.example.com/login') === 'www.example.com/login' && signInPageKey('about:blank') === null && signInPageKey('file:///Users/ada/a.html') === 'file:/Users/ada/a.html');
+t('9: a sign-in page is remembered by origin and path, the query left out', signInPageKey('https://example.com/login?next=/a') === 'https://example.com/login' && signInPageKey('https://example.com/login?next=/b') === 'https://example.com/login' && signInPageKey('https://example.com/signup') === 'https://example.com/signup' && signInPageKey('http://shop.example:8080/pay#x') === 'http://shop.example:8080/pay');
+t('9: … another subdomain is another page; no site, no key', signInPageKey('https://www.example.com/login') === 'https://www.example.com/login' && signInPageKey('about:blank') === null && signInPageKey('file:///Users/ada/a.html') === 'file:/Users/ada/a.html');
+t('9: … and the http page is not the https one', signInPageKey('http://example.com/login') !== signInPageKey('https://example.com/login'));
+
+// ---------- 10. An approval covers the scheme it was given on ----------
+t('10: a web site has an origin: scheme, host and port', siteOf('https://Example.com:443/a').origin === 'https://example.com' && siteOf('http://example.com:8080/').origin === 'http://example.com:8080' && siteOf('http://[::1]:3000/').origin === 'http://[::1]:3000' && siteOf('file:///Users/ada/a.html').origin === 'file:/Users/ada/a.html');
+const sessionOf = (...keys) => ({ sessionAllowed: new Set(keys) });
+t('10: an https approval for the session does not cover http', decide('https://example.com/', 'read', 'ask', sessionOf('https://example.com')).kind === 'allow' && decide('http://example.com/', 'read', 'ask', sessionOf('https://example.com')).kind === 'ask');
+t('10: an http approval for the session does not cover https', decide('http://example.com/', 'read', 'ask', sessionOf('http://example.com')).kind === 'allow' && decide('https://example.com/', 'read', 'ask', sessionOf('http://example.com')).kind === 'ask');
+t('10: a session approval does not cover another port', decide('https://example.com:8443/', 'read', 'ask', sessionOf('https://example.com')).kind === 'ask' && decide('https://example.com/', 'read', 'ask', sessionOf('https://example.com:8443')).kind === 'ask');
+t('10: a saved https site does not cover http, nor another port', decide('https://example.com/x', 'act', 'ask', always(['https://example.com'])).kind === 'allow' && decide('http://example.com/x', 'act', 'ask', always(['https://example.com'])).kind === 'ask' && decide('https://example.com:8443/', 'read', 'ask', always(['https://example.com'])).kind === 'ask');
+t('10: a saved http site does not cover https', decide('http://example.com/', 'read', 'ask', always(['http://example.com'])).kind === 'allow' && decide('https://example.com/', 'read', 'ask', always(['http://example.com'])).kind === 'ask');
+t('10: a saved site with a port covers that port only; the default port written out is the default', decide('https://example.com:8443/', 'read', 'ask', always(['https://example.com:8443'])).kind === 'allow' && decide('https://example.com/', 'read', 'ask', always(['https://example.com:8443'])).kind === 'ask' && decide('https://example.com/', 'read', 'ask', always(['https://example.com:443'])).kind === 'allow');
+t('10: a saved pattern with a scheme keeps it', decide('https://api.example.org/', 'read', 'ask', always(['https://*.example.org'])).kind === 'allow' && decide('http://api.example.org/', 'read', 'ask', always(['https://*.example.org'])).kind === 'ask');
+t('10: an old entry without a scheme covers https only', decide('https://example.com/', 'read', 'ask', always(['example.com'])).kind === 'allow' && decide('http://example.com/', 'read', 'ask', always(['example.com'])).kind === 'ask' && decide('https://example.com/', 'read', 'ask', sessionOf('example.com')).kind === 'allow' && decide('http://example.com/', 'read', 'ask', sessionOf('example.com')).kind === 'ask');
+const lo = (u) => siteOf(u);
+t('10: … except on a loopback host, where it covers http too', ['http://localhost:3000/', 'http://127.0.0.1:3000/', 'http://[::1]:3000/'].every((u) => approvalCovers(lo(u).key, lo(u)) && approvalCovers(lo(u).key.replace(/:3000$/, ''), lo(u))) && approvalCovers('localhost', lo('https://localhost/')));
+t('10: … and not on a host that only looks local', !approvalCovers('localhost.example.com', lo('http://localhost.example.com/')) && !approvalCovers('127.0.0.2', lo('http://127.0.0.2/')) && !approvalCovers('dev.localhost', lo('http://dev.localhost/')));
+t('10: an entry with a scheme covers that scheme only, on loopback too', approvalCovers('https://localhost:3000', lo('https://localhost:3000/')) && !approvalCovers('https://localhost:3000', lo('http://localhost:3000/')) && !approvalCovers('http://localhost:3000', lo('https://localhost:3000/')));
+t('10: nothing covers a page that is not http or https', !approvalCovers('example.com', lo('ftp://example.com/')) && !approvalCovers('ftp://example.com', lo('ftp://example.com/')));
 
 console.log(failures ? `\n${failures} of ${checks} checks FAILED` : `\nALL OK (${checks} checks)`);
 process.exit(failures ? 1 : 0);

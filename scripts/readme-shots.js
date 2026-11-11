@@ -545,8 +545,12 @@ const isLoadTest = (p) => firstUser(p).includes('Load-test the new rate limiter'
 const isMain = (p) => !isLoadTest(p);
 
 
+// Each reply of the scenes below is held back a few seconds, so the turn's header reads like a real run ("Worked for
+// 20s") rather than "Worked for 0s".
+const STEP_MS = 3000;
+
 function scriptHero(mock) {
-  const main = (r) => mock.state.replies.push({ ...r, when: isMain });
+  const main = (r) => mock.state.replies.push({ delayMs: STEP_MS, ...r, when: isMain });
   const tasks = (...status) =>
     call('update_tasks', {
       tasks: [
@@ -581,7 +585,7 @@ function scriptHero(mock) {
 }
 
 function scriptImages(mock) {
-  const main = (r) => mock.state.replies.push({ ...r, when: isMain });
+  const main = (r) => mock.state.replies.push({ delayMs: STEP_MS, ...r, when: isMain });
   main({ promptTokens: 12400, toolCalls: [call('mcp__grafana__render_panel', { dashboard: 'atlas-api', panel: 'Requests per minute', from: '2026-11-05T14:00Z', to: '2026-11-05T15:00Z' })] });
   main({ promptTokens: 13600, toolCalls: [call('bash', { command: 'node scripts/replay.js reports/traffic-2026-11-05.ndjson reports/rpm.svg' })] });
   main({ promptTokens: 14100, toolCalls: [call('show_image', { path: 'reports/rpm.svg', caption: 'Replay of Nov 5, 14:00–15:00 UTC' })] });
@@ -789,7 +793,7 @@ async function main() {
     };
     const box = (sel) => ev(`(() => { const r = document.querySelector(${js(sel)}).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
     const paneOpen = async (open) => {
-      await ev(`(() => { const hidden = document.querySelector('.shell').classList.contains('pane-hidden'); if (${open} && hidden) document.querySelector('#browser-toggle').click(); if (!${open} && !hidden) document.querySelector('#pane-close').click(); })()`);
+      await ev(`(() => { const hidden = document.querySelector('.shell').classList.contains('pane-hidden'); if (${open} === hidden) document.querySelector('#pane-toggle').click(); })()`);
       await sleep(400);
     };
     // Scrolled to the end, the top edge of the transcript can cut through a line of text or a box. Scroll back just
@@ -875,7 +879,9 @@ async function main() {
     // titles shorten at this width, as they do in the app)
     const RAIL_W = 300;
     const PANE_W = 480;
-    await viewport(1600, 980);
+    // Tall enough for the Outputs panel's two files under its heading (at 980 the picture ended on the heading)
+    const MODS_H = 1080;
+    await viewport(1600, MODS_H);
     await ev(`document.querySelector('.rail-section[data-view="plan/main"] .rail-head-btn').click()`);
     await paneOpen(true);
     const dragPane = async (width) => {
@@ -907,7 +913,7 @@ async function main() {
       const pane = await box('#side-pane');
       const x = Math.floor(rail.x);
       const end = await ev(`document.querySelector('.rail-section[data-view="outputs/main"]').getBoundingClientRect().bottom`);
-      await shot('mods', { x, y: 0, width: Math.ceil(pane.x + pane.width - x), height: Math.min(980, Math.ceil(end + 1)) });
+      await shot('mods', { x, y: 0, width: Math.ceil(pane.x + pane.width - x), height: Math.min(MODS_H, Math.ceil(end + 1)) });
     }
     await paneOpen(false);
     await ev(`document.querySelector('.rail-section[data-view="plan/main"] .rail-head-btn').click()`);
@@ -918,7 +924,10 @@ async function main() {
     await app.send("Pull yesterday's traffic panel from Grafana, then replay that hour through the limiter and chart requests per minute, before and after.");
     await mainIdle();
     await app.waitFor(`[...document.querySelectorAll('.reply-image img, .tool-thumb')].length >= 2 && [...document.querySelectorAll('.reply-image img, .tool-thumb')].every((i) => i.complete && i.naturalWidth > 0)`, 15_000, 'the images');
-    // The screenshot's row opens to show it; fold it back to its summary line, where the thumbnail stays.
+    // The turn folds its working under "Worked for …" once it has its answer: open it, so the tool rows and their
+    // thumbnails show. The screenshot's row opens to show it; fold it back to its summary line, where the thumbnail stays.
+    await ev(`(() => { const b = [...document.querySelectorAll('#messages > .turn-head button')].pop(); if (b && b.getAttribute('aria-expanded') === 'false') b.click(); })()`);
+    await sleep(300);
     await ev(`(() => { const row = [...document.querySelectorAll('.tool[data-tool="mcp__grafana__render_panel"]')].pop(); if (row && row.open) row.querySelector('summary').click(); })()`);
     await paneOpen(false);
     await sleep(800);

@@ -1,7 +1,11 @@
 // The actions Auto mode's safety check blocked in this app session, for the quiet line's Allow in the chat, the phone
 // and Settings → Permissions → Recently blocked. Kept in memory: a block from before the app started cannot be allowed.
+// Also what Auto mode learned from the user's answers (agent/learned.ts), kept in <userData>/auto-learned.json, for
+// the agents (the 'auto-learned' service) and Settings → Permissions → Auto mode (auto.learned, auto.forget).
 
+import path from 'node:path';
 import type { AutoBlock, RecentBlock } from '../shared/auto-mode';
+import { LearnedStore } from './agent/learned';
 import type { App } from './app';
 import type { AutoBlocksService } from './services';
 
@@ -39,5 +43,13 @@ export function setupAutoBlocks(app: App): AutoBlocksService {
   app.provide('auto-blocks', service);
   app.rpc.handle('auto.blocked', (sessionId?: string) => service.list(typeof sessionId === 'string' && sessionId ? sessionId : undefined));
   app.rpc.handle('auto.allow', (sessionId, id) => service.allow(sessionId, id));
+  const learned = new LearnedStore(path.join(app.userData, 'auto-learned.json'));
+  app.provide('auto-learned', learned);
+  app.rpc.handle('auto.learned', () => learned.all());
+  app.rpc.handle('auto.forget', (id?: unknown) => {
+    if (typeof id === 'string' && id) learned.remove(id);
+    else learned.clear();
+    return learned.all();
+  });
   return service;
 }

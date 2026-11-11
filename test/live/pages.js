@@ -291,10 +291,11 @@ async function frameEval(app, part, expression) {
     // ---------- The Scheduled mod tab: New opens the app's form ----------
     await app.click(`.session-item[data-id="${onScreen}"]`);
     await sleep(200);
-    await app.evaluate(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#browser-toggle').click(); })()`);
+    await app.evaluate(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); })()`);
     const tab = await app.waitFor(`Boolean(document.querySelector('.mod-pane-tab[data-view="scheduled/main"]'))`, 15_000, 'the Scheduled tab').catch(() => false);
     if (tab) {
-      await app.click('.mod-pane-tab[data-view="scheduled/main"]');
+      // Opened as the ⋯ menu or harness.ui.open would: its tab joins the strip, in front
+      await app.evaluate(`window.__oc_debug.mods.open('scheduled/main')`);
       await sleep(1500);
       const clicked = await frameEval(app, 'scheduled', `(() => { const b = document.getElementById('new'); if (!b || b.hidden) return 'no button'; b.click(); return 'ok'; })()`);
       await app.waitFor(`!!document.querySelector('#task-dialog[open]')`, 5000, 'the form').catch(() => {});
@@ -316,7 +317,7 @@ async function frameEval(app, part, expression) {
       await sleep(400);
       check('a mod asking for Settings → Dreaming (an old section) gets the Dreaming page', old === 'ok' && (await pages()).route?.page === 'dreaming' && !(await app.evaluate(`document.querySelector('#settings').open`)), old);
       await app.click(`.session-item[data-id="${onScreen}"]`);
-      await app.click('#pane-tab-browser');
+      await app.click('.browser-tab');
     } else check('the Scheduled mod tab is there', false);
 
     // ---------- Dreaming ----------

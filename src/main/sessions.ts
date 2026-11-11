@@ -65,6 +65,12 @@ export interface Session {
   toolGroups?: string[];
   /** Set on a dream's session: the dream, and how many of its proposals wait for the user (see dreaming/) */
   dream?: { id: string; waiting?: number };
+  /**
+   * How long each turn worked, in ms, for the "Worked for 53s" line over its process (the window only; nothing of it
+   * reaches a model). Keyed by the place of the turn's user message among the messages the transcript shows as user
+   * messages (0 = the first, compactions' folded messages included), which compaction and fork leave as they are.
+   */
+  turnTimes?: Record<string, number>;
 }
 
 /** A checkpoint: where a user message sits in `messages` and what files looked like when the agent first touched them after it. */
@@ -155,6 +161,7 @@ export function rewindSession(s: Session, cwd: string, turnIndex: number, store?
   if (store) store.truncate(s, turn.at);
   else s.messages.splice(turn.at);
   s.turns = turns.slice(0, turnIndex);
+  pruneTurnTimes(s);
   s.tasks = turn.tasks?.length ? structuredClone(turn.tasks) : undefined;
   if (s.lastPrompt && s.lastPrompt.at > s.messages.length) delete s.lastPrompt;
   return { text: turn.text, restored: restored.sort(), deleted: deleted.sort(), skipped: [...skipped].map(rel).sort() };
@@ -257,6 +264,13 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   const turnByAt = new Map<number, number>();
   (s.turns ?? []).forEach((t, i) => turnByAt.set(t.at, i));
   appendTranscript(s, s.messages, items, turnByAt, opts.running === true, shown);
+  // Each user message carries how long its turn worked, when that was recorded
+  let n = 0;
+  for (const it of items) {
+    if (it.role !== 'user') continue;
+    const ms = s.turnTimes?.[n++];
+    if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) it.worked = ms;
+  }
   return items;
 }
 
@@ -285,15 +299,38 @@ export function pairToolResults(messages: Msg[]): Map<StoredToolCall, Extract<Ms
   return out;
 }
 
+/** What a user message shows as in the transcript, or null for one the app put there for the model alone. */
+function shownUserText(m: Msg): string | null {
+  if (m.role !== 'user' || isCompactPreamble(m)) return null;
+  const text = displayText(m.content);
+  if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX) || text.startsWith(CONTEXT_NOTE_PREFIX)) return null;
+  return text;
+}
+
+/** How many user messages the transcript shows (compactions' folded ones included): the key of the next turn's time. */
+export function shownUserCount(s: Session): number {
+  let n = 0;
+  for (const c of s.compactions ?? []) for (const m of c.folded) if (shownUserText(m) !== null) n++;
+  for (const m of s.messages) if (shownUserText(m) !== null) n++;
+  return n;
+}
+
+/** Drops the times of turns that are gone (a rewind or a repair cut the conversation). */
+export function pruneTurnTimes(s: Session): void {
+  if (!s.turnTimes) return;
+  const n = shownUserCount(s);
+  for (const k of Object.keys(s.turnTimes)) if (!(Number(k) < n)) delete s.turnTimes[k];
+  if (!Object.keys(s.turnTimes).length) delete s.turnTimes;
+}
+
 function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], turnByAt?: Map<number, number>, inFlight = false, shown?: Map<string, ImageInfo>): void {
   const paired = pairToolResults(messages);
   const results = new Map<StoredToolCall, string>();
   for (const [call, m] of paired) results.set(call, typeof m.content === 'string' ? m.content : String(m.content));
   messages.forEach((m, index) => {
     if (m.role === 'user') {
-      if (isCompactPreamble(m)) return;
-      const text = displayText(m.content);
-      if (text.startsWith('[Screenshot returned by') || text.startsWith('You returned an empty response.') || text.startsWith(HOOK_NOTE_PREFIX) || text.startsWith(AUTO_NOTE_PREFIX) || text.startsWith(CONTEXT_NOTE_PREFIX)) return;
+      const text = shownUserText(m);
+      if (text === null) return;
       const images = imageUrls(m.content);
       const mentions = mentionedPaths(rawText(m.content));
       const item: Extract<TranscriptItem, { role: 'user' }> = { role: 'user', text };
@@ -514,6 +551,7 @@ export class SessionStore {
       turns: src.turns ? structuredClone(src.turns) : undefined,
       tasks: src.tasks ? structuredClone(src.tasks) : undefined,
       toolGroups: src.toolGroups ? [...src.toolGroups] : undefined,
+      turnTimes: src.turnTimes ? { ...src.turnTimes } : undefined,
       seedLength: src.messages.length,
     };
     this.sessions.set(s.id, s);

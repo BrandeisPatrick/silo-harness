@@ -217,8 +217,8 @@ function fakeBrowser(page) {
   r = await step('browser_read_page', {}, [ALWAYS]);
   check('2: a site allowed for another session asks again in this one', r.cards.length === 1 && r.card.browser.site === 'example.com');
   check('2: answered "Always": the call ran, resolved with scope project', /^<page_content site="[^"]+">URL:/.test(r.result ?? '') && r.resolved[0].scope === 'project', r.resolved);
-  check('2: … config.browser.alwaysAllowed holds the site key', JSON.stringify(app.config().browser.alwaysAllowed) === '["example.com"]', app.config().browser);
-  check('2: … saved to config.json, and not as a project rule', saved.length > 0 && saved.at(-1).browser.alwaysAllowed.includes('example.com') && !Object.keys(app.config().allowRules || {}).length, saved.at(-1)?.allowRules);
+  check('2: … config.browser.alwaysAllowed holds the site origin', JSON.stringify(app.config().browser.alwaysAllowed) === '["https://example.com"]', app.config().browser);
+  check('2: … saved to config.json, and not as a project rule', saved.length > 0 && saved.at(-1).browser.alwaysAllowed.includes('https://example.com') && !Object.keys(app.config().allowRules || {}).length, saved.at(-1)?.allowRules);
   r = await step('browser_find', { query: 'x' });
   check('2: the same run goes on without a card', r.cards.length === 0);
   sid = rt.create({ cwd: project, foreground: true }).id;
@@ -228,7 +228,7 @@ function fakeBrowser(page) {
   // A second "Always" adds to the list without repeating it
   page.url = 'https://docs.example.org/';
   r = await step('browser_read_page', {}, [ALWAYS]);
-  check('2: a second site joins the list', JSON.stringify(app.config().browser.alwaysAllowed) === '["example.com","docs.example.org"]', app.config().browser.alwaysAllowed);
+  check('2: a second site joins the list', JSON.stringify(app.config().browser.alwaysAllowed) === '["https://example.com","https://docs.example.org"]', app.config().browser.alwaysAllowed);
 
   // ---------- 3. The model's reason, navigations, local files, refused schemes ----------
   const why = 'To read the release notes the user asked about.';

@@ -23,8 +23,14 @@ function startMock() {
       if (state.apiKey && req.url.startsWith('/v1/') && !req.url.startsWith('/v1/messages') && req.headers.authorization !== `Bearer ${state.apiKey}`) {
         return json(401, { error: { message: 'Invalid API key (mock)', type: 'authentication_error' } });
       }
-      // The models list most OpenAI-compatible services have (GET /v1/models)
-      if (req.url === '/v1/models' && req.method === 'GET') return json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+      // The models list most OpenAI-compatible services have (GET /v1/models); `modelsDelayMs` holds it back and
+      // `modelsStatus` fails it with that HTTP status
+      if (req.url === '/v1/models' && req.method === 'GET') {
+        return setTimeout(() => {
+          if (state.modelsStatus) return json(state.modelsStatus, { error: { message: `mock error ${state.modelsStatus}` } });
+          json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+        }, state.modelsDelayMs ?? 0);
+      }
       if (req.url === '/api/show') return json(200, { capabilities: ['completion', 'tools'] });
       if (req.url.startsWith('/v1/messages')) return anthropic(state, payload, res, json);
       // A gateway that refuses prompt-cache fields it does not know (`rejectCacheFields`), as some do
@@ -42,10 +48,11 @@ function startMock() {
       // requests never take a `nonStream` reply.
       if (!payload.stream && (req.url === '/api/chat' || req.url === '/v1/chat/completions')) {
         const at = state.replies.findIndex((r) => r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
-        // `classifierDefault` ({ decision, reason }): the standing answer of Auto mode's safety check when no reply
-        // for it is queued (the screenshot scripts, where every check should pass)
-        if (at < 0 && state.classifierDefault && isClassifierRequest(payload)) {
-          const d = state.classifierDefault;
+        // `classifierDefault` ({ decision, reason }, decision 'allow', 'block' or, for a browser action, 'ask'; or a
+        // function of the request that returns one, or null for no standing answer): the answer of Auto mode's safety
+        // check when no reply for it is queued (the screenshot scripts, where every check should pass)
+        const d = at < 0 && isClassifierRequest(payload) ? standingVerdict(state, payload) : null;
+        if (d) {
           const content = JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' });
           return req.url === '/api/chat'
             ? json(200, { model: payload.model, message: { role: 'assistant', content }, done: true, prompt_eval_count: 300, eval_count: 20 })
@@ -156,8 +163,8 @@ function anthropic(state, payload, res, json) {
   }
   const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(seen(payload))));
   let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;
-  if (!reply && !stream && state.classifierDefault && isClassifierRequest(payload)) {
-    const d = state.classifierDefault;
+  const d = !reply && !stream && isClassifierRequest(payload) ? standingVerdict(state, payload) : null;
+  if (d) {
     reply = { content: JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' }) };
   }
   reply = reply ?? { content: stream ? 'Done.' : state.summary };
@@ -243,6 +250,12 @@ function askUserReply(questions, extra = {}) {
 /** Marks Auto mode's safety-check requests (src/main/agent/classifier.ts CLASSIFIER_MARK). */
 const CLASSIFIER_MARK = 'You are the safety check of Auto mode in Silo Harness';
 
+/** state.classifierDefault for this check request: the object, or what the function returns for the request. */
+function standingVerdict(state, payload) {
+  const d = state.classifierDefault;
+  return typeof d === 'function' ? d(payload) ?? null : d ?? null;
+}
+
 /** True for a request of Auto mode's safety check (its system message). */
 function isClassifierRequest(payload) {
   // Anthropic's native requests carry the instructions as system blocks
@@ -252,7 +265,7 @@ function isClassifierRequest(payload) {
 }
 
 /**
- * A scripted answer of Auto mode's safety check: decision 'allow' or 'block' with its reason, as one line of JSON.
+ * A scripted answer of Auto mode's safety check: decision 'allow', 'block' or (a browser action) 'ask' with its reason, as one line of JSON.
  * `extra` adds fields: `when` (and-ed with being a check request), `content` (a raw answer: garbage, say), `status`
  * (fail with that HTTP status), `delayMs`. Push it onto `state.replies` like any other.
  */

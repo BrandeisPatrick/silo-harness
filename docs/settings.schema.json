@@ -254,7 +254,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Sites the agent may use without asking (example.com, *.example.com, localhost:3000)."
+          "description": "Sites the agent may use without asking (https://example.com, *.example.com, localhost:3000). An entry without a scheme covers https only (and http on localhost)."
         },
         "sensitive": {
           "type": "array",
@@ -293,6 +293,10 @@
         "model": {
           "type": "string",
           "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: the session's own model. Your own settings.json only."
+        },
+        "learn": {
+          "type": "boolean",
+          "description": "Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only."
         }
       }
     },

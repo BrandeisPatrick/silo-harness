@@ -33,7 +33,8 @@ const GROUPS = `[...document.querySelectorAll('#messages > .tool-group')].map((g
   live: g.classList.contains('live'),
 }))`;
 /** What the conversation is made of, top level: one letter per thing (u user, a reply, g group, t row, d decided approval line, c card) */
-const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden).map((e) => e.matches('.msg.user') ? 'u' : e.matches('.msg.assistant') ? 'a' : e.matches('.tool-group') ? 'g' : e.matches('.tool') ? 't' : e.matches('.approval.done') ? 'd' : e.matches('.approval') ? 'c' : e.matches('.compaction') ? '=' : e.matches('.msg.system') ? 's' : e.matches('.chat-cards') ? 'k' : '?').join('')`;
+// (The "Worked for …" header over a turn is checked in chat-fold.js and left out here.)
+const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden && !e.matches('.turn-head')).map((e) => e.matches('.msg.user') ? 'u' : e.matches('.msg.assistant') ? 'a' : e.matches('.tool-group') ? 'g' : e.matches('.tool') ? 't' : e.matches('.approval.done') ? 'd' : e.matches('.approval') ? 'c' : e.matches('.compaction') ? '=' : e.matches('.msg.system') ? 's' : e.matches('.chat-cards') ? 'k' : '?').join('')`;
 
 (async () => {
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-quiet-'));
@@ -58,7 +59,7 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
     await theme('light');
     // The reading column on its own, as a user reading a long session would have it
     await app.waitFor(`window.__oc_debug.mods.views().filter((v) => v.hello).length >= 5`, 20_000, 'the rail to start').catch(() => {});
-    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-close');
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
     await app.evaluate(`(() => { const b = document.querySelector('#rail-toggle'); if (b && !b.hidden && b.getAttribute('aria-pressed') === 'true') b.click(); })()`);
 
     // ---------- Turn 1: reads, edits, a failing and a passing command, a reply, a search and a listing ----------
@@ -77,12 +78,14 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
     await app.send('The cart total ignores quantities. Fix it and run the tests.');
 
     // While it runs: one live line that reads like the call in flight
-    const live = await app.waitFor(`(() => { const g = document.querySelector('#messages > .tool-group.live'); const v = g?.querySelector('.group-verb').textContent; const a = g?.querySelector('.group-arg').textContent ?? ''; return v === 'Bash' && /sleep 2\\.5/.test(a) ? { v, a, spin: Boolean(g.querySelector(':scope > summary > .group-icon.spin')), open: g.open } : null; })()`, 30_000, 'the live line on the passing command');
-    check('while the turn runs the line reads like the call in flight, with a spinner', live && live.spin, live);
+    const live = await app.waitFor(`(() => { const g = document.querySelector('#messages > .tool-group.live'); const v = g?.querySelector('.group-verb').textContent; const a = g?.querySelector('.group-arg').textContent ?? ''; return v === 'Bash' && /sleep 2\\.5/.test(a) ? { v, a, spin: Boolean(g.querySelector(':scope > summary > .group-icon.spin')), shimmer: getComputedStyle(g.querySelector('.group-verb')).animationName, open: g.open } : null; })()`, 30_000, 'the live line on the passing command');
+    check('while the turn runs the line reads like the call in flight, shimmering (no spinner)', live && live.shimmer === 'shimmer' && !live.spin, live);
     check('the live group stays closed', live && !live.open);
     check('nothing but the one line while the calls run', /^ug$/.test(await shape()), await shape());
     await shot('quiet-running');
     await idle();
+    // The turn folded under its header once it had its answer: open it to look at its lines
+    await app.unfold();
 
     let g = await groups();
     check('turn 1: two lines, one per run of calls', g.length === 2, g);
@@ -177,6 +180,7 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
     reply({ content: 'Yes: `total` multiplies by `qty` now.' });
     await app.send('Does cart.js use qty now?');
     await idle();
+    await app.unfold();
     check('a single call folds to one line', (await shape()) === 'ugagaugauga', await shape());
     g = await groups();
     check('…that says what it did', g[g.length - 1].words === 'Read a file' && g[g.length - 1].rows === 1 && g[g.length - 1].meta === '', g[g.length - 1]);
