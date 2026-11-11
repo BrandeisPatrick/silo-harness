@@ -1,6 +1,7 @@
-// The Browser pane's controller: it owns the tabs (at most MAX_TABS; one is active and on screen, the others keep
-// their pages hidden), places the active tab's view where the window's pane is, hands popups to popups.ts, and does
-// what the browser_* tools ask, on the active tab and nothing else (browser_tabs switches). Every change is pushed
+// The Browser pane's controller: one session's tabs (at most MAX_TABS; one is active and on screen while the session
+// is, the others keep their pages hidden; session-tabs.ts keeps one controller per session), places the active tab's
+// view where the window's pane is, hands popups to popups.ts, and does what that session's browser_* tools ask, on its
+// active tab and nothing else (browser_tabs switches), also while another session is in front. Every change is pushed
 // to the window as a BrowserState. For the browser's safety it also stamps the agent's actions (a download that
 // begins during one is the agent's and asks), hides a tab stopped at a certificate error behind the pane's
 // interstitial, and knows which tab a popup belongs to (its permission requests and downloads are that tab's).
@@ -98,7 +99,13 @@ export interface BrowserControllerOptions {
   onFound?(result: FindResultState): void;
   /** The window's chrome is dark (the popup cards' bars follow) */
   dark?(): boolean;
+  /** Its session is the one on screen (default true); false parks the views off the pane, see setInFront */
+  inFront?: boolean;
 }
+
+/** Where the views of a session not on screen wait: off the window, at the pane's size (this when it has none yet). */
+const PARKED_SIZE = { width: 1280, height: 800 };
+const PARKED_X = -20_000;
 
 /** How long a Save Image As… counts as the user's download, whatever the agent did just before. */
 const USER_DOWNLOAD_MS = 10_000;
@@ -121,21 +128,86 @@ export class BrowserController {
   private syntheticUntil = 0;
   /** Addresses the user asked to save from the context menu, and until when that counts (ms) */
   private readonly userDownloads = new Map<string, number>();
+  /** Its session is on screen: only then do its views show and does it push state and popups to the window */
+  private inFront: boolean;
+  /** The blank tab the controller started with, until it navigates: a new tab replaces it rather than joining it */
+  private pristine: BrowserTab | null = null;
+  private disposed = false;
 
   constructor(
     private readonly win: BrowserWindow,
     private readonly opts: BrowserControllerOptions,
   ) {
+    this.inFront = opts.inFront !== false;
     this.popups = new PopupManager({
       win,
       pane: () => this.rounded(),
-      visible: () => this.visible && !win.isDestroyed(),
+      visible: () => this.visible && this.inFront && !win.isDestroyed(),
       dark: () => opts.dark?.() ?? false,
       onChange: () => this.emitPopups(),
     });
     this.activeTab = this.makeTab();
+    this.pristine = this.activeTab;
     void this.activeTab.webContents.loadURL('about:blank');
     this.layout();
+    this.scheduleState();
+  }
+
+  /**
+   * Its session came on screen (true) or left it (false). Off screen the views keep the pane's size but sit outside
+   * the window, hidden, so the session's agent can still read, click, type and take screenshots there; its popup cards
+   * and the find bar's search wait. Coming back pushes its state and popups to the window.
+   */
+  setInFront(front: boolean): void {
+    if (this.disposed || front === this.inFront) return;
+    this.inFront = front;
+    if (!front) this.activeTab.stopFind();
+    this.layout();
+    if (front) {
+      this.emitState();
+      this.emitPopups();
+    }
+  }
+
+  /** Only the blank tab the controller started with, never used: its session has no tabs to keep. */
+  isPristine(): boolean {
+    // Not while the agent acts or the tab loads: a navigation it started has not left about:blank yet
+    if (this.disposed || this.actingCount > 0) return false;
+    const t = this.pristineTab();
+    return t !== null && !t.webContents.isLoading();
+  }
+
+  /** Whether `id` is one of this controller's tabs. */
+  hasTab(id: string): boolean {
+    return this.tabs.some((t) => t.id === id);
+  }
+
+  /** Its session was deleted: every tab closes, with its popups. The controller is not used again. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.stateTimer) clearImmediate(this.stateTimer);
+    this.stateTimer = null;
+    for (const tab of this.tabs.splice(0)) {
+      this.popups.closeFor(tab.id);
+      for (const fn of tabEvents.closed) fn(tab.id);
+      try {
+        if (!this.win.isDestroyed()) this.win.contentView.removeChildView(tab.view);
+      } catch {
+        /* the window is going */
+      }
+      tab.dispose();
+    }
+    this.popups.dispose();
+  }
+
+  /** The blank tab the controller started with, while it is still the only tab and has not left about:blank. */
+  private pristineTab(): BrowserTab | null {
+    const t = this.pristine;
+    if (!t || this.tabs.length !== 1 || this.tabs[0] !== t || t.webContents.isDestroyed()) return (this.pristine = null);
+    const url = t.webContents.getURL();
+    if (url && url !== 'about:blank') return (this.pristine = null);
+    return t;
   }
 
   // ---------- Tabs ----------
@@ -151,13 +223,14 @@ export class BrowserController {
         this.scheduleState();
       },
       onNavigated: (t, url) => {
+        if (t === this.pristine && url !== 'about:blank') this.pristine = null;
         // A site whose zoom was saved gets it back (also after a relaunch)
         applySavedZoom(t.webContents, url);
         for (const fn of tabEvents.navigated) fn(t.id, url, t.webContents.id);
       },
       onContextMenu: (t, params) => this.contextMenu(t, params),
       onFound: (t, r) => {
-        if (!this.win.isDestroyed()) this.opts.onFound?.({ tabId: t.id, ...r });
+        if (!this.win.isDestroyed() && this.inFront) this.opts.onFound?.({ tabId: t.id, ...r });
       },
     });
     tab.webContents.setWindowOpenHandler(this.ownPopups(tab, this.popups.handlerFor(tab, (url, background) => this.openFromPage(url, background))));
@@ -180,11 +253,17 @@ export class BrowserController {
    * reading another site while the user keeps theirs). The 13th throws TOO_MANY_TABS.
    */
   newTab(url?: string, opts: { background?: boolean } = {}): TabState {
+    const first = this.pristineTab();
+    if (first && !(url && url.trim())) {
+      this.activate(first.id);
+      return first.state();
+    }
     const tab = this.makeTab();
     const target = url && url.trim() ? resolveTarget(url, '') : 'about:blank';
     tab.webContents.loadURL(target).catch(() => undefined);
     if (opts.background) this.layout();
     else this.activate(tab.id);
+    if (first) this.closeTab(first.id);
     this.scheduleState();
     return tab.state();
   }
@@ -192,9 +271,11 @@ export class BrowserController {
   /** browser_tabs new: a tab at `url`, loaded like browser_navigate loads, with the same "Now at …" answer. */
   openTab(url: string, opts: { background?: boolean } = {}): Promise<string> {
     return this.stamp(async () => {
+      const first = this.pristineTab();
       const tab = this.makeTab();
       if (opts.background) this.layout();
       else this.activate(tab.id);
+      if (first) this.closeTab(first.id);
       this.scheduleState();
       const where = await this.navigateIn(tab, url);
       return `Opened ${tab.id}${opts.background ? ' in the background' : ''}. ${where}`;
@@ -231,6 +312,7 @@ export class BrowserController {
   /** Closes a tab (its popups with it). Closing the last tab leaves one blank tab; the next tab, else the one before, becomes active. */
   closeTab(id: string): void {
     const tab = this.tabById(id);
+    if (tab === this.pristine) this.pristine = null;
     if (this.tabs.length === 1) this.newTab();
     const at = this.tabs.indexOf(tab);
     this.tabs.splice(at, 1);
@@ -319,6 +401,11 @@ export class BrowserController {
   blockedPopup(tabId: string, action: 'show' | 'dismiss'): void {
     const url = this.tabById(tabId).clearBlockedPopups();
     if (action === 'show' && url) this.openFromPage(url, false);
+  }
+
+  /** The passkey notice's OK on one of this session's tabs. */
+  dismissPasskey(tabId: string): void {
+    this.tabById(tabId).dismissPasskeyNotice();
   }
 
   /** ⌥⌘I: a tab's DevTools, in a window of their own (a view in the pane has nowhere to dock them), opened or closed. */
@@ -433,7 +520,7 @@ export class BrowserController {
   }
 
   private emitPopups(): void {
-    if (!this.win.isDestroyed()) this.opts.onPopups(this.popups.list());
+    if (!this.win.isDestroyed() && this.inFront && !this.disposed) this.opts.onPopups(this.popups.list());
   }
 
   // ---------- State and layout ----------
@@ -465,7 +552,7 @@ export class BrowserController {
   }
 
   private emitState(): void {
-    if (this.win.isDestroyed()) return;
+    if (this.win.isDestroyed() || !this.inFront || this.disposed) return;
     this.opts.onState(this.state());
   }
 
@@ -483,15 +570,21 @@ export class BrowserController {
     return { x: Math.round(this.bounds.x), y: Math.round(this.bounds.y), width: Math.round(this.bounds.width), height: Math.round(this.bounds.height) };
   }
 
-  /** The active tab's view has the pane's bounds and shows while the pane does; the others keep their size, hidden. */
+  /**
+   * The active tab's view has the pane's bounds and shows while the pane does; the others keep their size, hidden.
+   * A session not on screen parks every view outside the window at the pane's size (its agent still works there).
+   */
   private layout(): void {
+    if (this.disposed) return;
     // A hidden pane (a dialog, a page, another pane tab) also takes the views' size away, as before tabs: a dialog
     // must never sit under a page, whatever setVisible does in a window that is covered or not yet painted.
-    const b = this.visible ? this.rounded() : { x: 0, y: 0, width: 0, height: 0 };
+    const pane = this.rounded();
+    const parked = { x: PARKED_X, y: 0, width: pane.width > 0 ? pane.width : PARKED_SIZE.width, height: pane.height > 0 ? pane.height : PARKED_SIZE.height };
+    const b = !this.inFront ? parked : this.visible ? pane : { x: 0, y: 0, width: 0, height: 0 };
     for (const tab of this.tabs) {
       tab.view.setBounds(b);
       // A tab stopped at a certificate error hides behind the pane's interstitial (drawn by the window).
-      tab.view.setVisible(tab === this.activeTab && this.visible && !tab.certError);
+      tab.view.setVisible(this.inFront && tab === this.activeTab && this.visible && !tab.certError);
     }
     this.popups.layout();
   }
@@ -802,6 +895,11 @@ export class BrowserController {
     }
   }
 
+  /** The agent's click or typing gives the page the keyboard focus, but only on screen: a session behind never takes it from the user. */
+  private focusPage(): void {
+    if (this.inFront) this.wc.focus();
+  }
+
   clickAt(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left', clickCount = 1): void {
     const wc = this.wc;
     const px = Math.round(x);
@@ -826,7 +924,7 @@ export class BrowserController {
       const at = await this.aimAt(ref);
       if (typeof at === 'string') return at;
       if (expect && !sameClickTarget(expect, at.target)) return CHANGED_UNDER_CLICK;
-      this.wc.focus();
+      this.focusPage();
       this.clickAt(at.x, at.y, button, double ? 2 : 1);
       const suffix = await this.settle(before);
       return `Clicked ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}).${suffix}`;
@@ -844,7 +942,7 @@ export class BrowserController {
       if (!a) return `The page could not be asked what is at (${x}, ${y}); nothing was clicked.`;
       if ('refusal' in a) return a.refusal;
       if (expect && !sameClickTarget(expect, a.target)) return CHANGED_UNDER_CLICK;
-      this.wc.focus();
+      this.focusPage();
       this.clickAt(x, y, button, clickCount);
       const suffix = await this.settle(before);
       return `Clicked at (${x}, ${y}).${suffix}`;
@@ -870,7 +968,7 @@ export class BrowserController {
       if (typeof at === 'string') return { content: at, secret: false };
       // A frame from another site over the field: the text would go to that site
       if (at.target.frameOrigin) return { content: `Something else covers ${what.role}${what.name ? ` '${what.name}'` : ''} (${ref}): a frame from ${at.target.frameOrigin}; read the page again.`, secret: false };
-      this.wc.focus();
+      this.focusPage();
       this.clickAt(at.x, at.y);
       await sleep(120);
     }

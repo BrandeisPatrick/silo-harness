@@ -1,8 +1,8 @@
 // The Browser pane's safety chrome, drawn by the window (never by the page, so none of it is in browser_screenshot):
 // the bars under the URL bar (a page asking for the camera or notifications, Chrome's three answers; a download the
-// agent started, Allow or Don't allow), the interstitial over the view's slot when the active tab stopped at a
-// certificate error, the mark at the left of the URL pill (a lock, "Not secure", the amber triangle), and the
-// downloads tray at the right of the browser bar with its popover list. The bars sit in the pane's column above the
+// agent started, Allow or Don't allow; the notice that passkeys cannot work here yet), the interstitial over the
+// view's slot when the active tab stopped at a certificate error, the mark at the left of the URL pill (a lock, "Not
+// secure", the amber triangle), and the downloads tray at the right of the browser bar with its popover list. The bars sit in the pane's column above the
 // view's slot, so the slot (and the native view glued to it) shrinks while one shows. The popover would sit under the
 // native view, which paints above the window's page: while it is open the view is hidden, as for a dialog.
 // side-pane.ts creates this and feeds it the browser state.
@@ -30,6 +30,9 @@ export interface BrowserBarsDeps {
 const LOCK = '<svg class="icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.25" y="7" width="9.5" height="6.75" rx="1.5"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/></svg>';
 
 const PERMISSION_ICONS: Record<string, IconName> = { media: 'camera', notifications: 'message', 'clipboard-read': 'clipboard', openExternal: 'external-link', 'display-capture': 'panel-right', fileSystem: 'folder' };
+
+/** The notice when a page asks for a passkey: fixed words, nothing from the page. */
+export const PASSKEY_NOTICE = "Passkeys don't work here yet. Choose another way to sign in.";
 
 /** "The agent started a download: report.pdf (1.2 MB) from example.com"; "A page started …" when no browser tool was acting */
 export function agentDownloadSentence(d: Pick<DownloadState, 'filename' | 'total' | 'host' | 'fromPage'>): string {
@@ -68,8 +71,8 @@ export function createBrowserBars(o: BrowserBarsDeps) {
 
   // ---------- The bars ----------
 
-  function barElement(kind: 'permission' | 'download', id: string, iconName: IconName, text: string, answers: { label: string; value: string; primary?: boolean }[]): HTMLElement {
-    const el = h('div', { class: `browser-ask ${kind}`, role: 'region', 'aria-label': kind === 'permission' ? 'Permission request' : 'Download request', 'data-kind': kind, 'data-id': id });
+  function barElement(kind: 'permission' | 'download' | 'passkey', id: string, iconName: IconName, text: string, answers: { label: string; value: string; primary?: boolean }[]): HTMLElement {
+    const el = h('div', { class: `browser-ask ${kind}`, role: 'region', 'aria-label': kind === 'permission' ? 'Permission request' : kind === 'download' ? 'Download request' : 'Passkey notice', 'data-kind': kind, 'data-id': id });
     const textEl = h('span', { class: 'browser-ask-text', title: text }, text);
     const actions = h('span', { class: 'browser-ask-actions' });
     for (const a of answers) {
@@ -86,7 +89,8 @@ export function createBrowserBars(o: BrowserBarsDeps) {
     const tab = activeTab();
     const tabIds = new Set((state?.tabs ?? []).map((t) => t.id));
     const req = tab ? requests.find((r) => r.tabId === tab.id) : undefined;
-    const dl = downloads.find((d) => d.asking && (d.tabId === tab?.id || !d.tabId || !tabIds.has(d.tabId)));
+    // One from a tab of a session that is not on screen waits for that session
+    const dl = downloads.find((d) => d.asking && !d.elsewhere && (d.tabId === tab?.id || !d.tabId || !tabIds.has(d.tabId)));
     const want: { key: string; make: () => HTMLElement }[] = [];
     if (req) {
       const text = `${req.site} wants to ${req.phrase}`;
@@ -110,6 +114,8 @@ export function createBrowserBars(o: BrowserBarsDeps) {
           ]),
       });
     }
+    // A page asked for a passkey: the notice, in the same bar (the request itself is refused, so the page goes on)
+    if (tab?.passkeyNotice) want.push({ key: `passkey:${tab.id}`, make: () => barElement('passkey', tab.id, 'info', PASSKEY_NOTICE, [{ label: 'OK', value: 'dismiss', primary: true }]) });
     // Keep a bar that is still wanted (its focus stays); replace the rest.
     const keys = want.map((w) => w.key);
     for (const el of [...o.bars.children] as HTMLElement[]) if (!keys.includes(`${el.dataset.kind}:${el.dataset.id}`)) el.remove();
@@ -136,7 +142,9 @@ export function createBrowserBars(o: BrowserBarsDeps) {
     const buttons = [...bar.querySelectorAll<HTMLButtonElement>('button')];
     buttons.forEach((b) => (b.disabled = true));
     try {
-      if (bar.dataset.kind === 'permission') {
+      if (bar.dataset.kind === 'passkey') {
+        await rpc('browser.dismissPasskey', id);
+      } else if (bar.dataset.kind === 'permission') {
         await rpc('browser.answerPermission', id, value as PermissionAnswer);
         requests = requests.filter((r) => r.id !== id);
       } else {

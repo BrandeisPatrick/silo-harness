@@ -177,3 +177,60 @@ export function selectAllScript(): string {
 export function scrollScript(dx: number, dy: number): string {
   return inSafetyWorld(`window.scrollBy({ left: ${Number(dx) || 0}, top: ${Number(dy) || 0}, behavior: 'instant' }); return { x: scrollX, y: scrollY, h: document.documentElement.scrollHeight, vh: innerHeight };`);
 }
+
+/** How long a page's passkey request may wait before it is refused (Electron leaves it pending for good here). */
+export const PASSKEY_REFUSE_MS = 1500;
+
+/**
+ * Runs in the page's own world at dom-ready: navigator.credentials.get and .create, when they ask for a passkey in a
+ * modal request (publicKey, not mediation 'conditional'), raise the event `eventName` on the document (no detail: the
+ * notice it brings is fixed text) and settle: the page's request goes on, but one still pending after
+ * PASSKEY_REFUSE_MS is refused with a NotAllowedError, as a cancelled passkey sheet is, so the page offers its other
+ * ways to sign in. Without a Developer ID signed build the app cannot serve passkeys (app.configureWebAuthn needs
+ * entitlements), and Electron then leaves such a request pending even past its own timeout. Password, federated and
+ * conditional requests pass through untouched.
+ */
+export function passkeyGuardScript(eventName: string): string {
+  return `(() => {
+    const c = navigator.credentials;
+    if (!c || typeof c.get !== 'function' || typeof c.create !== 'function') return;
+    const MARK = Symbol.for(${JSON.stringify(eventName)});
+    if (c[MARK]) return;
+    Object.defineProperty(c, MARK, { value: true });
+    const wrap = (orig) => function (options) {
+      if (!options || typeof options !== 'object' || !options.publicKey || options.mediation === 'conditional') return orig.call(this, options);
+      document.dispatchEvent(new Event(${JSON.stringify(eventName)}));
+      const theirs = options.signal;
+      if (theirs && theirs.aborted) return orig.call(this, options);
+      const ours = new AbortController();
+      if (theirs) theirs.addEventListener('abort', () => ours.abort(theirs.reason), { once: true });
+      const request = orig.call(this, { ...options, signal: ours.signal });
+      return new Promise((resolve, reject) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (done) return;
+          done = true;
+          reject(new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError'));
+          ours.abort();
+        }, ${PASSKEY_REFUSE_MS});
+        request.then(
+          (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+          (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } },
+        );
+      });
+    };
+    c.get = wrap(c.get);
+    c.create = wrap(c.create);
+  })()`;
+}
+
+/**
+ * Runs in the safety world at dom-ready, beside passkeyGuardScript: resolves true the first time the page raises
+ * `eventName`, false when the page goes. The main process reads nothing else from it.
+ */
+export function passkeyWatchScript(eventName: string): string {
+  return `new Promise((resolve) => {
+    document.addEventListener(${JSON.stringify(eventName)}, () => resolve(true), { once: true });
+    addEventListener('pagehide', () => resolve(false), { once: true });
+  })`;
+}

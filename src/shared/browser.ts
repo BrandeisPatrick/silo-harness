@@ -53,6 +53,8 @@ export interface TabState {
   security: PageSecurity;
   /** The page's zoom in percent (100: none; the URL pill shows a chip otherwise) */
   zoom: number;
+  /** The page asked for a passkey, which the pane cannot serve yet: its notice shows (once per page load) */
+  passkeyNotice?: boolean;
 }
 
 /** What a search in the find bar found on a tab (pushed as browser:found). */
@@ -129,6 +131,8 @@ export interface DownloadState {
   asking: boolean;
   /** The tab it came from (a popup's: the tab that opened it); null when unknown or closed */
   tabId: string | null;
+  /** Asking, from a tab of a session not on screen: its bar waits for that session */
+  elsewhere?: boolean;
 }
 
 export type DownloadAction = 'open' | 'show' | 'cancel' | 'clear' | 'allow' | 'deny';
@@ -147,6 +151,7 @@ export interface BrowserBuiltIns {
 
 /** The pane: every tab, which one is active, and the active tab's fields flat (the URL bar reads those). */
 export interface BrowserState {
+  /** The tabs of the session on screen (each session has its own; a new one has none) */
   tabs: TabState[];
   activeId: string;
   url: string;
@@ -154,6 +159,8 @@ export interface BrowserState {
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
+  /** The session these tabs belong to (absent from older main processes) */
+  session?: string;
 }
 
 /** A popup window a page opened (an OAuth sign-in), drawn as a card over the pane. `bounds` is the page area, under its 32 px bar. */
@@ -215,6 +222,8 @@ export interface BrowserRpc {
   'browser.blockedPopup': (tabId: string, action: 'show' | 'dismiss') => void;
   /** ⌥⌘I with the pane focused: the active tab's DevTools, detached, opened or closed */
   'browser.devTools': () => void;
+  /** The passkey notice's OK: it goes for the rest of that tab's page load */
+  'browser.dismissPasskey': (tabId: string) => void;
 
   // ---------- Permissions (the bar under the URL bar) ----------
   /** The requests waiting for an answer, every tab's (the bar shows the active tab's first) */

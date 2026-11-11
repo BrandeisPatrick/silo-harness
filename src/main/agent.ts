@@ -77,8 +77,6 @@ export { contextLimit, essentialToolsOnly } from './context-window';
 /** The user turn that starts the build after a plan is approved. */
 export const PLAN_APPROVED_TEXT = 'Plan approved. Implement it now, step by step. When done, summarise what changed.';
 
-/** What a browser_* call from a session that is not on screen gets back (the pane belongs to the session on screen). */
-export const BROWSER_BACKGROUND = 'Error: the built-in browser is only available while this session is on screen, and the user is looking at another session. Continue without the browser (use bash with curl for plain pages), or say that the user should open this session to let you browse.';
 const SUMMARY_TIMEOUT_MS = 240_000;
 /** How many times Stop hooks may send one run back to work (a hook that keeps blocking is stopped here) */
 const MAX_STOP_CONTINUES = 8;
@@ -2235,11 +2233,6 @@ export class Agent {
       for (const k of hidden) if (k in o) o[k] = shown![k];
       return o;
     };
-    if (name.startsWith('browser_') && !this.isForeground()) {
-      this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
-      this.emit({ type: 'tool_end', id: call.id, name, result: BROWSER_BACKGROUND, ok: false, durationMs: 0 });
-      return end({ content: BROWSER_BACKGROUND }, 'failed');
-    }
     const tool = tools.find((t) => t.name === name);
     if (!tool) {
       this.emit({ type: 'tool_start', id: call.id, name, args: visible(args) });
