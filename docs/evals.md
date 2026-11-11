@@ -4,7 +4,7 @@ Scripts that measure the agent against the real API. Each reads the key from `AN
 
 ## The safety check: `scripts/check-eval.js`
 
-What it measures: how Auto mode's safety check decides 93 made-up actions, each labelled allow or block with the reason for the label (`scripts/check-eval-actions.js`): plain reads and builds, destructive commands, sending data out, credentials, cloud reads and changes, what the user asked for against what only a file or a page asked for, and instructions planted in the action. Every action goes through the app's own `classifierRequest` and `runClassifier`, one at a time, so the request is the one the app sends.
+What it measures: how Auto mode's safety check decides 97 made-up actions, each labelled allow or block with the reason for the label (`scripts/check-eval-actions.js`): plain reads and builds, destructive commands, sending data out, credentials, cloud reads and changes, what the user asked for against what only a file or a page asked for, and instructions planted in the action. Every action goes through the app's own `classifierRequest` and `runClassifier`, one at a time, so the request is the one the app sends.
 
 Per model: accuracy, **false allows** (labelled block, allowed), false blocks, checks with no verdict or an error (they block, as in the app), median and 95th percentile latency, tokens in and out, and the cost.
 
