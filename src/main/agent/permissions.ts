@@ -161,7 +161,8 @@ export function decideApproval(name: string, detail: string, target: string | un
     // never an interpreter, which runs anything, nor bare Bash or a rule that starts with a wildcard (as Claude Code
     // drops such broad rules in Auto mode). The rest goes to the check.
     if (isCmd) {
-      if (always) return reasonAllowed(always) ? allow : ask(always, programs);
+      // (allowing sudo does not allow what sudo runs: a reason for that still counts below)
+      if (always && !reasonAllowed(always)) return ask(always, programs);
       if (!reason && isReadOnlyCommand(detail)) return allow;
       if (reason && reasonAllowed(reason)) return allow;
       const autoOk = !!cmd?.covered && !cmd.broad && !programs.some((p) => INTERPRETERS.has(p));
@@ -181,6 +182,8 @@ export function decideApproval(name: string, detail: string, target: string | un
   const guarded = isEdit && target ? protectedWrite(target, cwd) : reason && PROTECTED_REASONS.has(reason) ? reason : null;
   if (guarded) return ask(guarded, programs, true);
   if (reason && !reasonAllowed(reason) && !(isCmd ? cmdCovers(reason) && cmd?.covered : editCovers(reason))) return ask(reason, programs);
+  // sudo and deleting a critical folder ask unless that reason itself is allowed (the guard may name another reason first)
+  if (always && !reasonAllowed(always)) return ask(always, programs);
   if (mode === 'auto') return allow;
   if (isEdit && (mode === 'acceptEdits' || edit?.any)) return allow;
   if (isCmd && cmd?.covered) return allow;

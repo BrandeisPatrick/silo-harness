@@ -216,6 +216,52 @@ const err = (t, list) => parse(t, list).error;
   check('rule files: Plan mode refuses', d('write_file', 'x', userFile, { mode: 'plan' }).kind === 'refuse');
   check('rule files: a session working in the config folder still asks', decideApproval('write_file', 'x', userFile, {}, { ...ctx({ mode: 'acceptEdits' }), cwd: CONFIG }).kind === 'ask');
 
+  // ---------- 10b. A cd earlier in the line, relative paths, sudo ----------
+  // The guard checks a path at every folder the line may be in, so a rule for cd and echo does not cover a write the
+  // cd moved somewhere else; a write it cannot place counts as outside the working directory.
+  const firm = (r) => r.kind === 'ask' && r.firm === true && r.reason === 'writes a protected file';
+  const notRun = (r) => r.kind === 'ask' || r.kind === 'classify';
+  const echoCd = allowR('Bash(echo:*)', 'Bash(cd:*)');
+  for (const [mode, auto] of [['ask'], ['acceptEdits'], ['auto', 'check'], ['auto', 'guard'], ['bypass']]) {
+    const m = `${mode}${auto ? ` (${auto})` : ''}`;
+    for (const cmd of [`cd ${CONFIG} && echo x > settings.json`, `pushd ${CONFIG}; echo x > settings.json`, `cd ${appData} && echo x > config.json`, `dd of=${userFile}`, `ln -s ${userFile} s.json && echo x > s.json`, `tar -C ${CONFIG} -xf a.tar`, `unzip a.zip -d ${CONFIG}`, `sudo tee ${userFile}`])
+      check(`rule files: ${m}: ${cmd.split(CONFIG).join('<config>').split(appData).join('<appdata>')} asks, firm`, firm(d('bash', cmd, undefined, { mode, auto, rules: echoCd })), d('bash', cmd, undefined, { mode, auto, rules: echoCd }));
+    check(`rule files: ${m}: pushd <appdata>; echo x > config.json under bare Bash asks, firm`, firm(d('bash', `pushd ${appData}; echo x > config.json`, undefined, { mode, auto, rules: allowR('Bash') })));
+  }
+  for (const [mode, auto] of [['ask'], ['acceptEdits'], ['auto', 'check']]) {
+    const m = `${mode}${auto ? ` (${auto})` : ''}`;
+    const rows = [
+      ['cd ~ && echo x > .zshrc', echoCd, 'writes a protected file'],
+      ['cd /etc && echo hi > hosts', allowR('Bash(echo hi:*)', 'Bash(cd:*)'), 'writes outside the working directory'],
+      ['cd .. && echo x > out.txt', echoCd, 'writes outside the working directory'],
+      ['npm run test > ../out.txt', allowR('Bash(npm run test:*)'), 'writes outside the working directory'],
+      ['X=~/.zshrc; echo evil >> $X', allowR('Bash(echo:*)'), 'writes outside the working directory'],
+      [`D=${CONFIG}; echo x > $D/settings.json`, allowR('Bash(echo:*)'), 'writes outside the working directory'],
+      ['cd $D && echo x > a', echoCd, 'writes outside the working directory'],
+      ['rm ../x', allowR('Bash(rm:*)'), 'deletes outside the working directory'],
+      ['cp a ../b', allowR('Bash(cp:*)'), 'writes outside the working directory'],
+    ];
+    for (const [cmd, rules, why] of rows) {
+      const r = d('bash', cmd, undefined, { mode, auto, rules });
+      check(`folders: ${m}: ${cmd.split(CONFIG).join('<config>')} under ${rules.allow.join(', ')} is not run unasked (${why})`, notRun(r) && r.reason === why, r);
+    }
+    // ordinary work under the same rules still runs
+    for (const [cmd, rules] of [['cd src && echo x > out.txt', echoCd], ['npm run test > out.log', allowR('Bash(npm run test:*)')], ['cd src && rm -rf dist', allowR('Bash(cd:*)', 'Bash(rm:*)')], ['cat ../README.md', allowR('Bash(cat:*)')], ['cd .. && git status', allowR('Bash(cd:*)', 'Bash(git status:*)')]]) {
+      const r = d('bash', cmd, undefined, { mode, auto, rules });
+      check(`folders: ${m}: ${cmd} under ${rules.allow.join(', ')} runs`, r.kind === 'allow', r);
+    }
+  }
+  check('folders: Bypass runs a write outside after a cd (only rule files ask there)', d('bash', 'cd .. && echo x > out.txt', undefined, { mode: 'bypass' }).kind === 'allow');
+  // deny and ask rules look through sudo and doas; allow rules do not
+  for (const cmd of ['sudo rm x', 'sudo -u root rm x', 'sudo -- rm x', 'sudo -E -u root VAR=1 rm x', 'doas rm x', 'sudo sh -c "rm x"', 'echo y | sudo xargs rm'])
+    check(`deny: Bash(rm:*) refuses ${cmd}`, v(rs([], [], ['Bash(rm:*)']), 'bash', { command: cmd })?.list === 'deny');
+  check('ask: Bash(git push:*) asks for sudo git push', v(rs([], ['Bash(git push:*)']), 'bash', { command: 'sudo git push origin main' })?.list === 'ask');
+  check('deny: Bash(rm:*) leaves sudo ls alone', v(rs([], [], ['Bash(rm:*)']), 'bash', { command: 'sudo ls' }) === null);
+  check('allow: Bash(rm:*) does not cover sudo rm x', !R.bashAllow('sudo rm x', rs(['Bash(rm:*)']), () => false).covered);
+  for (const mode of ['ask', 'bypass']) check(`deny: sudo rm x is refused in ${mode} mode by deny Bash(rm:*)`, R.ruleVerdict(R.compileRules({ deny: ['Bash(rm:*)'] }), 'bash', { command: 'sudo rm x' }, cwd)?.list === 'deny');
+  const sudoRm = d('bash', 'sudo rm -rf ~', undefined, { rules: { allow: ['Bash'], reasons: ['uses sudo'] } });
+  check('sudo: a saved "uses sudo" does not wave through sudo rm -rf ~', sudoRm.kind === 'ask', sudoRm);
+
   // ---------- 11. The agent loop: deny in Bypass, ask in Bypass, a hook's allow ----------
   const mock = await startMock();
   const { state } = mock;

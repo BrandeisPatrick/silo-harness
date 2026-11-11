@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { PermissionLists, StoredRules } from '../../shared/types';
-import { allSimpleCommands, commandShape, substitutions, words } from '../guard';
+import { allSimpleCommands, commandShape, lineCommands, substitutions, words } from '../guard';
 
 export type RuleListName = 'allow' | 'ask' | 'deny';
 export const RULE_LISTS: RuleListName[] = ['deny', 'ask', 'allow'];
@@ -527,7 +527,8 @@ function ruleMatchesCall(rule: Rule, name: string, args: unknown, cwd: string, s
       if (!BASH_TOOLS.has(name)) return false;
       const command = argString(args, 'command') ?? '';
       if (rule.spec.type === 'any') return true;
-      for (const simple of allSimpleCommands(command.trim())) {
+      // deny and ask look through sudo and doas too (sudo -u root rm x is rm x); allow rules do not
+      for (const simple of lineCommands(command.trim())) {
         const m = matchTexts(simple, true);
         if (bashSpecMatches(rule.spec, m.texts, m.program)) return true;
       }
@@ -538,7 +539,7 @@ function ruleMatchesCall(rule: Rule, name: string, args: unknown, cwd: string, s
 
 /**
  * What the deny and ask rules say about a tool call, deny first: the first rule that matches, or null. Bash: any
- * command the line runs (in a substitution, sh -c, xargs or find -exec too). Paths: the path or its real path.
+ * command the line runs (in a substitution, sh -c, xargs, find -exec or after sudo too). Paths: the path or its real path.
  */
 export function ruleVerdict(rules: CompiledRules, name: string, args: unknown, cwd: string, server?: string): RuleVerdict | null {
   for (const list of ['deny', 'ask'] as const) {
