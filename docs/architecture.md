@@ -192,7 +192,12 @@ Every agent emits through the runtime, which notes the event in the session's Li
 `onEvent` listeners (= `app.events`), then to the window as `('agent:event', ev, sessionId)`, deltas coalesced every
 30 ms per session. `send` with a non-user origin to a running session queues it like a typed message; if the run is
 stopped before delivery the message is dropped (`queue_dropped`), so the sender decides whether to resend (a message
-from another session is held instead: see Messages between sessions).
+from another session is held instead: see Messages between sessions). "Send now" on a queued row (`chat:sendNow` →
+`Agent.sendNow(id)`) takes the message out of the queue and calls `stop()`; the run's end emits
+`run_end { reason, continued: true }` with the agent still `running` and starts the next run with that message at once
+(`queue_delivered` when its UserPromptSubmit hooks accept it, `queue_dropped` when they refuse it). The rest of the queue
+stays and is delivered after that run's first model call. Listeners treat a `continued` end as no end at all: no
+notification, unread mark, sub-session report, schedule or dream status, and keep-awake holds.
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
 `unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the

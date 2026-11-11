@@ -225,8 +225,10 @@ export function eventsFromAgent(ev: AgentEvent, sessionId: string): ModEventOut[
     case 'run_start':
       return [{ name: 'run.started', data: { sessionId } }];
     case 'run_end': {
-      const data: { sessionId: string; reason: string; text?: string } = { sessionId, reason: ev.reason };
+      const data: { sessionId: string; reason: string; text?: string; continued?: boolean } = { sessionId, reason: ev.reason };
       if (typeof ev.text === 'string') data.text = ev.text;
+      // Cut by "Send now": run.started follows at once with the user's message
+      if (ev.continued) data.continued = true;
       return [{ name: 'run.ended', data }];
     }
     case 'user_message':

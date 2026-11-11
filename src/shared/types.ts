@@ -607,8 +607,12 @@ export type AgentEvent =
   | { type: 'auto_blocked'; block: AutoBlock }
   /** The user allowed the blocked call `id` (here, in Settings or on the phone): it runs once when the agent retries it */
   | { type: 'auto_allowed'; id: string }
-  /** `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times. */
-  | { type: 'run_end'; reason: RunEndReason; text?: string };
+  /**
+   * `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times.
+   * `continued`: the user chose "Send now" on a queued message, so the run was cut (reason usually `aborted`) and the
+   * next one, with that message, starts right after this event; the session never counts as idle in between.
+   */
+  | { type: 'run_end'; reason: RunEndReason; text?: string; continued?: boolean };
 
 /** Why a run ended */
 export type RunEndReason = 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop';
@@ -861,6 +865,11 @@ export interface SiloHarnessApi {
   send(text: string, attachments?: ImageAttachment[]): Promise<SendResult>;
   /** Removes a queued message before it is delivered; false when it was already delivered or unknown */
   unqueue(id: string): Promise<boolean>;
+  /**
+   * "Send now" on a queued message: stops the current step (as Stop does) and sends this message at once as the next
+   * user turn; the rest of the queue stays. False when it is no longer queued (delivered, removed, or the run ended).
+   */
+  sendNow(id: string): Promise<boolean>;
   /** Messages still waiting to be delivered (for restoring the queue after a reload) */
   queue(): Promise<QueuedMessage[]>;
   /** Whether the configured model accepts images and tools (cached per provider+model) */

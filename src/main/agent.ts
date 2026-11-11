@@ -358,6 +358,8 @@ export class Agent {
   readonly mcp: McpManager | null;
   /** Messages sent while a run was in progress; delivered before the model's next turn */
   private queued: QueuedMessage[] = [];
+  /** A queued message the user chose to send now (sendNow): the run is being cut, and this message starts the next */
+  private sendingNow: QueuedMessage | null = null;
   private readonly opts: AgentOptions;
   /** The folder of the run in progress: a folder change while it runs applies from the next run on */
   private runCwd: string | null = null;
@@ -1202,6 +1204,15 @@ export class Agent {
 
   async run(userText: string, attachments: ImageAttachment[] = [], opts: SendOptions = {}): Promise<void> {
     if (this.running) throw new Error('A run is already in progress.');
+    return this.startRun(userText, attachments, opts);
+  }
+
+  /**
+   * The run itself. `queuedId`: the run starts from the queued message of that id (sendNow), which leaves the queue
+   * on screen through queue_delivered once its hooks accepted it, or goes back to the composer (queue_dropped). Such a
+   * run keeps the rest of the queue until after its first model call.
+   */
+  private async startRun(userText: string, attachments: ImageAttachment[], opts: SendOptions, queuedId?: string): Promise<void> {
     this.running = true;
     this.planSubmitted = false;
     this.abortController = new AbortController();
@@ -1236,12 +1247,19 @@ export class Agent {
       await this.startSessionHooks();
       accepted = await this.promptHooks(userText, origin, opts.from);
       if (!accepted.ok || signal.aborted) {
-        this.running = false;
+        // A message sent from the queue goes back to the composer as a refused queued one does
+        if (queuedId) this.emit({ type: 'queue_dropped', id: queuedId });
+        const next = this.takeSendingNow();
         this.abortController = null;
         this.runCwd = null;
         this.runTimer = null;
-        this.dropQueue();
-        this.emit({ type: 'run_end', reason: signal.aborted ? 'aborted' : 'done' });
+        if (!next) {
+          this.running = false;
+          this.dropQueue();
+        }
+        const ended = signal.aborted ? 'aborted' : 'done';
+        this.emit(next ? { type: 'run_end', reason: ended, continued: true } : { type: 'run_end', reason: ended });
+        if (next) this.continueWith(next);
         return;
       }
     } else this.sessionStarted = true;
@@ -1254,6 +1272,8 @@ export class Agent {
     // Auto mode's check gets another chance to reach its model with each run
     this.autoState().unavailable = false;
     if (!early) this.emit({ type: 'run_start' });
+    // The queued row leaves the queue and becomes the message's bubble, as a delivered queued message does
+    if (queuedId) this.emit({ type: 'queue_delivered', id: queuedId });
     this.emitUserMessage(userText, attachments.length, origin, opts.from);
     // Saved now, not only at the end: the session gets its title from this message at once, so a sidebar with
     // several running sessions does not show several "New session" rows.
@@ -1345,7 +1365,8 @@ export class Agent {
         this.turnTimer = tt;
         this.flushAutoNotes();
         tt.step('notes');
-        if (this.queued.length && (await this.drainQueue(skills))) continuations = 0;
+        // A run started by "Send now" leaves the rest of the queue for after its first model call
+        if (this.queued.length && (turn > 0 || !queuedId) && (await this.drainQueue(skills))) continuations = 0;
         tt.step('queue');
         await this.autoCompactIfNeeded(cfg, client, model, signal);
         tt.step('prune_compact');
@@ -1446,7 +1467,7 @@ export class Agent {
         }
         if (!toolCalls.length) {
           // A message queued during the run keeps it going instead of ending it.
-          if (this.queued.length && (await this.drainQueue(skills))) {
+          if (this.queued.length && !signal.aborted && (await this.drainQueue(skills))) {
             continuations = 0;
             continue;
           }
@@ -1546,15 +1567,23 @@ export class Agent {
       this.repairTail();
       this.store.save(this.session);
       this.finishTiming(timer, reason);
-      this.running = false;
+      // "Send now": the session stays running (no other send can start a run, the queue stays) into the next run
+      const next = this.takeSendingNow();
       this.abortController = null;
       this.runCwd = null;
-      this.dropQueue();
+      if (!next) {
+        this.running = false;
+        this.dropQueue();
+      }
       this.emit({ type: 'session_changed', session: toMeta(this.session) });
-      this.emit(lastText ? { type: 'run_end', reason, text: lastText } : { type: 'run_end', reason });
-      if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
-      if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
-        this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
+      const end: AgentEvent = { type: 'run_end', reason, ...(lastText ? { text: lastText } : {}), ...(next ? { continued: true } : {}) };
+      this.emit(end);
+      if (next) this.continueWith(next);
+      else {
+        if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
+        if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
+          this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
+        }
       }
     }
   }
@@ -2209,6 +2238,32 @@ export class Agent {
       delivered = true;
     }
     return delivered;
+  }
+
+  /**
+   * "Send now" on the queued message `id`: cuts the current step short exactly as stop() does (a running command is
+   * stopped, a waiting card closes as interrupted, a retry wait ends) and, when the run has ended (its tail repaired
+   * and saved), starts the next run with this message. The rest of the queue stays queued. False when the message is
+   * not queued here any more, or another message is already on its way this way.
+   */
+  sendNow(id: string): boolean {
+    if (!this.running || this.sendingNow) return false;
+    const i = this.queued.findIndex((m) => m.id === id);
+    if (i < 0) return false;
+    this.sendingNow = this.queued.splice(i, 1)[0];
+    this.stop();
+    return true;
+  }
+
+  private takeSendingNow(): QueuedMessage | null {
+    const m = this.sendingNow;
+    this.sendingNow = null;
+    return m;
+  }
+
+  /** Starts the run of a message sent with sendNow; called while `running` is still true, so nothing comes between. */
+  private continueWith(m: QueuedMessage): void {
+    this.startRun(m.text, m.attachments, { origin: m.origin ?? 'queue', ...(m.from ? { from: m.from } : {}) }, m.id).catch((err: unknown) => console.error('[agent] run failed', err));
   }
 
   /** The run ended with messages still queued: hand them back to the renderer. */

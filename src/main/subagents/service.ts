@@ -304,7 +304,8 @@ export class Subagents {
       const origin = this.runOrigin.get(sessionId);
       this.runOrigin.delete(sessionId);
       // Only a run another session started (the spawn, or a session_send) reports back; a turn the user drove by hand does not.
-      if (origin === 'session') this.report(sessionId, ev);
+      // A run cut by "Send now" does not report either: the user took over, and the next run starts at once.
+      if (origin === 'session' && !ev.continued) this.report(sessionId, ev);
     } else if (ev.type === 'queue_delivered') this.inQueue.delete(ev.id);
     else if (ev.type === 'queue_dropped') {
       const m = this.inQueue.get(ev.id);

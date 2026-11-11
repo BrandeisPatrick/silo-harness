@@ -388,6 +388,8 @@ export class Dreaming {
       return;
     }
     if (ev.type !== 'run_end') return;
+    // Cut by "Send now": the dream's session goes on with the user's message; that run's end counts
+    if (ev.continued) return;
     const dream = this.dreamOf(sessionId);
     if (!dream) return;
     const first = dream.status === 'running';

@@ -43,6 +43,7 @@ const SCRIPTS = [
   { name: 'tool-rows' },
   { name: 'tool-concurrency' },
   { name: 'chat-fold' },
+  { name: 'queue-send-now' },
   { name: 'quiet' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },

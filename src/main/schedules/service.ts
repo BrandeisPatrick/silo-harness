@@ -198,6 +198,8 @@ export function createScheduler(app: App, opts: SchedulerOptions = {}): Schedule
 
   function onEvent(sessionId: string, ev: AgentEvent): void {
     if (ev.type !== 'run_end') return;
+    // Cut by "Send now": the session goes on with the user's message; the run's end that follows decides the status
+    if (ev.continued) return;
     let any = false;
     for (const [id, sid] of inflight) {
       if (sid !== sessionId) continue;
