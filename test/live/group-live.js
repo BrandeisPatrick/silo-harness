@@ -5,7 +5,8 @@
 // opens by itself (a lone call opens to its details only once the run is over); the line does not jump under the
 // pointer (no chevron riding on the end of the changing words, no scroll away from it); a mouse click leaves no focus
 // ring and the composer keeps the focus (on the line, on a row in it and on the turn's header); keyboard focus still
-// shows the ring, and Enter and Space toggle the line.
+// shows the ring, and Enter and Space toggle the line. Opened while live, the line heads its list in the present
+// ("Running 2 commands") instead of repeating the row of the call in flight; shut, it reads like that row again.
 // Run: npm run build && node test/live/group-live.js [screenshot-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -192,6 +193,42 @@ const { check, done } = checker();
     await idle();
     const log6 = (await stop()).filter((e) => e.live);
     check('6: scrolled up, the opened live line stays where it was', log6.length > 10 && log6.every((e) => e.top === top6), [...new Set(log6.map((e) => e.top))]);
+
+    // ---------- 7. Opened while live, the line heads the list in the present; shut, it reads like the call in flight ----------
+    replies.push({ content: '', toolCalls: [{ id: 'h1', name: 'bash', args: { command: 'sleep 3; echo h1' } }] });
+    replies.push({ content: '', toolCalls: [{ id: 'h2', name: 'bash', args: { command: 'sleep 3; echo h2' } }] });
+    replies.push({ content: 'Headings done.' });
+    await app.send('Seventh turn');
+    await app.waitFor(liveWith(1), 15_000, 'the live line (7)');
+    await app.evaluate(`document.querySelector('#messages').scrollTop = 1e6`);
+    await sleep(200);
+    const words = () =>
+      app.evaluate(`(() => {
+        const g = ${G}; const s = g.querySelector(':scope > summary');
+        const t = (e, q) => (e.querySelector(q)?.textContent ?? '').trim();
+        const line = [t(s, '.group-verb'), t(s, '.group-arg')].filter(Boolean).join(' ');
+        const rows = [...g.querySelectorAll(':scope > .group-body > .tool')].map((r) => ({ verb: t(r, ':scope > summary > .tool-verb'), line: [t(r, ':scope > summary > .tool-verb'), t(r, ':scope > summary > .tool-arg')].filter(Boolean).join(' '), icon: r.dataset.icon, running: Boolean(r.querySelector('.tool-status.spin')) }));
+        return { open: g.open, live: g.classList.contains('live'), line, aria: s.getAttribute('aria-label'), icon: s.querySelector('.group-icon').dataset.kind ?? 'files', rows };
+      })()`);
+    let w = await words();
+    check('7: shut and live, the line reads like the row of the call in flight', !w.open && w.live && w.line === w.rows[0].line, w);
+    await realClick(`${G}.querySelector(':scope > summary')`);
+    w = await words();
+    check('7: opened with one call in flight it reads "Running a command", and so does its label', w.open && w.live && w.line === 'Running a command' && w.aria === 'Running a command', w);
+    check('7: opened, the line carries the words of none of its rows; the icon stays the call in flight\'s', w.rows.every((r) => r.line !== w.line && r.verb !== w.line) && w.icon === w.rows[0].icon, w);
+    await app.waitFor(liveWith(2), 15_000, 'the second call (7)');
+    await sleep(200);
+    w = await words();
+    check('7: a second call joins: "Running 2 commands", no row repeated', w.open && w.line === 'Running 2 commands' && w.aria === 'Running 2 commands' && w.rows.every((r) => r.line !== w.line), w);
+    await realClick(`${G}.querySelector(':scope > summary')`);
+    w = await words();
+    const inFlight = w.rows.filter((r) => r.running).pop() ?? w.rows[w.rows.length - 1];
+    check('7: shut again, it reads like the row of the call in flight', !w.open && w.live && w.line === inFlight.line && /echo h2/.test(w.line), w);
+    await realClick(`${G}.querySelector(':scope > summary')`);
+    await idle();
+    await app.unfold();
+    w = await words();
+    check('7: after the run, "Ran 2 commands" in the past, still open', w.open && !w.live && w.line === 'Ran 2 commands' && w.aria === 'Ran 2 commands', w);
 
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));

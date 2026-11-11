@@ -1,6 +1,7 @@
 // The words of a folded run of tool calls: "Read 3 files, ran 2 commands, edited a file". One phrase per kind of
 // call, in the order the kinds first appear, with counts; a kind names what the single rows say (tool-labels.ts and
-// toolLabel in tools.ts) in the past tense. Pure (no DOM, no imports), so test/tool-activity.js loads it headless;
+// toolLabel in tools.ts) in the past tense, or in the present ("Reading 3 files, running 2 commands") for the heading
+// of a live run's opened list. Pure (no DOM, no imports), so test/tool-activity.js loads it headless;
 // renderer.ts puts the line together with the diff total and the failed and denied counts.
 
 /** One call in a run, as the summary needs it */
@@ -114,8 +115,33 @@ export interface ActivityWords {
   denied: number;
 }
 
-/** What a run of calls did, in words. Names alone work too (each counts as one call). */
-export function activityWords(input: (ActivityCall | string)[]): ActivityWords {
+/** The present form of each phrase's leading verb: "ran a command" → "running a command" */
+const PRESENT: Record<string, string> = {
+  read: 'reading', edited: 'editing', listed: 'listing', ran: 'running', stopped: 'stopping', loaded: 'loading', made: 'making',
+  showed: 'showing', updated: 'updating', asked: 'asking', wrote: 'writing', started: 'starting', sent: 'sending',
+  merged: 'merging', renamed: 'renaming', created: 'creating', changed: 'changing', deleted: 'deleting', checked: 'checking',
+  searched: 'searching', proposed: 'proposing', withdrew: 'withdrawing', took: 'taking', fetched: 'fetching', opened: 'opening',
+  used: 'using', called: 'calling',
+};
+
+/** A phrase with its leading verb in the present: "read 2 files" → "reading 2 files" */
+export function presentPhrase(phrase: string): string {
+  const m = /^(\w+)(.*)$/.exec(phrase);
+  const verb = m ? PRESENT[m[1].toLowerCase()] : undefined;
+  return verb && m ? verb + m[2] : phrase;
+}
+
+export interface ActivityOptions {
+  /** 'past' (default): what a run did. 'present': what a live run is doing, every call in it counted */
+  tense?: 'past' | 'present';
+}
+
+/**
+ * What a run of calls did, in words (or, with tense 'present', is doing). Names alone work too (each counts as one
+ * call). A line of denials only stays in the past tense: nothing is happening.
+ */
+export function activityWords(input: (ActivityCall | string)[], opts: ActivityOptions = {}): ActivityWords {
+  const present = opts.tense === 'present';
   const calls = input.map((c) => (typeof c === 'string' ? { name: c } : c));
   const kinds = new Map<string, { kind: Kind; n: number; targets: Set<string> }>();
   let denied = 0;
@@ -137,7 +163,7 @@ export function activityWords(input: (ActivityCall | string)[]): ActivityWords {
     }
     k.n++;
   }
-  const phrases = [...kinds.values()].map(({ kind, n }) => (n === 1 ? kind.one : kind.many(n)));
+  const phrases = [...kinds.values()].map(({ kind, n }) => (n === 1 ? kind.one : kind.many(n))).map((ph) => (present ? presentPhrase(ph) : ph));
   let text: string;
   if (!phrases.length) text = denied ? `denied ${deniedNoun(deniedKeys, denied)}` : '';
   else if (phrases.length <= MAX_KINDS) text = phrases.join(', ');
@@ -155,6 +181,6 @@ function deniedNoun(keys: Set<string>, n: number): string {
 }
 
 /** The words alone: "Read 3 files, ran 2 commands, edited a file" */
-export function groupSummary(input: (ActivityCall | string)[]): string {
-  return activityWords(input).text;
+export function groupSummary(input: (ActivityCall | string)[], opts: ActivityOptions = {}): string {
+  return activityWords(input, opts).text;
 }

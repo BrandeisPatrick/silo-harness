@@ -69,6 +69,10 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     if (!group) return;
     const cards = groupCards(group);
     const live = liveGroup(group);
+    // Opened while live, the line is the heading of the list under it, in the present ("Running 2 commands"): the
+    // row of the call in flight is right there, so the line does not repeat it
+    const heading = live && (group as HTMLDetailsElement).open;
+    const tense = heading ? 'present' : 'past';
     const verb = group.querySelector<HTMLElement>(':scope > summary > .group-verb')!;
     const arg = group.querySelector<HTMLElement>(':scope > summary > .group-arg')!;
     const words = activityWords(
@@ -80,11 +84,17 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
         denied: c.outcome === 'denied',
         server: mcpParts(c.name)?.server,
       })),
+      { tense },
     );
     // A run of MCP calls from one or two servers: "Used docs and files", and "tracker needs sign-in" for its failure
-    const mcpFold = mcpFoldWords(cards.map((c) => ({ server: mcpParts(c.name)?.server, outcome: c.outcome, problem: c.problem })));
-    // While the run goes on, the line reads like the row of the call in flight; once it is over, what the run did
-    const now = live ? (cards.filter((c) => c.running).pop() ?? cards[cards.length - 1]) : undefined;
+    const mcpFold = mcpFoldWords(
+      cards.map((c) => ({ server: mcpParts(c.name)?.server, outcome: c.outcome, problem: c.problem })),
+      { tense },
+    );
+    // While the run goes on, the shut line reads like the row of the call in flight; opened, it heads the list; once the
+    // run is over, what the run did. The icon is the call in flight's while it is live, open or shut.
+    const flight = live ? (cards.filter((c) => c.running).pop() ?? cards[cards.length - 1]) : undefined;
+    const now = heading ? undefined : flight;
     if (now) {
       const rowVerb = now.el.querySelector<HTMLElement>(':scope > summary > .tool-verb');
       const rowArg = now.el.querySelector<HTMLElement>(':scope > summary > .tool-arg');
@@ -100,7 +110,7 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     group.classList.toggle('live', live);
     // The icon of the call in flight while the run goes on, then the first kind's
     const iconOf = (c: ToolCard | undefined) => c?.el.dataset.icon ?? '';
-    const want = now ? iconOf(now) : iconOf(cards[0]);
+    const want = flight ? iconOf(flight) : iconOf(cards[0]);
     const kind: IconName = isIconName(want) ? (want as IconName) : 'files';
     const groupIcon = group.querySelector<HTMLElement>(':scope > summary > .group-icon')!;
     if ((groupIcon.dataset.kind ?? 'files') !== kind) {
@@ -143,6 +153,8 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     // A finished line that stands for one call opens straight to that call's details. Not a live one: more calls can
     // join it, and that row would stay open among them.
     group.addEventListener('toggle', () => {
+      // A live line's words follow it: the call in flight while shut, the heading of the list while open
+      if (group.classList.contains('live')) updateGroup(group);
       if (!group.open) return;
       const cards = groupCards(group);
       if (cards.length === 1 && !group.classList.contains('live')) cards[0].el.open = true;
