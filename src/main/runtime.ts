@@ -3,6 +3,7 @@
 // tagged with its session, so the runtime always knows what is in flight in each session (LiveState) and whether it
 // needs the user (SessionStatus). No Electron here: the headless tests drive it directly.
 
+import { cardRules, normalizeStoredRules } from './agent/rules';
 import type { AgentEvent, AppConfig, McpCallNames, ApprovalScope, ImageAttachment, LiveState, PlanInfo, SendResult, SessionMeta, SessionOrigin, SessionStatus, StoredRules } from '../shared/types';
 import { Agent, PLAN_APPROVED_TEXT, type SendOptions } from './agent';
 import type { App, Disposer } from './app';
@@ -319,12 +320,16 @@ export class SessionRuntime {
       update((c) => ({ ...c, browser: { ...c.browser, alwaysAllowed: [...new Set([...(c.browser?.alwaysAllowed ?? []), ...rule.values])] } }));
     } else if (rule) {
       update((c) => {
-        const r: StoredRules = { ...(c.allowRules?.[cwd] ?? {}) };
-        const add = (list: string[] | undefined) => [...new Set([...(list ?? []), ...rule.values])];
-        if (rule.kind === 'program') r.programs = add(r.programs);
-        else if (rule.kind === 'reason') r.reasons = add(r.reasons);
-        else if (rule.kind === 'mcp') r.mcp = add(r.mcp);
-        else if (rule.kind === 'edits') r.edits = true;
+        // Saved as rule strings: "Always allow git" is Bash(git:*), edits Edit, a server mcp__server (agent/rules.ts)
+        const r: StoredRules = normalizeStoredRules(c.allowRules?.[cwd]) ?? {};
+        const add = (list: string[] | undefined, values: string[]) => [...new Set([...(list ?? []), ...values])];
+        if (rule.kind === 'reason') r.reasons = add(r.reasons, rule.values);
+        else {
+          const saved = cardRules(rule.kind as 'program' | 'edits' | 'mcp', rule.values);
+          if (saved.allow.length) r.allow = add(r.allow, saved.allow);
+          if (saved.programs.length) r.programs = add(r.programs, saved.programs);
+          if (saved.mcp.length) r.mcp = add(r.mcp, saved.mcp);
+        }
         return { ...c, allowRules: { ...(c.allowRules ?? {}), [cwd]: r } };
       });
     }

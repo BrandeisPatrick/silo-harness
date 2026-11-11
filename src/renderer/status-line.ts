@@ -37,6 +37,9 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
   const statusText = byId('status-text');
   const statusTime = byId('status-time');
   const statusTokens = byId('status-tokens');
+  /** The session's estimated cost, beside the tokens (a 'cost' event; nothing when a model has no price) */
+  const statusCost = byId('status-cost');
+  let costLabel = '';
   const statusHint = byId('status-hint');
 
   /** A run is going on in the session on screen */
@@ -118,6 +121,8 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
       setStatus('run', baseVerb());
       statusTime.textContent = elapsed(Date.now() - runStartedAt);
       statusTokens.hidden = true;
+      statusCost.hidden = true;
+      costLabel = '';
       runOutputTokens = 0;
       window.clearInterval(timer);
       timer = window.setInterval(() => {
@@ -156,6 +161,7 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
       setStatus('run', COMPACTING_TEXT);
       statusTime.textContent = '0s';
       statusTokens.hidden = true;
+      statusCost.hidden = true;
       window.clearInterval(timer);
       timer = window.setInterval(() => {
         statusTime.textContent = elapsed(Date.now() - runStartedAt);
@@ -238,6 +244,14 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
     statusTokens.dataset.tip = `Context ${formatCount(context)}${limit ? ` of ${formatCount(limit)}` : ''} · Output ${formatCount(runOutputTokens)} this run`;
     statusTokens.classList.toggle('near-limit', limit > 0 && context / limit >= 0.85);
     statusTokens.hidden = !running;
+    statusCost.hidden = !running || !costLabel;
+  }
+
+  /** A cost event: the session's estimate so far ("$0.04"), or none (a model of the session has no price). */
+  function reportCost(label: string | undefined): void {
+    costLabel = label ?? '';
+    statusCost.textContent = costLabel;
+    statusCost.hidden = !running || statusTokens.hidden || !costLabel;
   }
 
   return {
@@ -273,6 +287,7 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
       }
     },
     reportUsage,
+    reportCost,
     /** A compact_end with an error arrived: compactNow's own error is not shown a second time */
     compactFailed: () => {
       compactErrorShown = true;

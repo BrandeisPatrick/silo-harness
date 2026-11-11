@@ -1,8 +1,10 @@
 // The auto-mode guard: pure rules that decide which commands and writes still need the user's OK.
 // Also: the plan-mode read-only allowlist and the "program" of a command for session allow-lists.
 // A heuristic over the command text, not a sandbox: it looks inside $(…), backticks, <(…), sh -c '…', eval, xargs
-// and find -exec, and at redirections, but a command can still hide what it runs (a script file, a variable).
+// and find -exec, at what sudo runs, and at redirections (at every folder a cd in the line may have moved to), but a
+// command can still hide what it runs (a script file, a variable).
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configDir } from './paths';
@@ -351,6 +353,8 @@ function argvOf(simple: string): { argv: string[]; assigns: boolean; lexed: Lexe
     break;
   }
   const argv = w.slice(i);
+  // a subshell or group after a keyword: do (cd x; …)
+  if (i > 0 && argv[0] && /^[({]./.test(argv[0])) argv[0] = argv[0].replace(/^[({]+/, '');
   // the ) that closes a subshell: (cd x; rm -rf ~)
   const last = argv.length - 1;
   if (last > 0 && argv[last].endsWith(')') && (argv[last].match(/\)/g) ?? []).length > (argv[last].match(/\(/g) ?? []).length) {
@@ -363,6 +367,15 @@ function argvOf(simple: string): { argv: string[]; assigns: boolean; lexed: Lexe
 /** The program and arguments of a simple command (see argvOf), quotes removed and redirections left out. */
 export function commandArgv(simple: string): string[] {
   return argvOf(simple).argv;
+}
+
+/**
+ * A simple command as the permission rules match it (agent/rules.ts): its program and arguments (see argvOf), whether
+ * it starts with a VAR=value assignment, and the files its redirections write.
+ */
+export function commandShape(simple: string): { argv: string[]; assigns: boolean; writes: string[] } {
+  const { argv, assigns, lexed } = argvOf(simple);
+  return { argv, assigns, writes: lexed.writes.filter((t) => !NULL_DEVICES.has(t)) };
 }
 
 /** The program a simple command runs: env assignments and wrappers like env/nohup/time are skipped; sudo counts as the program. */
@@ -457,6 +470,64 @@ export function allSimpleCommands(command: string): string[] {
   return out;
 }
 
+/** sudo's options that take a value (the rest of the cluster or the next word); doas has -u and -C */
+const SUDO_VALUE_SHORT = 'ugpCDrtTUhR';
+const SUDO_VALUE_LONG = new Set(['--user', '--group', '--prompt', '--close-from', '--chdir', '--role', '--type', '--command-timeout', '--other-user', '--host', '--chroot']);
+
+/** The command sudo or doas runs, its options and VAR=value words skipped; null when it is not one or runs none (sudo -s, sudo -e). */
+export function sudoInner(argv: string[]): string | null {
+  const prog = path.basename(argv[0] ?? '');
+  if (prog !== 'sudo' && prog !== 'doas') return null;
+  const valued = prog === 'sudo' ? SUDO_VALUE_SHORT : 'uC';
+  let i = 1;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (a === '--') {
+      i++;
+      break;
+    }
+    if (a.startsWith('--')) {
+      if (a === '--edit') return null;
+      i += SUDO_VALUE_LONG.has(a) ? 2 : 1;
+      continue;
+    }
+    if (a.startsWith('-') && a.length > 1) {
+      let next = i + 1;
+      for (let j = 1; j < a.length; j++) {
+        if (prog === 'sudo' && a[j] === 'e') return null; // sudoedit: edits a file, runs no command
+        if (valued.includes(a[j])) {
+          if (j + 1 === a.length) next = i + 2;
+          break;
+        }
+      }
+      i = next;
+      continue;
+    }
+    if (ASSIGNMENT.test(a)) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  const rest = argv.slice(i);
+  return rest.length ? joinWords(rest) : null;
+}
+
+/** allSimpleCommands, and after each sudo or doas command the commands it runs (what deny rules and the guard look through). */
+export function lineCommands(command: string): string[] {
+  const out: string[] = [];
+  const walk = (text: string, depth: number) => {
+    for (const s of allSimpleCommands(text)) {
+      if (out.length >= MAX_COMMANDS) return;
+      out.push(s);
+      const inner = depth < MAX_DEPTH ? sudoInner(argvOf(s).argv) : null;
+      if (inner) walk(inner, depth + 1);
+    }
+  };
+  walk(command.trim(), 0);
+  return out;
+}
+
 function expandHome(p: string): string {
   return p.replace(/^~(?=$|\/)/, os.homedir()).replace(/^\$\{?HOME\}?(?=$|\/)/, os.homedir());
 }
@@ -478,6 +549,95 @@ function isAbsolutePathArg(a: string): boolean {
 
 function pathArgsOutsideCwd(args: string[], cwd: string): string[] {
   return args.filter((a) => isAbsolutePathArg(a) && !insideCwd(a, cwd) && !TMP_RE.test(expandHome(a)) && !NULL_DEVICES.has(a));
+}
+
+/**
+ * The folders a command line may be in: the session's folder, and each literal `cd` / `pushd` / `chdir` target
+ * resolved against every folder already in the set (a set, not one current folder: subshells, loops and sh -c are
+ * flattened, so the guard cannot tell which cd is still in effect). `unknown`: a cd whose target is not literal.
+ */
+export interface LineFolders {
+  dirs: string[];
+  unknown: boolean;
+}
+
+const CD_PROGRAMS = new Set(['cd', 'pushd', 'chdir']);
+const MAX_FOLDERS = 16;
+
+export function lineFolders(command: string, cwd: string): LineFolders {
+  const out: LineFolders = { dirs: [path.resolve(cwd)], unknown: false };
+  const add = (d: string) => {
+    if (out.dirs.includes(d)) return;
+    if (out.dirs.length >= MAX_FOLDERS) out.unknown = true;
+    else out.dirs.push(d);
+  };
+  for (const simple of lineCommands(command)) {
+    const argv = argvOf(simple).argv;
+    const prog = path.basename(argv[0] ?? '');
+    if (!CD_PROGRAMS.has(prog)) continue;
+    const args = argv.slice(1);
+    const dash = args.indexOf('--');
+    const ops = dash >= 0 ? args.slice(dash + 1) : args.filter((a) => !/^-[A-Za-z@]+$/.test(a));
+    // cd - and popd go back to a folder already in the set; cd -2 / pushd +1 turn the folder stack
+    if (ops[0] === '-' || (ops.length === 1 && /^[+-]\d+$/.test(ops[0]))) continue;
+    if (!ops.length) {
+      if (prog !== 'pushd') add(os.homedir());
+      continue;
+    }
+    const e = expandHome(ops[0]);
+    if (ops.length > 1 || /[$`*?[{]/.test(e) || e.startsWith('~')) {
+      out.unknown = true;
+      continue;
+    }
+    for (const d of [...out.dirs]) add(path.resolve(d, e));
+  }
+  return out;
+}
+
+/** A path's brace alternatives (a{b,c} → ab, ac), or null past a bounded number */
+function braceVariants(p: string, limit = 32): string[] | null {
+  const m = /\{([^{}]*,[^{}]*)\}/.exec(p);
+  if (!m) return [p];
+  const out: string[] = [];
+  for (const alt of m[1].split(',')) {
+    const more = braceVariants(p.slice(0, m.index) + alt + p.slice(m.index + m[0].length), limit);
+    if (!more || out.length + more.length > limit) return null;
+    out.push(...more);
+  }
+  return out;
+}
+
+/**
+ * Where a path a command names may be: absolute, or resolved against each folder the line may be in. Null when the
+ * guard cannot place it: an expansion it cannot resolve ($X/…, ${D}, $(…), ~user; ~ and $HOME are resolved), or a
+ * relative path after a cd it could not follow.
+ */
+function placements(p: string, folders: LineFolders): string[] | null {
+  const out: string[] = [];
+  const variants = braceVariants(p);
+  if (!variants) return null;
+  for (const v of variants) {
+    const e = expandHome(v);
+    if (/[$`]/.test(e) || e.startsWith('~')) return null;
+    if (path.isAbsolute(e)) out.push(path.resolve(e));
+    else if (folders.unknown) return null;
+    else for (const d of folders.dirs) out.push(path.resolve(d, e));
+  }
+  return [...new Set(out)];
+}
+
+/** True when a path written by the line may be outside the session's folder (not /tmp, not a null device), or cannot be placed. */
+function writesOutside(paths: string[], folders: LineFolders, cwd: string): boolean {
+  return paths.some((p) => {
+    if (!p || NULL_DEVICES.has(p)) return false;
+    const at = placements(p, folders);
+    return at === null || at.some((a) => !insideCwd(a, cwd) && !TMP_RE.test(a) && !NULL_DEVICES.has(a));
+  });
+}
+
+/** True when a path the line names is a secret at any folder the line may be in */
+function secretAt(p: string, folders: LineFolders): boolean {
+  return folders.dirs.some((d) => isSecretPath(p, d));
 }
 
 const BROAD_TARGETS = new Set(['/', '~', '$HOME', '*', './*', '..', '../', '.', './', '~/', '/*']);
@@ -671,6 +831,66 @@ const OPEN_IN_PROJECT = ['.claude/skills', '.claude/commands', '.claude/agents',
 const PROTECTED_IN_HOME = ['.zshrc', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.bash_login', '.profile', '.gitconfig', '.config/git', '.ripgreprc', '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.config/gh', 'Library/LaunchAgents'];
 /** In the user's config folder (~/.silo-harness): skills and the instructions file hold no executable configuration */
 const OPEN_IN_CONFIG = ['skills', 'SILOHARNESS.md', 'OPENHARNESS.md'];
+/** The app's data folder (config.json, with every project's saved rules), when the app has told the guard (index.ts) */
+let appDataDir: string | null = null;
+export function setAppDataDir(dir: string | null): void {
+  appDataDir = dir ? path.resolve(dir) : null;
+}
+
+/** The real path of `p`, or of its nearest existing folder with the rest appended */
+function realish(p: string): string {
+  let cur = p;
+  const rest: string[] = [];
+  for (let i = 0; i < 64; i++) {
+    try {
+      return path.join(fs.realpathSync(cur), ...rest.reverse());
+    } catch {
+      const up = path.dirname(cur);
+      if (up === cur) return p;
+      rest.push(path.basename(cur));
+      cur = up;
+    }
+  }
+  return p;
+}
+
+/**
+ * The files that hold permission rules: the user's settings.json (under every name the config folder has had) and
+ * the app's config.json (each project's saved rules). The agent must never write them itself.
+ */
+export function ruleFiles(): string[] {
+  const h = os.homedir();
+  const out = [configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')].map((d) => path.join(d, 'settings.json'));
+  for (const d of APP_DATA) out.push(path.join(h, d, 'config.json'));
+  if (appDataDir) out.push(path.join(appDataDir, 'config.json'));
+  return [...new Set(out.map((f) => path.resolve(f)))];
+}
+
+/** True when a write to `p` (from `cwd`) writes a file that holds permission rules, or moves or removes the folder it is in. Symlinks are followed. */
+export function writesRuleFile(p: string, cwd: string): boolean {
+  if (!p) return false;
+  const abs = path.resolve(cwd, expandHome(p));
+  const real = realish(abs);
+  // The file itself, or the folder that holds it (moved or removed): not every folder above it, whose removal the
+  // guard's own reasons (a critical folder, a broad path) already ask about
+  return ruleFiles().some((f) => [f, realish(f)].some((t) => [abs, real].some((x) => x === t || x === path.dirname(t))));
+}
+
+/** True when a shell command writes, moves or removes a file that holds permission rules (as far as its text shows). */
+export function commandWritesRuleFile(command: string, cwd: string): boolean {
+  const raw = command.trim();
+  const folders = lineFolders(raw, cwd);
+  for (const simple of lineCommands(raw)) {
+    const { argv, lexed } = argvOf(simple);
+    const prog = path.basename(argv[0] ?? '');
+    for (const p of writtenOrLinked(prog, argv.slice(1), lexed)) {
+      if (!p || NULL_DEVICES.has(p)) continue;
+      if ((placements(p, folders) ?? []).some((abs) => writesRuleFile(abs, cwd))) return true;
+    }
+  }
+  return false;
+}
+
 /** The reasons no allow rule or "for this session" answer covers */
 export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protected file', 'modifies the .git directory']);
 
@@ -683,6 +903,8 @@ export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protect
 export function protectedWrite(abs: string, cwd: string): string | null {
   const file = path.resolve(cwd, expandHome(abs));
   const root = path.resolve(cwd);
+  // The files that hold permission rules, wherever the session works (even inside the config folder)
+  if (writesRuleFile(file, cwd)) return 'writes a protected file';
   if (holds(root, file) && file !== root) {
     if (path.relative(root, file).split(path.sep)[0] === '.git') return 'modifies the .git directory';
     const under = (list: string[]) => list.some((p) => holds(path.join(root, p), file));
@@ -716,6 +938,37 @@ function writtenPaths(prog: string, args: string[], lexed: Lexed): string[] {
   }
   if (prog === 'tee' || prog === 'rm' || prog === 'rmdir' || prog === 'truncate') out.push(...targets);
   if (prog === 'sed' && args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) out.push(...targets);
+  if (prog === 'dd') for (const a of args) if (a.startsWith('of=')) out.push(a.slice(3));
+  // where tar -C and unzip -d unpack: the folder itself (writesRuleFile answers for the folder that holds a rule file)
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (prog === 'tar') {
+      if (a.startsWith('--directory=')) out.push(a.slice('--directory='.length));
+      else if (a === '--directory' || /^-[A-Za-z]*C$/.test(a)) out.push(args[++i] ?? '');
+    } else if (prog === 'unzip') {
+      if (a === '-d') out.push(args[++i] ?? '');
+      else if (/^-d./.test(a)) out.push(a.slice(2));
+    }
+  }
+  return out;
+}
+
+/** writtenPaths, and what ln links to: a link to a rule file or a protected file is a way to write it */
+function writtenOrLinked(prog: string, args: string[], lexed: Lexed): string[] {
+  const out = writtenPaths(prog, args, lexed);
+  if (prog === 'ln') {
+    const ops = args.filter((a) => !a.startsWith('-'));
+    const t = args.findIndex((a) => a === '-t' || a.startsWith('--target-directory'));
+    const dest = t >= 0 ? (args[t].includes('=') ? args[t].split('=').slice(1).join('=') : args[t + 1]) : ops[ops.length - 1];
+    out.push(...(t >= 0 ? ops.filter((x) => x !== dest) : ops.slice(0, -1)));
+  }
+  return out;
+}
+
+/** The operands a simple command writes that the outside check follows when relative: writtenPaths' operands, and mkdir and touch */
+function writtenOperands(prog: string, args: string[], lexed: Lexed): string[] {
+  const out = writtenPaths(prog, args, { ...lexed, writes: [] });
+  if (prog === 'mkdir' || prog === 'touch') out.push(...args.filter((a) => !a.startsWith('-')));
   return out;
 }
 
@@ -743,6 +996,14 @@ const WRITE_PROGRAMS = new Set(['cp', 'mv', 'rm', 'mkdir', 'touch', 'ln', 'rsync
 export function guardCommand(command: string, cwd: string): string | null {
   const raw = command.trim();
   if (!raw) return null;
+  return guardLine(raw, cwd, lineFolders(raw, cwd), 0);
+}
+
+/**
+ * guardCommand for a line, with the folders the whole line may be in. A path the guard can place is checked at every
+ * one of them ("inside" is always the session's folder); a write it cannot place counts as outside.
+ */
+function guardLine(raw: string, cwd: string, folders: LineFolders, depth: number): string | null {
   if (/\b(curl|wget)\b[^|;&\n]*\|\s*(sudo\s+)?(sh|bash|zsh|ksh|dash|python3?|node|perl|ruby)\b/.test(raw)) return 'pipes a download into a shell';
   if (/\b(sh|bash|zsh)\s+-c\s+["']?\$\(\s*(curl|wget)\b/.test(raw)) return 'pipes a download into a shell';
   if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(raw)) return 'fork bomb';
@@ -758,24 +1019,33 @@ export function guardCommand(command: string, cwd: string): string | null {
     const args = argv.slice(1);
     const flags = args.filter((a) => a.startsWith('-'));
     const targets = args.filter((a) => !a.startsWith('-'));
-    // a protected file written by a redirection, cp, mv, tee, sed -i, rm …
-    for (const p of writtenPaths(prog, args, lexed)) {
+    // a protected file written by a redirection, cp, mv, tee, sed -i, rm, dd of=, or linked to by ln, at every
+    // folder the line may be in
+    for (const p of writtenOrLinked(prog, args, lexed)) {
       if (!p || NULL_DEVICES.has(p)) continue;
-      const why = protectedWrite(p, cwd);
-      if (why) return why;
+      for (const at of [p, ...(placements(p, folders) ?? [])]) {
+        const why = protectedWrite(at, cwd);
+        if (why) return why;
+      }
     }
     // redirections: > path, 2> path, &> path, >| path (not 2>&1, >&2, /dev/null)
-    if (pathArgsOutsideCwd(lexed.writes, cwd).length) return 'writes outside the working directory';
-    if (lexed.reads.some((t) => isSecretPath(t, cwd))) return 'reads secrets';
+    if (pathArgsOutsideCwd(lexed.writes, cwd).length || writesOutside(lexed.writes, folders, cwd)) return 'writes outside the working directory';
+    if (lexed.reads.some((t) => secretAt(t, folders))) return 'reads secrets';
     if (!prog) continue;
 
-    if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
+    // What sudo runs is read too: its own reason comes first ("uses sudo" saved as allowed must not wave through
+    // sudo rm -rf ~); alwaysAskReason still asks "uses sudo"
+    if (prog === 'sudo' || prog === 'doas') {
+      const inner = depth < MAX_DEPTH ? sudoInner(argv) : null;
+      return (inner && guardLine(inner, cwd, folders, depth + 1)) || 'uses sudo';
+    }
     if (prog === 'rm') {
       const recursive = flags.some((f) => /^-[a-zA-Z]*[rR]/.test(f) || f === '--recursive');
       if (targets.some((t) => BROAD_TARGETS.has(t) || /^~?\/\*?$/.test(t))) return recursive ? 'recursive delete of a broad path' : 'deletes a broad path';
       const outside = pathArgsOutsideCwd(targets, cwd);
       if (outside.length) return 'deletes outside the working directory';
       if (recursive && targets.some((t) => /^\.\.(\/|$)/.test(t) || t === '~')) return 'recursive delete of a broad path';
+      if (writesOutside(targets, folders, cwd)) return 'deletes outside the working directory';
     }
     if (prog === 'git') {
       const { sub, rest } = gitWords(argv);
@@ -791,7 +1061,7 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'crontab' && !(args.length === 1 && args[0] === '-l')) return 'system control';
     if (prog === 'kill' && flags.includes('-9') && targets.includes('-1')) return 'system control';
     if ((prog === 'chmod' || prog === 'chown' || prog === 'chgrp') && flags.some((f) => /^-[a-zA-Z]*R/.test(f) || f === '--recursive')) {
-      if (targets.some((t) => BROAD_TARGETS.has(t)) || pathArgsOutsideCwd(targets, cwd).length) return 'broad permission change';
+      if (targets.some((t) => BROAD_TARGETS.has(t)) || pathArgsOutsideCwd(targets, cwd).length || writesOutside(targets.slice(1), folders, cwd)) return 'broad permission change';
     }
     if (prog === 'osascript' || (prog === 'open' && (flags.includes('-a') || flags.includes('-b')))) return 'controls other apps';
     if (['ssh', 'scp', 'sftp', 'telnet'].includes(prog)) return 'remote access';
@@ -814,10 +1084,12 @@ export function guardCommand(command: string, cwd: string): string | null {
     if (prog === 'security' && targets.some((t) => /^(find|dump|export|delete|add)-/.test(t))) return 'reads or changes the keychain';
     if (prog === 'printenv' && !targets.length) return 'reads secrets';
     if (prog === 'env' && !targets.length && !flags.length) return 'reads secrets';
-    if (!NO_READ_PROGRAMS.has(prog) && args.some((a) => pathsIn(a).some((p) => isSecretPath(p, cwd)))) return 'reads secrets';
+    if (!NO_READ_PROGRAMS.has(prog) && args.some((a) => pathsIn(a).some((p) => secretAt(p, folders)))) return 'reads secrets';
     if (prog === 'sed' && flags.some((f) => /^-[a-zA-Z]*i/.test(f) || f === '--in-place') && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (WRITE_PROGRAMS.has(prog) && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
     if (prog === 'tee' && pathArgsOutsideCwd(targets, cwd).length) return 'writes outside the working directory';
+    // what it writes, relative paths too, at every folder the line may be in (rm said so above)
+    if (prog !== 'rm' && writesOutside(writtenOperands(prog, args, lexed), folders, cwd)) return 'writes outside the working directory';
     if ((prog === 'cd' || prog === 'pushd') && args[0] !== '-') walkCwd = path.resolve(walkCwd, expandHome(targets[0] ?? '~'));
     soft ??= privacyReason(prog, args) ?? (scansHome(prog, args, walkCwd) ? SCAN_REASON : null);
   }

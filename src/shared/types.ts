@@ -331,6 +331,8 @@ export interface AppConfig {
   notifications: boolean;
   /** "Always allow … in this project" answers, by working directory (see ProjectRules) */
   allowRules: Record<string, StoredRules>;
+  /** Rules for every project, from the user's own settings.json only (never config.json, never a project's file) */
+  permissions?: PermissionLists;
   /** Working directories used before, most recent first (at most 8); the welcome screen offers them */
   recentDirs: string[];
   /** Keep the Mac awake: never, while a session is running, or whenever the app is open */
@@ -370,6 +372,16 @@ export interface AppConfig {
   timingLog?: boolean;
   /** How many read-only tool calls of one reply run at the same time (1 to 10; absent: 4; 1: one after another) */
   toolConcurrency?: number;
+  /** Prices the user set, by model id (src/main/cost.ts): they override the built-in table and price any other model */
+  prices?: Record<string, ModelPrice>;
+}
+
+/** AppConfig.prices: dollars per million tokens; cacheRead and cacheWrite default to the input price. */
+export interface ModelPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
@@ -382,7 +394,8 @@ export interface WebSearchConfig {
 /**
  * AppConfig.autoMode ("autoMode" in your own settings.json; a project's file may not set it). `environment` is free
  * text the check reads ("aisolutions-dev is a dev AWS account"); `allow` plain-language rules it allows; `model` the
- * check's model, "<provider>:<model>" or a model id of the session's provider ('' : the session's own model).
+ * check's model, "<provider>:<model>" or a model id of the session's provider ('' : classifierTarget's default,
+ * Claude Haiku 5.5 for a larger Claude model on Anthropic's API, else the session's own model).
  */
 export interface AutoModeConfig {
   environment: string;
@@ -407,30 +420,55 @@ export interface BrowserCardInfo {
   site: string;
 }
 
-export interface StoredRules {
-  /** Programs (first word of a command: git, npm, …) that run without asking */
-  programs?: string[];
+/** Permission rules in Claude Code's format ("Bash(npm run test:*)", "Edit", "mcp__github"): see docs/reference.md#permission-rules */
+export interface PermissionLists {
+  allow?: string[];
+  ask?: string[];
+  deny?: string[];
+}
+
+/**
+ * A project's saved rules (AppConfig.allowRules[cwd]): rule strings, and guard reasons ("uses sudo") that no longer
+ * pause. Before 0.16 it held programs, edits and mcp: they are read as Bash(p:*), Edit and mcp__s (agent/rules.ts).
+ */
+export interface StoredRules extends PermissionLists {
   /** Auto-mode guard reasons ("uses sudo") that no longer pause */
   reasons?: string[];
-  /** Writes and edits inside the working directory run without asking (like Accept edits, but remembered) */
+  /** Before 0.16: programs (git, npm, …) that run without asking; a name the rule grammar cannot hold stays here */
+  programs?: string[];
+  /** Before 0.16: writes and edits inside the working directory run without asking */
   edits?: boolean;
-  /** MCP servers whose tools run without asking */
+  /** Before 0.16: MCP servers whose tools run without asking */
   mcp?: string[];
 }
 
-/** The saved rules for the current working directory, for Settings */
+export type RuleList = 'allow' | 'ask' | 'deny';
+
+/** One rule as Settings lists it; `error` when it does not parse (it is then ignored) */
+export interface RuleEntry {
+  text: string;
+  error?: string;
+}
+
+/** The rules for the current working directory and the global ones (the user's settings.json), for Settings */
 export interface ProjectRules {
   cwd: string;
-  programs: string[];
+  allow: RuleEntry[];
+  ask: RuleEntry[];
+  deny: RuleEntry[];
   reasons: string[];
-  edits: boolean;
-  mcp: string[];
+  /** From the user's settings.json: read-only here (edit the file) */
+  global: { file: string; allow: RuleEntry[]; ask: RuleEntry[]; deny: RuleEntry[] };
 }
 
 export interface RulesApi {
   list(): Promise<ProjectRules>;
-  /** Removes one rule (value is the program, reason or server name; edits needs none). Returns the remaining rules. */
-  remove(kind: 'program' | 'reason' | 'edits' | 'mcp', value?: string): Promise<ProjectRules>;
+  /** Removes one of the project's rules (a rule string, or a reason). Returns the rules left. */
+  remove(kind: RuleList | 'reason', value: string): Promise<ProjectRules>;
+  /** Adds a rule to one of the project's lists; throws with the reason when it does not parse. */
+  add(list: RuleList, text: string): Promise<ProjectRules>;
+  /** Why a rule would be refused, or null when it parses */
+  check(list: RuleList, text: string): Promise<string | null>;
 }
 
 /** One entry of the agent's own task list (the update_tasks tool); shown as a checklist card that updates in place */
@@ -503,6 +541,11 @@ export type AgentEvent =
    * after each call. The cache counts, of the prompt, only when the provider reports them.
    */
   | { type: 'usage'; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+  /**
+   * What the session has cost so far, after each model call it counts (src/main/cost.ts): the estimate in dollars and
+   * its short label ("$0.04", "<$0.01"); neither when a call of the session has no known price.
+   */
+  | { type: 'cost'; usd?: number; label?: string }
   /**
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text

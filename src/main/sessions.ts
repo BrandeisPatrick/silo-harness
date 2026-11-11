@@ -5,6 +5,7 @@ import type OpenAI from 'openai';
 import type { CompactionInfo, MessageOrigin, PlanInfo, SessionMeta, SessionOrigin, TaskItem, TranscriptItem, ArtifactInfo } from '../shared/types';
 import type { ImageInfo } from '../shared/images';
 import type { Snapshot } from './changes';
+import type { SessionCost } from './cost';
 import { CONTEXT_NOTE_PREFIX, FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble } from './compact';
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
@@ -71,6 +72,8 @@ export interface Session {
    * messages (0 = the first, compactions' folded messages included), which compaction and fork leave as they are.
    */
   turnTimes?: Record<string, number>;
+  /** The tokens of every model call made for this session, for its cost in dollars (see cost.ts); not copied to a fork */
+  cost?: SessionCost;
 }
 
 /** A checkpoint: where a user message sits in `messages` and what files looked like when the agent first touched them after it. */

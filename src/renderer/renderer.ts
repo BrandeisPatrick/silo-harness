@@ -1169,6 +1169,9 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     case 'usage':
       statusLine.reportUsage(Number(ev.promptTokens) || 0, Number(ev.completionTokens) || 0);
       break;
+    case 'cost':
+      statusLine.reportCost(typeof ev.label === 'string' ? ev.label : undefined);
+      break;
     case 'hook_status':
     case 'retry_status':
       // A hook's statusMessage while it runs, or the wait before a model call is tried again (one line; the status
@@ -1931,11 +1934,19 @@ const rulesPanel = createRulesPanel({
   els: {
     cwd: $('rules-cwd'),
     list: $('rules-list'),
-    programs: $('rules-programs'),
+    allow: $('rules-allow'),
+    ask: $('rules-ask'),
+    deny: $('rules-deny'),
     reasons: $('rules-reasons'),
-    mcp: $('rules-mcp'),
-    edits: $('rules-edits'),
     empty: rulesSection.querySelector<HTMLElement>('.rules-empty')!,
+    addList: $('rules-add-list') as HTMLSelectElement,
+    addInput: $('rules-add-input') as HTMLInputElement,
+    addBtn: $('rules-add-btn') as HTMLButtonElement,
+    addError: $('rules-add-error'),
+    globalFor: $('rules-global-for'),
+    globalFile: $('rules-global-file'),
+    global: $('rules-global'),
+    ignored: $('rules-ignored'),
     status: $('rules-status'),
   },
   source: rulesSource,

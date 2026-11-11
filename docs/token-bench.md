@@ -386,9 +386,10 @@ named the server or the model called a tool by name.
 
 ### Smaller ones
 
-- **The safety check's model.** It runs on the session's model unless `autoMode.model` names another. On Opus 5.5 ($4 per million
-  input) each check costs 40 times what it would on Haiku 5.5; a default of the provider's small model would cut it by that.
-  Not changed: which model a provider offers is a product decision.
+- **The safety check's model.** It ran on the session's model unless `autoMode.model` named another. On Opus 5.5 ($4 per million
+  input) each check costs 40 times what it does on Haiku 5.5. Changed in 0.16.0: on Anthropic's own API a session on a larger
+  Claude model has Haiku 5.5 check, after it passed the eval with no false allow ([evals.md](evals.md)); gateways and other
+  providers keep the session's model.
 - **The installed-mods list** names all 14 bundled mods, including those that are off (about 150 tokens; since the tool
   groups it is in the mods group's load result, not the system prompt).
 - **browser_get_text and browser_read_page** default to 50,000 and 40,000 characters; the 30,000-character cut now bounds them for

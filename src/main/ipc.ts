@@ -6,7 +6,8 @@ import { app as electronApp, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AppConfig, ApprovalScope, Bounds, BrowserState, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
+import type { AppConfig, ApprovalScope, Bounds, BrowserState, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, RuleEntry, RuleList, StoredRules } from '../shared/types';
+import { normalizeStoredRules, parseRule, storedLists } from './agent/rules';
 import type { AppHost } from './app';
 import { ARTIFACT_SCHEME } from './artifacts';
 import type { BrowserController } from './browser';
@@ -106,6 +107,8 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         mcpTrustedEntries: current.mcpTrustedEntries,
         mcpProjectValues: current.mcpProjectValues,
         allowRules: current.allowRules,
+        // Global permission rules come from the user's settings.json alone
+        permissions: current.permissions,
         recentDirs: current.recentDirs,
         settingsTrusted: current.settingsTrusted,
         mods: current.mods,
@@ -249,24 +252,61 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   });
 
   const projectRules = (): ProjectRules => {
-    const cwd = cfg().workingDirectory;
-    const r: StoredRules = cfg().allowRules?.[cwd] ?? {};
-    return { cwd, programs: [...(r.programs ?? [])], reasons: [...(r.reasons ?? [])], edits: r.edits === true, mcp: [...(r.mcp ?? [])] };
+    const c = cfg();
+    const cwd = c.workingDirectory;
+    const l = storedLists(c.allowRules?.[cwd]);
+    const entries = (list: RuleList, texts: string[]): RuleEntry[] =>
+      texts.map((text) => {
+        const r = parseRule(text, list);
+        return 'error' in r ? { text, error: r.error } : { text };
+      });
+    const global = c.permissions ?? {};
+    return {
+      cwd,
+      allow: [...entries('allow', l.allow), ...(l.programs ?? []).map((p) => ({ text: `Bash(${p}:*)` })), ...(l.mcp ?? []).map((m) => ({ text: `mcp__${m}` }))],
+      ask: entries('ask', l.ask),
+      deny: entries('deny', l.deny),
+      reasons: l.reasons,
+      global: { file: settingsLayer.userFile(), allow: entries('allow', global.allow ?? []), ask: entries('ask', global.ask ?? []), deny: entries('deny', global.deny ?? []) },
+    };
   };
-  ipcMain.handle('rules:list', () => projectRules());
-  ipcMain.handle('rules:remove', (_e, kind: string, value?: string) => {
+  const isList = (v: unknown): v is RuleList => v === 'allow' || v === 'ask' || v === 'deny';
+  /** Changes the project's stored rules (in today's shape), dropping the folder's entry when nothing is left */
+  const changeRules = (change: (r: StoredRules) => StoredRules) =>
     app.updateConfig((c) => {
       const cwd = c.workingDirectory;
-      const r: StoredRules = { ...(c.allowRules?.[cwd] ?? {}) };
-      const v = String(value ?? '');
-      if (kind === 'program') r.programs = (r.programs ?? []).filter((p) => p !== v);
-      else if (kind === 'reason') r.reasons = (r.reasons ?? []).filter((p) => p !== v);
-      else if (kind === 'mcp') r.mcp = (r.mcp ?? []).filter((p) => p !== v);
-      else if (kind === 'edits') delete r.edits;
+      const next = normalizeStoredRules(change(normalizeStoredRules(c.allowRules?.[cwd]) ?? {}));
       const rules = { ...(c.allowRules ?? {}) };
-      if (!r.programs?.length && !r.reasons?.length && !r.mcp?.length && !r.edits) delete rules[cwd];
-      else rules[cwd] = r;
+      if (next) rules[cwd] = next;
+      else delete rules[cwd];
       return { ...c, allowRules: rules };
+    });
+  ipcMain.handle('rules:list', () => projectRules());
+  ipcMain.handle('rules:check', (_e, list: unknown, text: unknown) => {
+    if (!isList(list)) return 'choose allow, ask or deny';
+    const r = parseRule(String(text ?? ''), list);
+    return 'error' in r ? r.error : null;
+  });
+  ipcMain.handle('rules:add', (_e, list: unknown, text: unknown) => {
+    if (!isList(list)) throw new Error('choose allow, ask or deny');
+    const r = parseRule(String(text ?? ''), list);
+    if ('error' in r) throw new Error(r.error);
+    changeRules((st) => ({ ...st, [list]: [...new Set([...(st[list] ?? []), r.rule.text])] }));
+    return projectRules();
+  });
+  ipcMain.handle('rules:remove', (_e, kind: string, value?: string) => {
+    const v = String(value ?? '');
+    changeRules((st) => {
+      const r: StoredRules = { ...st };
+      if (kind === 'reason') r.reasons = (r.reasons ?? []).filter((p) => p !== v);
+      else if (isList(kind)) {
+        r[kind] = (r[kind] ?? []).filter((p) => p !== v);
+        if (kind === 'allow') {
+          r.programs = (r.programs ?? []).filter((p) => `Bash(${p}:*)` !== v);
+          r.mcp = (r.mcp ?? []).filter((m) => `mcp__${m}` !== v);
+        }
+      }
+      return r;
     });
     return projectRules();
   });

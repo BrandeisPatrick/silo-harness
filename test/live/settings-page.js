@@ -261,13 +261,13 @@ const js = (v) => JSON.stringify(v);
     await app.evaluate(`window.__oc_debug.mcp.mock(null)`);
 
     // Rules panel (debug mock): remove a rule
-    await app.evaluate(`window.__oc_debug.rules.mock({ cwd: ${js(project)}, programs: ['git', 'npm'], reasons: [], edits: false, mcp: [] })`);
+    await app.evaluate(`window.__oc_debug.rules.mock({ cwd: ${js(project)}, allow: [{ text: 'Bash(git:*)' }, { text: 'Bash(npm:*)' }], ask: [], deny: [], reasons: [] })`);
     await open(app, 'permissions');
     await sleep(200);
-    const chips = await app.count('#rules-programs .rule-chip');
-    await app.click('#rules-programs .rule-remove');
+    const chips = await app.count('#rules-allow .rule-chip');
+    await app.click('#rules-allow .rule-remove');
     await sleep(400);
-    check('the rules panel removes a rule', chips === 2 && (await app.count('#rules-programs .rule-chip')) === 1, chips);
+    check('the rules panel removes a rule', chips === 2 && (await app.count('#rules-allow .rule-chip')) === 1, chips);
     await app.evaluate(`window.__oc_debug.rules.mock(null)`);
 
     // Mods (real backend). The built-in mods that restyle the app start off, so this follows one mod that is on.
