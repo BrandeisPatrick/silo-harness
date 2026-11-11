@@ -127,7 +127,7 @@
     },
     "timingLog": {
       "type": "boolean",
-      "description": "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."
+      "description": "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder. On unless set to false."
     },
     "ollama": {
       "type": "object",

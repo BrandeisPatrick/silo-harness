@@ -12,6 +12,7 @@ import { foldedGroups, FOLDED_GROUPS_HEADING, groupOfSpec, LOAD_TOOLS, requested
 import { effortRefused, effortRefusedNotice, isEffortRefusal, nativeEffortFor, thinkingWithEffort } from './effort';
 import { idleWatch, StreamDropped } from './retry';
 import type { RequestTiming } from './perf';
+import type { StreamProgress } from './progress';
 import type { EffortLevel } from '../../shared/types';
 
 type Block = Anthropic.ContentBlockParam;
@@ -354,6 +355,8 @@ export interface NativeHost {
   thinking?: { stripBefore: number };
   /** Where the request's time goes (agent/perf.ts) */
   timing?: RequestTiming;
+  /** What the window is told as the request streams (agent/progress.ts) */
+  activity?: StreamProgress;
   /** The reasoning effort chosen, read at each request (agent/effort.ts); undefined: send nothing */
   effort?(): EffortLevel | undefined;
 }
@@ -463,10 +466,11 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
 async function stream(host: NativeHost, client: Anthropic, req: Anthropic.MessageCreateParamsStreaming, signal: AbortSignal, turn: number): Promise<NativeReply> {
   // A stream with no event for STREAM_IDLE_MS is a dropped connection (agent/retry.ts)
   const watch = idleWatch(signal);
+  host.activity?.dropAfter(watch.ms);
   try {
     return await readEvents(host, client, req, watch, turn);
   } catch (err) {
-    if (watch.idled()) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`);
+    if (watch.idled()) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`, true);
     throw err;
   } finally {
     watch.done();
@@ -483,8 +487,12 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
   let usage: Usage | null = null;
   let stop: string | null = null;
   for await (const ev of events) {
+    // Every event keeps the connection from counting as dropped; only content ends a silence. The API's pings never
+    // get here: the SDK drops them, so they neither reset the idle limit nor show as keep-alive data
+    // (agent/progress.ts)
     watch.touch();
     host.timing?.event();
+    host.activity?.event();
     switch (ev.type) {
       case 'message_start':
         usage = nativeUsage(ev.message.usage);
@@ -502,11 +510,14 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
           const call: ToolCall = { id: b.id || `call_${turn}_${calls.length}`, type: 'function', function: { name: b.name, arguments: '' } };
           calls.push(call);
           open.set(ev.index, { kind: 'tool', call });
+          host.activity?.toolInput(calls.length - 1, b.name, 0);
         } else if (b.type === 'thinking') {
+          host.activity?.content();
           const block: ThinkingBlock = { type: 'thinking', thinking: b.thinking ?? '', signature: b.signature ?? '' };
           thinking.push(block);
           open.set(ev.index, { kind: 'thinking', block });
         } else if (b.type === 'redacted_thinking') {
+          host.activity?.content();
           thinking.push({ type: 'redacted_thinking', data: b.data });
         }
         break;
@@ -517,11 +528,18 @@ async function readEvents(host: NativeHost, client: Anthropic, req: Anthropic.Me
         if (d.type === 'text_delta') {
           text += d.text;
           host.emit({ type: 'text_delta', text: d.text });
-        } else if (d.type === 'input_json_delta' && at?.kind === 'tool') at.call.function.arguments += d.partial_json;
+        } else if (d.type === 'input_json_delta' && at?.kind === 'tool') {
+          at.call.function.arguments += d.partial_json;
+          host.timing?.toolDelta();
+          host.activity?.toolInput(calls.indexOf(at.call), at.call.function.name, d.partial_json.length);
+        }
         else if (d.type === 'thinking_delta' && at?.kind === 'thinking' && at.block.type === 'thinking') {
           at.block.thinking += d.thinking;
           if (d.thinking) host.emit({ type: 'thinking_delta', text: d.thinking });
-        } else if (d.type === 'signature_delta' && at?.kind === 'thinking' && at.block.type === 'thinking') at.block.signature += d.signature;
+        } else if (d.type === 'signature_delta' && at?.kind === 'thinking' && at.block.type === 'thinking') {
+          at.block.signature += d.signature;
+          host.activity?.content();
+        }
         break;
       }
       case 'content_block_stop':

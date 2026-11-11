@@ -15,13 +15,26 @@ import type { SessionMeta } from './types';
  *
  * Everything else is context for people and tools:
  *   session.created { title, cwd, origin, parentId?, forkedFrom?, seedLength? } · session.renamed { title }
- *   session.deleted {} · session.restored {} · session.merged { from, title }
- *   run.start { origin } · run.end { reason, text? } · request { provider, model, tools: string[], promptHash }
- *   system.prompt { hash, text }  (once per distinct prompt)
- *   thinking { text, ms } · tool.start { id, name, args } · tool.end { id, name, ok, durationMs, chars }
- *   usage { promptTokens, completionTokens } · approval.request { id, name, detail, reason? } · approval.resolved { id, ok, scope }
+ *   session.deleted {} · session.restored {} · session.merged { from, title } · session.forked { from, seedLength }
+ *   run.start { origin, from?, timing? } · run.end { reason, text?, continued? }
+ *   thinking { text, ms } · tool.start { id, name, args, mcp? } · tool.end { id, name, ok, durationMs, chars }
+ *   usage { promptTokens, completionTokens, cacheReadTokens?, cacheWriteTokens? }
+ *   approval.request { id, name, detail, reason? } · approval.resolved { id, ok, scope }
  *   plan { id, title, status } · artifact { id, title, kind, version } · image { id, name } · tasks { tasks }
  *   compaction { id, reason, tokensBefore, tokensAfter, summary } · notice { message } · error { message }
+ *
+ * Numbers and fixed words only (after 0.17.0; a log written by 0.17.0 or before has none, and no `timing` on run.start):
+ *   run.start's timing    the run's id in the timing log (eight hex digits), which ties a timing line to its session
+ *   retry                 { attempt, waitMs, ranMs, kind }  a model request is tried again: the attempt coming (2-6),
+ *                         the wait before it, how long the failed one ran, why it failed (idle, connection,
+ *                         rate_limited, busy, too_long, other)
+ *   check                 { ms, verdict, timedOut }  Auto mode's safety check of a call ended (allow, block, ask,
+ *                         error, stopped)
+ *   question.request      { count }  ask_user's question card is on screen, with this many questions
+ *   question.resolved     { outcome }  answered or skipped (a stop skips it)
+ *   compaction.start      { reason }  auto or manual; its end is the compaction record (or an error record)
+ *
+ * No request or system-prompt record is written: what was sent is rebuilt from the conversation records.
  */
 export interface HistoryRecord {
   v: 1;
