@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.17.0 — 2026-11-11
+
+MCP servers get clearer rows in Settings, tool titles with a switch each, stricter trust for project servers, and tools that load only when a session needs them.
+
+### Highlights
+
+- **Clearer server rows.** Each server shows one status and one action, with Reconnect, Show log, Copy config and Remove in its `…` menu ([details](docs/mcp.md#statuses)).
+  ![Settings, MCP servers: four servers, each with one status and one action](docs/releases/0.17.0/mcp-servers.png)
+- **Tools you can read.** A server's tools show their titles in two groups, Read-only and Can make changes, and your own servers get a switch per tool.
+  ![One server's tools in two groups, each tool with its switch](docs/releases/0.17.0/mcp-tools.png)
+- **Tools on demand.** A server's tools reach the model only once a session needs them: a first request with a 20-tool server is 40% smaller ([numbers](docs/token-bench.md#mcp-servers-tools-loaded-when-needed-built-since)).
+
+### New
+
+- **Show log.** A local server's output opens from its menu, with tokens cut out, and is never sent to the model.
+- **Copy config.** Copies a server's entry with every environment and header value as a `${VAR}` reference, never the value.
+- **Project values.** Values you type for a project's server stay on this Mac, and `.mcp.json` gets `${KEY}` references ([details](docs/mcp.md#values-for-a-projects-servers)).
+
+### Improved
+
+- **`/mcp` list.** `/mcp` lists every server on one line with its status and the one action it needs.
+- **Approval cards.** A card names the server and tool as they are and lists simple arguments as keys and values.
+- **Failed calls.** A call that fails because its server needs sign-in or is not connected says so, with the action beside it.
+- **Folded lines.** A finished turn's line names the servers used ("Used docs and files") and says when one needs sign-in.
+- **Add server form.** The form starts from what you paste, suggests a name, says what it understood, and takes headers for a URL.
+- **Settings search.** Searching Settings for "connector" finds MCP servers.
+
+### Fixed
+
+- **Menus in Settings.** A menu opened inside Settings now shows above it and takes clicks.
+- **Removed sign-ins.** Removing a server deletes its sign-in tokens and client registration.
+- **Sign-in not hidden.** A remote server that answers 401 or 403 shows Needs sign-in; the fallback to SSE no longer hides it.
+- **Entries kept.** Adding a server never overwrites an entry of the same name in a project's `.mcp.json`.
+
+### Security
+
+- **Trust follows changes.** A trusted project server whose `.mcp.json` entry changes stops until you trust it again ([details](docs/mcp.md#project-servers-and-trust)).
+- **Trust shows first.** Before you confirm, Trust shows what will run, which variables the server reads and where it sends them.
+- **Pasted tokens refused.** JSON pasted for a project's `.mcp.json` is refused when a value in it looks like a token.
+- **Tool names cleaned.** In the list the model reads, a tool name keeps only the characters a tool name may have, cut to 40.
+
+### For developers
+
+- **Real server check.** `scripts/mcp-real-check.js` adds a public remote server, lists its tools and calls one; it needs the network, so the live suite skips it.
+- **MCP token bench.** `scripts/mcp-token-bench.js` measures a request's fixed part with and without a server's tools.
+
+### Upgrade notes
+
+- **Tools load on demand.** A session starts without MCP tool definitions; the model loads a server when it needs one, or when your message names it ([details](docs/mcp.md)).
+- **All tools at once.** With Tools offered set to all in Settings, every server's tools are sent from the start, as before.
+- **Older trust carries over.** Project servers you trusted before stay trusted as they are written now.
+
+### Known issues
+
+- **Hosted sign-in untested.** Sign-in is tested against a local authorization server and not yet against a hosted provider's.
+- **Loaded servers cost more.** Once a server is loaded, a request is about 1% larger than before, for the list of tool names.
+
 ## 0.16.0 — 2026-11-11
 
 Permission rules in Claude Code's format, the session's cost in dollars, and a faster Auto mode safety check on Claude Haiku 5.5.

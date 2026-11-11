@@ -1,6 +1,6 @@
 {
   "name": "silo-harness",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "An open-source agent harness for macOS, in the style of Claude Code: local models via Ollama or any OpenAI-compatible provider, sessions that run side by side, and mods.",
   "main": "dist/main/index.js",
   "repository": "https://github.com/BrandeisPatrick/silo-harness",
