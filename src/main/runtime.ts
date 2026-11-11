@@ -62,6 +62,9 @@ export interface CreateOptions {
 interface Live {
   running: boolean;
   startedAt?: number;
+  /** When the turn going on now began (a message delivered during the run starts one), and whether one has begun */
+  turnStartedAt?: number;
+  turnSeen?: boolean;
   text: string;
   thinking: string;
   tools: Map<string, { id: string; name: string; args: unknown }>;
@@ -245,6 +248,7 @@ export class SessionRuntime {
     return {
       running: true,
       startedAt: l.startedAt,
+      turnStartedAt: l.turnStartedAt,
       text: l.text,
       thinking: l.thinking,
       tools: [...l.tools.values()].map((t) => ({ ...t })),
@@ -418,13 +422,18 @@ export class SessionRuntime {
     let status = false;
     switch (ev.type) {
       case 'run_start':
-        Object.assign(l, { running: true, startedAt: Date.now(), text: '', thinking: '', planWaiting: false });
+        Object.assign(l, { running: true, startedAt: Date.now(), turnStartedAt: undefined, turnSeen: false, text: '', thinking: '', planWaiting: false });
         l.tools.clear();
         l.approvals.clear();
         l.questions.clear();
         status = true;
         break;
       case 'user_message': {
+        // The run's first message is its first turn; each one after it starts a turn of its own
+        if (l.running) {
+          if (l.turnSeen) l.turnStartedAt = Date.now();
+          l.turnSeen = true;
+        }
         // A message from another session reached a session that is not on screen: the sidebar marks it at once
         const s = ev.origin === 'session' && id !== this.fg ? this.opts.store.get(id) : undefined;
         if (s && !s.unread) {
@@ -482,7 +491,7 @@ export class SessionRuntime {
         status = !this.isRunning(id);
         break;
       case 'run_end': {
-        Object.assign(l, { running: false, startedAt: undefined, text: '', thinking: '' });
+        Object.assign(l, { running: false, startedAt: undefined, turnStartedAt: undefined, turnSeen: false, text: '', thinking: '' });
         l.tools.clear();
         l.approvals.clear();
         l.questions.clear();

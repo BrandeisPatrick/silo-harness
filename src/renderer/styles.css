@@ -628,8 +628,41 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .meta-page { color: inherit; }
 .meta-value { font: var(--fs-micro)/var(--lh-micro) var(--mono); }
 .tool-body { margin: 8px 0 8px 28px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.group-body { margin: 8px 0 0 28px; display: flex; flex-direction: column; gap: 8px; }
+/* An opened group: its calls one quiet line each at the group's own left edge, about nine of them, then the list
+   scrolls and its last line fades out until the end is reached (.more, tool-groups.ts). A row opened to its output
+   lifts the cap. */
+.group-body { margin: 0; display: flex; flex-direction: column; gap: 0; max-height: 225px; overflow-y: auto; overscroll-behavior: contain; }
+.group-body.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 25px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 25px), transparent); }
+.group-body:has(> .tool[open]) { max-height: none; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+.group-body > :is(.tool, .thinking) > summary { height: 25px; }
+.group-body > .tool:not([open]) > summary:not(:hover):not(:focus-visible) .tool-chevron { visibility: hidden; }
 .group-body > .fade-in { animation: none; }
+/* The live line: the call in flight, faint, with a shimmer running through it and a fade where it meets the edge */
+.tool-group.live > summary { opacity: 0.8; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); }
+.tool-group.live > summary .group-verb { flex: none; }
+.tool-group.live > summary :is(.group-verb, .group-arg) {
+  text-overflow: clip; color: transparent;
+  background: linear-gradient(90deg, var(--text-400) 0 35%, var(--text-100) 50%, var(--text-400) 65% 100%) 0 0 / 300% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tool-group.live > summary :is(.group-verb, .group-arg) { animation: none; color: var(--text-400); background: none; }
+}
+/* The line over a turn's process: "Working for 18s" while it runs, then "Worked for 53s", the button that folds the
+   process away and brings it back; a hairline under it, the width of the column. */
+.transcript > .turn-head { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+.turn-head-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: var(--r-control);
+  font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
+}
+.turn-head-btn:hover:not(:disabled) { color: var(--text-200); }
+.turn-head-btn:active:not(:disabled) { background: var(--pressed); }
+.turn-head-chevron { display: inline-flex; flex: none; opacity: 0.8; transition: transform 0.12s ease; }
+.turn-head-chevron .icon { width: 12px; height: 12px; }
+.turn-head.live .turn-head-chevron { display: none; }
+.turn-head-btn[aria-expanded="true"] .turn-head-chevron { transform: rotate(90deg); }
+.transcript > .turn-hidden { display: none !important; }
 /* A folded run: the summary takes the room and is cut last; the diff total, failed and denied sit on its right */
 .group-verb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .group-verb.mono { font-family: var(--mono); font-size: 0.9em; }
@@ -1204,6 +1237,8 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
   font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none; user-select: none;
   animation: pop-in 0.12s ease-out;
 }
+/* A menu capped to the room it has (popover.ts) scrolls */
+.popover { overflow-y: auto; overscroll-behavior: contain; }
 .pop-label { padding: 8px 8px 4px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 400; color: var(--text-400); }
 .pop-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: var(--r-control); color: var(--text-100); text-align: left; }
 .pop-item.active { background: var(--hover); }

@@ -42,7 +42,7 @@ import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGr
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
-import { clip, latestPlan, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
+import { clip, latestPlan, shownUserCount, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
 import { generateTitle, titlePrompt } from './titles';
 import { TerminalManager } from './terminal';
 import { ArtifactStore, type ArtifactInput } from './artifacts';
@@ -271,6 +271,9 @@ export class Agent {
   private smallWindowNoticed = new Set<string>();
   /** The checkpoint that file changes are recorded on during a run (the latest user message) */
   private currentTurn: Turn | null = null;
+  /** When this run began, and the turn whose working time is being counted (its key in Session.turnTimes) */
+  private runStartedAt = 0;
+  private turnClock: { at: number; startedAt: number } | null = null;
   running = false;
   /** True while /compact runs outside a run (stop() cancels it). */
   compacting = false;
@@ -1093,6 +1096,8 @@ export class Agent {
     // any, nothing here waits, so the message is in the conversation by the time send() returns.
     const early = (!this.sessionStarted && this.hasHooks('SessionStart')) || this.hasHooks('UserPromptSubmit');
     let accepted: { ok: boolean; context: string[] } = { ok: true, context: [] };
+    this.runStartedAt = Date.now();
+    this.turnClock = null;
     if (early) {
       this.emit({ type: 'run_start' });
       await this.startSessionHooks();
@@ -1399,6 +1404,7 @@ export class Agent {
         this.emit({ type: 'error', message: providerErrorMessage(err, cfg) });
       }
     } finally {
+      this.stopTurnClock();
       this.currentTurn = null;
       this.shownArgs.clear();
       this.repairTail();
@@ -2062,11 +2068,23 @@ export class Agent {
 
   /** user_message for the message just added; `turn` is its checkpoint. */
   private emitUserMessage(text: string, images: number, origin: MessageOrigin, from?: string): void {
+    // The turn before (a message delivered during the run) has ended; this one starts (the run's first: when the run did)
+    const first = !this.turnClock;
+    this.stopTurnClock();
+    this.turnClock = { at: shownUserCount(this.session) - 1, startedAt: first ? this.runStartedAt || Date.now() : Date.now() };
     const turns = this.session.turns ?? [];
     const ev: Extract<AgentEvent, { type: 'user_message' }> = { type: 'user_message', text, images, origin };
     if (turns.length) ev.turn = turns.length - 1;
     if (from) ev.from = from;
     this.emit(ev);
+  }
+
+  /** Records how long the turn being counted worked (Session.turnTimes; the window's "Worked for 53s"). */
+  private stopTurnClock(): void {
+    const c = this.turnClock;
+    this.turnClock = null;
+    if (!c || c.at < 0) return;
+    (this.session.turnTimes ??= {})[c.at] = Math.max(0, Date.now() - c.startedAt);
   }
 
   /** Opens a checkpoint for the user message about to be pushed; file changes until the next one are recorded on it. */
