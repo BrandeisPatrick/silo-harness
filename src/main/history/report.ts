@@ -436,7 +436,7 @@ export function sessionReport(records: readonly unknown[], opts: ReportOptions =
   if (!longest.length) out.push('**Longest stretches with no record** none over 1s');
   else {
     out.push('**Longest stretches with no record**');
-    for (const g of longest) out.push(`- ${duration(g.ms)} in turn ${g.turn}, ${g.at < 1000 ? 'at its start' : `${duration(g.at)} in`}: after ${words(g.before)}, before ${g.after ? words(g.after) : 'now (still running)'}`);
+    for (const g of longest) out.push(`- ${duration(g.ms)} in turn ${g.turn}${g.at >= 1000 ? `, ${duration(g.at)} in` : ''}: after ${words(g.before)}, before ${g.after ? words(g.after) : 'now (still running)'}`);
   }
 
   // ---------- Tokens per model call ----------

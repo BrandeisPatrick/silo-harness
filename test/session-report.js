@@ -173,7 +173,7 @@ function makeLog({ skipNew = false, oldFirstRun = false } = {}) {
     (
       'session report numbers only no content time working in turns turn over your message queued another phone mod command dream schedule other stopped error plan app closed unfinished in progress turn limit repeated call ' +
       'model calls all median slowest call tool their own work approvals and checks not included under waiting on you approval cards questions none from the ask_user safety allow block ask timed out recorded retries before them why data connection rate limited busy too long longest failed attempt ' +
-      'stretches with record after before result reply user start end of notice retry question card answer check at its save saved session change messages replaced rewind thinking compaction compactions tokens per input output min max total read cache that did finish shown last mcp tools mcp now still running'
+      'stretches with record after before result reply user start end of notice retry question card answer check save saved session change messages replaced rewind thinking compaction compactions tokens per input output min max total read cache that did finish shown last mcp tools mcp now still running'
     ).split(/\s+/),
   );
   for (const n of builtInToolNames()) vocab.add(n);
