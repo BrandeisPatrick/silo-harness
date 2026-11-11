@@ -1,9 +1,10 @@
 // The permission rules: per mode, whether an action runs, asks the user, or is refused, and the wording of the
 // approval card's wider answers. Pure: the agent keeps the pending cards and the per-session allow lists.
 
-import type { PermissionMode, StoredRules } from '../../shared/types';
+import type { PermissionLists, PermissionMode, StoredRules } from '../../shared/types';
 import { siteCardLabels, type Site } from '../browser/policy';
-import { guardCommand, guardWrite, isHomeScanRoot, isReadOnlyCommand, programsOf, SCAN_REASON } from '../guard';
+import { commandWritesRuleFile, guardCommand, guardWrite, isHomeScanRoot, isReadOnlyCommand, programsOf, SCAN_REASON, writesRuleFile } from '../guard';
+import { bashAllow, compileRules, mcpRuleMatches, pathAllow } from './rules';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
 import { alwaysAskReason, protectedWrite, PROTECTED_REASONS } from './auto-rules';
@@ -18,6 +19,12 @@ const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'pytho
 /** The tools that read files: they ask only for a secret path, or grep and glob for a walk of the home folder (tools/fs.ts) */
 const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_directory']);
 const SECRET_REASON = 'reads secrets';
+const OUTSIDE_REASON = 'writes outside the working directory';
+/** The guard's reasons a rule that names the command (Bash(gcloud compute instances list:*)) never covers */
+const NEVER_BY_PATTERN: ReadonlySet<string> = new Set([SCAN_REASON]);
+const PLAN_RULES_BLOCKED = 'Not permitted in plan mode: this changes the permission settings. Describe this step in your plan instead.';
+/** Why a write to a file that holds permission rules asks, in every mode: the agent must not give itself a rule */
+export const RULE_FILE_REASON = 'writes a protected file';
 /** The browser cards Auto mode's safety check decides (allow, block or ask the user); purchase and account always ask. */
 export const CHECKED_BROWSER_CARDS: ReadonlySet<string> = new Set(['site', 'sensitive', 'eval']);
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
@@ -30,7 +37,7 @@ const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the u
 export type ApprovalDecision =
   | { kind: 'allow' }
   | { kind: 'refuse'; message: string }
-  | { kind: 'ask'; reason: string | null; programs: string[]; custom: boolean }
+  | { kind: 'ask'; reason: string | null; programs: string[]; custom: boolean; firm?: boolean }
   | { kind: 'classify'; reason: string | null; programs: string[] };
 
 /**
@@ -46,8 +53,10 @@ export interface ApprovalContext {
   /** Auto mode only (default 'guard') */
   auto?: AutoLevel;
   cwd: string;
-  /** The "Always allow … in this project" rules saved for `cwd` */
+  /** The project's saved rules for `cwd` ("Always allow … in this project", Settings → Permissions; the shape before 0.16 too) */
   rules: StoredRules | undefined;
+  /** The rules for every project, from the user's settings.json */
+  global?: PermissionLists;
   /** The MCP tool the name stands for, when it is one (asked only once the rules reach MCP tools) */
   mcp(): McpToolRef | undefined;
   /** What the user allowed for the rest of this session (each asked only when the rules reach it) */
@@ -71,7 +80,8 @@ export interface ApprovalContext {
  * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
  */
 export function decideApproval(name: string, detail: string, target: string | undefined, opts: ApproveOptions, ctx: ApprovalContext): ApprovalDecision {
-  const { mode, cwd, rules } = ctx;
+  const { mode, cwd } = ctx;
+  const rules = compileRules(ctx.rules, ctx.global);
   const isEdit = name === 'write_file' || name === 'edit_file';
   const isCmd = name === 'bash' || name === 'terminal_run';
   const allow: ApprovalDecision = { kind: 'allow' };
@@ -83,6 +93,7 @@ export function decideApproval(name: string, detail: string, target: string | un
   // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
   // In Auto mode with its check running, a site, sensitive or eval card goes to the check (which may still ask);
   // purchase and account cards are the user's in every mode, and a paused or unavailable check shows the card.
+  // Permission rules do not reach browser cards.
   if (opts.browser) {
     if (mode === 'auto' && ctx.auto === 'check' && CHECKED_BROWSER_CARDS.has(opts.browser.card)) return { kind: 'classify', reason: opts.browser.reason ?? null, programs: [] };
     return ask(opts.browser.reason ?? null, [], opts.browser.card !== 'site');
@@ -94,23 +105,30 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (opts.sessionKey && ctx.allowed.custom?.(opts.sessionKey)) return allow;
     return ask(null, [], true);
   }
+  // A write to a file that holds permission rules (the user's settings.json, the app's config.json) asks in every
+  // mode, Bypass and Auto included, and nothing covers it: the agent must not give itself a rule
+  if ((isEdit && target && writesRuleFile(target, cwd)) || (isCmd && commandWritesRuleFile(detail, cwd))) {
+    if (mode === 'plan') return refuse(PLAN_RULES_BLOCKED);
+    return { kind: 'ask', reason: RULE_FILE_REASON, programs: isCmd ? programsOf(detail) : [], custom: true, firm: true };
+  }
   if (mode === 'bypass') return allow;
   const ref = ctx.mcp();
   if (ref) {
     if (mode === 'plan') return ref.readOnly ? allow : refuse(PLAN_MCP_BLOCKED);
-    if (ref.readOnly || ctx.allowed.mcp(ref.server) || rules?.mcp?.includes(ref.server)) return allow;
+    if (ref.readOnly || ctx.allowed.mcp(ref.server) || rules.allow.some((r) => r.kind === 'mcp' && mcpRuleMatches(r, name, ref.server))) return allow;
     if (checked) return check(ref.destructive ? 'destructive MCP tool' : null, [ref.server]);
     if (mode === 'auto') return ref.destructive ? ask('destructive MCP tool', [ref.server]) : allow;
     return ask(null, [ref.server]);
   }
   // A protected path's reason ("writes a protected file", "modifies the .git directory") is never covered by a rule
-  const reasonAllowed = (r: string) => !PROTECTED_REASONS.has(r) && (ctx.allowed.reason(r) || !!rules?.reasons?.includes(r));
+  const reasonAllowed = (r: string) => !PROTECTED_REASONS.has(r) && (ctx.allowed.reason(r) || rules.reasons.includes(r));
   // A read tool asks only for a secret path, or grep and glob rooted at the home folder, /, /Users … (fs.ts decides
-  // that; the reason follows from the root): every mode, Plan included, asks unless that reason is allowed; Auto mode
-  // with its check sends it to the check.
+  // that; the reason follows from the root): every mode, Plan included, asks unless that reason is allowed (or, for a
+  // secret, a Read rule names the exact path); Auto mode with its check sends it to the check.
   if (READ_TOOLS.has(name)) {
     const why = (name === 'grep' || name === 'glob') && target && isHomeScanRoot(target, cwd) ? SCAN_REASON : SECRET_REASON;
     if (reasonAllowed(why)) return allow;
+    if (why === SECRET_REASON && target && pathAllow('Read', target, cwd, rules).exact) return allow;
     return checked ? check(why, []) : ask(why, []);
   }
   if (mode === 'plan') {
@@ -126,35 +144,46 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (!isEdit && !isCmd) return allow;
   const reason = isCmd ? guardCommand(detail, cwd) : target ? guardWrite(target, cwd) : null;
   const programs = isCmd ? programsOf(detail) : [];
-  const programsAllowed = programs.length > 0 && programs.every((p) => ctx.allowed.program(p) || rules?.programs?.includes(p));
+  // Commands: every command the line runs is covered by an allow rule or a program allowed for this session
+  const cmd = isCmd ? bashAllow(detail, rules, (p) => ctx.allowed.program(p)) : null;
+  const always = isCmd ? alwaysAskReason(detail, cwd) : null;
+  // A rule that names the command (two or more words, or the exact command) also covers the guard's soft reasons for
+  // it, never sudo or deleting a critical folder, a protected path, a home-folder scan, and "reads secrets" only by an
+  // exact command
+  const cmdCovers = (r: string): boolean => !!cmd?.strong && !always && !PROTECTED_REASONS.has(r) && !NEVER_BY_PATTERN.has(r) && (r !== SECRET_REASON || cmd.exact);
+  // Edits: bare Edit or Write, or a path rule, covers edits the guard has nothing to say about; one anchored at //, ~/
+  // or / with a literal first folder also covers "writes outside the working directory" for the paths it matches
+  const edit = isEdit && target ? pathAllow('Edit', target, cwd, rules) : null;
+  const editCovers = (r: string): boolean => r === OUTSIDE_REASON && !!edit?.anchored;
   if (checked) {
     // Auto mode with its check. Commands: sudo and deleting a critical folder ask whatever the check would say; read-only
-    // commands run; then the user's allow rules: a guard reason they allowed, or programs they allowed for a command
-    // the guard does not flag (a program rule never covers a force push), and never an interpreter, which runs anything
-    // (as Claude Code drops such broad rules in Auto mode). The rest goes to the check.
+    // commands run; then the user's allow rules: a guard reason they allowed, or rules that cover the command, but
+    // never an interpreter, which runs anything, nor bare Bash or a rule that starts with a wildcard (as Claude Code
+    // drops such broad rules in Auto mode). The rest goes to the check.
     if (isCmd) {
-      const always = alwaysAskReason(detail, cwd);
       if (always) return reasonAllowed(always) ? allow : ask(always, programs);
       if (!reason && isReadOnlyCommand(detail)) return allow;
       if (reason && reasonAllowed(reason)) return allow;
-      if (!reason && programsAllowed && !programs.some((p) => INTERPRETERS.has(p))) return allow;
+      const autoOk = !!cmd?.covered && !cmd.broad && !programs.some((p) => INTERPRETERS.has(p));
+      if (reason && autoOk && cmdCovers(reason)) return allow;
+      if (!reason && autoOk) return allow;
       return check(reason, programs);
     }
     // Edits: inside the working directory they run; a protected path goes to the check even when a rule allows it;
-    // elsewhere a saved "writes outside the working directory" rule runs it.
+    // elsewhere a saved "writes outside the working directory" rule, or an anchored Edit rule, runs it.
     const guarded = target ? protectedWrite(target, cwd) : null;
     if (!reason && !guarded) return allow;
-    if (!guarded && reason && reasonAllowed(reason)) return allow;
+    if (!guarded && reason && (reasonAllowed(reason) || editCovers(reason))) return allow;
     return check(guarded ?? reason, []);
   }
   // A protected path (.vscode/tasks.json, .mcp.json, .git, ~/.zshrc …) asks every time, Allow and Deny only, whatever
   // the mode (but Bypass), the saved rules or the session allowed
   const guarded = isEdit && target ? protectedWrite(target, cwd) : reason && PROTECTED_REASONS.has(reason) ? reason : null;
   if (guarded) return ask(guarded, programs, true);
-  if (reason && !reasonAllowed(reason)) return ask(reason, programs);
+  if (reason && !reasonAllowed(reason) && !(isCmd ? cmdCovers(reason) && cmd?.covered : editCovers(reason))) return ask(reason, programs);
   if (mode === 'auto') return allow;
-  if (isEdit && (mode === 'acceptEdits' || rules?.edits)) return allow;
-  if (isCmd && programsAllowed) return allow;
+  if (isEdit && (mode === 'acceptEdits' || edit?.any)) return allow;
+  if (isCmd && cmd?.covered) return allow;
   return ask(null, programs);
 }
 

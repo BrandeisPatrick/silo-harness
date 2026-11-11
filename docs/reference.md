@@ -8,7 +8,7 @@
 | Accept edits | Edits inside the project run, except to a [protected path](#protected-paths); commands ask |
 | Auto | Actions run without a card; a safety check (a second model call) blocks the risky ones, and the agent reads why. See [Auto mode](#auto-mode) |
 | Plan | Read-only exploration ending in a plan card you approve; a read-only command the guard flags ("reads secrets") asks |
-| Bypass | Everything runs |
+| Bypass | Everything runs, but what a deny rule refuses or an ask rule asks, and writes to the files that hold the rules |
 
 ## Approval cards
 
@@ -16,13 +16,41 @@ An action that needs your OK waits on a card, as in Claude Code: the question as
 
 Keys while a card waits: `⌘↵` allows once (also from the chat bar while you type), `Esc` denies (instead of stopping the run), `A` and `P` pick the scopes when the chat bar is empty or the ⌄ menu is open. Once answered the card goes; the call's row keeps the answer ("Allowed once", "Allowed git for this session", "Denied") at the top of its details.
 
-Saved rules: Settings → Permissions. One thing asks in every mode, Bypass included: a schedule the agent wants to create or re-time, because it outlives the conversation.
+"Always allow … in this project" saves a [permission rule](#permission-rules) (`Bash(git:*)`, `Edit`, `mcp__github`), or the guard's reason for a card that gave one. One thing asks in every mode, Bypass included: a schedule the agent wants to create or re-time, because it outlives the conversation.
+
+## Permission rules
+
+Rules use Claude Code's format, `Tool` or `Tool(specifier)`, in three lists: `allow`, `ask` and `deny`. Settings → Permissions lists them; a project's rules are added and removed there, rules for every project live in your own [settings.json](configure.md#permission-rules).
+
+| Rule | Covers |
+| --- | --- |
+| `Bash`, `Bash(npm test)`, `Bash(npm run test:*)`, `Bash(git * main)` | `bash` and `terminal_run`: every command, an exact command, a prefix (`:*` at the end is the same as ` *`), or `*` standing in for any text |
+| `Read(path)` | `read_file`, `grep`, `glob`, `list_directory` |
+| `Edit(path)`, `Write(path)` | `write_file`, `edit_file` |
+| `WebFetch(domain:example.com)`, `WebSearch` | `web_fetch`, `web_search` (ask and deny only: sites are allowed in Settings → Browser) |
+| `mcp__github`, `mcp__github__get_issue` | every tool of a server, or one |
+| `session_spawn`, `browser_navigate` … | any of the app's own tools by name (ask and deny only) |
+
+Paths are gitignore patterns: `//abs/path` from `/`, `~/path` from the home folder, `/path` and `path` from the session's folder; a name with no `/` matches at any depth. A path is matched as the tool names it and at its real location (a symlink): allow needs both to match, ask and deny either. `Read` and `Edit` rules apply to the file tools, not to commands (`cat .env`): use a `Bash` rule for those. A `Read` deny rule also refuses writing that path.
+
+**Precedence.** Deny, then ask, then allow, whatever the order or how specific. A deny rule refuses in every mode, Bypass included, and the agent reads which rule refused. An ask rule shows a card in every mode, Bypass included (as in Claude Code), except where Plan mode refuses the call anyway. A PreToolUse hook's allow beats neither.
+
+**Compound commands.** A command is split at `&&`, `||`, `;`, `|` and newlines. An allow rule must cover every part (and what `sh -c`, `xargs` and `find -exec` run); deny and ask apply when any part matches, inside `$(…)` and backticks too. A command with `$(…)`, backticks, `<(…)`, `eval` or a here-document is never covered by an allow rule. Only a whole-program rule (`Bash(git:*)`) matches past a leading `VAR=value`.
+
+**What an allow rule does not cover.**
+
+- A [protected path](#protected-paths), `sudo`, deleting a critical folder, browser cards (sites, purchases, accounts, sign-ins) and a tool's own question: they ask as before. Plan mode's refusals stay.
+- `Bash(git:*)`, `Bash(git *)`, bare `Bash`, bare `Edit` and `mcp__server` mean what "Always allow" always meant: the program runs when the guard has nothing to say about the command, edits run inside the project. A rule that names more than the program (`Bash(git push --force-with-lease:*)`, `Bash(gcloud compute instances list:*)`) or an exact command also covers the guard's softer reasons for what it matches (a cloud change, a force push), never "scans the home folder", and "reads secrets" only as an exact command.
+- An edit outside the project needs a path rule anchored at `//`, `~/` or `/` with a literal first folder (`Edit(~/notes/**)`). Reading a secret file needs a `Read` rule with no wildcard (`Read(~/.aws/config)`).
+- Auto mode: a matching allow rule skips the check, but not for an interpreter (`python`, `node`, `sh` …), bare `Bash`, or a rule that starts with `*`.
+
+**Where rules live.** Your settings.json (`permissions`), for every project; the app's own store, per project (what cards and Settings save; the older "programs, edits, servers" entries read as `Bash(p:*)`, `Edit`, `mcp__s`). A `permissions` block in a project's `.silo-harness/settings.json` is ignored, allow, ask and deny alike. Writing your settings.json or the app's `config.json`, by a tool or a command, asks in every mode, Bypass included: the agent cannot give itself a rule. Rules a hook's `if` field uses are matched more loosely (a hook fires when unsure).
 
 ## Auto mode
 
 Auto mode works like Claude Code's: rules settle most actions, and a safety check, a second model call, decides the rest.
 
-1. **Rules first.** A PreToolUse hook that denies blocks in every mode. Read-only commands and edits inside the working directory run without the check. What your saved rules or "for this session" answers allow runs (a program rule covers neither a command the guard flags, such as a force push, nor an interpreter such as `python`), except a write to a [protected path](#protected-paths), which still goes to the check.
+1. **Rules first.** A deny rule, or a PreToolUse hook that denies, blocks in every mode; an ask rule shows its card. Read-only commands and edits inside the working directory run without the check. What your saved rules or "for this session" answers allow runs (a whole-program rule covers neither a command the guard flags, such as a force push, nor an interpreter such as `python`; see [Permission rules](#permission-rules)), except a write to a [protected path](#protected-paths), which still goes to the check.
 2. **The check.** Everything else, MCP calls that are not read-only included, goes to the check: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API (it passed [the eval](evals.md) with no false allow, at about half the wait), otherwise the session's own model, or the model `autoMode.model` names. If your key may not use Haiku 5.5, the session's model checks instead. The check is asked for the least thinking the model allows (on Anthropic's API: thinking off, or effort `low` where it cannot be off). It reads your messages in the session, the agent's tool calls so far (never their results), the project's instructions files, your `autoMode` notes, your earlier answers and the action, and answers allow or block with a reason that names a category: "[Destructive Git] force-pushes over remote history". It blocks by default piping a download into a shell, sending secrets or private data out, printing live credentials, production deploys and migrations, force pushes, `git reset --hard`, `git clean -fd`, deleting outside the working directory, destructive infrastructure changes, merging pull requests you did not approve, writing to the app's own files and publishing. It allows by default local work in the working directory, installing dependencies, read-only commands of any CLI (`gcloud projects list`, `kubectl get`), read-only HTTP and pushing to a branch that is not the default one. A message of yours approves a risky action only when it names the action and its risk ("force-push the feature branch"); a boundary you stated ("don't push") blocks.
 3. **A block.** The action does not run. The agent reads "Blocked by Auto mode: [Category] reason. Do not try to get around it; continue with other work, or ask the user." and goes on. The chat shows one line, "Auto mode blocked git push --force · Allow", with the reason as its tooltip. **Allow** lets that exact action run once, without the check, when the agent tries it again, and tells the agent it may. The phone has the same line and Allow, and Settings → Permissions → Recently blocked lists the blocks since the app started.
 4. **Pauses.** After 3 blocks in a row or 20 in a session, Auto mode pauses for that session: what needs the check shows the approval card again, with a one-line notice.
@@ -43,7 +71,7 @@ Auto mode works like Claude Code's: rules settle most actions, and a safety chec
 
 ### Protected paths
 
-In the project: `.git`, `.silo-harness`, `.open-harness`, `.claude`, `.vscode`, `.idea`, `.husky`, `.github/workflows`, `.envrc`, `.gitmodules` and `.mcp.json`, but not the `skills`, `commands`, `agents` and `worktrees` folders in `.claude` nor `skills` in `.silo-harness`. Anywhere: shell start-up files, `~/.gitconfig`, `~/.config/git`, `~/.ripgreprc`, `~/.ssh`, `~/.aws`, launch agents, the app's own data and `~/.silo-harness` (but its skills and `SILOHARNESS.md`). A write to one, by `write_file`, `edit_file` or a command (a redirection, `cp`, `mv`, `tee`, `ln`, `rsync`, `install`, `sed -i`, `rm`), asks in every mode but Bypass, with Allow and Deny only: no saved rule or "for this session" answer covers it. In Auto mode with the check it goes to the check. The command side reads the command's text: a heuristic, not a sandbox.
+In the project: `.git`, `.silo-harness`, `.open-harness`, `.claude`, `.vscode`, `.idea`, `.husky`, `.github/workflows`, `.envrc`, `.gitmodules` and `.mcp.json`, but not the `skills`, `commands`, `agents` and `worktrees` folders in `.claude` nor `skills` in `.silo-harness`. Anywhere: shell start-up files, `~/.gitconfig`, `~/.config/git`, `~/.ripgreprc`, `~/.ssh`, `~/.aws`, launch agents, the app's own data and `~/.silo-harness` (but its skills and `SILOHARNESS.md`). A write to one, by `write_file`, `edit_file` or a command (a redirection, `cp`, `mv`, `tee`, `ln`, `rsync`, `install`, `sed -i`, `rm`), asks in every mode but Bypass, with Allow and Deny only: no saved rule or "for this session" answer covers it. Your settings.json and the app's `config.json`, which hold the permission rules, ask in Bypass too. In Auto mode with the check it goes to the check. The command side reads the command's text: a heuristic, not a sandbox.
 
 Tell the check about your setup in your own settings.json: `autoMode.environment`, `autoMode.allow` and `autoMode.model` (see [configure.md](configure.md#auto-mode)).
 

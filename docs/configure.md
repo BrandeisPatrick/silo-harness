@@ -270,6 +270,22 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 **Only your own settings.json may set `autoMode`.** A project's file may not, since a repository could otherwise allow its own actions or send your conversation to a model of its choosing; it is ignored there with a problem line.
 
+### Permission rules
+
+The `permissions` block holds rules for every project, in Claude Code's format (see [Permission rules](reference.md#permission-rules)). Settings → Permissions lists them read-only; a project's own rules are added there.
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm run test:*)", "Edit(~/notes/**)"],
+    "ask": ["Bash(git push:*)"],
+    "deny": ["Bash(rm:*)", "Read(.env)"]
+  }
+}
+```
+
+**Only your own settings.json may set `permissions`.** A project's file may not, allow, ask and deny alike: a repository must not grant itself permissions. It is ignored there with a problem line. A rule that does not parse is ignored and listed with the reason.
+
 ### Prices
 
 The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on Anthropic's own API. For any other model, or to override those, set `prices`: dollars per million tokens, by model id. `cacheRead` and `cacheWrite` are optional and default to the input price. Only your own settings.json sets prices: a project's file may not, so a repository cannot make its sessions look free.
