@@ -1113,6 +1113,8 @@ const READ_ONLY_PROGRAMS = new Set([
 ]);
 const GIT_READ_ONLY = new Set(['status', 'log', 'diff', 'show', 'blame', 'rev-parse', 'ls-files', 'ls-tree', 'describe', 'shortlog', 'reflog', 'cat-file', 'grep', 'remote', 'config', 'rev-list', 'count-objects', 'branch', 'tag', 'stash', 'worktree', 'help', 'version']);
 const PKG_READ_ONLY = new Set(['ls', 'list', 'view', 'info', 'outdated', 'audit', 'why', 'explain', 'show', 'search', 'help', 'version', '-v', '--version', 'config']);
+/** A package as the registry names it (name, @scope/name, name@version) or a field of it (dist.tarball): no URL, path or git spec */
+const PKG_SPEC = /^(@[A-Za-z0-9._~-]+\/)?[A-Za-z0-9._~-]+(@[A-Za-z0-9._~^<>=*|-]*)?$/;
 /** Git's global options that set config, or point it at other code or another repository */
 const GIT_UNSAFE_GLOBAL = /^(-c|--config-env|--exec-path|--git-dir|--work-tree)(=|$)/;
 
@@ -1264,6 +1266,8 @@ function readOnlyArgs(prog: string, argv: string[]): boolean {
       if (sub === 'remote' && rest.length && rest[0] !== '-v' && rest[0] !== 'show' && rest[0] !== 'get-url') return false;
       if (sub === 'config' && !rest.some((a) => a === '--get' || a === '--list' || a === '-l' || a === '--get-all')) return false;
       if (sub === 'worktree' && rest[0] !== 'list') return false;
+      // (reflog expire and reflog delete drop entries)
+      if (sub === 'reflog' && rest.some((a) => a === 'expire' || a === 'delete')) return false;
       return true;
     }
     case 'npm':
@@ -1271,16 +1275,29 @@ function readOnlyArgs(prog: string, argv: string[]): boolean {
     case 'yarn': {
       const sub = targets[0] ?? flags[0] ?? '';
       if (!PKG_READ_ONLY.has(sub)) return false;
+      // Another registry, proxy, config file or shell: the request, and what runs, would no longer be the user's own
+      if (flags.some((f) => longIs(f, '--registry', '--userconfig', '--globalconfig', '--proxy', '--https-proxy', '--noproxy', '--cafile', '--ca', '--script-shell', '--shell', '--node-options'))) return false;
+      // view reads a package from the registry by name; a URL, a path or a git spec is fetched (and may be built)
+      if (['view', 'info', 'show'].includes(sub) && !targets.slice(targets[0] === sub ? 1 : 0).every((t) => PKG_SPEC.test(t))) return false;
       if (sub === 'config') return ['get', 'list', 'ls'].includes(targets[1] ?? '');
       if (sub === 'audit') return !args.some((a) => a === 'fix' || a === '--fix');
       if (sub === 'version') return prog === 'npm' && args.length === 1;
       return true;
     }
     case 'pip':
-    case 'pip3':
-      return ['list', 'show', 'freeze', '--version', '-V', 'check'].includes(targets[0] ?? flags[0] ?? '');
-    case 'cargo':
-      return ['tree', 'metadata', 'version', '--version', '-V', 'search'].includes(targets[0] ?? flags[0] ?? '');
+    case 'pip3': {
+      const sub = targets[0] ?? flags[0] ?? '';
+      if (!['list', 'show', 'freeze', '--version', '-V', 'check'].includes(sub)) return false;
+      // --log writes a file, --python runs another interpreter, the rest send the request somewhere else
+      if (flags.some((f) => longIs(f, '--log', '--python', '--cache-dir', '--index-url', '--extra-index-url', '--proxy', '--find-links', '--trusted-host', '--cert', '--client-cert', '--keyring-provider'))) return false;
+      // -i is --index-url; -f is --find-links everywhere but in `pip show`, where it lists the package's files
+      return !flags.some((f) => shortHas(f, sub === 'show' ? 'i' : 'if'));
+    }
+    case 'cargo': {
+      const sub = targets[0] ?? flags[0] ?? '';
+      if (!['tree', 'metadata', 'version', '--version', '-V', 'search'].includes(sub)) return false;
+      return !(sub === 'search' && flags.some((f) => longIs(f, '--registry', '--index')));
+    }
     case 'go': {
       const sub = targets[0] ?? flags[0] ?? '';
       if (!['version', 'env', 'list', 'doc'].includes(sub)) return false;
@@ -1583,11 +1600,14 @@ export function isAwsRead(simple: string): boolean {
  * True when every simple command in the line only reads (plan mode runs these without asking). False for any
  * substitution ($(…), backticks, <(…)), a redirection into a file, a leading VAR=value, a program outside the list,
  * a listed program with a flag that writes or runs something (sed -i, sort -o, git -c, rg --pre …), or an aws
- * command isAwsRead does not recognise.
+ * command isAwsRead does not recognise. False as well for anything zsh could read differently from the lexers here
+ * or expand into code or into other words (plainForShell), and for a wildcard that a file's name could turn into an
+ * option or a second operand (namesStayNames).
  */
 export function isReadOnlyCommand(command: string): boolean {
   const raw = command.trim();
   if (!raw) return false;
+  if (!plainForShell(raw)) return false;
   if (substitutions(raw).found) return false;
   for (const simple of splitCommands(raw)) {
     const { argv, assigns, lexed } = argvOf(simple);
@@ -1600,7 +1620,171 @@ export function isReadOnlyCommand(command: string): boolean {
       continue;
     }
     if (!READ_ONLY_PROGRAMS.has(prog)) return false;
+    if (!namesStayNames(prog, simple)) return false;
     if (!readOnlyArgs(prog, argv)) return false;
+  }
+  return true;
+}
+
+/**
+ * False when zsh, which runs the command, could read the line differently from the lexers here, or turn a word into
+ * code or into other words. Outside single quotes, and not after a backslash:
+ *  - a control character other than a tab or a new line;
+ *  - a backtick, and a $ that starts anything but $NAME, ${NAME} or a positional or special parameter: so $(…),
+ *    $((…)) and $[…] (arithmetic evaluates subscripts, which may hold a substitution inside quotes), ${…} with a flag,
+ *    a default, an assignment or another expansion in it, $~x $=x $^x $+x (a value read again as a pattern or as
+ *    words), $x[…], and $'…' / $"…" (quoted by other rules than '…' and "…");
+ * and, outside double quotes as well:
+ *  - ( or ): a glob qualifier runs code (ls *(e:'cmd':)), as do subshells, functions and =(…) <(…) >(…);
+ *  - { or }, except a literal {word} with no comma and no .. (HEAD@{1}): brace expansion makes words, so
+ *    sort {-o,out} f is sort -o out f;
+ *  - # at the start of a word: a comment, in which the lexers would read a quote and zsh would not;
+ *  - << that is not <<<: a here-document's body is expanded whatever quotes it holds.
+ * False too for an unclosed quote and a trailing backslash.
+ */
+export function plainForShell(s: string): boolean {
+  let dq = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const code = s.charCodeAt(i);
+    if ((code < 0x20 && c !== '\t' && c !== '\n') || code === 0x7f) return false;
+    if (c === '\\') {
+      if (i + 1 >= s.length) return false;
+      i++;
+      continue;
+    }
+    if (c === "'" && !dq) {
+      const end = s.indexOf("'", i + 1);
+      if (end < 0) return false;
+      i = end;
+      continue;
+    }
+    if (c === '"') {
+      dq = !dq;
+      continue;
+    }
+    if (c === '`') return false;
+    if (c === '$') {
+      const rest = s.slice(i + 1);
+      const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest);
+      if (name) {
+        if (rest[name[0].length] === '[') return false;
+        i += name[0].length;
+        continue;
+      }
+      const braced = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(rest);
+      if (braced) {
+        i += braced[0].length;
+        continue;
+      }
+      if (/^[0-9?$#@*!-]/.test(rest)) {
+        i++;
+        continue;
+      }
+      // Arithmetic on numbers alone ($((1 + 2))): no name in it, so nothing is looked up or evaluated twice
+      const sum = /^\(\([0-9\s+*/%()-]*\)\)/.exec(rest);
+      if (sum) {
+        i += sum[0].length;
+        continue;
+      }
+      // What is left either starts an expansion this does not read, or is a $ that stands for itself ("a$|b")
+      if (/^[([{'~=^+]/.test(rest) || (!dq && rest[0] === '"')) return false;
+      continue;
+    }
+    if (dq) continue;
+    if (c === '(' || c === ')' || c === '}') return false;
+    if (c === '{') {
+      const literal = /^\{[A-Za-z0-9_^~./-]*\}/.exec(s.slice(i));
+      if (!literal || literal[0].includes('..')) return false;
+      i += literal[0].length - 1;
+      continue;
+    }
+    if (c === '#' && (i === 0 || /[\s;|&]/.test(s[i - 1]))) return false;
+    if (c === '<' && s[i + 1] === '<') {
+      if (s[i + 2] !== '<') return false;
+      i += 2;
+    }
+  }
+  return !dq;
+}
+
+/** Programs no file name can turn against the user: none of their options writes a file or runs a program */
+const NAME_SAFE_PROGRAMS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'echo', 'printf', 'stat', 'du', 'basename', 'dirname', 'realpath', 'readlink', 'md5', 'shasum', 'cmp', 'nl', 'column', 'cut', 'tr', 'grep', 'test', '[']);
+/** Programs that read every word after `--` as a file or a pattern, never as an option */
+const HONOURS_DASH_DASH = new Set(['sort', 'sed', 'rg', 'git', 'diff', 'awk']);
+
+/**
+ * The words of a simple command as written, each with what a wildcard in it could become: `glob` when it holds an
+ * unquoted * ? or [, and `prefix`, the fixed text before the first one (quotes removed, $NAME left out since it may
+ * be empty). zsh puts every matching file name in the word's place, so with an empty prefix, or one that starts with
+ * -, a file named like an option becomes one (sort * with a file called -oout is sort -oout).
+ */
+function writtenWords(simple: string): { text: string; glob: boolean; prefix: string }[] {
+  const out: { text: string; glob: boolean; prefix: string }[] = [];
+  let i = 0;
+  while (i < simple.length) {
+    if (/\s/.test(simple[i])) {
+      i++;
+      continue;
+    }
+    const start = i;
+    let glob = false;
+    let prefix = '';
+    let quote: string | null = null;
+    for (; i < simple.length; i++) {
+      const c = simple[i];
+      if (quote === "'") {
+        if (c === "'") quote = null;
+        else if (!glob) prefix += c;
+        continue;
+      }
+      if (c === '\\' && i + 1 < simple.length) {
+        if (!glob) prefix += simple[i + 1];
+        i++;
+        continue;
+      }
+      if (c === '$') {
+        const name = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})/.exec(simple.slice(i));
+        if (name) {
+          i += name[0].length - 1;
+          continue;
+        }
+      }
+      if (quote === '"') {
+        if (c === '"') quote = null;
+        else if (!glob) prefix += c;
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        quote = c;
+        continue;
+      }
+      if (/\s/.test(c)) break;
+      if (c === '*' || c === '?' || c === '[') glob = true;
+      else if (!glob) prefix += c;
+    }
+    out.push({ text: simple.slice(start, i), glob, prefix });
+  }
+  return out;
+}
+
+/**
+ * False when a wildcard could hand a read-only program something other than the file names it looks like it names:
+ * a word whose wildcard has no fixed text before it, or only text that starts with - (sort *, sort -*, sort ?x),
+ * for any program with an option that writes or runs something, unless the program reads every word after -- as a
+ * name and the word comes after one; and any wildcard at all for uniq, whose second file name is the file it writes.
+ */
+function namesStayNames(prog: string, simple: string): boolean {
+  if (NAME_SAFE_PROGRAMS.has(prog)) return true;
+  let namesOnly = false;
+  for (const w of writtenWords(simple)) {
+    if (!w.glob) {
+      if (w.text === '--' && HONOURS_DASH_DASH.has(prog)) namesOnly = true;
+      continue;
+    }
+    if (prog === 'uniq') return false;
+    // (--include=*.ts stays what it is: the option's name is fixed before the wildcard)
+    if (!namesOnly && (w.prefix === '' || (w.prefix.startsWith('-') && !/^--[A-Za-z0-9-]+=/.test(w.prefix)))) return false;
   }
   return true;
 }
