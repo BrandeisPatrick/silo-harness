@@ -33,6 +33,8 @@ export interface Usage {
   completionTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Of the cache writes, those kept an hour (Anthropic's Messages API reports them apart; they cost more) */
+  cacheWrite1hTokens?: number;
 }
 
 /** Native API root for a configured base URL, which may be the OpenAI-compatible .../v1 endpoint. */
@@ -213,6 +215,8 @@ export async function ollamaComplete(o: {
   think?: boolean;
   options: Record<string, unknown>;
   signal?: AbortSignal;
+  /** The call's token counts (for the session's cost) */
+  onUsage?: (usage: Usage) => void;
 }): Promise<string> {
   const body: Record<string, unknown> = { model: o.model, messages: toOllamaMessages(o.messages), stream: false, options: o.options };
   if (o.think !== undefined) body.think = o.think;
@@ -225,5 +229,6 @@ export async function ollamaComplete(o: {
   if (!res.ok) throw await httpError(res);
   const data = (await res.json()) as OllamaChunk;
   if (data.error) throw new Error(data.error);
+  if (data.prompt_eval_count !== undefined || data.eval_count !== undefined) o.onUsage?.({ promptTokens: data.prompt_eval_count ?? 0, completionTokens: data.eval_count ?? 0 });
   return data.message?.content ?? '';
 }

@@ -890,6 +890,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .status-time { margin-left: -4px; color: var(--text-400); font-variant-numeric: tabular-nums; }
 .status-tokens { color: var(--text-400); font-size: var(--fs-small); line-height: var(--lh-small); font-variant-numeric: tabular-nums; cursor: default; }
 .status-tokens.near-limit { color: var(--warn); }
+.status-cost { margin-left: -4px; }
 .stop-hint {
   display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; margin-right: -6px; border-radius: var(--r-control);
   font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); transition: background-color 0.12s, color 0.12s;
@@ -1765,6 +1766,20 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .rules-empty { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: var(--r-card); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
 .rules-empty .icon { flex: none; }
 .rules-empty p { margin: 0; }
+.rule-chip.invalid { border-style: dashed; color: var(--text-400); }
+.rule-chip.invalid .rule-chip-text { text-decoration: line-through; }
+.rule-chip.invalid > .icon { flex: none; margin-right: 2px; color: var(--warn); }
+.rules-add { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.rules-add .select { flex: none; width: 104px; }
+.rules-add input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-control); background: var(--field-bg); color: var(--text-100); font-family: var(--mono); font-size: var(--fs-small); outline: none; }
+.rules-add input::placeholder { color: var(--text-400); }
+.rules-add input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--field-ring); }
+.rules-add input[aria-invalid="true"] { border-color: var(--danger); }
+#rules-add-btn { flex: none; }
+#rules-add-btn.busy { pointer-events: none; opacity: 0.7; }
+.rules-panel .hint a { color: var(--accent, inherit); }
+.rules-ignored code { font-family: var(--mono); font-size: var(--fs-micro); }
+#rules-global-for { margin-top: 12px; }
 
 /* ---------- Tick 2: message actions on user bubbles, rewind, the task list ---------- */
 

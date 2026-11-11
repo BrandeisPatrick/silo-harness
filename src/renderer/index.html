@@ -87,6 +87,7 @@
                 <span id="status-time" class="status-time"></span>
                 <span class="spacer"></span>
                 <span id="status-tokens" class="status-tokens" hidden></span>
+                <span id="status-cost" class="status-tokens status-cost" data-tip="Estimated from list prices" hidden></span>
                 <button id="stop-btn" class="stop-hint" data-tip="Stop the run"><kbd>esc</kbd><span>to interrupt</span></button>
                 <span id="status-hint" class="status-hint"><kbd>↵</kbd><span>build</span><kbd>esc</kbd><span>keep planning</span></span>
               </div>
@@ -230,24 +231,46 @@
             <p class="rules-for">For <span id="rules-cwd" class="rules-cwd">this project</span></p>
             <div id="rules-list" class="rules-list" hidden>
               <div class="rules-row" hidden>
-                <span class="rules-label"><span data-icon="terminal" data-icon-size="14"></span><span>Commands</span></span>
-                <div id="rules-programs" class="rules-chips" role="list" aria-label="Commands that run without asking"></div>
+                <span class="rules-label"><span data-icon="check" data-icon-size="14"></span><span>Allow</span></span>
+                <div id="rules-allow" class="rules-chips" role="list" aria-label="Allow rules"></div>
+              </div>
+              <div class="rules-row" hidden>
+                <span class="rules-label"><span data-icon="circle-help" data-icon-size="14"></span><span>Ask</span></span>
+                <div id="rules-ask" class="rules-chips" role="list" aria-label="Ask rules"></div>
+              </div>
+              <div class="rules-row" hidden>
+                <span class="rules-label"><span data-icon="circle-x" data-icon-size="14"></span><span>Deny</span></span>
+                <div id="rules-deny" class="rules-chips" role="list" aria-label="Deny rules"></div>
               </div>
               <div class="rules-row" hidden>
                 <span class="rules-label" title="Auto mode no longer pauses for these"><span data-icon="zap" data-icon-size="14"></span><span>Auto-mode checks</span></span>
                 <div id="rules-reasons" class="rules-chips" role="list" aria-label="Auto-mode checks that no longer pause"></div>
               </div>
-              <div class="rules-row" hidden>
-                <span class="rules-label"><span data-icon="plug" data-icon-size="14"></span><span>MCP servers</span></span>
-                <div id="rules-mcp" class="rules-chips" role="list" aria-label="MCP servers whose tools run without asking"></div>
-              </div>
-              <div id="rules-edits" class="rules-row rules-edits" hidden>
-                <span class="rules-label"><span data-icon="pencil" data-icon-size="14"></span><span>File edits</span></span>
-                <span class="rules-text">Edits inside the working directory run without asking</span>
-                <button type="button" class="rule-remove" aria-label="Ask again before edits" title="Remove" data-icon="x" data-icon-size="12"></button>
-              </div>
             </div>
             <div class="rules-empty" hidden></div>
+            <div class="rules-add" role="group" aria-label="Add a rule">
+              <span class="select"><select id="rules-add-list" aria-label="Add to"><option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span>
+              <input id="rules-add-input" class="mono" placeholder="Bash(npm run test:*)" aria-label="Rule" spellcheck="false" autocomplete="off" autocapitalize="off">
+              <button type="button" id="rules-add-btn" class="btn" disabled><span data-icon="plus" data-icon-size="14"></span><span>Add</span></button>
+            </div>
+            <p id="rules-add-error" class="rules-status" role="alert" hidden></p>
+            <p class="hint">Claude Code's rule format, e.g. <code>Edit(src/**)</code>, <code>mcp__github</code>. <a href="https://github.com/BrandeisPatrick/silo-harness/blob/main/docs/reference.md#permission-rules" target="_blank" rel="noopener">Rules reference</a></p>
+            <p id="rules-global-for" class="rules-for" hidden>Every project, from <span id="rules-global-file" class="rules-cwd">settings.json</span></p>
+            <div id="rules-global" class="rules-list" hidden>
+              <div class="rules-row" hidden>
+                <span class="rules-label"><span data-icon="check" data-icon-size="14"></span><span>Allow</span></span>
+                <div data-list="allow" class="rules-chips" role="list" aria-label="Allow rules from settings.json"></div>
+              </div>
+              <div class="rules-row" hidden>
+                <span class="rules-label"><span data-icon="circle-help" data-icon-size="14"></span><span>Ask</span></span>
+                <div data-list="ask" class="rules-chips" role="list" aria-label="Ask rules from settings.json"></div>
+              </div>
+              <div class="rules-row" hidden>
+                <span class="rules-label"><span data-icon="circle-x" data-icon-size="14"></span><span>Deny</span></span>
+                <div data-list="deny" class="rules-chips" role="list" aria-label="Deny rules from settings.json"></div>
+              </div>
+            </div>
+            <p id="rules-ignored" class="hint rules-ignored" hidden></p>
             <p id="rules-status" class="rules-status" role="alert" hidden></p>
           </div>
           <div id="mcp-section" class="mcp-panel">

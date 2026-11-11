@@ -54,7 +54,7 @@ function percentile(values, p) {
 const PRICES = [
   [/claude-opus-5-5/, { input: 4, output: 20, cacheRead: 0.2 }],
   [/claude-opus-5(?!-\d)/, { input: 5, output: 25, cacheRead: 0.5 }],
-  [/claude-sonnet-5-5/, { input: 2, output: 10, cacheRead: 0.2 }],
+  [/claude-sonnet-5-5/, { input: 2, output: 10, cacheRead: 0.1 }],
   [/claude-sonnet-5(?!-\d)/, { input: 2, output: 10, cacheRead: 0.2 }],
   // Prompts up to 100K tokens; cache reads at the usual 0.1x of input
   [/claude-haiku-5-5/, { input: 0.1, output: 0.5, cacheRead: 0.01 }],

@@ -292,7 +292,7 @@
         },
         "model": {
           "type": "string",
-          "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: the session's own model. Your own settings.json only."
+          "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's API, else the session's own model. Your own settings.json only."
         },
         "learn": {
           "type": "boolean",
@@ -576,6 +576,40 @@
         ]
       }
     },
+    "prices": {
+      "type": "object",
+      "description": "Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic's API and price any other model. Your own settings.json only.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "input",
+          "output"
+        ],
+        "properties": {
+          "input": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Input tokens."
+          },
+          "output": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Output tokens."
+          },
+          "cacheRead": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Tokens read from the prompt cache (default: the input price)."
+          },
+          "cacheWrite": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Tokens written to the prompt cache (default: the input price)."
+          }
+        }
+      }
+    },
     "hooks": {
       "type": "object",
       "description": "Commands and HTTP endpoints run before and after the agent acts, in Claude Code's format. A project file's hooks run only once you trust the file. See docs/hooks.md.",
@@ -749,6 +783,34 @@
               }
             }
           }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Your own settings.json only: permission rules for every project, in Claude Code's format (\"Bash(npm run test:*)\", \"Edit(//tmp/**)\", \"mcp__github\"). A project's file may not set them. See docs/reference.md#permission-rules.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Run without asking (never covers a protected path, sudo, a browser card or Plan mode)."
+        },
+        "ask": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Always ask, in every mode."
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Always refuse, in every mode."
         }
       }
     },

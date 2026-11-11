@@ -57,15 +57,17 @@ import { claudeToolInput, claudeToolName, nativeToolInput, toolMatchNames } from
 import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPromptParts, userMessage, type PromptExtra } from './agent/prompt';
 import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
-import { complete, noToolsNotice, uniqueCallIds, type CompletionHost, type Reply } from './agent/complete';
+import { complete, noToolsNotice, uniqueCallIds, usageOf, type CompletionHost, type RawUsage, type Reply } from './agent/complete';
+import { callSource, chargeSession, type CallSource } from './cost';
 import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
-import { CLASSIFIER_TIMEOUT_MS, classifierRequest, classifierTarget, isConnectionError, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
+import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCommand } from './guard';
+import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
 import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
 
@@ -288,6 +290,8 @@ export class Agent {
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
   private lastUsage: Usage | null = null;
+  /** The model and API of the run's (or /compact's) own calls, which their usage is charged to (cost.ts) */
+  private costSource: CallSource | null = null;
   /** Per session: whether its provider was seen caching (cachesPrefix, noteCache) */
   private cacheSeen = new Map<string, CacheSeen>();
   /** When the current main model call was sent */
@@ -726,14 +730,24 @@ export class Agent {
     return s;
   }
 
+  /** True when Plan mode refuses the call whatever is answered: an edit, or a command that is not read-only. */
+  private planRefuses(name: string, args: unknown): boolean {
+    if (this.sessionConfig().permissionMode !== 'plan') return false;
+    if (EDIT_TOOLS.has(name)) return true;
+    if (!BASH_TOOLS.has(name)) return false;
+    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
+    return typeof command !== 'string' || !isReadOnlyCommand(command);
+  }
+
   /**
    * Decides, per permission mode, whether an action runs, asks, or is refused (the rules are in agent/permissions.ts).
    * `hookAllowed`: a PreToolUse hook allowed the call, so no card is shown and no check runs (what the mode refuses
    * outright, plan mode's edits, stays refused, and a browser purchase or account card still asks, as it does in
-   * bypass mode). In Auto mode what the rules do not settle goes to the safety check (autoCheck); `call` is the tool
+   * bypass mode). 'rule': the user allowed the call on an ask rule's card, which skips the same cards but no browser
+   * card. In Auto mode what the rules do not settle goes to the safety check (autoCheck); `call` is the tool
    * call it belongs to.
    */
-  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed = false, call?: CallRef): Promise<ApprovalResult> {
+  private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed: boolean | 'rule' = false, call?: CallRef): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
     const mode = cfg.permissionMode;
     const cwd = cfg.workingDirectory;
@@ -751,6 +765,7 @@ export class Agent {
         auto,
         cwd,
         rules: cfg.allowRules?.[cwd],
+        global: cfg.permissions,
         mcp: () => this.mcp?.lookup(name),
         allowed: {
           mcp: (server) => seen(this.sessionSet(this.mcpAllowed).has(server)),
@@ -775,7 +790,10 @@ export class Agent {
     // card or the safety check must decide
     const atOnce = (decision: ApprovalDecision): Promise<ApprovalResult> | null => {
       if (decision.kind === 'refuse' || decision.kind === 'allow') return settle(decision);
-      if (hookAllowed && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
+      // A firm card (a write to the file that holds the permission rules) is the user's alone: no hook, no earlier Allow
+      if (decision.kind === 'ask' && decision.firm) return null;
+      // (an Allow on an ask rule's card does not answer a browser card: site approvals stay the browser's)
+      if (hookAllowed && !(hookAllowed === 'rule' && opts.browser) && !USER_ONLY_CARDS.has(opts.browser?.card ?? '')) return Promise.resolve(done('hook', { ok: true }));
       // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
       // by its card, site and first line, a page script also by its code: the model's reason under it may differ on the retry)
       if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve(done('allowed_before', { ok: true }));
@@ -841,7 +859,20 @@ export class Agent {
     const checkAt = Date.now();
     probe?.checkStarted();
     try {
-      const raw = await runClassifier(checker, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal);
+      const ask = (t: ClassifierTarget) => runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage));
+      let raw: string;
+      try {
+        raw = await ask(checker);
+      } catch (err) {
+        // The faster default model is one this key may not use, or is not there: the session's own model checks
+        // instead, now and until the app restarts. Nothing is allowed without a verdict either way.
+        if (!checker.candidate || !isModelRefusal(err) || signal?.aborted) throw err;
+        candidateRefused.add(checker.candidate);
+        const own = classifierTarget(cfg);
+        if (!own || own.candidate) throw err;
+        console.warn(`[auto] ${checker.label} is not available to this key; the check runs on ${own.label}`);
+        raw = await ask(own);
+      }
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       probe?.checkEnded(verdict?.decision ?? 'error');
@@ -1208,6 +1239,7 @@ export class Agent {
       const { client, model, maxOutput, native } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined, native: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
+      this.costSource = callSource(cfg, model);
       timer.setModel(this.providerType(cfg), model);
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
       // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
@@ -1626,6 +1658,18 @@ export class Agent {
     this.noteCache(usage);
     this.turnTimer?.usage(usage);
     this.emit({ type: 'usage', ...usage });
+    this.charge(this.costSource, usage);
+  }
+
+  /**
+   * Counts one model call toward the session's cost (cost.ts) and tells the window the new total. Every kind of call
+   * the session makes comes here: its turns, Auto mode's checks, the title, a compaction summary.
+   */
+  private charge(src: CallSource | null, usage: Usage): void {
+    if (!src) return;
+    const s = this.session;
+    const ev = chargeSession(s, src, usage, this.getConfig());
+    if (this.store.get(s.id) === s) this.emit(ev);
   }
 
   /** What a model call (agent/complete.ts) may use of this agent. */
@@ -1747,6 +1791,7 @@ export class Agent {
       const { client, model, maxOutput } = isOllama(cfg) ? { client: null, model: ollamaOf(cfg).model, maxOutput: undefined } : makeClient(cfg);
       this.maxOutput = maxOutput;
       if (!model) throw new Error('No model selected. Open Settings and pick one.');
+      this.costSource = callSource(cfg, model);
       const r = await this.compact('manual', focus, signal, cfg, client, model);
       return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'The summary could not be produced.' };
     } catch (err) {
@@ -2063,6 +2108,7 @@ export class Agent {
             // num_ctx matches the agent's requests so Ollama keeps the model loaded as it is.
             options: { num_ctx: contextSize(ollamaOf(cfg).numCtx), num_predict: maxTokens, temperature: 0.2 },
             signal: timeout,
+            onUsage: (usage) => this.charge(callSource(cfg, model), usage),
           });
         try {
           return await call(false);
@@ -2073,6 +2119,7 @@ export class Agent {
         }
       }
       const res = await client.chat.completions.create({ model, messages, max_tokens: maxTokens, stream: false }, { signal: timeout, maxRetries: 1 });
+      if (res.usage) this.charge(callSource(cfg, model), usageOf(res.usage as RawUsage));
       return res.choices?.[0]?.message?.content ?? '';
     };
     const budget = summaryBudgetChars(limit);
@@ -2221,7 +2268,9 @@ export class Agent {
     const prompt = titlePrompt(session);
     if (!prompt) return;
     this.titleAttempts.add(session.id);
-    const title = await generateTitle(cfg, prompt);
+    const title = await generateTitle(cfg, prompt, (usage) => {
+      if (session === this.session) this.charge(callSource(cfg), usage);
+    });
     // The user may have renamed or deleted the session, or turned the feature off, while the model answered.
     if (!title || title === session.title || session.titleLocked) return;
     if (this.store.get(session.id) !== session || !this.getConfig().autoTitles) return;
@@ -2348,13 +2397,31 @@ export class Agent {
     }
     const hookContext = pre?.context ?? [];
     let hookApproval: HookApproval = pre?.permission === 'allow' ? 'allow' : pre?.permission === 'ask' ? 'ask' : null;
+    let askReason = pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call';
+    // The card came from an ask rule, not a hook: its Allow does not stand in for a browser card
+    let byRule = false;
+    // Permission rules (agent/rules.ts), after the hook and whatever it said: a deny rule refuses in every mode, Bypass
+    // included; an ask rule shows a card in every mode (but where Plan mode refuses the call anyway). A hook's allow
+    // beats neither.
+    const scfg = this.sessionConfig();
+    const verdict = ruleVerdict(compileRules(scfg.allowRules?.[ctx.cwd], scfg.permissions), name, args, ctx.cwd, name.startsWith('mcp__') ? this.mcp?.lookup(name)?.server : undefined);
+    if (verdict?.list === 'deny') {
+      const content = deniedByRule(verdict.rule);
+      this.emit({ type: 'tool_end', id: call.id, name, result: content, ok: false, durationMs: 0 });
+      return end({ content }, 'blocked');
+    }
+    if (verdict?.list === 'ask' && !this.planRefuses(name, args)) {
+      hookApproval = 'ask';
+      byRule = pre?.permission !== 'ask';
+      askReason = `it matches your ask rule ${verdict.rule}`;
+    }
     if (hookApproval === 'ask') {
       // The card comes up whatever the mode says; once answered, the tool's own check asks no more. One card at a
       // time: it waits for the cards of calls still running before it.
       const input = toolInput();
       const what = typeof input.command === 'string' ? input.command : typeof input.file_path === 'string' ? input.file_path : truncate(JSON.stringify(args ?? {}), 800);
       const probe = timing?.permission();
-      const answer = await this.inLane(() => (ctx.signal?.aborted ? Promise.resolve<ApprovalResult>({ ok: false, message: INTERRUPTED }) : this.ask(name, what, this.getConfig().permissionMode, pre?.permissionReason || 'a PreToolUse hook asks you to confirm this call', [], true, undefined, undefined, probe, call.id)));
+      const answer = await this.inLane(() => (ctx.signal?.aborted ? Promise.resolve<ApprovalResult>({ ok: false, message: INTERRUPTED }) : this.ask(name, what, this.getConfig().permissionMode, askReason, [], true, undefined, undefined, probe, call.id)));
       probe?.settle('hook', answer.ok);
       if (!answer.ok) {
         this.emit({ type: 'tool_end', id: call.id, name, result: answer.message, ok: false, durationMs: 0 });
@@ -2372,7 +2439,7 @@ export class Agent {
         approve: async (toolName, detail, target, approveOpts) => {
           const askedAt = Date.now();
           try {
-            return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow', { id: call.id, args: visible(args), timing });
+            return await this.requestApproval(toolName, detail, target, approveOpts, hookApproval === 'allow' ? (byRule ? 'rule' : true) : false, { id: call.id, args: visible(args), timing });
           } finally {
             waited += Date.now() - askedAt;
           }

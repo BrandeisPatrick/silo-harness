@@ -58,6 +58,7 @@ const SCRIPTS = [
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
   { name: 'auto-mode' },
+  { name: 'permission-rules' },
   { name: 'aws-reads' },
   { name: 'shell-traps' },
   { name: 'remote-page', electron: true },
@@ -76,6 +77,7 @@ const SCRIPTS = [
   { name: 'browser-hardening' },
   { name: 'browser-drag-regions', shots: 'none' },
   { name: 'chat-cards' },
+  { name: 'cost' },
 ];
 
 const words = process.argv.slice(2);

@@ -169,7 +169,7 @@ async function waitFor(fn, ms = 5000, what = 'condition') {
   rt.respondApproval(cCard.id, true, true, 'project');
   await idle(C);
   check('5: the background session went on, the other still waits', !rt.isRunning(C) && rt.isRunning(A) && rt.live(A).approvals.length === 1);
-  check('5: the project rule went to C\'s folder, not the one on screen', app.config().allowRules[dirB]?.programs?.includes('git') && !app.config().allowRules[dirA], app.config().allowRules);
+  check('5: the project rule went to C\'s folder, not the one on screen', app.config().allowRules[dirB]?.allow?.includes('Bash(git:*)') && !app.config().allowRules[dirA], app.config().allowRules);
   check('5: approval_resolved scope project', of(C, 'approval_resolved')[0].scope === 'project');
   rt.respondApproval(rt.live(A).approvals[0].id, false);
   await idle(A);

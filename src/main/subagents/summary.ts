@@ -3,7 +3,8 @@
 // same agent to carry on, this one is a report for another session that only needs the outcome.
 
 import type { AppConfig } from '../../shared/types';
-import { contextSize, ollamaComplete } from '../ollama';
+import { contextSize, ollamaComplete, type Usage } from '../ollama';
+import { usageOf, type RawUsage } from '../agent/complete';
 import { isOllama, makeClient, ollamaOf } from '../providers';
 import type { Msg } from '../sessions';
 
@@ -96,8 +97,8 @@ export function cleanReport(raw: string): string {
   return t.replace(/^(?:here is|here's|below is)[^\n]*\n+/i, '').trim();
 }
 
-/** Asks the configured model for the report. Throws when the call fails or the reply is empty. */
-export async function writeMergeReport(cfg: AppConfig, title: string, kind: 'sub-session' | 'fork', messages: Msg[]): Promise<string> {
+/** Asks the configured model for the report. Throws when the call fails or the reply is empty. `onUsage` gets the call's tokens. */
+export async function writeMergeReport(cfg: AppConfig, title: string, kind: 'sub-session' | 'fork', messages: Msg[], onUsage?: (u: Usage) => void): Promise<string> {
   const request = mergeRequest(title, kind, messages);
   const signal = AbortSignal.timeout(TIMEOUT_MS);
   let raw: string;
@@ -112,10 +113,12 @@ export async function writeMergeReport(cfg: AppConfig, title: string, kind: 'sub
       // The agent's own num_ctx, so Ollama does not reload the model for this call
       options: { num_ctx: contextSize(ol.numCtx), num_predict: 1200, temperature: 0.2 },
       signal,
+      onUsage,
     });
   } else {
     const { client, model } = makeClient(cfg);
     const res = await client.chat.completions.create({ model, messages: request, max_tokens: 1200, stream: false }, { signal, maxRetries: 1 });
+    if (res.usage) onUsage?.(usageOf(res.usage as RawUsage));
     raw = res.choices?.[0]?.message?.content ?? '';
   }
   const report = cleanReport(raw);

@@ -372,7 +372,7 @@ const privacy = [
   ['find / -name x > ~/out.txt', 'writes outside the working directory'],
   ['rg token ~; sudo ls', 'uses sudo'],
   ['find ~ -name x; cat ~/.ssh/id_rsa', 'reads secrets'],
-  ['pbpaste | sudo tee /etc/x', 'uses sudo'],
+  ['pbpaste | sudo tee /etc/x', 'writes outside the working directory'], // what sudo runs is read too
   ['screencapture /tmp/s.png; rm -rf /', 'recursive delete of a broad path'],
   // the screen, the camera and microphone, the clipboard, macOS settings
   ['screencapture -x /tmp/s.png', 'records the screen'],
@@ -454,6 +454,127 @@ for (const [bare, quoted] of [
   check(`wildcard: ${bare} is decided as ${quoted}`, JSON.stringify(a) === JSON.stringify(b), { bare: a, quoted: b });
 }
 check('wildcard: grep --include=*.ts is a plain read', isReadOnlyCommand('grep -r x --include=*.ts src') && guardCommand('grep -r x --include=*.ts src', cwd) === null);
+
+// ---------- A cd earlier in the line, relative paths, writes the guard cannot place ----------
+// Paths are checked at every folder the line may be in (the session's folder and each literal cd / pushd target);
+// "inside" is the session's folder; a write after a cd the guard cannot follow, or into $X/…, counts as outside.
+// A folder outside the temp folders (nothing is written): ../x from a temp folder is still a temp folder.
+const proj = path.join(projectDir, 'test');
+const OUT = 'writes outside the working directory';
+const PROT = 'writes a protected file';
+const dirRows = [
+  // [command, guardCommand, alwaysAskReason (undefined: not checked)]
+  ['cd ~ && echo x > .zshrc', PROT],
+  ['cd ~; echo x >> .ssh/authorized_keys', PROT],
+  ['cd && echo x > .zprofile', PROT],
+  ['cd /etc && echo hi > hosts', OUT],
+  ['cd .. && echo x > out.txt', OUT],
+  ['pushd .. && echo x > out.txt', OUT],
+  ['chdir .. && echo x > out.txt', OUT],
+  ['cd -P .. && echo x > out.txt', OUT],
+  ['cd -- .. && echo x > out.txt', OUT],
+  ['npm run test > ../out.txt', OUT],
+  ['echo x 2> ../err.txt', OUT],
+  ['echo x > {a,../b}', OUT],
+  ['echo x > {a,b,c,d,e,f}{a,b,c,d,e,f}', OUT], // more alternatives than the guard follows: it cannot place it
+  ['rm ../x', 'deletes outside the working directory'],
+  ['cd .. && rm x', 'deletes outside the working directory'],
+  ['cp a ../b', OUT],
+  ['mv a ../b', OUT],
+  ['mv ../a b', OUT], // mv removes its source
+  ['touch ../x', OUT],
+  ['mkdir -p ../x', OUT],
+  ['echo x | tee ../x', OUT],
+  ['sed -i "" s/a/b/ ../f', OUT],
+  ['cd .. && sed -i s/a/b/ f', OUT],
+  ['truncate -s 0 ../f', OUT],
+  ['unzip a.zip -d ../out', OUT],
+  ['tar -C ../out -xf a.tar', OUT],
+  ['cd .. && chmod -R u+w x', 'broad permission change'],
+  ['(cd /tmp) ; echo x > .git/hooks/pre-commit', 'modifies the .git directory'],
+  ['cd .git && echo x > config', 'modifies the .git directory'],
+  ['cd /tmp && cd .. && echo x > etc/hosts', OUT],
+  ['bash -c "cd .. && echo x > out.txt"', OUT],
+  ['for d in a b; do (cd .. && touch x); done', OUT],
+  // reads of secrets follow the cd too
+  ['cd ~/.ssh && cat id_rsa', 'reads secrets'],
+  ['cd ~/.ssh && cat config', 'reads secrets'],
+  ['cd ~/.aws; head credentials', 'reads secrets'],
+  ['cd ~/.ssh && wc -l < config', 'reads secrets'],
+  // writes the guard cannot place
+  ['X=~/.zshrc; echo evil >> $X', OUT],
+  ['D=/somewhere; echo x > $D/settings.json', OUT],
+  ['echo x > ${D}/x', OUT],
+  ['echo x > "$(pwd)/x"', OUT],
+  ['echo x > ~bob/.zshrc', OUT],
+  ['cd $D && echo x > a', OUT],
+  ['cd "$(git rev-parse --show-toplevel)" && touch a', OUT],
+  ['cd `dirname $0` && rm a', 'deletes outside the working directory'],
+  ['cd src/* && touch a', OUT],
+  ['cp a $TARGET', OUT],
+  // $HOME and ~ are resolved
+  ['echo x > $HOME/.zshrc', PROT],
+  ['echo x > ${HOME}/.zshrc', PROT],
+  // sudo: what it runs is read too
+  ['sudo rm -rf ~', 'recursive delete of a broad path', 'deletes a critical folder'],
+  ['sudo -u root rm -rf ~', 'recursive delete of a broad path', 'deletes a critical folder'],
+  ['sudo -- tee ~/.zshrc', PROT, 'uses sudo'],
+  ['doas -u root rm -rf /', 'recursive delete of a broad path', 'deletes a critical folder'],
+  ['sudo rm x', 'uses sudo', 'uses sudo'],
+  ['sudo -E VAR=1 npm install -g x', 'uses sudo', 'uses sudo'],
+  ['sudo -s', 'uses sudo', 'uses sudo'],
+  ['sudo -e /etc/hosts', 'uses sudo', 'uses sudo'],
+  // a cd to a system folder, then a delete there
+  ['cd / && rm -rf usr', 'deletes outside the working directory', 'deletes a critical folder'],
+  ['cd .. && rm -rf test', undefined, 'deletes a critical folder'], // the working directory itself
+  // ordinary work stays quiet
+  ['cd sub && npm run build > build.log', null, null],
+  ['cd sub && rm -rf dist', null, null],
+  ['(cd sub && make) && touch done.txt', null, null],
+  ['cd /tmp/x && touch a', null, null],
+  ['cd /tmp && echo x > y', null, null],
+  ['npm test > out.log', null, null],
+  ['npm test > out.log 2>&1', null, null],
+  ['npm test 2> /dev/null', null, null],
+  ['cat ../README.md', null, null],
+  ['cd .. && git status', null, null],
+  ['cd .. && ls', null, null],
+  ['cd - && touch a', null, null],
+  ['pushd sub && touch a && popd', null, null],
+  ['rm -rf {dist,build}', null, null],
+  ['cp ../template.txt .', null, null],
+  ['ln -s ../lib/x.js x.js', null, null],
+  ['mkdir -p build/out && touch build/out/a', null, null],
+  ['echo $HOME > home.txt', null, null],
+  ['for f in *.md; do cat "$f"; done > all.txt', null, null],
+];
+for (const [cmd, want, always] of dirRows) {
+  const got = guardCommand(cmd, proj);
+  if (want !== undefined) check(`folders: ${cmd} -> ${want}`, got === want, got);
+  if (always !== undefined) {
+    const a = alwaysAskReason(cmd, proj);
+    check(`folders: ${cmd} always asks ${always}`, a === always, a);
+  }
+}
+
+// A saved "uses sudo" does not wave through what sudo runs
+const sudoSaved = { ...noneAllowed, reason: (r) => r === 'uses sudo' };
+for (const m of ['ask', 'acceptEdits', 'auto']) {
+  for (const cmd of ['sudo rm -rf ~', 'sudo rm -rf ../x', 'sudo tee ~/.zshrc']) {
+    d = decideApproval('bash', cmd, undefined, {}, ctx({ mode: m, auto: 'guard', cwd: proj, allowed: { ...sudoSaved, program: () => true } }));
+    check(`sudo: ${m}, "uses sudo" allowed: ${cmd} still asks`, d.kind === 'ask', d);
+  }
+  d = decideApproval('bash', 'sudo npm install -g x', undefined, {}, ctx({ mode: m, auto: 'guard', cwd: proj, allowed: { ...sudoSaved, program: () => true } }));
+  check(`sudo: ${m}, "uses sudo" allowed: sudo npm install -g x runs`, d.kind === 'allow', d);
+}
+for (const cmd of ['sudo rm -rf ~', 'sudo rm -rf ../x', 'sudo tee ~/.zshrc']) {
+  d = decideApproval('bash', cmd, undefined, {}, ctx({ mode: 'auto', auto: 'check', cwd: proj, allowed: sudoSaved }));
+  check(`sudo: auto with the check, "uses sudo" allowed: ${cmd} does not run unchecked`, d.kind === 'ask' || d.kind === 'classify', d);
+}
+d = decideApproval('bash', 'sudo true', undefined, {}, ctx({ mode: 'auto', auto: 'check', cwd: proj, allowed: sudoSaved }));
+check('sudo: auto with the check, "uses sudo" allowed: sudo true runs', d.kind === 'allow', d);
+d = decideApproval('bash', 'rm -rf /usr', undefined, {}, ctx({ mode: 'ask', cwd: proj, allowed: { ...noneAllowed, program: () => true, reason: (r) => r === 'deletes outside the working directory' } }));
+check('critical: ask mode, "deletes outside" allowed: rm -rf /usr still asks "deletes a critical folder"', d.kind === 'ask' && d.reason === 'deletes a critical folder', d);
 
 fs.rmSync(cwd, { recursive: true, force: true });
 done();

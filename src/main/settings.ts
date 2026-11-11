@@ -28,6 +28,7 @@ import { between, bool, describe, intBetween, kind, nonNegative, oneOf, positive
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
 import { configDir, projectConfigDir } from './paths';
 import { hooksSchema, validateHooks } from './hooks/config';
+import { parseRule } from './agent/rules';
 
 type Scope = 'user' | 'project';
 
@@ -117,7 +118,7 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
   autoMode: {
     environment: describe(str, "What Auto mode's safety check should know about this Mac, e.g. \"aisolutions-dev is a dev AWS account\". Your own settings.json only."),
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
-    model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: the session\'s own model. Your own settings.json only.'),
+    model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic\'s API, else the session\'s own model. Your own settings.json only.'),
     learn: describe(bool, 'Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only.'),
   },
   webSearch: {
@@ -126,6 +127,44 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     baseUrl: describe(str, 'Your SearXNG instance, e.g. http://localhost:8888 (it may be on your own network). Not allowed in a project file.'),
   },
 };
+
+/** `prices`: dollars per million tokens by model id (cost.ts); cacheRead and cacheWrite default to the input price. */
+const PRICE_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
+
+function pricesSchema(): Record<string, unknown> {
+  const n = (description: string) => ({ type: 'number', minimum: 0, description });
+  return {
+    type: 'object',
+    description: 'Prices for the cost estimate, in dollars per million tokens, by model id. They override the built-in prices of Claude models on Anthropic\'s API and price any other model. Your own settings.json only.',
+    additionalProperties: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['input', 'output'],
+      properties: { input: n('Input tokens.'), output: n('Output tokens.'), cacheRead: n('Tokens read from the prompt cache (default: the input price).'), cacheWrite: n('Tokens written to the prompt cache (default: the input price).') },
+    },
+  };
+}
+
+/** The valid entries of a `prices` value, and what is wrong with the rest. */
+export function validatePrices(value: unknown): { prices: Record<string, Record<string, number>>; problems: { key: string; message: string }[] } {
+  const prices: Record<string, Record<string, number>> = {};
+  const problems: { key: string; message: string }[] = [];
+  if (!isRecord(value)) return { prices, problems: [{ key: 'prices', message: `expected an object of model ids, e.g. { "my-model": { "input": 1, "output": 5 } }, got ${kind(value)}` }] };
+  for (const [model, raw] of Object.entries(value)) {
+    const key = `prices.${model}`;
+    if (!model.trim()) problems.push({ key, message: 'expected a model id' });
+    else if (!isRecord(raw)) problems.push({ key, message: `expected { "input": …, "output": … }, got ${kind(raw)}` });
+    else {
+      const extra = Object.keys(raw).find((f) => !(PRICE_FIELDS as readonly string[]).includes(f));
+      const bad = PRICE_FIELDS.find((f) => raw[f] !== undefined && !(typeof raw[f] === 'number' && Number.isFinite(raw[f]) && (raw[f] as number) >= 0));
+      if (extra) problems.push({ key: `${key}.${extra}`, message: `not a price field (known: ${PRICE_FIELDS.join(', ')})` });
+      else if (bad) problems.push({ key: `${key}.${bad}`, message: `expected dollars per million tokens (a number, 0 or more), got ${kind(raw[bad])}` });
+      else if (raw.input === undefined || raw.output === undefined) problems.push({ key, message: 'needs "input" and "output"' });
+      else prices[model] = Object.fromEntries(PRICE_FIELDS.filter((f) => raw[f] !== undefined).map((f) => [f, raw[f] as number]));
+    }
+  }
+  return { prices, problems };
+}
 
 /** Fields of the built-in blocks that hold a secret: never shown, never accepted from a project's file. */
 export const SECRET_FIELDS = ['portkey.apiKey', 'portkey.providerApiKey', 'webSearch.apiKey'];
@@ -147,6 +186,22 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
     return first ? `${first.key}: ${first.message}` : null;
   }
   if (p === 'disableAllHooks') return bool(value);
+  if (p === 'prices') {
+    const first = validatePrices(value).problems[0];
+    return first ? `${first.key}: ${first.message}` : null;
+  }
+  if (p === 'permissions') {
+    if (!isRecord(value)) return `expected { "allow": [], "ask": [], "deny": [] }, got ${kind(value)}`;
+    for (const [list, v] of Object.entries(value)) {
+      if (list !== 'allow' && list !== 'ask' && list !== 'deny') return `permissions.${list}: not a permissions list (known: allow, ask, deny)`;
+      if (!Array.isArray(v)) return `permissions.${list}: expected a list of rules, got ${kind(v)}`;
+      for (const rule of v) {
+        const r = parseRule(rule, list);
+        if ('error' in r) return `permissions.${list}: ${typeof rule === 'string' ? rule : kind(rule)}: ${r.error}`;
+      }
+    }
+    return null;
+  }
   const [a, b, ...rest] = p.split('.');
   if (rest.length) return 'unknown';
   if (b === undefined) return a in SCALARS ? SCALARS[a](value) : 'unknown';
@@ -156,7 +211,7 @@ export function checkSetting(p: string, value: unknown): string | null | 'unknow
 
 /** Every field path checkSetting knows, in schema order. */
 export function settableFields(): string[] {
-  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'hooks', 'disableAllHooks'];
+  return [...Object.keys(SCALARS), ...Object.entries(SECTIONS).flatMap(([sec, fields]) => Object.keys(fields).map((f) => `${sec}.${f}`)), 'prices', 'hooks', 'disableAllHooks', 'permissions'];
 }
 
 /** The JSON Schema of settings.json, built from the checks above (docs/settings.schema.json is this, written out). */
@@ -176,7 +231,19 @@ export function settingsSchema(): Record<string, unknown> {
     propertyNames: { pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$', not: { enum: [...BUILT_IN_PROVIDERS] } },
     additionalProperties: providerEntrySchema(),
   };
+  properties.prices = pricesSchema();
   properties.hooks = hooksSchema();
+  const ruleList = (desc: string) => ({ type: 'array', items: { type: 'string' }, description: desc });
+  properties.permissions = {
+    type: 'object',
+    additionalProperties: false,
+    description: 'Your own settings.json only: permission rules for every project, in Claude Code\'s format ("Bash(npm run test:*)", "Edit(//tmp/**)", "mcp__github"). A project\'s file may not set them. See docs/reference.md#permission-rules.',
+    properties: {
+      allow: ruleList('Run without asking (never covers a protected path, sudo, a browser card or Plan mode).'),
+      ask: ruleList('Always ask, in every mode.'),
+      deny: ruleList('Always refuse, in every mode.'),
+    },
+  };
   properties.disableAllHooks = { type: 'boolean', description: 'Turn off every hook from the settings files (mods\' hooks still run).' };
   return {
     $schema: 'http://json-schema.org/draft-07/schema#',
@@ -315,6 +382,39 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       if (block.commands.length) info.hookCommands = block.commands;
       continue;
     }
+    if (key === 'permissions') {
+      // Rules for every project, from your own settings.json only: a repository must not grant itself permissions
+      // (nor take away yours), so a project's block is ignored, allow, ask and deny alike.
+      if (scope === 'project') {
+        bad(key, "a project's settings.json may not set permissions; it is ignored. Add rules in Settings → Permissions or your own settings.json");
+        continue;
+      }
+      if (!isRecord(value)) {
+        bad(key, `expected { "allow": [], "ask": [], "deny": [] }, got ${kind(value)}`);
+        continue;
+      }
+      const lists: Record<string, string[]> = {};
+      for (const [list, v] of Object.entries(value)) {
+        if (list !== 'allow' && list !== 'ask' && list !== 'deny') {
+          bad(`permissions.${list}`, 'not a permissions list (known: allow, ask, deny)');
+          continue;
+        }
+        if (!Array.isArray(v)) {
+          bad(`permissions.${list}`, `expected a list of rules, got ${kind(v)}`);
+          continue;
+        }
+        lists[list] = [];
+        v.forEach((rule, i) => {
+          const r = parseRule(rule, list);
+          // Kept even when it does not parse: Settings lists it with the reason, and it is ignored where rules apply
+          if ('error' in r) bad(`permissions.${list}[${i}]`, r.error);
+          if (typeof rule === 'string') lists[list].push(rule);
+        });
+      }
+      out.values.push({ path: 'permissions', value: lists });
+      info.keys.push(key);
+      continue;
+    }
     if (key === 'disableAllHooks') {
       if (typeof value !== 'boolean') bad(key, `expected true or false, got ${kind(value)}`);
       else info.keys.push(key);
@@ -332,6 +432,20 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
           out.values.push({ path: `providers.${name}`, value: r.entry });
           info.keys.push(`providers.${name}`);
         }
+      }
+      continue;
+    }
+    if (key === 'prices') {
+      // What a session costs is the user's to state: a cloned repository could otherwise price its models at zero
+      if (scope === 'project') {
+        bad(key, "a project's settings.json may not set prices; set them in your own settings.json");
+        continue;
+      }
+      const r = validatePrices(value);
+      for (const pr of r.problems) bad(pr.key, pr.message);
+      if (isRecord(value)) {
+        out.values.push({ path: 'prices', value: r.prices });
+        info.keys.push('prices');
       }
       continue;
     }

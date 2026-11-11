@@ -4,7 +4,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { allSimpleCommands, commandArgv } from '../guard';
+import { commandArgv, lineCommands, lineFolders } from '../guard';
 
 /** Blocks in a row, and in all, after which Auto mode pauses for the session (the approval cards come back). */
 export const PAUSE_IN_A_ROW = 3;
@@ -56,17 +56,18 @@ function holds(a: string, b: string): boolean {
 const SYSTEM_DIRS = ['/System', '/Library', '/Applications', '/Users', '/Volumes', '/usr', '/bin', '/sbin', '/etc', '/var', '/private', '/opt', '/dev', '/cores', '/private/etc', '/private/var', '/usr/local'];
 
 /**
- * True when deleting `target` (as an rm or rmdir argument, from `cwd`) takes a critical folder or everything in one:
- * the root, the home folder, the working directory itself or a folder above it or the home folder, or a system folder.
+ * True when deleting `target` (as an rm or rmdir argument, from `base`: the working directory or a folder a cd in the
+ * line moved to) takes a critical folder or everything in one: the root, the home folder, the working directory `cwd`
+ * itself or a folder above it or the home folder, or a system folder.
  */
-export function criticalTarget(target: string, cwd: string): boolean {
+export function criticalTarget(target: string, cwd: string, base = cwd): boolean {
   let t = expandHome(target.trim());
   if (!t) return false;
   // "dir/*" deletes everything in dir; "*" everything in the working directory
   t = t.replace(/\/\*+$/, '') || '/';
   if (t === '*' || t === '.*') t = '.';
   if (t.length > 1) t = t.replace(/\/+$/, '');
-  const abs = path.resolve(cwd, t);
+  const abs = path.resolve(base, t);
   if (abs === '/') return true;
   const root = path.resolve(cwd);
   if (holds(abs, root) || holds(abs, home())) return true;
@@ -74,23 +75,26 @@ export function criticalTarget(target: string, cwd: string): boolean {
 }
 
 /**
- * Why a command asks the user even in Auto mode, whatever the safety check would say: it uses sudo, or it deletes a
- * critical folder (rm or rmdir of the home folder, /, the working directory itself, a system folder). Null otherwise.
- * Commands inside substitutions, sh -c and eval strings, and what xargs or find -exec runs, count too.
+ * Why a command asks the user even in Auto mode, whatever the safety check would say: it deletes a critical folder
+ * (rm or rmdir of the home folder, /, the working directory itself, a system folder, from any folder a cd in the line
+ * may have moved to), or it uses sudo; the first wins (sudo rm -rf ~ deletes a critical folder). Null otherwise.
+ * Commands inside substitutions, sh -c and eval strings, what xargs or find -exec runs, and what sudo runs, count too.
  */
 export function alwaysAskReason(command: string, cwd: string): string | null {
-  for (const simple of allSimpleCommands(command)) {
+  const folders = lineFolders(command, cwd);
+  let sudo = false;
+  for (const simple of lineCommands(command)) {
     const argv = commandArgv(simple);
     const prog = path.basename(argv[0] ?? '');
-    if (prog === 'sudo' || prog === 'doas') return 'uses sudo';
+    if (prog === 'sudo' || prog === 'doas') sudo = true;
     if (prog === 'rm' || prog === 'rmdir') {
       const args = argv.slice(1);
       const dash = args.indexOf('--');
       const targets = dash >= 0 ? [...args.slice(0, dash).filter((a) => !a.startsWith('-')), ...args.slice(dash + 1)] : args.filter((a) => !a.startsWith('-'));
-      if (targets.some((t) => criticalTarget(t, cwd))) return 'deletes a critical folder';
+      if (targets.some((t) => folders.dirs.some((d) => criticalTarget(t, cwd, d)))) return 'deletes a critical folder';
     }
   }
-  return null;
+  return sudo ? 'uses sudo' : null;
 }
 
 /**

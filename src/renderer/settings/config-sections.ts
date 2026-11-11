@@ -426,7 +426,7 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
     choices: order.map((m) => ({ value: m, label: `${SHORT[m]} · ${MODES[m].desc}` })),
     read: (v) => (order.includes(v as PermissionMode) ? (v as PermissionMode) : 'ask'),
   });
-  const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Actions you always allow in this project.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
+  const rules = row({ id: 'rules', title: 'Rules', desc: 'What runs, asks or is refused in this project.', keywords: 'always allow ask deny rules project commands programs mcp edits bash read write pattern', full: true }, rulesEl);
   rulesEl.classList.add('sp-embedded');
   const blocked = recentlyBlocked(ctx);
   const learned = learnedAnswers(ctx);
