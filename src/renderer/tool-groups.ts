@@ -133,6 +133,8 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     if (added || removed) meta.push(`<span class="group-stat">${statHtml(added, removed)}</span>`);
     if (failed) meta.push(`<span class="group-failed meta-err">${escapeHtml(mcpFold.failed ?? `${failed} failed`)}</span>`);
     if (words.denied) meta.push(`<span class="group-denied">${words.denied} denied</span>`);
+    // Auto mode's safety check of the call in flight (renderer.ts markChecking): the shut line says so, as its row does
+    if (now?.el.classList.contains('checking')) meta.unshift('<span class="tool-check">Checking…</span>');
     group.querySelector(':scope > summary > .group-meta')!.innerHTML = meta.join(' ');
     const summary = group.querySelector<HTMLElement>(':scope > summary')!;
     summary.setAttribute('aria-label', [now ? `${verb.textContent} ${arg.textContent}`.trim() : (mcpFold.text ?? words.text), ...meta.map((m) => m.replace(/<[^>]+>/g, ''))].join(', '));

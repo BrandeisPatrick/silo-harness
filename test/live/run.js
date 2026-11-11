@@ -48,6 +48,7 @@ const SCRIPTS = [
   { name: 'queue-look' },
   { name: 'queue-send-now' },
   { name: 'quiet' },
+  { name: 'run-visibility' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },
   { name: 'mods-look', shots: 'env' },

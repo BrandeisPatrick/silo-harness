@@ -309,6 +309,38 @@ export function statusVerb(name: string): string {
   return `Running ${name}…`;
 }
 
+/** "12 KB", "1.4 MB"; nothing under 1 KB (a call that small is written in a moment) */
+export function inputSize(chars: number): string {
+  const n = Number(chars) || 0;
+  if (n < 1024) return '';
+  return n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The status line while the model writes a tool call's input, before the call's row appears (input_progress):
+ * "Writing a file… 12 KB". The size counts characters of the call's input.
+ */
+export function inputProgressText(name: string, chars: number): string {
+  const what =
+    name === 'write_file'
+      ? 'Writing a file…'
+      : name === 'edit_file'
+        ? 'Writing an edit…'
+        : name === 'bash' || name === 'terminal_run'
+          ? 'Writing a command…'
+          : name === 'create_artifact'
+            ? 'Writing an artifact…'
+            : name === 'submit_plan'
+              ? 'Writing the plan…'
+              : name === 'update_tasks'
+                ? 'Writing the tasks…'
+                : name === 'ask_user'
+                  ? 'Writing a question…'
+                  : 'Preparing a tool call…';
+  const size = inputSize(chars);
+  return size ? `${what} ${size}` : what;
+}
+
 const KNOWN_TOOLS = new Set([
   'read_file', 'write_file', 'edit_file', 'list_directory', 'glob', 'grep', 'bash', 'skill', 'create_artifact', 'update_tasks', 'show_image', 'ask_user',
   'terminal_run', 'terminal_read', 'terminal_list', 'terminal_stop',
