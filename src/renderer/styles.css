@@ -1465,6 +1465,17 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .queue-text.muted { color: var(--text-400); }
 .queue-meta { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; }
 .queue-remove { margin-left: auto; color: var(--text-400); }
+/* "Send now" (queue.ts): a quiet text button before the ×, in the row's muted small type; it never wraps or shrinks,
+   so on a narrow pane the message text is cut first */
+.queue-send-now {
+  flex: none; margin-left: auto; height: 24px; padding: 0 6px; border-radius: var(--r-control);
+  font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s;
+}
+.queue-send-now:hover { background: var(--hover); color: var(--text-100); }
+.queue-send-now:active { background: var(--pressed); }
+.queue-send-now:disabled { opacity: 0.35; pointer-events: none; }
+.queue-send-now + .queue-remove { margin-left: -4px; }
 
 /* ---------- File cards: artifacts and documents (file-card.ts), as Claude Code draws them ---------- */
 /* 72px tall, 520px at most; a page tile rises from the card's foot with the file's icon on it, cut by the card's

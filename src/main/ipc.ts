@@ -149,6 +149,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
     return runtime.send(fg(), String(text ?? ''), images, { origin: 'user' });
   });
   ipcMain.handle('chat:unqueue', (_e, id: string) => runtime.findQueued(String(id))?.unqueue(String(id)) ?? false);
+  ipcMain.handle('chat:sendNow', (_e, id: string) => runtime.findQueued(String(id))?.sendNow(String(id)) ?? false);
   ipcMain.handle('chat:queue', () => fgAgent().queue());
   ipcMain.handle('chat:abort', () => runtime.stop(fg()));
   ipcMain.handle('chat:compact', (_e, focus?: string) => fgAgent().compactNow(String(focus ?? '').trim() || undefined));

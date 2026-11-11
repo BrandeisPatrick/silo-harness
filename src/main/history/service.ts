@@ -210,7 +210,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         return;
       }
       case 'run_end':
-        write(id, 'run.end', ev.text ? { reason: ev.reason, text: ev.text } : { reason: ev.reason });
+        write(id, 'run.end', { reason: ev.reason, ...(ev.text ? { text: ev.text } : {}), ...(ev.continued ? { continued: true } : {}) });
         return;
       case 'thinking_delta': {
         const th = thinking.get(id);

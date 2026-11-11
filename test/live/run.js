@@ -46,6 +46,7 @@ const SCRIPTS = [
   { name: 'group-live' },
   { name: 'interim-replies' },
   { name: 'queue-look' },
+  { name: 'queue-send-now' },
   { name: 'quiet' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },
