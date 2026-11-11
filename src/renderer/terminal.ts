@@ -17,6 +17,8 @@ export interface TerminalPaneOptions {
   strip: HTMLElement;
   /** The "+" button after the strip */
   newButton: HTMLButtonElement;
+  /** The row holding the strip and +: shown only while there are two terminals or more (one needs no row of tabs) */
+  bar: HTMLElement;
   /** Where the xterms mount (one .term-view per tab) */
   host: HTMLElement;
   /** Unavailable, error and "no terminals" states */
@@ -25,6 +27,8 @@ export interface TerminalPaneOptions {
   source: () => TerminalApi | null;
   /** Number of tabs with a command running, whenever it changes */
   onBusy: (count: number) => void;
+  /** The terminals changed (one came, went, was renamed or exited): them, in strip order */
+  onTabs?: (tabs: TerminalTabInfo[]) => void;
   /** A link was clicked in a terminal (http and https only) */
   onOpenUrl: (url: string) => void;
   onError: (anchor: HTMLElement, message: string) => void;
@@ -314,6 +318,7 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
       void load();
     }
     render();
+    renderStrip();
     reportBusy();
   }
 
@@ -648,7 +653,7 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
     if (error !== null || !info || typeof info.id !== 'string') {
       const message = `Couldn't start a shell: ${error !== null ? o.cleanError(error) : 'the app returned no tab'}`;
       if (ticket && focusWanted === ticket) focusWanted = null;
-      if (order.length) o.onError(o.newButton, message);
+      if (order.length) o.onError(errorAnchor(), message);
       else failure = { message, retry: 'create' };
       render();
       return null;
@@ -687,7 +692,7 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
     try {
       await a.close(id);
     } catch (err) {
-      o.onError(anchor?.isConnected ? anchor : o.newButton, `Couldn't close the terminal: ${o.cleanError(err)}`);
+      o.onError(anchor?.isConnected && !o.bar.hidden ? anchor : errorAnchor(), `Couldn't close the terminal: ${o.cleanError(err)}`);
       return;
     }
     if (a !== api) return;
@@ -695,9 +700,9 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
     if (infos.has(id)) applyTabs(order.filter((x) => x !== id).map((x) => infos.get(x)!));
     const now = document.activeElement;
     if (hadFocus && (!now || now === document.body || o.root.contains(now))) {
-      const tab = active ? tabEls.get(active) : undefined;
+      const tab = active && !o.bar.hidden ? tabEls.get(active) : undefined;
       if (onStripTab && tab) tab.focus();
-      else if (!focusActive()) o.newButton.focus();
+      else if (!focusActive()) o.empty.querySelector<HTMLElement>('button')?.focus();
     }
   }
 
@@ -808,7 +813,13 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
       const at = o.strip.children.item(i);
       if (at !== el) o.strip.insertBefore(el, at);
     });
+    // One terminal starts right under the pane's strip; the host's ResizeObserver refits it when the row comes or goes
+    o.bar.hidden = order.length < 2;
+    o.onTabs?.(order.flatMap((id) => (infos.has(id) ? [{ ...infos.get(id)! }] : [])));
   }
+
+  /** Where an error about the terminals points: the + while its row shows, else the pane */
+  const errorAnchor = () => (o.bar.hidden ? o.root : o.newButton);
 
   function showActive(): void {
     for (const v of views.values()) {

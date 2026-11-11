@@ -438,5 +438,22 @@ check('scan: … in Ask mode the command still asks, as any command does, withou
 check('scan: a saved project rule for the reason is honoured in Auto with the check', sh(scan, mode('auto', { auto: 'check', rules: { reasons: [SCAN] } })).kind === 'allow');
 check('scan: not a protected reason', !require(path.join(projectDir, 'dist/main/guard.js')).PROTECTED_REASONS.has(SCAN));
 
+// The shell tool lets an unmatched wildcard through (zsh nonomatch). No rule here relied on zsh refusing it: the guard
+// reads a wildcard as its text, quoted or not, so each pair below is decided alike.
+for (const [bare, quoted] of [
+  ['grep -r x --include=*.ts src', "grep -r x --include='*.ts' src"],
+  ['rm -rf build/*.o', "rm -rf 'build/*.o'"],
+  ['rm -rf ~/*.bak', "rm -rf ~/'*.bak'"],
+  ['find . -name *.log -delete', "find . -name '*.log' -delete"],
+  ['cp *.txt /etc/', "cp '*.txt' /etc/"],
+  ['cat ~/.ssh/*.pub', "cat ~/.ssh/'*.pub'"],
+  ['ls *.nothing', "ls '*.nothing'"],
+]) {
+  const a = [isReadOnlyCommand(bare), guardCommand(bare, cwd), alwaysAskReason(bare, cwd)];
+  const b = [isReadOnlyCommand(quoted), guardCommand(quoted, cwd), alwaysAskReason(quoted, cwd)];
+  check(`wildcard: ${bare} is decided as ${quoted}`, JSON.stringify(a) === JSON.stringify(b), { bare: a, quoted: b });
+}
+check('wildcard: grep --include=*.ts is a plain read', isReadOnlyCommand('grep -r x --include=*.ts src') && guardCommand('grep -r x --include=*.ts src', cwd) === null);
+
 fs.rmSync(cwd, { recursive: true, force: true });
 done();

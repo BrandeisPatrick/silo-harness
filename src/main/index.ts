@@ -4,12 +4,12 @@
 import './carry-over';
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
-import type { AgentEvent, McpServerInfo } from '../shared/types';
+import type { AgentEvent, BrowserState, McpServerInfo } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
 import { FileTokenStore } from './mcp-auth';
 import { ARTIFACT_SCHEME, ArtifactStore, serveArtifactRequest } from './artifacts';
 import { loadConfig, saveConfig } from './config';
-import { BrowserController, browserSession, openChatLink, setupBrowser, zoomMenuItems } from './browser';
+import { BrowserController, browserSession, NO_TABS, openChatLink, SessionTabs, setupBrowser, zoomMenuItems } from './browser';
 import { TerminalManager } from './terminal';
 import { createApp, type AppHost } from './app';
 import { registerCoreIpc } from './ipc';
@@ -28,10 +28,14 @@ import { setupPower } from './power';
 import { setupDreaming } from './dreaming';
 import { setupProviders } from './providers-service';
 import { setupUpdates } from './updates';
+import { setupTiming } from './timing-service';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
-let browser: BrowserController | null = null;
+/** The window's browser tabs, a set per session (session-tabs.ts) */
+let browsers: SessionTabs<BrowserController> | null = null;
+/** The tabs of the session on screen; `create` makes them when it has none */
+const frontBrowser = (create = false): BrowserController | null => browsers?.current(create) ?? null;
 /** Blocked project MCP servers the user was told about, as "<cwd>:<name>" */
 const notifiedBlocked = new Set<string>();
 
@@ -94,7 +98,7 @@ function createWindow(): void {
   });
   // A link in the chat: the default browser, or a tab of the pane when Settings → Browser says so (browser/feature.ts)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    openChatLink(host!, browser, url);
+    openChatLink(host!, () => frontBrowser(true), url);
     return { action: 'deny' };
   });
   win.webContents.on('console-message', (event) => {
@@ -107,16 +111,27 @@ function createWindow(): void {
   const w = win;
   const a = host!;
   a.setWindow(w);
-  browser = new BrowserController(w, {
-    onState: (state) => {
-      if (!w.isDestroyed()) w.webContents.send('browser:state', state);
-    },
-    onPopups: (popups) => a.push('browser:popups', popups),
-    onFocusUrl: () => a.push('browser:focus-url', null),
-    onFindOpen: () => a.push('browser:find-open', null),
-    onFound: (result) => a.push('browser:found', result),
-    dark: darkChrome,
+  // Each session has its own tabs; the pane shows the set of the session in front.
+  const sendState = (state: BrowserState) => {
+    if (!w.isDestroyed()) w.webContents.send('browser:state', state);
+  };
+  const sets: SessionTabs<BrowserController> = new SessionTabs(a.runtime.foregroundId(), {
+    make: (session, inFront) =>
+      new BrowserController(w, {
+        inFront,
+        onState: (state) => sendState({ ...state, session }),
+        onPopups: (popups) => a.push('browser:popups', popups),
+        onFocusUrl: () => a.push('browser:focus-url', null),
+        onFindOpen: () => a.push('browser:find-open', null),
+        onFound: (result) => a.push('browser:found', result),
+        dark: darkChrome,
+      }),
   });
+  browsers = sets;
+  // The session on screen starts with a blank tab, as every session does when it comes forward
+  sets.current(true);
+  const offFront = a.runtime.onForeground((id) => sets.setFront(id));
+  const offForget = a.runtime.onForget((id) => sets.close(id));
   const servers = a.mcp;
   const term = a.terminal!;
   const onServers = (list: McpServerInfo[]) => {
@@ -145,10 +160,12 @@ function createWindow(): void {
     term.off('data', onTermData);
     term.off('tabs', onTermTabs);
     servers?.off('servers', onServers);
+    offFront();
+    offForget();
     a.runtime.stopAll();
     a.setWindow(null);
     win = null;
-    browser = null;
+    browsers = null;
   });
 }
 
@@ -208,7 +225,7 @@ function buildApp(): AppHost {
     appRoot: app.getAppPath(),
     loadConfig,
     saveConfig,
-    browser: () => browser,
+    browser: (sessionId) => browsers?.of(sessionId) ?? null,
     terminal: new TerminalManager({ dataDir: userData, cwd: () => host?.config().workingDirectory ?? userData }),
     artifacts: new ArtifactStore({ root: path.join(userData, 'artifacts'), rendererDir: path.join(__dirname, '..', 'renderer') }),
     mcp: (self) =>
@@ -243,7 +260,7 @@ function buildMenu(): void {
           { role: 'forceReload' },
           { role: 'toggleDevTools' },
           { type: 'separator' },
-          ...zoomMenuItems((wc, change) => browser?.zoomContents(wc, change) ?? false, () => webContents.getFocusedWebContents() ?? win?.webContents ?? null),
+          ...zoomMenuItems((wc, change) => (browsers?.all() ?? []).some((c) => c.zoomContents(wc, change)), () => webContents.getFocusedWebContents() ?? win?.webContents ?? null),
           { type: 'separator' },
           { role: 'togglefullscreen' },
         ],
@@ -272,7 +289,10 @@ app.whenReady().then(() => {
   // The Browser pane has a session of its own (persist:browser): artifacts must be served there too.
   browserSession().protocol.handle(ARTIFACT_SCHEME, serveArtifact);
   buildMenu();
-  registerCoreIpc(a, { browser: () => browser });
+  registerCoreIpc(a, {
+    browser: frontBrowser,
+    pane: () => browsers && { setBounds: (b) => browsers?.setBounds(b), setVisible: (v) => browsers?.setVisible(v), state: () => frontBrowser()?.state() ?? { ...NO_TABS, session: browsers?.frontId() } },
+  });
   // The features, in this order. Each keeps its code in its own file and never needs to edit this one.
   setupSettings(a);
   setupHooks(a);
@@ -287,9 +307,10 @@ app.whenReady().then(() => {
   setupPower(a);
   setupDreaming(a);
   setupProviders(a);
-  setupBrowser(a, () => browser);
-  setupChatCards(a, () => browser);
+  setupBrowser(a, () => browsers);
+  setupChatCards(a, () => frontBrowser(true));
   setupUpdates(a);
+  setupTiming(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

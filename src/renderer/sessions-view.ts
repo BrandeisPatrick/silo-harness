@@ -15,7 +15,8 @@ export interface SessionsViewDeps {
   renderTranscript(items: TranscriptItem[]): void;
   /** An event of the session on screen, replayed from its LiveState or from the buffer (renderer.ts) */
   handleEvent(ev: AgentEvent): void;
-  setRunning(v: boolean, startedAt?: number): void;
+  /** `joined`: a run already going in the session just brought on screen (its last turn counts on) */
+  setRunning(v: boolean, startedAt?: number, turnStartedAt?: number, joined?: boolean): void;
   /** Ends the plan status line once the plan was decided elsewhere */
   syncPlanStatus(): void;
   /** The session's newest plan was decided in the main process: its card follows */
@@ -249,7 +250,7 @@ export function createSessionsView({ api, input: inputEl, running, renderTranscr
   /** Shows what is in flight in the session just rendered, through the same paths its events take. */
   function applyLive(live: LiveState | null): void {
     const on = Boolean(live?.running);
-    if (on !== running() || on) setRunning(on, live?.startedAt ?? Date.now());
+    if (on !== running() || on) setRunning(on, live?.startedAt ?? Date.now(), live?.turnStartedAt, true);
     if (!live || !on) {
       syncPlanStatus();
       return;

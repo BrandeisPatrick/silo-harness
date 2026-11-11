@@ -83,7 +83,7 @@ export function browserSection(ctx: Ctx): Section {
   // ---------- The lists ----------
 
   /** One editable list: a row per entry with Remove, then a field to add one. */
-  function listBlock(o: { id: string; field: BrowserListField; title: string; empty: string; addTitle: string; addDesc: string; placeholder: string; keywords: string; prefixes?: boolean; folders?: boolean }) {
+  function listBlock(o: { id: string; field: BrowserListField; title: string; empty: string; addTitle: string; addDesc: string; placeholder: string; keywords: string; prefixes?: boolean; folders?: boolean; schemes?: boolean }) {
     const rowsEl = h('div', { class: 'sp-rows' });
     const input = h('input', { type: 'text', class: 'sp-input mono', placeholder: o.placeholder, spellcheck: 'false', autocomplete: 'off', 'aria-label': o.addTitle });
     const addBtn = button('Add', () => void add(), { icon: 'plus' });
@@ -111,7 +111,7 @@ export function browserSection(ctx: Ctx): Section {
     }
 
     async function add(): Promise<void> {
-      const parsed = parseSitePattern(input.value, { prefixes: o.prefixes, folders: o.folders });
+      const parsed = parseSitePattern(input.value, { prefixes: o.prefixes, folders: o.folders, schemes: o.schemes });
       if (!parsed.ok) {
         addRow.problem(parsed.error);
         return;
@@ -152,9 +152,10 @@ export function browserSection(ctx: Ctx): Section {
     title: 'Sites the agent may always use',
     empty: 'None yet.',
     addTitle: 'Add a site',
-    addDesc: 'The agent uses it without asking, unless it is sensitive.',
+    addDesc: 'The agent uses it without asking, unless it is sensitive. Without http:// it covers https only.',
     placeholder: 'example.com',
     keywords: 'always allow allowed sites agent approve approval card trust browser',
+    schemes: true,
   });
 
   const sensitive = listBlock({

@@ -6,6 +6,7 @@ import type { AppConfig, PermissionMode, SiloHarnessApi } from '../shared/types'
 import { createContextMeter, normalizeContext } from './context.js';
 import { byId, formatCount } from './dom.js';
 import { activeProvider } from './provider-view.js';
+import { elapsedText as elapsed } from './turn-fold-model.js';
 
 export interface StatusLineDeps {
   /** The context meter's popover stays inside this element */
@@ -43,11 +44,6 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
   let runStartedAt = 0;
   let timer: number | undefined;
   let runOutputTokens = 0;
-
-  function elapsed(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
-  }
 
   // The status line: the run (spinner, verb, elapsed, tokens, esc) or, after a plan, a quiet line with the keys.
   type StatusState = 'off' | 'run' | 'plan-ready' | 'plan-wait';

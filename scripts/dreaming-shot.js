@@ -174,7 +174,7 @@ async function main() {
     await app.waitFor(`Boolean(document.querySelector('.session-item[data-id=${js(ids.main)}]'))`, 15_000, 'the seeded sessions');
     await app.click(`.session-item[data-id=${js(ids.main)}]`);
     await app.waitFor(`document.querySelector('.session-item.active')?.dataset.id === ${js(ids.main)}`, 10_000, 'the main session');
-    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); })()`);
+    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); })()`);
 
     // The dream, run by hand as Run a dream does
     scriptDream(mock, past);

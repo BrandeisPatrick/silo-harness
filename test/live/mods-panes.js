@@ -1,9 +1,9 @@
-// Live checks of how the mods' panels open and close from the top bar, in the real window: the rail's toggle is
-// always there, first of the top bar's icons (rail, terminal, diff, browser, ⋯), drawn as a list in a box at the same
-// size and in the same pressed style as the others; it and ⌘⇧E open and close the rail, and the choice survives a
-// relaunch; it stays when no rail mod is on, and goes with the rest of the top bar's buttons while a page has the main
-// column. A mod's tab in the side pane has a × that takes it out of the strip (Delete does the same), the ⋯ menu shows
-// it again ("Show Side chat"), opening the pane if it was closed, and a closed tab stays closed after a relaunch.
+// Live checks of how the mods' panels open and close, in the real window: the rail's toggle is always there at the
+// right end of the chat column's top bar, drawn as a list in a box at the same size and in the same pressed style as
+// the corner's ⋯ and pane toggle; it and ⌘⇧E open and close the rail, and the choice survives a relaunch; it stays
+// when no rail mod is on, and goes with the corner's buttons while a page has the main column. A mod's pane is a tab
+// in the side pane's one strip only once opened (the ⋯ menu opens it, opening the pane if it was closed); its × takes
+// it out of the strip without stopping the mod (Delete does the same), and the strip is remembered across a relaunch.
 // Screenshots: the top bar with the rail open and closed, light and dark; the strip with a tab's ×; the ⋯ menu.
 // Run: npm run build && node test/live/mods-panes.js [shots-dir]
 const fs = require('node:fs');
@@ -27,11 +27,11 @@ const RAIL_MODS = ['context', 'environment', 'outputs', 'plan', 'skills', 'sub-s
   const toggle = () => ev(`(() => { const b = document.querySelector('#rail-toggle'); return { shown: !!b.offsetParent, pressed: b.getAttribute('aria-pressed'), active: b.classList.contains('active') }; })()`);
   const railShown = () => ev(`(() => { const r = document.querySelector('#mod-rail'); return !r.hidden && r.getClientRects().length > 0; })()`);
   const tabs = () => ev(`window.__oc_debug.mods.tabs()`);
-  const strip = () => ev(`[...document.querySelectorAll('.pane-tabs > .pane-tab')].filter((b) => !b.hidden).map((b) => b.dataset.view || b.id)`);
+  const strip = () => ev(`[...document.querySelectorAll('#pane-tabs > [role=tab]')].filter((b) => !b.hidden).map((b) => b.dataset.view || b.dataset.tab)`);
   const topShot = async (name) => {
     await ev(`document.activeElement && document.activeElement.blur()`);
     await sleep(350);
-    const r = await ev(`(() => { const a = document.querySelector('.topbar-actions').getBoundingClientRect(); return { x: Math.max(0, a.right - 560), y: 0, width: Math.min(560, a.right), height: 240 }; })()`);
+    const r = await ev(`(() => { const a = document.querySelector('.window-actions').getBoundingClientRect(); return { x: Math.max(0, a.right - 560), y: 0, width: Math.min(560, a.right), height: 240 }; })()`);
     await app.screenshot(path.join(SHOTS, `${name}.png`), r);
   };
   const setScheme = async (scheme) => {
@@ -49,20 +49,20 @@ const RAIL_MODS = ['context', 'environment', 'outputs', 'plan', 'skills', 'sub-s
     await app.waitFor(`window.__oc_debug.mods.views().filter((v) => v.seat === 'rail' && v.hello).length >= 5`, 20_000, 'the rail to start');
 
     // ---------- The rail's toggle ----------
-    const order = await ev(`[...document.querySelectorAll('.topbar-actions > button')].filter((b) => b.offsetParent).map((b) => b.id)`);
-    check('the top bar\'s icons: rail, terminal, diff, browser, then ⋯', js(order) === js(['rail-toggle', 'terminal-toggle', 'diff-toggle', 'browser-toggle', 'mods-more']), order);
+    const order = await ev(`[...document.querySelectorAll('.topbar-actions > button, .window-actions > button')].filter((b) => b.offsetParent).map((b) => b.id)`);
+    check('the top bar\'s icon: details; then the corner\'s: ⋯ and the pane toggle', js(order) === js(['rail-toggle', 'mods-more', 'pane-toggle']), order);
     check('the rail toggle is a list inside a box', await ev(`(() => { const p = document.querySelector('#rail-toggle svg'); return !!p && !!p.querySelector('rect') && /M5 6\\.25h6/.test(p.innerHTML); })()`));
-    const sizes = await ev(`['rail-toggle', 'terminal-toggle', 'diff-toggle', 'browser-toggle'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); const s = document.getElementById(id).querySelector('svg').getBoundingClientRect(); return [r.width, r.height, s.width, s.height].map(Math.round).join('x'); })`);
+    const sizes = await ev(`['rail-toggle', 'mods-more', 'pane-toggle'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); const s = document.getElementById(id).querySelector('svg').getBoundingClientRect(); return [r.width, r.height, s.width, s.height].map(Math.round).join('x'); })`);
     check('… the same size as the others, icon included', new Set(sizes).size === 1, sizes);
     let t = await toggle();
     check('the rail is open at the start, its toggle pressed', t.shown && t.pressed === 'true' && t.active && (await railShown()), t);
-    // The pane on the Browser: its toggle is pressed too, and the two pressed buttons look the same
-    await ev(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#browser-toggle').click(); })()`);
+    // The pane open: its toggle is pressed too, and the two pressed buttons look the same
+    await ev(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); })()`);
     await sleep(300);
     await ev(`document.activeElement && document.activeElement.blur()`);
     await sleep(300);
-    const pressedLook = await ev(`['rail-toggle', 'browser-toggle'].map((id) => { const s = getComputedStyle(document.getElementById(id)); return s.backgroundColor + ' ' + s.color + ' ' + s.borderRadius; })`);
-    check('… in the same pressed style as the Browser\'s', pressedLook[0] === pressedLook[1], pressedLook);
+    const pressedLook = await ev(`['rail-toggle', 'pane-toggle'].map((id) => { const s = getComputedStyle(document.getElementById(id)); return s.backgroundColor + ' ' + s.color + ' ' + s.borderRadius; })`);
+    check('… in the same pressed style as the pane\'s', pressedLook[0] === pressedLook[1], pressedLook);
     await topShot('top-bar-rail-open-light');
     await app.click('#rail-toggle');
     await sleep(500);
@@ -98,7 +98,7 @@ const RAIL_MODS = ['context', 'environment', 'outputs', 'plan', 'skills', 'sub-s
     await app.waitFor(`!document.querySelector('#scheduled-row').hidden`, 10_000, 'the Scheduled row').catch(() => {});
     await app.click('#scheduled-row');
     await sleep(600);
-    check('on a page: the rail toggle and the rail are hidden', (await ev(`window.__oc_debug.pages.state().open`)) && !(await toggle()).shown && !(await railShown()));
+    check('on a page: the rail toggle, the corner\'s buttons and the rail are hidden', (await ev(`window.__oc_debug.pages.state().open`)) && !(await toggle()).shown && !(await railShown()) && !(await ev(`!!document.querySelector('#pane-toggle').offsetParent`)));
     await app.key('e', { meta: true, shift: true });
     await sleep(300);
     check('… and ⌘⇧E does nothing there', (await layout()).railOpen === true);
@@ -108,37 +108,41 @@ const RAIL_MODS = ['context', 'environment', 'outputs', 'plan', 'skills', 'sub-s
     t = await toggle();
     check('back from the page: the toggle and the rail are as they were', !(await ev(`window.__oc_debug.pages.state().open`)) && t.shown && t.pressed === 'true' && (await railShown()), t);
 
-    // ---------- A mod's tab in the side pane: × takes it out, the ⋯ menu shows it again ----------
+    // ---------- A mod's pane is a tab once opened: the ⋯ menu opens it, × takes it out ----------
     await app.waitFor(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"]') !== null`, 10_000, 'the Side chat tab');
-    await app.click('.mod-pane-tab[data-view="side-chat/main"]');
-    await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'side-chat/main')?.hello`, 10_000, 'the Side chat page').catch(() => {});
-    check('a mod tab in front shows its ×', await ev(`(() => { const x = document.querySelector('.mod-pane-tab[data-view="side-chat/main"] .pane-tab-close'); return !!x && getComputedStyle(x).opacity === '1' && x.getBoundingClientRect().width > 0; })()`));
-    await app.screenshotOf(path.join(SHOTS, 'pane-tabs-close-light.png'), '.pane-tabs', 0);
-    await ev(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"] .pane-tab-close').click()`);
-    await sleep(500);
-    let s = await strip();
-    check('its × takes it out of the strip, and its page unloads', !s.includes('side-chat/main') && (await tabs()).find((x) => x.key === 'side-chat/main').closed && !(await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'side-chat/main')`)) && (await layout()).closedTabs.includes('side-chat/main'), s);
-    check('… and the pane falls back to the Browser', (await ev(`document.querySelector('#pane-tab-browser').getAttribute('aria-selected')`)) === 'true');
-    const items = await menuItems();
-    check('the ⋯ menu shows it again ("Show Side chat") beside the tabs still in the strip', items.includes('Show Side chat') && items.includes('Scheduled') && items.includes('Manage mods…'), items);
+    check('a mod\'s pane waits out of the strip until it is opened', !(await strip()).includes('side-chat/main') && (await tabs()).find((x) => x.key === 'side-chat/main')?.inStrip === false, await strip());
+    let items = await menuItems();
+    check('the ⋯ menu lists the mods\' panes and Manage mods', items.includes('Side chat') && items.includes('Scheduled') && items.includes('Manage mods…'), items);
     await ev(`document.activeElement && document.activeElement.blur()`);
-    await app.screenshotOf(path.join(SHOTS, 'more-menu-show-light.png'), '.popover.mods-menu', 12).catch(() => {});
-    await app.key('Escape');
-    await sleep(200);
-    await app.click('#pane-close');
+    await app.screenshotOf(path.join(SHOTS, 'more-menu-light.png'), '.popover.mods-menu', 12).catch(() => {});
+    await pickMenu('Side chat');
+    await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'side-chat/main')?.hello`, 10_000, 'the Side chat page').catch(() => {});
+    let s = await strip();
+    check('picking it puts its tab last in the strip, in front', s[s.length - 1] === 'side-chat/main' && (await ev(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"]').getAttribute('aria-selected')`)) === 'true', s);
+    check('a mod tab in front shows its ×', await ev(`(() => { const x = document.querySelector('.mod-pane-tab[data-view="side-chat/main"] .tab-close'); return !!x && getComputedStyle(x).visibility === 'visible' && x.getBoundingClientRect().width > 0; })()`));
+    await app.screenshotOf(path.join(SHOTS, 'pane-tabs-close-light.png'), '.pane-strip', 0);
+    await ev(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"] .tab-close').click()`);
+    await sleep(500);
+    s = await strip();
+    check('its × takes it out of the strip; the mod keeps running', !s.includes('side-chat/main') && !(await tabs()).find((x) => x.key === 'side-chat/main').inStrip && (await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'side-chat/main' && v.hello)`)), s);
+    check('… and its left neighbour, the page tab, comes to the front', (await ev(`window.__oc_debug.mods.browser().tab`)) === 'browser' && (await ev(`document.querySelector('.browser-tab').getAttribute('aria-selected')`)) === 'true');
+    await app.click('#pane-toggle');
     await sleep(300);
     check('the pane closed', await ev(`document.querySelector('.shell').classList.contains('pane-hidden')`));
     await menuItems();
-    await pickMenu('Show Side chat');
-    await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'side-chat/main')?.hello`, 10_000, 'the Side chat page again').catch(() => {});
+    await pickMenu('Side chat');
+    await sleep(400);
     s = await strip();
-    check('"Show Side chat" puts the tab back in front and opens the pane', s.includes('side-chat/main') && !(await ev(`document.querySelector('.shell').classList.contains('pane-hidden')`)) && (await ev(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"]').getAttribute('aria-selected')`)) === 'true' && !(await layout()).closedTabs.includes('side-chat/main'), s);
+    check('the ⋯ menu brings it back in front and opens the pane', s.includes('side-chat/main') && !(await ev(`document.querySelector('.shell').classList.contains('pane-hidden')`)) && (await ev(`document.querySelector('.mod-pane-tab[data-view="side-chat/main"]').getAttribute('aria-selected')`)) === 'true', s);
     // Delete on a focused tab closes it too
+    await menuItems();
+    await pickMenu('Scheduled');
+    await sleep(400);
     await ev(`document.querySelector('.mod-pane-tab[data-view="scheduled/main"]').focus()`);
     await app.key('Delete');
     await sleep(500);
-    check('Delete on a focused mod tab closes it', !(await strip()).includes('scheduled/main') && (await layout()).closedTabs.includes('scheduled/main'));
-    check('the built-in tabs have no ×', await ev(`!document.querySelector('#pane-tab-browser .pane-tab-close, #pane-tab-diff .pane-tab-close, #pane-tab-terminal .pane-tab-close')`));
+    check('Delete on a focused mod tab closes it', !(await strip()).includes('scheduled/main') && (await strip()).includes('side-chat/main'));
+    check('Diff and Terminal tabs have a × like every tab', await ev(`!!document.querySelector('#pane-tab-diff .tab-close') && !!document.querySelector('#pane-tab-terminal .tab-close')`));
 
     // ---------- Remembered across a relaunch: the rail closed, the Scheduled tab closed ----------
     await app.click('#rail-toggle');
@@ -149,7 +153,7 @@ const RAIL_MODS = ['context', 'environment', 'outputs', 'plan', 'skills', 'sub-s
     await sleep(800);
     t = await toggle();
     check('after a relaunch the rail is still closed, its toggle there and not pressed', t.shown && t.pressed === 'false' && !(await railShown()), t);
-    check('… and the Scheduled tab is still out of the strip', !(await strip()).includes('scheduled/main') && (await strip()).includes('side-chat/main'));
+    check('… and the strip is as it was: Side chat in it, Scheduled out', !(await strip()).includes('scheduled/main') && (await strip()).includes('side-chat/main'), await strip());
     await ev(`window.__oc_debug.mods.open('scheduled/main')`);
     await sleep(600);
     check('opening its view (a command, harness.ui.open) brings the tab back, in front', (await strip()).includes('scheduled/main') && (await ev(`document.querySelector('.mod-pane-tab[data-view="scheduled/main"]').getAttribute('aria-selected')`)) === 'true');

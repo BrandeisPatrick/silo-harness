@@ -53,7 +53,7 @@ const afterTool = (p) => p.messages?.[p.messages.length - 1]?.role === 'tool';
       return { words: t(g, ':scope > summary .group-verb'), meta: t(g, ':scope > summary .group-meta'), rows: g.querySelectorAll(':scope > .group-body > .tool').length, verb: t(row, '.tool-verb'), arg: t(row, '.tool-arg'), rowMeta: t(row, '.tool-meta'), body: t(row, '.tool-body'), decision: t(row, '.tool-decision'), open: g.open, rowOpen: row?.open };
     })()`);
   try {
-    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-close');
+    if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
 
     // ---------- 1. One question: a click picks, a number key picks, ⌘↵ submits ----------
     replies.push(askUserReply([LIB]));

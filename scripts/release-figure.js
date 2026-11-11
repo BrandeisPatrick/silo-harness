@@ -6,7 +6,7 @@
 // Writes docs/releases/0.13.0/token-saving.png. The JSON:
 //   { "title": "…", "subtitle": "…",
 //     "bars": [{ "label": "0.12.0", "value": 0.3812 }, …, { "label": "0.13.0", "value": 0.077, "now": true }],
-//     "format": "$0.00",            how a bar's value is written: "$0.00", "$0.000", "0", "0K" or "0%"
+//     "format": "$0.00",            how a bar's value is written: "$0.00", "$0.000", "0", "0K", "0%" or "0 ms"
 //     "hero": { "value": "−80%", "label": "cost of a session" },
 //     "source": "docs/token-bench.md" }
 const { app, BrowserWindow } = require('electron');
@@ -35,6 +35,7 @@ function write(value, format = '0') {
   if (format.startsWith('$')) return '$' + value.toFixed((format.split('.')[1] || '').length);
   if (format === '0K') return (value / 1000).toFixed(value < 10000 ? 1 : 0).replace(/\.0$/, '') + 'K';
   if (format === '0%') return Math.round(value) + '%';
+  if (format === '0 ms') return Math.round(value) + ' ms';
   return Math.round(value).toLocaleString('en-US');
 }
 

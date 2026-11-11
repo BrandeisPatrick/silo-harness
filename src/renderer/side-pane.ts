@@ -1,15 +1,19 @@
-// The side pane next to the transcript: the Browser, Diff and Terminal tabs (the mods' tabs join them through
-// mods-host.ts), the rail that resizes it, the browser's URL bar, and the native browser view's bounds and visibility,
-// which follow the pane because the view floats above the page. The browser's bars, interstitial and downloads tray
-// are browser-bars.ts; the find bar is browser-find.ts.
+// The side pane next to the transcript: its one tab strip, where the browser's page tabs and the open tools (Diff,
+// Terminal, each pane a mod adds through mods-host.ts) are all tabs in the order they were opened, the pane's toggle,
+// the rail that resizes it, the browser's URL bar, the New tab page, and the native browser view's bounds and
+// visibility, which follow the pane because the view floats above the page. The browser's bars, interstitial and
+// downloads tray are browser-bars.ts; the find bar is browser-find.ts; the page tabs themselves are browser-pane.ts.
 
-import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi } from '../shared/types';
+import type { BrowserState, ChangeDiff, ChangeEntry, ChangesApi, SiloHarnessApi, TerminalApi, TerminalTabInfo } from '../shared/types';
 import { createBrowserBars } from './browser-bars.js';
 import { createBrowserFind } from './browser-find.js';
-import { createBrowserPane } from './browser-pane.js';
+import { createBrowserPane, hostOf } from './browser-pane.js';
 import { createChangesPane, mockChangesSource } from './changes.js';
 import { byId } from './dom.js';
+import { icon } from './icons.js';
 import type { ModPaneTabs } from './mods-host.js';
+import { createNewTabPage, type NewTabTool } from './new-tab-page.js';
+import { fitStrip, type FitTab } from './strip-fit.js';
 import { createTerminalPane, mockTerminalSource, type MockTerminalSource } from './terminal.js';
 import { forgetFile } from './tools.js';
 import { onPush, rpc } from './rpc.js';
@@ -19,7 +23,8 @@ export type PaneTab = 'browser' | 'diff' | 'terminal' | `mod:${string}`;
 
 export interface SidePaneDeps {
   shell: HTMLElement;
-  content: HTMLElement;
+  /** The main column: the chat and the pane share its width */
+  main: HTMLElement;
   /** The slot the native browser view is glued to */
   browserView: HTMLElement;
   /** Dialogs that hide the browser view while open (their closing brings it back) */
@@ -37,31 +42,43 @@ export interface SidePaneDeps {
   confirm: Parameters<typeof createChangesPane>[0]['confirm'];
 }
 
-export function createSidePane({ shell, content: contentEl, browserView, dialogs, browser, changesApi, terminalApi, dialogOpen, pageOpen, focusComposer, showError, cleanError, confirm }: SidePaneDeps) {
+export function createSidePane({ shell, main: mainEl, browserView, dialogs, browser, changesApi, terminalApi, dialogOpen, pageOpen, focusComposer, showError, cleanError, confirm }: SidePaneDeps) {
   const sidePane = byId('side-pane');
   const browserPane = byId('browser-pane');
   const diffPane = byId('diff-pane');
-  const paneTabBrowser = byId<HTMLButtonElement>('pane-tab-browser');
+  /** The strip's row (it drags the window where nothing is on it) and the tablist in it */
+  const stripRow = sidePane.querySelector<HTMLElement>('.pane-strip')!;
+  const strip = byId('pane-tabs');
+  const newTabButton = byId<HTMLButtonElement>('browser-tab-new');
+  const paneToggle = byId<HTMLButtonElement>('pane-toggle');
   const paneTabDiff = byId<HTMLButtonElement>('pane-tab-diff');
-  const diffToggle = byId<HTMLButtonElement>('diff-toggle');
-  const diffCountBadges = [byId('diff-count'), byId('pane-diff-count')];
+  const diffCountBadge = byId('pane-diff-count');
   const terminalPaneEl = byId('terminal-pane');
   const paneTabTerminal = byId<HTMLButtonElement>('pane-tab-terminal');
-  const terminalToggle = byId<HTMLButtonElement>('terminal-toggle');
-  const terminalBusyDots = [byId('terminal-busy'), byId('pane-terminal-busy')];
+  const terminalBusyDot = byId('pane-terminal-busy');
   const urlEl = byId<HTMLInputElement>('url');
   const backBtn = byId<HTMLButtonElement>('back-btn');
   const fwdBtn = byId<HTMLButtonElement>('fwd-btn');
   const reloadBtn = byId<HTMLButtonElement>('reload-btn');
   const openExternalBtn = byId<HTMLButtonElement>('open-external-btn');
   const browserTitle = byId('browser-title');
-  const browserToggle = byId<HTMLButtonElement>('browser-toggle');
   const resizer = byId('pane-resizer');
-  const placeholder = browserView.querySelector<HTMLElement>('.browser-placeholder');
-  /** The tab strip, the popups' state and the profile note (browser-pane.ts) */
+  /** For fitting the strip: the active tab's least width (its title and its ×), and the gap a title takes with it */
+  const ACTIVE_MIN = 112;
+  const TITLE_GAP = 6;
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  function textWidth(text: string, el: HTMLElement): number {
+    if (!measureCtx) return 0;
+    measureCtx.font = getComputedStyle(el).font;
+    return measureCtx.measureText(text).width;
+  }
+
+  /** The page tabs, the popups' state and the profile note (browser-pane.ts) */
   const browserTabs = createBrowserPane({
-    strip: byId('browser-tabs'),
-    newButton: byId<HTMLButtonElement>('browser-tab-new'),
+    strip,
+    newButton: newTabButton,
+    front: () => paneTab === 'browser',
+    onTabs: () => arrangeStrip(),
     note: byId('browser-note'),
     noteClose: byId<HTMLButtonElement>('browser-note-close'),
     urlField: urlEl,
@@ -101,11 +118,16 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
 
   let paneVisible = true;
   let paneTab: PaneTab = 'browser';
-  const PANE_TABS: readonly (readonly [PaneTab, HTMLButtonElement])[] = [
-    ['browser', paneTabBrowser],
-    ['diff', paneTabDiff],
-    ['terminal', paneTabTerminal],
-  ];
+  /**
+   * The strip in order: 'page:<id>' for a page tab, the tab itself for an open tool ('diff', 'terminal',
+   * 'mod:<view key>'). New ones go last; the tools and their order are kept with the pane (localStorage 'paneTools').
+   */
+  let order: string[] = [];
+  /** The terminals, as the Terminal pane last reported them */
+  let terminals: TerminalTabInfo[] = [];
+
+  /** The first page tabs reported go before the tools a relaunch restored; later ones go last */
+  let pagesPlaced = false;
   /** The mod tabs, once the mod host is up (setModTabs, from the feature wiring in renderer.ts) */
   let paneMods: ModPaneTabs | null = null;
   /** A mod tab that was in front at the last quit: it comes back once its mod has loaded, unless another tab was chosen first */
@@ -118,15 +140,141 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   }
 
   const modTabKey = (tab: PaneTab): string | null => (tab.startsWith('mod:') ? tab.slice(4) : null);
+  const isPage = (entry: string) => entry.startsWith('page:');
+  const isToolTab = (v: unknown): v is PaneTab => typeof v === 'string' && (v === 'diff' || v === 'terminal' || (v.startsWith('mod:') && v.length > 4));
+  const isOpen = (tab: PaneTab) => order.includes(tab);
 
-  /** Every tab in strip order with its button: the built-in ones, then the mods'. */
-  function paneTabList(): (readonly [PaneTab, HTMLButtonElement])[] {
-    return [...PANE_TABS, ...(paneMods?.buttons() ?? []).map(({ key, el }) => [`mod:${key}` as PaneTab, el] as const)];
+  /** A tool's tab element: the built-in buttons, or the one the mod host made for a mod's pane (null: not there yet) */
+  function toolElement(tab: PaneTab): HTMLElement | null {
+    if (tab === 'diff') return paneTabDiff;
+    if (tab === 'terminal') return paneTabTerminal;
+    const key = modTabKey(tab);
+    return (key && paneMods?.tabs().find((t) => t.key === key)?.el) || null;
+  }
+
+  function entryElement(entry: string): HTMLElement | null {
+    return isPage(entry) ? browserTabs.element(entry.slice(5)) : toolElement(entry as PaneTab);
+  }
+
+  /** The tabs drawn in the strip now, in order (a mod tab whose mod has not loaded yet is left out) */
+  function drawnEntries(): string[] {
+    return order.filter((e) => entryElement(e) !== null);
+  }
+
+  /** The strip's active tab: the browser's active page while the browser is in front, else the tool in front */
+  function activeEntry(): string {
+    return paneTab === 'browser' ? `page:${browserTabs.activeId()}` : paneTab;
+  }
+
+  /** Page tabs that came or went join or leave the order; the elements are put in it, closed tools after them, hidden. */
+  function arrangeStrip(): void {
+    const pages = browserTabs.ids();
+    order = order.filter((e) => !isPage(e) || pages.includes(e.slice(5)));
+    const fresh = pages.map((id) => `page:${id}`).filter((e) => !order.includes(e));
+    if (fresh.length) order = pagesPlaced ? [...order, ...fresh] : [...fresh, ...order];
+    if (pages.length) pagesPlaced = true;
+    const shown = drawnEntries().map((e) => entryElement(e)!);
+    const closed = [paneTabDiff, paneTabTerminal, ...(paneMods?.tabs().map((t) => t.el) ?? [])].filter((el) => !shown.includes(el));
+    [...shown, ...closed].forEach((el, i) => {
+      if (strip.children.item(i) !== el) strip.insertBefore(el, strip.children.item(i));
+    });
+    for (const el of closed) el.hidden = true;
+    for (const el of shown) el.hidden = false;
+    layoutStrip();
+  }
+
+  /** The strip's tabs sized to its room (strip-fit.ts), then the active one scrolled into view. */
+  function layoutStrip(): void {
+    fitTabs();
+    activeInView();
+  }
+
+  /** Measures every drawn tab with its title whole, then gives each the width and the icon-only look fitStrip says.
+   *  It all happens before the next paint, so a tab never shows at a wrong width for a frame. */
+  function fitTabs(): void {
+    const room = stripRow.clientWidth;
+    if (!room) return;
+    const els = drawnEntries().map((e) => entryElement(e)!);
+    for (const el of els) {
+      el.classList.remove('icon-only');
+      el.style.width = '';
+    }
+    const cs = getComputedStyle(stripRow);
+    const free = room - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - newTabButton.offsetWidth - parseFloat(cs.columnGap);
+    const active = entryElement(activeEntry());
+    const tabs = els.map((el): FitTab => {
+      const full = Math.ceil(el.getBoundingClientRect().width);
+      const titleEl = el.querySelector<HTMLElement>('.tab-title');
+      const text = titleEl?.textContent ?? '';
+      const chrome = full - (titleEl?.getBoundingClientRect().width ?? 0);
+      const isActive = el === active;
+      // A short title is whole or not there at all; a long one keeps six characters and its ellipsis
+      const short = text.length <= 8 ? full : Math.ceil(chrome + textWidth(text.slice(0, 6) + '…', titleEl!) + 1);
+      return { tool: !isPage(el.dataset.tab ?? ''), active: isActive, full, short: isActive ? Math.max(ACTIVE_MIN, short) : short, icon: Math.ceil(chrome - TITLE_GAP) };
+    });
+    const fit = fitStrip(tabs, free, parseFloat(getComputedStyle(strip).columnGap) || 0);
+    els.forEach((el, i) => {
+      el.classList.toggle('icon-only', fit.iconOnly[i]);
+      el.style.width = `${fit.widths[i]}px`;
+    });
+  }
+
+  /** An overflowing strip keeps its active tab scrolled into view (after a change, or when the pane narrows). */
+  function activeInView(): void {
+    const active = entryElement(activeEntry());
+    if (active && !active.hidden && strip.scrollWidth > strip.clientWidth) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    markOverflow();
+  }
+
+  /** Which ends of the strip have tabs scrolled out of view (they fade there) */
+  function markOverflow(): void {
+    strip.classList.toggle('scroll-left', strip.scrollLeft > 1);
+    strip.classList.toggle('scroll-right', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  }
+  strip.addEventListener('scroll', markOverflow, { passive: true });
+  // The strip is laid out again when its room changes (the pane or the window resized, the details rail toggled, the
+  // pane shown), when the type changes (a look's font: a probe word in the tabs' font changes size), and when a tab
+  // comes, goes, is renamed, gets or changes a count, or the active one changes. fitTabs only sets classes and widths,
+  // which none of these watch.
+  const fontProbe = document.createElement('span');
+  fontProbe.className = 'strip-probe';
+  fontProbe.setAttribute('aria-hidden', 'true');
+  fontProbe.textContent = 'Terminal';
+  stripRow.append(fontProbe);
+  const stripResized = new ResizeObserver(layoutStrip);
+  stripResized.observe(stripRow);
+  stripResized.observe(fontProbe);
+  let layoutQueued = false;
+  new MutationObserver(() => {
+    if (layoutQueued) return;
+    layoutQueued = true;
+    queueMicrotask(() => {
+      layoutQueued = false;
+      layoutStrip();
+    });
+  }).observe(strip, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-selected'] });
+
+  function saveTools(): void {
+    try {
+      localStorage.setItem('paneTools', JSON.stringify(order.filter((e) => !isPage(e))));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Puts a tool's tab in the strip (last), without bringing it forward. */
+  function openTool(tab: PaneTab): void {
+    if (tab === 'browser' || isOpen(tab)) return;
+    order.push(tab);
+    saveTools();
   }
 
   function browserShown(): boolean {
     return paneVisible && paneTab === 'browser' && !pageOpen();
   }
+
+  /** The active page tab is blank: the New tab page shows in its place and the native view stays hidden. */
+  let activeBlank = true;
 
   /** What was last sent to the native browser view (for the live checks: __oc_debug.mods.browser()) */
   const browserSent = { bounds: null as { x: number; y: number; width: number; height: number } | null, visible: false };
@@ -144,9 +292,9 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     browser.setVisible(v);
   }
 
-  /** The native browser view floats above the page: it is shown only while its tab is on screen and no dialog is open. */
+  /** The native browser view floats above the page: it is shown only while its tab is on screen with a page in it and no dialog is open. */
   function syncBrowserView(): void {
-    if (browserShown() && !dialogOpen() && !browserBars.overlayOpen()) {
+    if (browserShown() && !activeBlank && !dialogOpen() && !browserBars.overlayOpen()) {
       reportBounds();
       setBrowserVisible(true);
       requestAnimationFrame(reportBounds);
@@ -162,15 +310,13 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   }
 
   function applyPane(persist = true): void {
-    // A mod tab whose mod went off or away: back to the Browser.
+    // A mod tab whose mod went off or away, or a tool that is not open: back to the browser.
     if (modTabKey(paneTab) && !paneMods?.has(modTabKey(paneTab)!)) paneTab = 'browser';
+    if (paneTab !== 'browser' && !isOpen(paneTab)) paneTab = 'browser';
     const showBrowser = browserShown();
     const showDiff = paneVisible && paneTab === 'diff';
     const showTerminal = paneVisible && paneTab === 'terminal';
-    if (!showBrowser) {
-      browserBars.closeTray();
-      setBrowserVisible(false);
-    }
+    if (!showBrowser) browserBars.closeTray();
     // Focus would be lost with a hidden terminal: hand it back to the composer.
     if (!showTerminal && terminalPaneEl.contains(document.activeElement)) focusComposer();
     shell.classList.toggle('pane-hidden', !paneVisible);
@@ -178,21 +324,24 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     browserPane.hidden = paneTab !== 'browser';
     diffPane.hidden = paneTab !== 'diff';
     terminalPaneEl.hidden = paneTab !== 'terminal';
-    for (const [tab, el] of PANE_TABS) {
+    for (const [tab, el] of [['diff', paneTabDiff], ['terminal', paneTabTerminal]] as const) {
       el.classList.toggle('active', paneTab === tab);
       el.setAttribute('aria-selected', String(paneTab === tab));
-      el.tabIndex = paneTab === tab ? 0 : -1;
     }
     paneMods?.apply(modTabKey(paneTab), paneVisible);
-    browserToggle.classList.toggle('active', showBrowser);
-    browserToggle.setAttribute('aria-pressed', String(showBrowser));
-    diffToggle.classList.toggle('active', showDiff);
-    diffToggle.setAttribute('aria-pressed', String(showDiff));
-    terminalToggle.classList.toggle('active', showTerminal);
-    terminalToggle.setAttribute('aria-pressed', String(showTerminal));
+    // Page tabs look active only while the browser is in front
+    browserTabs.refresh();
+    arrangeStrip();
+    // One tab in the strip is reachable with Tab: the active one
+    const active = entryElement(activeEntry());
+    for (const el of strip.querySelectorAll<HTMLElement>('[role="tab"]')) el.tabIndex = el === active ? 0 : -1;
+    paneToggle.classList.toggle('active', paneVisible);
+    paneToggle.setAttribute('aria-pressed', String(paneVisible));
+    newTabPage.setShown(paneTab === 'browser' && activeBlank);
+    newTabPage.refresh();
     changesPane.setVisible(showDiff);
     terminalPane.setVisible(showTerminal);
-    if (showBrowser) syncBrowserView();
+    syncBrowserView();
     if (persist) {
       try {
         localStorage.setItem('pane', paneVisible ? 'shown' : 'hidden');
@@ -200,26 +349,58 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
       } catch {
         /* ignore */
       }
+      saveTools();
     }
   }
 
-  /** The top-bar toggles: show the pane on that tab, or hide it when that tab is already showing. */
+  /** The shortcuts (⌘⇧B, ⌘⇧D, ⌘⇧T): show the pane on that tab, or hide it when that tab is already showing. */
   function togglePane(tab: PaneTab): void {
     pendingModTab = null;
-    if (paneVisible && paneTab === tab) paneVisible = false;
-    else {
-      paneVisible = true;
-      paneTab = tab;
-    }
+    if (paneVisible && paneTab === tab) {
+      paneVisible = false;
+      applyPane();
+    } else showPaneTab(tab);
+  }
+
+  /** Shows the pane on a tab; a tool's tab joins the strip first if it is not there. */
+  function showPaneTab(tab: PaneTab): void {
+    pendingModTab = null;
+    if (modTabKey(tab) && !paneMods?.has(modTabKey(tab)!)) return;
+    if (paneVisible && paneTab === tab) return;
+    openTool(tab);
+    paneVisible = true;
+    paneTab = tab;
     applyPane();
   }
 
-  function showPaneTab(tab: PaneTab): void {
-    pendingModTab = null;
-    if (paneVisible && paneTab === tab) return;
-    if (modTabKey(tab) && !paneMods?.has(modTabKey(tab)!)) return;
-    paneVisible = true;
-    paneTab = tab;
+  /** A click or a key on a tab: a page tab shows the browser on that page, a tool's tab shows the tool. */
+  function activateEntry(entry: string): void {
+    if (!isPage(entry)) return showPaneTab(entry as PaneTab);
+    const id = entry.slice(5);
+    showPaneTab('browser');
+    if (id !== browserTabs.activeId()) void browserTabs.activate(id);
+  }
+
+  /** A tab's ×: the tab leaves the strip (a page closes; a tool only leaves, its terminals and mod keep running). The
+   *  active one hands over to its left neighbour, or the right one when it has none. */
+  function closeEntry(entry: string): void {
+    const list = drawnEntries();
+    const at = list.indexOf(entry);
+    if (at < 0) return;
+    const next = list[at - 1] ?? list[at + 1];
+    const wasActive = paneVisible && entry === activeEntry();
+    if (isPage(entry)) {
+      if (wasActive && next) activateEntry(next);
+      void browserTabs.closeTab(entry.slice(5));
+      return;
+    }
+    order = order.filter((e) => e !== entry);
+    if (paneTab === entry) {
+      if (next) {
+        paneTab = isPage(next) ? 'browser' : (next as PaneTab);
+        if (isPage(next) && next.slice(5) !== browserTabs.activeId()) void browserTabs.activate(next.slice(5));
+      } else paneTab = 'browser';
+    }
     applyPane();
   }
 
@@ -227,10 +408,11 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
   function paneTabsChanged(): void {
     const key = pendingModTab ? modTabKey(pendingModTab) : null;
     if (key && paneMods?.has(key)) {
-      paneTab = pendingModTab!;
+      if (isOpen(pendingModTab!)) paneTab = pendingModTab!;
       pendingModTab = null;
     }
     applyPane(false);
+    newTabPage.refresh();
   }
 
   /** The rail between the transcript and the pane opened, closed or was resized. */
@@ -241,26 +423,92 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     requestAnimationFrame(reportBounds);
   }
 
-  browserToggle.onclick = () => togglePane('browser');
-  diffToggle.onclick = () => togglePane('diff');
-  terminalToggle.onclick = () => toggleTerminal();
-  paneTabBrowser.onclick = () => showPaneTab('browser');
-  paneTabDiff.onclick = () => showPaneTab('diff');
-  paneTabTerminal.onclick = () => showPaneTab('terminal');
-  byId('pane-close').onclick = () => {
-    paneVisible = false;
+  paneToggle.onclick = () => {
+    pendingModTab = null;
+    paneVisible = !paneVisible;
     applyPane();
   };
-  // ←/→ move between the pane tabs (the mods' ones too), wrapping around.
-  sidePane.querySelector('.pane-tabs')!.addEventListener('keydown', (e) => {
-    const ke = e as KeyboardEvent;
-    if ((ke.key !== 'ArrowLeft' && ke.key !== 'ArrowRight') || !(ke.target as HTMLElement).matches('[role="tab"]')) return;
-    ke.preventDefault();
-    const list = paneTabList();
-    const at = Math.max(0, list.findIndex(([tab]) => tab === paneTab));
-    const [next, nextEl] = list[(at + (ke.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length];
-    showPaneTab(next);
-    nextEl.focus();
+  newTabButton.onclick = () => newPageTab();
+
+  /** + and ⌘⇧N: a blank page tab, last in the strip, in front. */
+  function newPageTab(): void {
+    showPaneTab('browser');
+    void browserTabs.newTab();
+  }
+
+  const entryOf = (target: EventTarget | null) => (target as HTMLElement | null)?.closest<HTMLElement>('[data-tab]')?.dataset.tab ?? null;
+  strip.addEventListener('click', (e) => {
+    const entry = entryOf(e.target);
+    if (!entry) return;
+    if ((e.target as HTMLElement).closest('.tab-close')) closeEntry(entry);
+    else activateEntry(entry);
+  });
+  // Middle-click closes a tab (and must not start autoscroll).
+  strip.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
+  strip.addEventListener('auxclick', (e) => {
+    const entry = entryOf(e.target);
+    if (e.button !== 1 || !entry) return;
+    e.preventDefault();
+    closeEntry(entry);
+  });
+  // ←/→ (and Home/End) move across the whole strip, pages and tools alike; Delete closes the focused tab; Enter or
+  // Space on a page tab activates it (a tool's tab is a button and clicks by itself).
+  strip.addEventListener('keydown', (e) => {
+    const entry = entryOf(e.target);
+    if (!entry || e.metaKey || e.ctrlKey || e.altKey) return;
+    const list = drawnEntries();
+    const at = list.indexOf(entry);
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (at + 1) % list.length;
+    else if (e.key === 'ArrowLeft') next = (at - 1 + list.length) % list.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = list.length - 1;
+    else if ((e.key === 'Enter' || e.key === ' ') && isPage(entry)) {
+      e.preventDefault();
+      activateEntry(entry);
+      return;
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      closeEntry(entry);
+      return;
+    }
+    if (next < 0 || at < 0) return;
+    e.preventDefault();
+    activateEntry(list[next]);
+    entryElement(list[next])?.focus();
+  });
+  // A vertical wheel scrolls an overflowing strip sideways (no arrows).
+  strip.addEventListener(
+    'wheel',
+    (e) => {
+      if (strip.scrollWidth <= strip.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      strip.scrollLeft += e.deltaY;
+    },
+    { passive: false },
+  );
+
+  /** The New tab page: a row per tool; a click opens that tool's tab, and the blank tab it was in closes if another page is open. */
+  const newTabPage = createNewTabPage({
+    root: byId('new-tab-page'),
+    tools: (): NewTabTool[] => [
+      // With the Terminal tab open on a terminal, the row starts another one (the Terminal pane has no row of its own
+      // to do it from while there is only one)
+      isOpen('terminal') && terminals.length
+        ? { tab: 'terminal:new', title: 'New terminal', iconHtml: icon('terminal'), kbd: '⌘ T' }
+        : { tab: 'terminal', title: 'Terminal', iconHtml: icon('terminal'), kbd: '⌘ ⇧ T' },
+      { tab: 'diff', title: 'Diff', iconHtml: icon('file-diff'), kbd: '⌘ ⇧ D', count: changeCount },
+      ...(paneMods?.tabs() ?? []).map((t) => ({ tab: `mod:${t.key}`, title: t.title, iconHtml: t.el.querySelector('.tab-icon')?.innerHTML ?? '' })),
+    ],
+    open: (tab) => {
+      const blank = browserTabs.activeId();
+      if (tab === 'terminal:new') openNewTerminal();
+      else showPaneTab(tab as PaneTab);
+      if (tab === 'terminal') terminalPane.focus();
+      if (browserTabs.ids().length > 1 && browserTabs.isBlank(blank)) void browserTabs.closeTab(blank);
+    },
   });
 
   // Diff tab
@@ -272,15 +520,24 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     return api && typeof api.list === 'function' && typeof api.diff === 'function' ? api : null;
   }
 
+  /** The session's changed files; null until the first count came (a count at start-up opens nothing) */
+  let changeCount = 0;
+  let countKnown = false;
+
   function setChangeCount(n: number): void {
     const count = Math.max(0, Math.floor(Number(n) || 0));
-    for (const badge of diffCountBadges) {
-      badge.textContent = String(count);
-      badge.hidden = count === 0;
+    diffCountBadge.textContent = String(count);
+    diffCountBadge.hidden = count === 0;
+    paneTabDiff.setAttribute('aria-label', count ? `Diff, ${count} changed file${count === 1 ? '' : 's'}` : 'Diff');
+    // Files started changing: the Diff tab joins the strip, in the back
+    const appears = countKnown && changeCount === 0 && count > 0 && !isOpen('diff');
+    changeCount = count;
+    countKnown = true;
+    if (appears) {
+      openTool('diff');
+      applyPane();
     }
-    const files = `${count} changed file${count === 1 ? '' : 's'}`;
-    diffToggle.dataset.tip = count ? `Toggle diff · ${files}` : 'Toggle diff';
-    paneTabDiff.setAttribute('aria-label', count ? `Diff, ${files}` : 'Diff');
+    newTabPage.refresh();
   }
 
 
@@ -306,33 +563,52 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     return api && typeof api.list === 'function' && typeof api.create === 'function' && typeof api.onData === 'function' && typeof api.onTabs === 'function' ? api : null;
   }
 
-  function setTerminalBusy(n: number): void {
-    const count = Math.max(0, Math.floor(Number(n) || 0));
-    for (const dot of terminalBusyDots) dot.hidden = count === 0;
-    terminalToggle.dataset.tip = count ? `Toggle terminal · ${count} running` : 'Toggle terminal';
-    paneTabTerminal.setAttribute('aria-label', count ? `Terminal, ${count} running` : 'Terminal');
+  /** The terminals changed: the New tab page's Terminal row, and the Terminal tab's tooltip, which tells (as the
+   *  Terminal pane's own row would) that a lone terminal was opened by the agent */
+  function terminalsChanged(list: TerminalTabInfo[]): void {
+    terminals = list;
+    paneTabTerminal.dataset.tip = list.length === 1 && list[0].agent ? 'Terminal · opened by Silo Harness' : 'Terminal';
+    newTabPage.refresh();
   }
 
-  /** A link clicked in a terminal opens in the Browser pane. */
+  /** Terminals running a command; null until the first report (one at start-up opens nothing) */
+  let busyCount: number | null = null;
+
+  function setTerminalBusy(n: number): void {
+    const count = Math.max(0, Math.floor(Number(n) || 0));
+    terminalBusyDot.hidden = count === 0;
+    paneTabTerminal.setAttribute('aria-label', count ? `Terminal, ${count} running` : 'Terminal');
+    // A terminal turned busy: the Terminal tab joins the strip, in the back
+    const appears = busyCount === 0 && count > 0 && !isOpen('terminal');
+    busyCount = count;
+    if (appears) {
+      openTool('terminal');
+      applyPane();
+    }
+  }
+
+  /** A link clicked in a terminal opens in the browser. */
   function openTerminalLink(url: string): void {
     showPaneTab('browser');
-    go(url, paneTabBrowser);
+    go(url, urlEl);
   }
 
   const terminalPane = createTerminalPane({
     root: terminalPaneEl,
     strip: byId('terminal-tabs'),
     newButton: byId<HTMLButtonElement>('terminal-new'),
+    bar: byId('terminal-bar'),
     host: byId('terminal-host'),
     empty: byId('terminal-empty'),
     source: terminalSource,
     onBusy: setTerminalBusy,
+    onTabs: terminalsChanged,
     onOpenUrl: openTerminalLink,
     onError: showError,
     cleanError,
   });
 
-  /** ⌘⇧T and the top-bar toggle: show the terminal with the cursor in it, or hide it. */
+  /** ⌘⇧T: show the terminal with the cursor in it, or hide the pane. */
   function toggleTerminal(): void {
     togglePane('terminal');
     if (paneVisible && paneTab === 'terminal') terminalPane.focus();
@@ -350,7 +626,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     // The mods' rail sits between the transcript and the pane: what it takes is not the pane's to have.
     const rail = document.getElementById('mod-rail');
     const railW = rail && !rail.hidden ? rail.offsetWidth : 0;
-    return Math.round(Math.max(BROWSER_MIN, Math.min(px, contentEl.clientWidth - TRANSCRIPT_MIN - resizer.offsetWidth - railW)));
+    return Math.round(Math.max(BROWSER_MIN, Math.min(px, mainEl.clientWidth - TRANSCRIPT_MIN - resizer.offsetWidth - railW)));
   }
   function setBrowserWidth(px: number | null): void {
     if (px === null) sidePane.style.removeProperty('--browser-w');
@@ -402,21 +678,34 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     requestAnimationFrame(reportBounds);
   });
 
+  /** The session whose page tabs the strip shows */
+  let pageSession: string | undefined;
+
   function applyBrowserState(s: BrowserState): void {
+    // Another session came forward: its page tabs take the place the pages had, before the tools
+    if (s.session !== pageSession) {
+      if (pageSession !== undefined) pagesPlaced = false;
+      pageSession = s.session;
+    }
     browserTabs.applyState(s);
     browserBars.applyState(s);
     browserFind.applyState(s);
     const blank = !s.url || s.url === 'about:blank';
     if (document.activeElement !== urlEl) urlEl.value = blank ? '' : s.url;
-    browserTitle.textContent = s.title && s.title !== s.url ? s.title : s.loading && !blank ? 'Loading…' : '';
+    // Centred in the pill while it is not being edited: the page's title, else its host
+    browserTitle.textContent = blank ? '' : s.title && s.title !== s.url ? s.title : s.loading ? 'Loading…' : hostOf(s.url);
     backBtn.disabled = !s.canGoBack;
     fwdBtn.disabled = !s.canGoForward;
     openExternalBtn.disabled = blank;
     browserPane.classList.toggle('loading', s.loading);
-    if (placeholder) placeholder.hidden = !blank;
+    if (blank !== activeBlank) {
+      activeBlank = blank;
+      newTabPage.setShown(paneTab === 'browser' && blank);
+      syncBrowserView();
+    }
   }
   browser.onState(applyBrowserState);
-  // A link from the chat opened in a new tab (Settings → Browser): the Browser tab of the pane comes forward
+  // A link from the chat opened in a new tab (Settings → Browser): the browser comes forward
   onPush('browser:show', () => showPaneTab('browser'));
   urlEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -465,20 +754,37 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     const pane = localStorage.getItem('pane') ?? localStorage.getItem('browser');
     paneVisible = pane !== 'hidden';
     const savedTab = localStorage.getItem('paneTab');
-    paneTab = savedTab === 'diff' || savedTab === 'terminal' ? savedTab : 'browser';
+    // The open tools in their order; a profile from before the strip had one tool tab: the one in front, if any
+    let tools: PaneTab[] = isToolTab(savedTab) ? [savedTab] : [];
+    const raw = localStorage.getItem('paneTools');
+    if (raw !== null) {
+      try {
+        const list: unknown = JSON.parse(raw);
+        tools = Array.isArray(list) ? [...new Set(list.filter(isToolTab))] : [];
+      } catch {
+        tools = [];
+      }
+    }
+    order = [...order.filter(isPage), ...tools];
+    paneTab = (savedTab === 'diff' || savedTab === 'terminal') && tools.includes(savedTab) ? savedTab : 'browser';
+    if (pendingModTab && !tools.includes(pendingModTab)) pendingModTab = null;
     const w = Number(localStorage.getItem('browserWidth'));
     if (w > 0) setBrowserWidth(w);
   }
 
-  /** The pane's own chrome has the focus (the URL bar, the tab strip, a bar button): the browser's shortcuts apply. */
+  /** The pane's own chrome has the focus (the strip, the URL bar, a bar button): the browser's shortcuts apply. */
   function browserFocused(): boolean {
-    return browserShown() && browserPane.contains(document.activeElement);
+    return browserShown() && (browserPane.contains(document.activeElement) || stripRow.contains(document.activeElement));
   }
 
   /** For the live checks (__oc_debug.mods.browser()): what was last sent to the native browser view, where its slot is, the tabs and popups */
   function browserDebug() {
     const r = browserView.getBoundingClientRect();
-    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), safety: browserBars.debug(), find: browserFind.debug() };
+    const strip = drawnEntries().map((e) => {
+      const el = entryElement(e)!;
+      return { tab: e, title: el.querySelector('.tab-title')?.textContent ?? '', active: el.getAttribute('aria-selected') === 'true' };
+    });
+    return { ...browserSent, bounds: browserSent.bounds && { ...browserSent.bounds }, element: { x: r.left, y: r.top, width: r.width, height: r.height }, tab: paneTab, paneVisible, dialog: dialogOpen(), ...browserTabs.debug(), strip, tools: order.filter((e) => !isPage(e)), newTab: newTabPage.debug(), safety: browserBars.debug(), find: browserFind.debug() };
   }
 
   return {
@@ -489,6 +795,8 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     tab: () => paneTab,
     showPaneTab,
     togglePane,
+    /** Closes a tab of the strip, as its × does: 'page:<id>', or a tool's tab */
+    closeTab: (entry: string) => closeEntry(entry),
     toggleTerminal,
     openNewTerminal,
     /** The mod host is up: its tabs join the strip */
@@ -507,7 +815,7 @@ export function createSidePane({ shell, content: contentEl, browserView, dialogs
     browserDebug,
     browserFocused,
     /** ⌘⇧N, ⌘W, ⌘L, ⌘F, ⌘+ ⌘− ⌘0 and ⌥⌘I while the pane's chrome has the focus (keys inside the page itself reach the main process) */
-    newBrowserTab: () => void browserTabs.newTab(),
+    newBrowserTab: newPageTab,
     closeBrowserTab: () => void browserTabs.closeActive(),
     focusUrl: () => browserTabs.focusUrl(),
     openFind: () => browserFind.openBar(),

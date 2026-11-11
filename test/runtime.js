@@ -6,7 +6,6 @@ const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { createApp } = require(path.join(projectDir, 'dist/main/app.js'));
 const { MAX_RUNNING } = require(path.join(projectDir, 'dist/main/runtime.js'));
-const { BROWSER_BACKGROUND } = require(path.join(projectDir, 'dist/main/agent.js'));
 const { ArtifactStore } = require(path.join(projectDir, 'dist/main/artifacts.js'));
 const { rewindSession, toTranscript } = require(path.join(projectDir, 'dist/main/sessions.js'));
 const { startMock } = require('./support/mock-model.js');
@@ -41,13 +40,15 @@ async function waitFor(fn, ms = 5000, what = 'condition') {
   };
   const saved = [];
   const navigated = [];
-  const browser = { navigate: async (url) => { navigated.push(url); return `Now at ${url}`; } };
+  /** Each session's own tabs: the runtime asks for them by session id */
+  const browserFor = [];
+  const browser = (sessionId) => ({ navigate: async (url) => { navigated.push(url); browserFor.push(sessionId); return `Now at ${url}`; } });
   const app = createApp({
     userData: tmp,
     appRoot: projectDir,
     loadConfig: () => base,
     saveConfig: (c) => saved.push(c),
-    browser: () => browser,
+    browser,
     artifacts: new ArtifactStore({ root: path.join(tmp, 'artifacts'), rendererDir: path.join(projectDir, 'dist/renderer') }),
   });
   const rt = app.runtime;
@@ -175,20 +176,20 @@ async function waitFor(fn, ms = 5000, what = 'condition') {
   check('5: a denied card is reported', of(A, 'approval_resolved').some((e) => e.ok === false));
   app.updateConfig({ permissionMode: 'bypass' });
 
-  // ---- 6: a browser_* call from a background session is refused; the foreground one works ----
+  // ---- 6: a background session browses in its own tabs; the foreground one in its own ----
   events = [];
   navigated.length = 0;
   reply('[C1]', { toolCalls: [call('browser_navigate', { url: 'https://example.com' })] });
-  reply('[C1]', { content: 'no browser' });
+  reply('[C1]', { content: 'browsed behind' });
   rt.send(C, 'browse');
   await idle(C);
   const bEnd = of(C, 'tool_end')[0];
-  check('6: background browser call gets the error result', bEnd && bEnd.ok === false && bEnd.result === BROWSER_BACKGROUND && navigated.length === 0, bEnd);
+  check("6: a background session's browser call reaches its own tabs", bEnd && bEnd.ok && navigated[0] === 'https://example.com' && browserFor[0] === C, { bEnd, browserFor });
   reply('[A1]', { toolCalls: [call('browser_navigate', { url: 'https://example.com' })] });
   reply('[A1]', { content: 'browsed' });
   rt.send(A, 'browse here');
   await idle(A);
-  check('6: the session on screen browses', navigated[0] === 'https://example.com' && of(A, 'tool_end')[0].ok);
+  check('6: the session on screen browses in its own', navigated[1] === 'https://example.com' && browserFor[1] === A && of(A, 'tool_end')[0].ok, browserFor);
   // create_artifact from the background stores it without navigating
   navigated.length = 0;
   reply('[C1]', { toolCalls: [call('create_artifact', { title: 'Note', kind: 'markdown', content: '# hi' })] });

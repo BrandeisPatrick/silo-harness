@@ -103,6 +103,7 @@ const { launch, checker, sleep } = require('./rig.js');
       tc = await transcript(C);
       check('C renamed itself through session_rename', tc.some((i) => i.role === 'tool' && i.name === 'session_rename' && i.ok) && (await meta(C))?.title === 'Comet log' && (await meta(C))?.titleLocked === true, [(await meta(C))?.title, tc.filter((i) => i.role === 'tool').map((i) => i.name)]);
       check('the top bar follows', (await app.text('#session-title')) === 'Comet log');
+      await app.unfold();
       await app.evaluate(`document.querySelectorAll('details.tool-group').forEach((d) => { d.open = true; })`);
       await sleep(400);
       check('the tool row reads as words', await app.evaluate(`[...document.querySelectorAll('.tool')].some((e) => /Rename session/.test(e.innerText) && !/session_rename/.test(e.innerText))`));

@@ -182,7 +182,7 @@ const { check, done } = checker();
     check('a site that is not one is refused under the field', /Enter a site like/.test((await app.text('#sp-row-browser-alwaysAllowed-add .sp-problem')) ?? ''));
     await addSite('https://Example.com/some/page');
     let cfg = await app.evaluate('oc.getConfig()');
-    check('Add puts the site in the list the agent may always use, as its host', JSON.stringify(cfg.browser.alwaysAllowed) === '["example.com"]' && (await app.evaluate(`[...document.querySelectorAll('#sp-sec-browser [id^="sp-row-browser-alwaysAllowed-0"] .sp-row-name')].map((e) => e.textContent).join()`)) === 'example.com', cfg.browser);
+    check('Add puts the site in the list the agent may always use, as its origin (an approval covers one scheme)', JSON.stringify(cfg.browser.alwaysAllowed) === '["https://example.com"]' && (await app.evaluate(`[...document.querySelectorAll('#sp-sec-browser [id^="sp-row-browser-alwaysAllowed-0"] .sp-row-name')].map((e) => e.textContent).join()`)) === 'https://example.com', cfg.browser);
     // A site card's "Always allow" while Settings is open: the main process adds it, the list follows.
     await app.evaluate(`oc.rpc('browser.editList', 'alwaysAllowed', 'add', 'card.example')`);
     await app.waitFor(`document.querySelectorAll('#sp-sec-browser [id^="sp-row-browser-alwaysAllowed-"]:not([id$="-add"])').length === 2`, 5000, 'the list to follow');

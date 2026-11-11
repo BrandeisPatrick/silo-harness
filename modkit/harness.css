@@ -1,7 +1,7 @@
 /*
  * Silo Harness mod kit: the app's look for mod pages. Served on every mod origin as /@harness/harness.css.
  * The tokens below are the app's defaults (src/renderer/styles.css); harness.js overrides them at run time with the
- * tokens the app sends, so a theme mod's colours reach every page.
+ * tokens the app sends, so the app's colours reach every page.
  */
 
 /* ---------- Tokens ---------- */

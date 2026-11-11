@@ -245,6 +245,7 @@ const kindOf = (html, extra = {}) => credentialKind({ ...fieldsOf(html)[0], ...e
       return r.ok && r.value === want;
     };
     check('4: sites are read as the policy matches them', ok('example.com', {}, 'example.com') && ok('*.Example.com', {}, '*.example.com') && ok('localhost:3000', {}, 'localhost:3000') && ok('[::1]:8080', {}, '[::1]:8080') && ok('https://www.example.com/some/page?q', {}, 'www.example.com'));
+    check('4: in the always-allowed list a typed http:// or https:// is kept (an approval covers one scheme)', ok('http://Example.com:8080/x', { schemes: true }, 'http://example.com:8080') && ok('https://www.example.com/a', { schemes: true }, 'https://www.example.com') && ok('example.com', { schemes: true }, 'example.com') && ok('ftp://example.com', { schemes: true }, 'example.com'));
     check('4: an international name is stored as its ASCII form', ok('bücher.example', {}, 'xn--bcher-kva.example'));
     check('4: nonsense, spaces and an empty field are refused', !site('not a site').ok && !site('').ok && !site('exa mple.com').ok && !site('-bad-.com').ok);
     check('4: "login." is a prefix only where the list takes prefixes', !site('login.').ok && ok('login.', { prefixes: true }, 'login.'));

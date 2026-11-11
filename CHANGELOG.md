@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.14.0 — 2026-11-10
+
+Reads asked for in one reply run together, `/timing` shows where a run's time went, and a pill under the chat bar sets the reasoning effort.
+
+### Highlights
+
+- **Reads run together.** Read-only tool calls of one reply run at the same time: a test run with three reads takes 316 ms instead of 620 ([measurement](docs/latency.md#the-benchmark)).
+  ![Wall time of a run with three reads, one at a time and together](docs/releases/0.14.0/reads-together.png)
+- **Reasoning effort.** A pill beside the model sets how hard the model thinks, from "Low" to "Max"; `/effort` does the same ([details](docs/configure.md#effort)).
+  ![The Effort menu open under the chat bar, with High chosen](docs/releases/0.14.0/effort.png)
+- **Where the time went.** `/timing` splits the last run into model, tools, safety checks, your approvals and the app's own work ([how to read it](docs/latency.md#timing)).
+  ![A run that read three files, with the /timing note under the answer](docs/releases/0.14.0/timing.png)
+
+### New
+
+- **Timing log.** `timingLog` in the settings keeps each run's timing in a file, numbers only: no prompts, commands, paths or output ([format](docs/latency.md#the-timing-log)).
+- **Read concurrency setting.** `toolConcurrency` sets how many reads run at once, from 1 to 10 (default 4); `1` runs calls one after another, as before.
+
+### Improved
+
+- **Lighter safety checks.** Auto mode's safety check asks each Claude model for the least thinking it allows.
+- **Faster AWS reads.** A recognised read-only `aws` command runs as a plain read in every mode instead of waiting for the safety check ([which ones](docs/reference.md#auto-mode)).
+- **Timeout hints.** When a command hits its time limit, the agent is told how to raise it, and that macOS has no `timeout` command.
+- **Better evidence habits.** The agent batches independent reads, searches narrowly first, and keeps confirmed, likely and unchecked findings apart in its answers.
+- **Lighter icons.** Icons draw with a thinner stroke, and the header's pane buttons stay muted until pressed.
+- **One "New" menu.** Under Settings → Mods, "Install…" and "From a template…" are items of one "New" button.
+
+### Fixed
+
+- **Sign-ins don't hang.** A sign-in that waits for you, such as `aws sso login`, no longer hangs the shell tool; the agent is pointed to the terminal.
+- **Wildcards pass through.** An unmatched wildcard in a command passes through as in bash instead of failing the command.
+- **Search keeps partial results.** A `grep` that reaches its time limit returns what it found so far.
+- **Paused, not spinning.** A task in progress shows a paused circle once the run has ended, instead of a frozen spinner.
+
+### Security
+
+- **Redirects count as writes.** After "don't change any files", Auto mode's check treats sending a command's output to a file as changing that file.
+
+### For developers
+
+- **Safety-check eval.** `scripts/check-eval.js` scores a model on 97 labelled actions and passes it only with none wrongly allowed ([docs](docs/evals.md)).
+- **Answer eval.** `scripts/answer-eval.js` runs the agent on a made-up service with planted traps and grades each answer next to its time and cost.
+- **Latency benchmark.** `scripts/latency-bench.js` times seven mock scenarios with reads one at a time and together ([results](docs/latency.md#the-benchmark)).
+- **Timing report.** `scripts/timing-report.js` prints where each run in a timing log spent its time.
+- **Mod styles ignored.** A mod's `contributes.styles` still loads but is not applied, and the mod shows a note saying so.
+
+### Upgrade notes
+
+- **Themes are removed.** Settings → Mods has no "Theme" tab, the three bundled themes are gone, and a theme you picked is dropped; looks remain.
+
+### Known issues
+
+- **AWS reads are unchecked.** A recognised `aws` read can still print sensitive values; operations known to return credentials go to the safety check.
+- **Effort on other services.** Effort is tested on Claude 5 models only; a service that refuses the setting gets the request again without it.
+
 ## 0.13.1 — 2026-11-10
 
 Fixes clicks not reaching a page in the Browser pane after a site marked the tab as a window-drag area.

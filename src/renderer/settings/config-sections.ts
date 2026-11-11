@@ -11,7 +11,7 @@ import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, pa
 import { actions, button, group, iconButton, row, sectionTitle, switchControl, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
-import { recentlyBlocked } from '../auto-blocked.js';
+import { learnedAnswers, recentlyBlocked } from '../auto-blocked.js';
 
 export function generalSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('General'));
@@ -429,12 +429,15 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
   const rules = row({ id: 'rules', title: 'Saved rules', desc: 'Actions you always allow in this project.', keywords: 'always allow rules project commands programs mcp edits', full: true }, rulesEl);
   rulesEl.classList.add('sp-embedded');
   const blocked = recentlyBlocked(ctx);
-  el.append(group(null, mode), group('This project', rules), group('Recently blocked', blocked.el));
+  const learned = learnedAnswers(ctx);
+  const learn = ctx.switchField({ id: 'autoMode-learn', title: 'Learn from my answers', desc: 'Auto mode decides like cases the way you did.', keywords: 'auto mode learn remember preferences answers approvals', field: 'autoMode.learn' });
+  const forget = row({ id: 'auto-learned', title: 'What it learned', keywords: 'auto mode learned answers forget all' }, learned.forgetAll);
+  el.append(group(null, mode), group('This project', rules), group('Auto mode', learn, forget, learned.el), group('Recently blocked', blocked.el));
   return {
     id: 'permissions',
     el,
     async load() {
-      await blocked.refresh();
+      await Promise.all([blocked.refresh(), learned.refresh()]);
       return 'ok';
     },
   };

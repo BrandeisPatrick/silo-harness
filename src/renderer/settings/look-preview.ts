@@ -1,10 +1,9 @@
-// The previews of Settings → Mods → Background, Chat bar, Conversation and Theme: a miniature window, a sample chat
-// bar or a sample exchange, each drawn in a shadow root of its own. Inside it are the app's own stylesheets (with
-// `:root`, `html` and `body` read as the preview's `.lp-root` and `.lp-body`), the theme the preview is dressed in and
-// the look it shows, both compiled by the main process for the preview's root (PREVIEW_ROOTS in
-// src/main/mods/css.ts). Nothing in a preview reaches the window: its CSS lives in its shadow root and is scoped to
-// its own root, the sample's ids (#chatbar, #messages, …) exist only in there, and it takes no input. Nothing of the
-// window reaches a preview either, but the tokens it resets and the theme it is given.
+// The previews of Settings → Mods → Background, Chat bar and Conversation: a miniature window, a sample chat bar or
+// a sample exchange, each drawn in a shadow root of its own. Inside it are the app's own stylesheets (with `:root`,
+// `html` and `body` read as the preview's `.lp-root` and `.lp-body`) and the look it shows, compiled by the main
+// process for the preview's root (PREVIEW_ROOTS in src/main/mods/css.ts). Nothing in a preview reaches the window:
+// its CSS lives in its shadow root and is scoped to its own root, the sample's ids (#chatbar, #messages, …) exist only
+// in there, and it takes no input. Nothing of the window reaches a preview either, but the tokens it resets.
 
 import type { LookKind } from '../../shared/mods';
 import { escapeHtml } from '../dom.js';
@@ -15,7 +14,6 @@ import { lookAttributes } from '../mods/logic.js';
 /** The natural size of each kind of preview, in CSS pixels; it is scaled to the width it is given. */
 const SIZES: Record<LookKind, { w: number; h: number }> = {
   background: { w: 1040, h: 650 },
-  theme: { w: 1040, h: 650 },
   conversation: { w: 660, h: 470 },
   composer: { w: 820, h: 150 },
 };
@@ -26,8 +24,6 @@ const CARD_SIZES: Partial<Record<LookKind, { w: number; h: number }>> = {
 };
 
 export interface PreviewState {
-  /** The theme it is dressed in, compiled for .lp-root ('' for the app's own) */
-  themeCss: string;
   /** The look it shows (Chat bar, Conversation), compiled for .lp-root #chatbar or #messages ('' for Default) */
   lookCss?: string;
   /** That look's ref and its mod's settings: the attributes a look reacts to (data-look, data-set-…) */
@@ -139,7 +135,7 @@ function sheetFor(css: string): CSSStyleSheet | null {
     } catch {
       s.replaceSync('');
     }
-    // A handful of themes and looks: the cache stays small, but never grows without end
+    // A handful of looks: the cache stays small, but never grows without end
     if (cssSheets.size > 60) cssSheets.delete(cssSheets.keys().next().value!);
     cssSheets.set(css, s);
   }
@@ -210,19 +206,19 @@ function conversationHtml(): string {
 function windowHtml(): string {
   const nav = (name: 'plus' | 'search', label: string) => `<div class="nav-row"><span class="nav-icon">${icon(name)}</span><span class="nav-label">${label}</span></div>`;
   const session = (title: string, active = false) => `<div class="session-item${active ? ' active' : ''}"><span class="label">${escapeHtml(title)}</span><span class="trail"></span></div>`;
-  const top = (name: 'terminal' | 'file-diff' | 'globe' | 'more', on = false) => `<span class="icon-btn top-btn${on ? ' active' : ''}">${icon(name)}</span>`;
+  const top = (name: 'panel-list' | 'panel-right' | 'more', on = false) => `<span class="icon-btn top-btn${on ? ' active' : ''}">${icon(name)}</span>`;
   return (
     `<div class="shell">` +
     `<aside class="sidebar"><div class="sidebar-top"></div><nav class="sidebar-nav">${nav('plus', 'New session')}${nav('search', 'Search')}</nav>` +
     `<nav class="session-list">${session('Retry backoff', true)}${session('Flaky login test')}${session('Release notes for 1.2')}${session('Dependency updates')}</nav></aside>` +
-    `<main class="main"><header class="topbar"><div class="title-block"><div class="session-title">Retry backoff</div><span class="cwd-btn">${icon('folder', 12)}<span>~/code/app</span></span></div><span class="spacer"></span><div class="topbar-actions">${top('terminal')}${top('file-diff')}${top('globe', true)}${top('more')}</div></header>` +
+    `<main class="main"><div class="chat-col"><header class="topbar"><div class="title-block"><div class="session-title">Retry backoff</div><span class="cwd-btn">${icon('folder', 12)}<span>~/code/app</span></span></div><span class="spacer"></span><div class="topbar-actions">${top('panel-list', true)}${top('more')}${top('panel-right')}</div></header>` +
     `<div class="content"><section class="transcript-wrap"><div id="messages" class="transcript">` +
     `<div class="msg user"><div class="bubble">Make the retry backoff configurable.</div></div>` +
     `<div class="msg assistant"><div class="md"><p>Sure. The retry loop in <code>login.ts</code> waits a fixed three seconds; I'll take the delay from the options instead.</p></div></div>` +
     `<div class="mod-offer lp-card"><div class="mod-offer-head"><span class="mod-offer-icon">${icon('puzzle')}</span><div class="mod-offer-heading"><div class="mod-offer-kicker">New mod</div><div class="mod-offer-title">Turn on Word count?</div></div></div>` +
     `<div class="lp-switch-row"><span>Update while streaming</span><input type="checkbox" class="switch" checked tabindex="-1"></div>` +
     `<div class="mod-offer-row"><span class="spacer"></span><button type="button" class="btn" tabindex="-1">Not now</button><button type="button" class="btn primary" tabindex="-1">Turn on</button></div></div>` +
-    `</div><div class="composer-wrap">${chatbarHtml()}</div></section></div></main></div>`
+    `</div><div class="composer-wrap">${chatbarHtml()}</div></section></div></div></main></div>`
   );
 }
 
@@ -234,7 +230,7 @@ function sampleHtml(kind: LookKind): string {
 
 // ---------- A preview ----------
 
-/** The scheme the window is in: the preview's root mirrors data-theme, so a theme's light and dark rules both work. */
+/** The scheme the window is in: the preview's root mirrors data-theme, so light and dark rules both work. */
 function mirrorScheme(root: HTMLElement): void {
   const t = document.documentElement.dataset.theme;
   if (t) root.dataset.theme = t;
@@ -281,7 +277,7 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
   root.append(lpRoot);
   mirrorScheme(lpRoot);
 
-  let state: PreviewState = { themeCss: '' };
+  let state: PreviewState = {};
   const region = () => (kind === 'composer' || kind === 'conversation' ? body.querySelector<HTMLElement>(kind === 'composer' ? '#chatbar' : '#messages') : null);
 
   const fit = () => {
@@ -329,7 +325,7 @@ export function createLookPreview(kind: LookKind, opts: { card?: boolean; label?
     root,
     set(next) {
       state = next;
-      root.adoptedStyleSheets = [app(), own(), sheetFor(next.themeCss), sheetFor(next.lookCss ?? '')].filter((x): x is CSSStyleSheet => !!x);
+      root.adoptedStyleSheets = [app(), own(), sheetFor(next.lookCss ?? '')].filter((x): x is CSSStyleSheet => !!x);
       paintAttrs();
       setBackdrop();
       fit();

@@ -198,10 +198,21 @@ Fields of an entry (only `type` is required):
 | `maxOutput` | all | The most tokens one reply may have, sent as `max_tokens`. Default: the service decides. |
 | `virtualKey`, `config`, `provider` | `portkey` | `x-portkey-virtual-key`, `x-portkey-config`, `x-portkey-provider`. With `provider`, put the upstream key in `headers` as `"Authorization": "Bearer ${UPSTREAM_KEY}"`. |
 | `numCtx`, `think` | `ollama` | `num_ctx` (also the context window) and the thinking mode, as in the `ollama` block. An `ollama` entry uses Ollama's native API, like the block. |
+| `effort` | all but `ollama`, `lmstudio` | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. Unset: the model's default. See [Effort](#effort). |
 
 A bad field is skipped and reported; an entry without a usable `type`, or an `openai-compatible` one without `baseURL`, is skipped whole. A missing key is an error that names the variable to set, shown in Settings, under the chat bar and by `silo doctor`.
 
 What the model can do (images, tools) is detected for Ollama; for the other services it is unknown, so the app does not refuse an image it cannot be sure about.
+
+### Effort
+
+The pill after the model under the chat bar sets the reasoning effort of the provider in use (stored as its entry's `effort`; `/effort <level>` does the same, `/effort default` clears it). It applies from the next model request, sub-sessions included; titles, compaction summaries and Auto mode's check keep their own settings.
+
+- Anthropic: sent as `output_config.effort`, for the models that take it (Claude Opus 4.6 and later, Sonnet 4.6 and later, Haiku 5.5, Fable, Mythos). A level the model lacks runs as the nearest one (`xhigh` on the 4.6 models runs as `high`). Where the app turns thinking off, `xhigh` and `max` turn it on, since the API refuses the pair.
+- OpenRouter: `reasoning.effort`. OpenAI, Groq, DeepSeek, Together, Portkey and OpenAI-compatible services: `reasoning_effort`. There the levels are Default (nothing sent), Low, Medium and High. A service that refuses the field gets the request again without it, and the window says so once.
+- Ollama keeps its own Thinking setting; LM Studio documents no effort field. No pill for either, or for the built-in Gateway block.
+
+Changing the effort re-writes the cached prompt once, so the app never changes it on its own.
 
 ### Keys
 
@@ -224,7 +235,7 @@ The `browser` block is what Settings → Browser edits.
 | `keepCookies` | `true` | Keep the Browser pane's cookies and site data when the app quits; `false` clears them at quit. |
 | `downloadsDir` | `""` | Where the pane's downloads are saved (`~` allowed); empty is the Downloads folder. |
 | `openChatLinksInPane` | `false` | Web links (http, https) clicked in the chat open in a new tab of the pane instead of the default browser. |
-| `alwaysAllowed` | `[]` | Sites the agent may read and act on without the site card: what "Always allow example.com" saves (`example.com`, `localhost:3000`, `file:/path`), or a pattern (`*.example.com`). A sensitive site still asks before acting. |
+| `alwaysAllowed` | `[]` | Sites the agent may read and act on without the site card: what "Always allow example.com" saves (`https://example.com`, `http://localhost:3000`, `file:/path`), or a pattern (`*.example.com`). An entry covers only its scheme; one without a scheme covers https only, and http too on `localhost`, `127.0.0.1` and `[::1]`. A sensitive site still asks before acting. |
 | `sensitive` | `[]` | Your own sites that always ask before the agent acts, beside the built-in list: `host` (and its subdomains), `*.host`, `host:port`, or a prefix such as `login.`. |
 | `exempt` | `[]` | Your own hosts the agent may use with no card and where it may type test passwords, beside `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` and `*.test`: `host`, `*.host`, `host:port`, or a folder (`/path`, `~/path`) whose files count. |
 
@@ -245,6 +256,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
 | `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: the session's own model. |
+| `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
 
 ```json
 {
@@ -261,6 +273,10 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 ### The other settings
 
 `permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
+
+`toolConcurrency` (1 to 10, default 4): how many read-only tool calls of one reply run at the same time; `1` runs every call one after another. See [latency.md](latency.md).
+
+`timingLog` (or `SILO_TIMING=1` in the environment) appends each run's timing, numbers only, to `timing/timing.jsonl` in the app's data folder; `/timing` shows the last run's without it. See [latency.md](latency.md).
 
 ## For coding agents
 

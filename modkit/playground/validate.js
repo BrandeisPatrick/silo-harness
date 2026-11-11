@@ -189,11 +189,13 @@
       }
     }
 
+    // Themes (CSS for the whole app) were removed: the app loads the field and ignores it
+    if (c.styles !== undefined) warn('Themes were removed; contributes.styles is ignored.');
     var views = Array.isArray(c.views) ? c.views.length : 0;
-    var styles = (Array.isArray(c.styles) ? c.styles.length : 0) + (Array.isArray(c.looks) ? c.looks.length : 0);
+    var looks = Array.isArray(c.looks) ? c.looks.length : 0;
     var cmds = Array.isArray(c.commands) ? c.commands.length : 0;
     var sets = Array.isArray(c.settings) ? c.settings.length : 0;
-    if (!views && !styles && !cmds && !sets) warn('contributes nothing: no views, styles, looks, commands or settings');
+    if (!views && !looks && !cmds && !sets) warn('contributes nothing: no views, looks, commands or settings');
     return problems;
   }
 

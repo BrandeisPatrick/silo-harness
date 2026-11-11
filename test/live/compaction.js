@@ -9,6 +9,7 @@ const path = require('node:path');
 const { launch, checker, sleep, LIVE_MODEL } = require('./rig.js');
 
 const WORDS = ['Apple', 'Banana', 'Cherry', 'Damson', 'Elderberry'];
+const WINDOW = 10250;
 const FILLER = 'This line is filler text that pads the file so that reading it takes a fair share of a small context window. ';
 
 (async () => {
@@ -21,13 +22,16 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-compaction-project-'));
   // Changed on purpose: with tool groups loaded when needed, a request's fixed part is about 4k tokens instead of 10k,
   // so the window is smaller (was 12k) and the files longer (were 22 fillers) for the reads to fill it as before.
+  // Changed on purpose again: the system prompt grew by about 170 tokens, which at a 10,000-token window made
+  // compaction due one read earlier, when what it would fold is already too small to summarise. 10,250 keeps the
+  // same sequence as before: two prunes, then a summary.
   WORDS.forEach((w, i) => fs.writeFileSync(path.join(project, `${'abcde'[i]}.txt`), `${w} ${FILLER.repeat(40)}\nEnd of file ${'abcde'[i]}.txt.\n`));
   const app = await launch({
     mode: 'bypass',
     project,
     config: {
       // The whole portkey block: the rig's config option replaces sections instead of merging them.
-      portkey: { baseURL: 'https://api.anthropic.com/v1', apiKey: '', model: LIVE_MODEL, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 10000 },
+      portkey: { baseURL: 'https://api.anthropic.com/v1', apiKey: '', model: LIVE_MODEL, virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: WINDOW },
       autoCompact: true,
       compactThreshold: 0.8,
       pruneToolResults: true,
@@ -88,7 +92,7 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
     check('the meter popover lists the breakdown', rows.length >= 4 && rows.some((r) => /^(Free|Reserved for compaction) \d/.test(r)) && rows.some((r) => /^System prompt/.test(r)), rows);
     await shoot('dark');
     const breakdown = await app.evaluate(`window.oc.rpc('context.breakdown')`);
-    check('context.breakdown adds up to the window', breakdown && breakdown.slices.reduce((a, s) => a + s.tokens, 0) === breakdown.limit && breakdown.limit === 10000, breakdown && { basis: breakdown.basis, tokens: breakdown.tokens });
+    check('context.breakdown adds up to the window', breakdown && breakdown.slices.reduce((a, s) => a + s.tokens, 0) === breakdown.limit && breakdown.limit === WINDOW, breakdown && { basis: breakdown.basis, tokens: breakdown.tokens });
     const rendererErrors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', rendererErrors.length === 0, rendererErrors.slice(0, 3));
     console.log(`screenshots: ${shots}`);

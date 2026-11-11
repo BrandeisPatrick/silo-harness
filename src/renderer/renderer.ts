@@ -65,12 +65,14 @@ import { createConfirmDialog } from './confirm.js';
 import { createSidePane, type PaneTab } from './side-pane.js';
 import { createConnection } from './connection.js';
 import { createToolGroups } from './tool-groups.js';
+import { createTurnFold } from './turn-fold.js';
 import { createApprovals } from './approvals.js';
 import { createTranscript } from './transcript.js';
 import { createSessionMessages } from './session-messages.js';
 import { createSessionsView } from './sessions-view.js';
 import { createStatusLine } from './status-line.js';
 import { createHeader } from './header.js';
+import { createEffortPill } from './effort.js';
 
 declare global {
   interface Window {
@@ -137,7 +139,7 @@ const $ = byId;
 hydrateIcons();
 
 const shell = document.querySelector<HTMLElement>('.shell')!;
-const contentEl = document.querySelector<HTMLElement>('.content')!;
+const mainEl = document.querySelector<HTMLElement>('.main')!;
 const transcriptWrap = document.querySelector<HTMLElement>('.transcript-wrap')!;
 const messagesEl = $('messages');
 const emptyState = $('empty-state');
@@ -296,8 +298,12 @@ const transcript = createTranscript({
   cleanError,
   // The chat cards are set up right after the tool rows
   replyEnded: (msg, raw) => chatCards.replyEnded(msg, raw),
+  nodeAdded: (el) => turnFold.nodeAdded(el),
 });
 const { scrollToBottom, showJump, addNode, bubbleImage, setTurn, turnOf, addUserMessage, addSystemMessage, addNoticeCard, addCompaction, assistantText, appendAssistantText, endAssistant, appendThinking, finishThinking } = transcript;
+
+// The "Working for 18s" line over a turn's process, and the fold once it has its answer (turn-fold.ts)
+const turnFold = createTurnFold({ messages: messagesEl, config: () => config });
 
 // Messages between sessions: "Received message from …" and "Messaged …" lines (session-messages.ts)
 const sessionMessages = createSessionMessages({ messages: messagesEl, sessions: () => sessions(), openSession: (id) => void openFromPage(id), addUserRow: transcript.addUserRow });
@@ -327,6 +333,7 @@ const approvals = createApprovals({
   running: () => running(),
   currentMode: () => currentMode(),
   lastCard: toolGroups.lastCard,
+  cardFor: toolGroups.cardFor,
   addNode,
   endAssistant,
   finishThinking,
@@ -500,6 +507,7 @@ function clearMessages(): void {
   emptyState.hidden = false;
   transcript.reset();
   toolGroups.reset();
+  turnFold.reset();
   hiddenTools.clear();
   planCards.clear();
   artifactCards.clear();
@@ -517,6 +525,7 @@ function clearMessages(): void {
 
 function renderTranscript(items: TranscriptItem[]): void {
   clearMessages();
+  turnFold.rendering(true);
   // Only the newest plan can still be decided, and only if nothing was said after it.
   let lastPlan = -1;
   let lastUser = -1;
@@ -525,11 +534,16 @@ function renderTranscript(items: TranscriptItem[]): void {
     else if (item.role === 'user') lastUser = i;
   });
   items.forEach((item, i) => {
-    if (item.role === 'user' && item.origin === 'session') sessionMessages.addReceived(item.text ?? '', item.from, item.turn);
-    else if (item.role === 'user') {
-      const images = Array.isArray(item.images) ? item.images.filter((src): src is string => typeof src === 'string' && Boolean(src)) : [];
-      const shown = unframe(item.origin, item.text ?? '');
-      addUserMessage(shown.text, images.map((src) => ({ src })), Array.isArray(item.mentions) ? item.mentions : null, { turn: item.turn, originLabel: item.origin ? originLabel(item.origin, item.from, shown.note) : undefined, markdown: writtenByModel(item.origin), folded: item.origin === 'dream' });
+    if (item.role === 'user') {
+      let el: HTMLElement;
+      if (item.origin === 'session') el = sessionMessages.addReceived(item.text ?? '', item.from, item.turn);
+      else {
+        const images = Array.isArray(item.images) ? item.images.filter((src): src is string => typeof src === 'string' && Boolean(src)) : [];
+        const shown = unframe(item.origin, item.text ?? '');
+        el = addUserMessage(shown.text, images.map((src) => ({ src })), Array.isArray(item.mentions) ? item.mentions : null, { turn: item.turn, originLabel: item.origin ? originLabel(item.origin, item.from, shown.note) : undefined, markdown: writtenByModel(item.origin), folded: item.origin === 'dream' });
+      }
+      // How long the turn it starts worked: its header reads it (turn-fold.ts)
+      if (typeof item.worked === 'number') el.dataset.worked = String(item.worked);
     } else if (item.role === 'assistant') {
       appendAssistantText(item.text);
       endAssistant();
@@ -553,6 +567,7 @@ function renderTranscript(items: TranscriptItem[]): void {
   });
   // Cards of the last calls when no reply came after them (in a session still running, they wait no longer either)
   chatCards.flush();
+  turnFold.rendering(false);
   scrollToBottom(true);
 }
 
@@ -765,7 +780,12 @@ const statusLine = createStatusLine({
   systemMessage: addSystemMessage,
   cleanError,
 });
-const { setStatus, setStatusText, baseVerb, showPlanReady, syncPlanStatus, syncSpin, setRunning, startCompaction, endCompaction, compactNow, contextMeter, refreshContext } = statusLine;
+const { setStatus, setStatusText, baseVerb, showPlanReady, syncPlanStatus, syncSpin, startCompaction, endCompaction, compactNow, contextMeter, refreshContext } = statusLine;
+/** The session on screen started or stopped running: the status line, and the header of the turn going on */
+function setRunning(v: boolean, startedAt = Date.now(), turnStartedAt?: number, joined = false): void {
+  statusLine.setRunning(v, startedAt);
+  turnFold.setRunning(v, startedAt, turnStartedAt, joined);
+}
 /** Whether a run is going on, the compaction in progress and the status line's state: read through these */
 const running = statusLine.running;
 const compacting = statusLine.compacting;
@@ -1065,6 +1085,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       if (ev.origin === 'session') {
         finishThinking();
         endAssistant();
+        turnFold.turnStarted();
         sessionMessages.addReceived(String(ev.text ?? ''), ev.from, ev.turn);
         break;
       }
@@ -1074,6 +1095,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       if (!label) break;
       finishThinking();
       endAssistant();
+      turnFold.turnStarted();
       addUserMessage(shown.text, [], null, { turn: ev.turn, originLabel: label, markdown: writtenByModel(ev.origin), folded: ev.origin === 'dream' });
       break;
     }
@@ -1201,6 +1223,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       if (msg) {
         finishThinking();
         endAssistant();
+        turnFold.turnStarted();
         addUserMessage(msg.text ?? '', (Array.isArray(msg.attachments) ? msg.attachments : []).map(bubbleImage));
       }
       break;
@@ -1244,6 +1267,8 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       if (ev.reason === 'aborted') addSystemMessage('Interrupted.');
       if (ev.reason === 'max_turns') addSystemMessage('Stopped at the tool turn limit. Raise it in Settings.');
       if (ev.reason === 'plan') showPlanReady();
+      // The turn's header stops counting; with its answer in, the process folds away
+      turnFold.runEnded(ev.reason);
       {
         // Queued messages normally come back through queue_dropped before this; anything still listed goes back too.
         const left = queueList.clear();
@@ -1657,7 +1682,10 @@ const header = createHeader({
   renderRecent: () => connection.renderRecent(),
   connectionChanged: () => connection.configApplied(),
   summaryMode,
-  refoldAll,
+  refoldAll: () => {
+    refoldAll();
+    turnFold.refold();
+  },
   refreshVisionNote,
   refreshChanges: () => changesPane.refresh(),
   refreshContext,
@@ -1668,6 +1696,20 @@ const header = createHeader({
   cleanError,
 });
 const { currentMode, announceMode, setMode, toggleMode, applyConfigToUi } = header;
+
+// The effort pill next to the model (effort.ts)
+createEffortPill({
+  btn: $<HTMLButtonElement>('effort-btn'),
+  boundary: transcriptWrap,
+  api: oc,
+  config: () => config,
+  setConfig: (next) => {
+    config = next;
+  },
+  focusComposer: () => inputEl.focus(),
+  showError: showInlineError,
+  cleanError,
+});
 
 // ---------- Provider connection: the banner above the composer and the welcome screen's setup strip ----------
 
@@ -1756,13 +1798,13 @@ const { hideSlashMenu, updateSlashMenu, moveSlashSelection, acceptSlashSelection
   autosize,
 });
 
-// ---------- Side pane: Browser, Diff and Terminal tabs, then the mods' tabs ----------
+// ---------- Side pane: one strip of page tabs and tool tabs (Diff, Terminal, the mods' panes) ----------
 
 const { confirmAction } = createConfirmDialog({ dialog: confirmDialog, hideBrowser: () => oc.browser.setVisible(false), afterClose: () => syncBrowserView() });
 
 const pane = createSidePane({
   shell,
-  content: contentEl,
+  main: mainEl,
   browserView,
   dialogs: [settingsDialog, shortcutsDialog, confirmDialog, lightbox],
   browser: oc.browser,
@@ -2012,6 +2054,7 @@ const modsHost = createModsHost({
   openPage: (page, opts) => (page === 'scheduled' && opts?.form === 'new' ? openTaskForm() : openPage({ page })),
   openLightbox,
   showPane: (tab) => showPaneTab(tab as PaneTab),
+  closePane: (tab) => pane.closeTab(tab),
   paneTabsChanged,
   paneLayoutChanged,
   syncBrowserView,
@@ -2039,7 +2082,7 @@ const dreamingPage = createDreamingPage({
 });
 pagesView = createPages({
   shell,
-  main: document.querySelector<HTMLElement>('.main')!,
+  main: document.querySelector<HTMLElement>('.chat-col')!,
   topbar: document.querySelector<HTMLElement>('.topbar')!,
   changed: (open) => {
     closeMenu();

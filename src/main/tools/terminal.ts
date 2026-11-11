@@ -49,7 +49,7 @@ export const terminalRun: Tool = {
   name: 'terminal_run',
   group: 'terminal',
   description:
-    'Run a command in the Terminal pane the user can see: a shell tab next to the chat that keeps running after this call. Use it for dev servers, watchers and anything the user should watch or take over, or to run in a tab the user is already using; use bash for ordinary builds, tests and git. Returns the output and exit code when the command finishes within timeout_ms (default 15 s), otherwise what it printed so far while it keeps running (then terminal_read shows more).',
+    'Run a command in the Terminal pane the user can see: a shell tab next to the chat that keeps running after this call. Use it for dev servers, watchers, sign-ins (aws sso login) and anything the user should watch or take over, or to run in a tab the user is already using; use bash for ordinary builds, tests and git. Returns the output and exit code when the command finishes within timeout_ms (default 15 s), otherwise what it printed so far while it keeps running (then terminal_read shows more).',
   parameters: {
     type: 'object',
     properties: {

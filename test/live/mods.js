@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { launch, checker, sleep } = require('./rig.js');
+const { startSite } = require('./support/site.js');
 
 const SHOTS = process.env.SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-mods-shots-'));
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -99,12 +100,23 @@ const FRAME_FIT = `(() => {
   return { width: vw, overflowX: d.scrollWidth - vw, overflowY: d.scrollHeight - d.clientHeight, scrollbars: (innerWidth - vw) + (innerHeight - d.clientHeight), cut };
 })()`;
 
+/** The fixture site: a page in the browser, whose native view the alignment checks measure */
+let site = null;
+
 async function start(profile) {
+  site = site || (await startSite());
   const inspectPort = 20000 + Math.floor(Math.random() * 20000);
   const app = await launch({ profile, mode: 'bypass', config: { theme: 'light' }, args: [`--inspect=${inspectPort}`] });
   app.inspectPort = inspectPort;
+  // A blank tab shows the New tab page and keeps the native view hidden: load a page so there is a view to align.
+  const landing = `${site.base}/landing.html`;
+  await app.evaluate(`oc.rpc('browser.go', ${JSON.stringify(landing)})`);
+  await app.waitFor(`oc.browser.state().then((s) => s.url === ${JSON.stringify(landing)} && !s.loading)`, 10_000, 'the landing page').catch(() => {});
   return app;
 }
+
+/** Brings the browser to the front of the pane, as a click on a page tab does. */
+const showBrowser = (app) => app.evaluate(`document.querySelector('.browser-tab').click()`);
 
 /** The bounds sent for the native view match #browser-view's box, and the view's page has that size. */
 async function checkAligned(app, label) {
@@ -115,7 +127,7 @@ async function checkAligned(app, label) {
   const same = b.bounds && ['x', 'y', 'width', 'height'].every((k) => Math.abs(b.bounds[k] - e[k]) < 1);
   const placed = size && [e.x, e.y, e.width, e.height].every((v, i) => Math.abs(size[i] - v) <= 1);
   // What the window thinks is in front, for the failure message: an open dialog or another tab explains a hidden view.
-  const state = await app.evaluate(`({ dialogs: [...document.querySelectorAll('dialog')].filter((d) => d.open).map((d) => d.id), shell: document.querySelector('.shell').className, tab: document.querySelector('.pane-tab.active')?.id, menu: Boolean(document.querySelector('.popover')) })`);
+  const state = await app.evaluate(`({ dialogs: [...document.querySelectorAll('dialog')].filter((d) => d.open).map((d) => d.id), shell: document.querySelector('.shell').className, tab: document.querySelector('.strip-tab.active')?.dataset.tab, menu: Boolean(document.querySelector('.popover')) })`);
   check(`browser view covers #browser-view (${label})`, b.visible && same && placed, { sent: b.bounds, element: e, view: size, state, errors: app.console.filter((l) => /^\[(error|exception)\]/.test(l)).slice(-3) });
 }
 
@@ -246,6 +258,10 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'light'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'light'; })()`);
       await app.evaluate(`document.getElementById('new-session-btn').click()`);
       await sleep(800);
+      // Each session has its own tabs: the new one gets a page too, for the alignment checks below
+      const landing = `${site.base}/landing.html`;
+      await app.evaluate(`oc.rpc('browser.go', ${JSON.stringify(landing)})`);
+      await app.waitFor(`oc.browser.state().then((s) => s.url === ${JSON.stringify(landing)} && !s.loading)`, 10_000, 'the landing page in the new session').catch(() => {});
     }
 
     // ---------- Layout: collapse, resize, close and reopen, remembered across a relaunch ----------
@@ -311,32 +327,37 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
 
       // The pane at its narrowest (360 px) with the Scheduled tab in front and a count on it.
       const sched = await rpc(app, 'schedules.create', { name: 'Nightly audit', prompt: 'Run npm audit.', when: { kind: 'cron', expr: '0 3 * * *' }, target: 'new', cwd: app.project });
-      await app.evaluate(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#browser-toggle').click(); })()`);
+      await app.evaluate(`(() => { if (document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); })()`);
       await app.waitFor(`Boolean(document.querySelector('.mod-pane-tab[data-view="scheduled/main"]'))`, 10_000, 'the Scheduled tab');
-      await app.click('.mod-pane-tab[data-view="scheduled/main"]');
+      // Diff and Terminal open too, then Scheduled (from harness.ui.open's path), last and in front
+      await app.key('d', { meta: true, shift: true });
+      await app.key('t', { meta: true, shift: true });
+      await dbg(app, `open('scheduled/main')`);
       await app.waitFor(`!document.querySelector('.mod-pane-tab[data-view="scheduled/main"] .count-badge').hidden`, 10_000, 'the Scheduled count');
       const STRIP = `(() => {
-        const strip = document.querySelector('.pane-tabs');
+        const strip = document.querySelector('#pane-tabs');
         const tabs = [...strip.querySelectorAll(':scope > [role=tab]')].filter((t) => !t.hidden);
         const box = (e) => e.getBoundingClientRect();
         const sticksOut = [];
-        for (const t of tabs) for (const k of t.children) { const b = box(k); if (b.width > 1 && (b.left < box(t).left - 0.5 || b.right > box(t).right + 0.5)) sticksOut.push(t.id + ' ' + k.className); }
-        const overlaps = tabs.slice(1).filter((t, i) => box(t).left < box(tabs[i]).right - 0.5).map((t) => t.id);
+        for (const t of tabs) for (const k of t.children) { const b = box(k); if (b.width > 1 && getComputedStyle(k).visibility !== 'hidden' && (b.left < box(t).left - 0.5 || b.right > box(t).right + 0.5)) sticksOut.push(t.dataset.tab + ' ' + k.className); }
+        const overlaps = tabs.slice(1).filter((t, i) => box(t).left < box(tabs[i]).right - 0.5).map((t) => t.dataset.tab);
         const named = tabs.every((t) => (t.getAttribute('aria-label') || t.textContent).trim().length > 0);
-        const tips = tabs.filter((t) => t.classList.contains('icon-only') || (t.querySelector('.pane-tab-label') && t.querySelector('.pane-tab-label').scrollWidth > t.querySelector('.pane-tab-label').clientWidth + 1)).every((t) => !!t.dataset.tip);
+        const cut = (t) => { const l = t.querySelector('.tab-title'); return l && l.scrollWidth > l.clientWidth + 1; };
+        const tips = tabs.filter(cut).every((t) => !!t.dataset.tip);
         const front = tabs.find((t) => t.getAttribute('aria-selected') === 'true');
-        const frontLabel = front && front.querySelector('.pane-tab-label');
-        return { pane: Math.round(box(document.getElementById('side-pane')).width), overflow: strip.scrollWidth - strip.clientWidth, sticksOut, overlaps, named, tips, frontWhole: !!frontLabel && !front.classList.contains('icon-only') && frontLabel.scrollWidth <= frontLabel.clientWidth + 1, iconOnly: tabs.filter((t) => t.classList.contains('icon-only')).length };
+        const plus = box(document.getElementById('browser-tab-new'));
+        const corner = box(document.querySelector('.window-actions'));
+        return { pane: Math.round(box(document.getElementById('side-pane')).width), tabs: tabs.length, scrolls: strip.scrollWidth > strip.clientWidth, sticksOut, overlaps, named, tips, frontShown: !!front && box(front).left >= box(strip).left - 0.5 && box(front).right <= box(strip).right + 0.5, plusShown: plus.width > 0 && plus.right <= corner.left, minWidth: Math.min(...tabs.filter((t) => !t.classList.contains('icon-only')).map((t) => Math.round(box(t).width))), iconWidth: Math.min(32, ...tabs.filter((t) => t.classList.contains('icon-only')).map((t) => Math.round(box(t).width))) };
       })()`;
       for (const w of [360, 440, 520]) {
         await app.evaluate(`document.getElementById('side-pane').style.setProperty('--browser-w', '${w}px')`);
         await paint(app);
         const st = await app.evaluate(STRIP);
-        check(`pane tabs at ${w} px: nothing clipped, no badge over a neighbour, every tab named, shortened ones have a tooltip, the front tab whole`, st.overflow <= 0 && !st.sticksOut.length && !st.overlaps.length && st.named && st.tips && st.frontWhole, st);
-        await app.screenshotOf(path.join(SHOTS, `pane-tabs-${w}-light.png`), '.pane-tabs', 0);
+        check(`pane tabs at ${w} px: nothing clipped, no badge over a neighbour, every tab named, cut titles have a tooltip, the front tab in view, + clear of the corner's buttons, a titled tab 60 px or more`, st.tabs === 4 && !st.sticksOut.length && !st.overlaps.length && st.named && st.tips && st.frontShown && st.plusShown && st.minWidth >= 60 && st.iconWidth >= 30, st);
+        await app.screenshotOf(path.join(SHOTS, `pane-tabs-${w}-light.png`), '.pane-strip', 0);
       }
       await app.evaluate(`document.getElementById('side-pane').style.removeProperty('--browser-w')`);
-      await app.click('#pane-tab-browser');
+      await showBrowser(app);
       if (sched && sched.id) await rpc(app, 'schedules.remove', sched.id);
       await paint(app);
     }
@@ -392,6 +413,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       writeMod(userMods, 'backdrop', { name: 'Backdrop', contributes: { views: [{ id: 'main', title: 'Backdrop', entry: 'bg.html', seat: 'background' }] } }, {
         'bg.html': `<!doctype html><style>html,body{margin:0;height:100%}body{background:radial-gradient(circle at 20% 30%,#f2a65a,transparent 50%),radial-gradient(circle at 80% 70%,#5a8df2,transparent 55%),linear-gradient(135deg,#2d1b4e,#1b4e3d)}</style><script src="/@harness/harness.js"></script>`,
       });
+      // A theme of yours from before themes were removed: it loads, its CSS is never applied
       writeMod(userMods, 'tint', { name: 'Tint', contributes: { styles: ['theme.css'] } }, { 'theme.css': ':root { --accent: #2b6cb0; }' });
       await sleep(1200);
       // The background is a look: approved at its first Use, not turned on (used once here, so its chat card is
@@ -402,9 +424,11 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await sleep(800);
       // Tab
       const tabBtn = await app.waitFor(`document.querySelector('.mod-pane-tab[data-view="tabby/main"]') ? true : false`, 5000, 'the tab button').catch(() => false);
-      check('tab mod: a tab after Browser, Diff and Terminal', tabBtn && (await app.evaluate(`(() => { const t = [...document.querySelectorAll('.pane-tabs [role=tab]')].map((b) => b.dataset.view || b.id); return t.indexOf('pane-tab-terminal') >= 0 && t.indexOf('pane-tab-terminal') < t.indexOf('tabby/main'); })()`)));
+      check('tab mod: its tab waits out of the strip until it is opened', tabBtn && (await dbg(app, 'tabs()')).find((t) => t.key === 'tabby/main')?.inStrip === false);
       check('tab mod: no frame before it is first shown', !(await view(app, 'tabby/main')).frameId);
-      await app.click('.mod-pane-tab[data-view="tabby/main"]');
+      await dbg(app, `open('tabby/main')`);
+      await sleep(200);
+      check('tab mod: opened, it joins the strip last', await app.evaluate(`(() => { const t = [...document.querySelectorAll('#pane-tabs > [role=tab]')].filter((b) => !b.hidden); return t[t.length - 1]?.dataset.view === 'tabby/main'; })()`));
       await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.hello`, 5000, 'the tab page').catch(() => {});
       const tv = await view(app, 'tabby/main');
       check('tab mod: fills the pane and says hello', tv.hello && (await app.evaluate(`(() => { const f = document.querySelector('.mod-tab-panel:not([hidden]) iframe'); const p = document.querySelector('#side-pane').getBoundingClientRect(); return f && f.getBoundingClientRect().height > p.height - 60; })()`)));
@@ -412,7 +436,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await sleep(700);
       await shot(app, 'seat-tab-light');
       const tabFrame = tv.frameId;
-      await app.click('#pane-tab-browser');
+      await showBrowser(app);
       await sleep(300);
       check('tab mod: kept alive while hidden and told so', (await view(app, 'tabby/main')).frameId === tabFrame && (await view(app, 'tabby/main')).badge === 'hidden');
       await checkAligned(app, 'back on the Browser tab');
@@ -430,16 +454,21 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       const sv = await view(app, 'stripy/main');
       check('composer mod: sits directly above the composer, sized to content', sv && sv.hello && sv.height > 10 && sv.height <= 120 && (await app.evaluate(`document.querySelector('#mod-strip').nextElementSibling.id === 'chatbar' && document.querySelector('#chatbar').firstElementChild.id === 'composer' && !document.querySelector('#mod-strip').hidden`)), sv);
       await app.screenshotOf(path.join(SHOTS, 'seat-composer-light.png'), '.composer-wrap', 8);
-      // Styles: the token reaches the app and, through theme.changed, every mod page
-      await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#2b6cb0'`, 5000, 'the tint').catch(() => {});
-      check('styles mod: <style data-mod> injected and the token applies', await app.evaluate(`Boolean(document.querySelector('style[data-mod="tint"]')) && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#2b6cb0'`));
-      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #2b6cb0'`, 5000, 'the token in the tab page').catch(() => {});
-      check("styles mod: the token reaches a mod page's own CSS", (await view(app, 'tabby/main')).title === 'Tabby #2b6cb0', (await view(app, 'tabby/main')).title);
-      check('styles mod: theme.changed reached the bundled views', (await dbg(app, 'log()')).some((e) => e.kind === 'event' && e.method === 'theme.changed' && e.view === 'tasks/main'));
-      await shot(app, 'styles-tint-light');
+      // An old theme (contributes.styles): listed with a note, never applied
+      const tint = (await dbg(app, 'list()')).find((m) => m.key === 'tint');
+      check('an old theme loads with a note, and its CSS never reaches the window', tint && tint.state !== 'invalid' && tint.problems.some((p) => p.warning && /Themes were removed/.test(p.message)) && (await app.evaluate(`!document.querySelector('style[data-mod]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`)), tint && tint.problems);
+      check('an old theme is not offered in the chat', await app.evaluate(`!document.querySelector('.mod-offer[data-mod="tint"]')`));
       await rpc(app, 'mods.setEnabled', 'tint', false);
+      // The scheme: the app's tokens reach every mod page through theme.changed
+      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #1f66c4'`, 5000, 'the accent in the tab page').catch(() => {});
+      check("the app's accent reaches a mod page's own CSS", (await view(app, 'tabby/main')).title === 'Tabby #1f66c4', (await view(app, 'tabby/main')).title);
+      await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'dark'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'dark'; })()`);
       await sleep(800);
-      check('styles mod off: its style is removed', await app.evaluate(`!document.querySelector('style[data-mod="tint"]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`));
+      const darkAccent = await app.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
+      await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === ${JSON.stringify('Tabby ' + darkAccent)}`, 5000, 'the dark accent in the tab page').catch(() => {});
+      check('dark: theme.changed reached the bundled views and the tab page has the dark accent', (await dbg(app, 'log()')).some((e) => e.kind === 'event' && e.method === 'theme.changed' && e.view === 'tasks/main') && (await view(app, 'tabby/main')).title === `Tabby ${darkAccent}`, { darkAccent, title: (await view(app, 'tabby/main')).title });
+      await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'light'; await window.oc.setConfig(c); document.documentElement.dataset.theme = 'light'; })()`);
+      await sleep(800);
       // Background
       await app.evaluate(`document.activeElement.blur()`);
       await sleep(300);
@@ -505,7 +534,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       check('isolation: messages from a frame the host did not make are ignored', lg.some((e) => e.kind === 'ignored') && !lg.some((e) => e.kind !== 'ignored' && e.method === 'hello'), lg.slice(0, 8));
       await app.evaluate(`document.getElementById('stranger')?.remove()`);
       // Dialogs hide the browser view.
-      await app.click('#pane-tab-browser');
+      await showBrowser(app);
       await app.click('#settings-btn');
       await checkHidden(app, 'Settings open');
       await app.click('#settings-close');
@@ -551,6 +580,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
     const lines = app.console.filter((l) => /\[(error|exception)\]/.test(l));
     if (lines.length) console.log('console:\n' + lines.slice(-15).join('\n'));
     await app.close();
+    site?.close();
     fs.rmSync(profile, { recursive: true, force: true });
   }
   process.exit(done() ? 1 : 0);

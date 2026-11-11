@@ -11,6 +11,7 @@ import type { HistoryRecord, HistoryStats, SearchHit, TrashEntry } from '../../s
 import type { App, Disposer } from '../app';
 import type { HistoryService } from '../services';
 import type { Msg, Session, SessionMutation } from '../sessions';
+import { pruneTurnTimes } from '../sessions';
 import { HistoryLog, safeId } from './log';
 import { activeModel } from '../providers';
 import { CONVERSATION_TYPES, hasOpenRun, lastSnapshot, missingToolResults, replayConversation } from './replay';
@@ -361,6 +362,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
     if (!changed && !missing.length && !open) return false;
     if (s.lastPrompt && s.lastPrompt.at > s.messages.length) delete s.lastPrompt;
     if (s.turns) s.turns = s.turns.filter((t) => t.at < s!.messages.length);
+    pruneTurnTimes(s);
     store.save(s, false);
     return true;
   }

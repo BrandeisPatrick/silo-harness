@@ -344,7 +344,7 @@ async function main() {
 
     // A new session in atlas-api, the reading column and the rail; the Browser pane closed
     await app.waitFor(`document.querySelectorAll('.session-item').length >= 8`, 15_000, 'the seeded sessions');
-    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-close').click(); })()`);
+    await ev(`(() => { if (!document.querySelector('.shell').classList.contains('pane-hidden')) document.querySelector('#pane-toggle').click(); })()`);
     await app.click('#new-session-btn');
     await app.waitFor(`!document.querySelector('#empty-state').hidden && document.querySelector('.session-item.active')`, 10_000, 'the new session');
     await app.waitFor(`window.__oc_debug.mods.views().filter((v) => v.seat === 'rail' && !v.collapsed).every((v) => v.hello && v.height > 0)`, 45_000, 'the rail');

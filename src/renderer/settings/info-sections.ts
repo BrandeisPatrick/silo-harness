@@ -186,7 +186,6 @@ export function appearanceSection(ctx: Ctx): Section {
     kindRow('background', 'appearance-background', 'Background', 'wallpaper image picture mod backgrounds dim look'),
     kindRow('composer', 'appearance-composer', 'Chat bar', 'look composer input message box style mod'),
     kindRow('conversation', 'appearance-conversation', 'Conversation', 'look transcript messages chat style mod'),
-    kindRow('theme', 'appearance-themes', 'Theme', 'theme themes styles colours colors mod look'),
   ];
   const kindGroup = group('Looks', ...kinds.map((k) => k.row));
   el.append(group(null, theme), kindGroup);

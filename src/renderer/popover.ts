@@ -118,24 +118,38 @@ export function openMenu(sections: MenuSection[], opts: MenuOptions): MenuHandle
 
   const position = () => {
     const placement = opts.placement ?? 'bottom-start';
+    // Measured at its natural height; a menu taller than the room it gets is capped to that room and scrolls (a
+    // provider listing dozens of models used to flip below the model chip, off the bottom of the window)
+    el.style.maxHeight = '';
     const w = el.offsetWidth;
-    const hgt = el.offsetHeight;
+    let hgt = el.offsetHeight;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const bound = opts.boundary?.getBoundingClientRect() ?? new DOMRect(0, 0, vw, vh);
+    const cap = (room: number) => {
+      if (hgt <= room) return;
+      hgt = Math.max(0, room);
+      el.style.maxHeight = `${Math.floor(hgt)}px`;
+    };
     let left: number;
     let top: number;
     if ('x' in opts.anchor) {
       left = opts.anchor.x;
       top = opts.anchor.y;
       if (top + hgt > vh - 8) top = Math.max(8, top - hgt);
+      cap(vh - 8 - top);
     } else {
       const r = opts.anchor.getBoundingClientRect();
       left = placement.endsWith('end') ? r.right - w : r.left;
-      const above = r.top - hgt - 6;
-      const below = r.bottom + 6;
-      if (placement.startsWith('top')) top = above >= 8 ? above : below;
-      else top = below + hgt <= vh - 8 ? below : Math.max(8, above);
+      const roomAbove = r.top - 6 - 8;
+      const roomBelow = vh - 8 - (r.bottom + 6);
+      // The side asked for when the menu fits there, else the other side when it fits there, else the roomier one
+      const preferAbove = placement.startsWith('top');
+      const fitsFirst = hgt <= (preferAbove ? roomAbove : roomBelow);
+      const fitsOther = hgt <= (preferAbove ? roomBelow : roomAbove);
+      const above = fitsFirst ? preferAbove : fitsOther ? !preferAbove : roomAbove >= roomBelow;
+      cap(above ? roomAbove : roomBelow);
+      top = above ? r.top - 6 - hgt : r.bottom + 6;
     }
     const minLeft = Math.max(8, bound.left + 8);
     const maxLeft = Math.min(vw - 8, bound.right - 8) - w;

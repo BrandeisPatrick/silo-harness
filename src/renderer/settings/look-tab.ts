@@ -1,19 +1,18 @@
-// One look tab of Settings → Mods (Background, Chat bar, Conversation, Theme). At the top, a preview of what is in
+// One look tab of Settings → Mods (Background, Chat bar, Conversation). At the top, a preview of what is in
 // use, or of the version being tried; under it the version's name and source with "In use", or Use and Back to
 // current; its mod's own settings (and Dim on Background); then every version as a card, Default first, then the
 // built-in ones, yours and the project's. A click on a card previews it; Use applies it, asking first the first time
-// a look of yours or a project's is used (the only approval a look needs). New ⌄ asks the agent for one or writes a
-// starter from a template, which shows in the grid previewed, not applied. Nothing here has a switch.
+// a look of yours or a project's is used (the only approval a look needs). New ⌄ asks the agent for one, writes a
+// starter from a template or installs one, which shows in the grid previewed, not applied. Nothing here has a switch.
 
 import type { LookKind, ModInfo, ModLayout, ModSettingField } from '../../shared/mods';
 import type { ModPreviews, BackgroundPreview } from '../mods-host.js';
-import { escapeHtml, h } from '../dom.js';
+import { h } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
 import { modeOf } from '../modes.js';
-import { looksUsable } from '../mods/logic.js';
 import { lookInUse, lookSetPatch, lookSets, lookVersions, needsApproval, setInUse, useSheet, type LookTabInfo, type LookVersion, type NewModKind } from './model.js';
 import { createLookPreview, type LookPreview, type PreviewState } from './look-preview.js';
-import { button, chip, row, type Row } from './ui.js';
+import { button, chip, dropdown, newMenu, row, type Row } from './ui.js';
 import type { Ctx } from './ctx.js';
 
 export interface LookTabDeps {
@@ -34,8 +33,8 @@ export interface LookTabDeps {
   /** The Install form of the section, shown in `slot` */
   openInstall(slot: HTMLElement): void;
   chooseImage(): Promise<void>;
-  /** A look's or a theme's CSS for the previews (cached by the section) */
-  css(kind: 'theme' | 'composer' | 'conversation', ref: string, rev: string): Promise<string>;
+  /** A look's CSS for the previews (cached by the section) */
+  css(kind: 'composer' | 'conversation', ref: string, rev: string): Promise<string>;
   reveal(m: ModInfo): void;
   customise(m: ModInfo): Promise<void>;
   remove(m: ModInfo): Promise<void>;
@@ -46,7 +45,7 @@ export interface LookTab {
   el: HTMLElement;
   /** The mods or the layout changed */
   render(): void;
-  /** Shows a version in the preview ("<mod key>/<id>", a theme's key, "image", null for Default), or what is in use (undefined) */
+  /** Shows a version in the preview ("<mod key>/<id>", "image", null for Default), or what is in use (undefined) */
   preview(ref: string | null | undefined): void;
   /** The tab came on screen or went (live backgrounds run only while it shows) */
   shown(on: boolean): void;
@@ -56,51 +55,6 @@ export interface LookTab {
   dim(value: number): void;
   /** For __oc_debug.settings.looks() */
   state(): { kind: LookKind; current: string | null; shown: string | null; previewing: boolean; versions: (string | null)[]; ready: boolean };
-}
-
-/** A small menu under a button, inside the page (the window's menus sit under the Settings dialog). */
-function dropdown(btn: HTMLButtonElement, wrap: HTMLElement, items: () => { label: string; icon: IconName; danger?: boolean; run: () => void }[]): void {
-  let menu: HTMLElement | null = null;
-  const close = () => {
-    menu?.remove();
-    menu = null;
-    btn.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', outside, true);
-  };
-  const outside = (e: Event) => {
-    if (menu && !menu.contains(e.target as Node) && e.target !== btn && !btn.contains(e.target as Node)) close();
-  };
-  btn.setAttribute('aria-haspopup', 'menu');
-  btn.setAttribute('aria-expanded', 'false');
-  btn.addEventListener('click', () => {
-    if (menu) return close();
-    menu = h('div', { class: 'sp-menu', role: 'menu' });
-    for (const it of items()) {
-      const b = h('button', { type: 'button', class: `sp-menu-item${it.danger ? ' danger' : ''}`, role: 'menuitem', html: `${icon(it.icon, 14)}<span>${escapeHtml(it.label)}</span>` });
-      b.addEventListener('click', () => {
-        close();
-        it.run();
-      });
-      menu.append(b);
-    }
-    menu.addEventListener('keydown', (e) => {
-      const list = [...menu!.querySelectorAll<HTMLButtonElement>('.sp-menu-item')];
-      const i = list.indexOf(document.activeElement as HTMLButtonElement);
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        close();
-        btn.focus();
-      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]?.focus();
-      }
-    });
-    wrap.append(menu);
-    btn.setAttribute('aria-expanded', 'true');
-    document.addEventListener('pointerdown', outside, true);
-    menu.querySelector<HTMLButtonElement>('.sp-menu-item')?.focus();
-  });
 }
 
 export function lookTab(d: LookTabDeps): LookTab {
@@ -119,7 +73,7 @@ export function lookTab(d: LookTabDeps): LookTab {
 
   // ---------- Its line: name and source, In use or Use / Back to current ----------
 
-  const head = row({ id: info.row, title: 'Default', desc: '', keywords: `${info.noun} ${info.title} look use preview in use mod ${kind === 'background' ? 'wallpaper picture image' : kind === 'theme' ? 'theme colours colors styles' : kind === 'composer' ? 'composer input message box chat bar' : 'transcript messages chat'}` });
+  const head = row({ id: info.row, title: 'Default', desc: '', keywords: `${info.noun} ${info.title} look use preview in use mod new install template ${kind === 'background' ? 'wallpaper picture image' : kind === 'composer' ? 'composer input message box chat bar' : 'transcript messages chat'}` });
   head.el.classList.add('sp-look-current');
   const acts = h('span', { class: 'sp-control-group sp-look-acts' });
   head.control.append(acts);
@@ -127,29 +81,27 @@ export function lookTab(d: LookTabDeps): LookTab {
 
   // ---------- The grid of versions ----------
 
-  const newWrap = h('span', { class: 'sp-menu-wrap' });
-  const newBtn = button('New', () => {}, { icon: 'plus' });
-  newBtn.insertAdjacentHTML('beforeend', icon('chevron-down', 12));
-  newBtn.classList.add('sp-look-new');
-  newWrap.append(newBtn);
-  const installBtn = button('Install…', () => d.openInstall(formSlot), { icon: 'download' });
-  const gridHead = h('div', { class: 'sp-look-grid-head sp-only-browse' }, h('span', { class: 'sp-look-grid-title' }, 'Versions'), h('span', { class: 'spacer' }), installBtn, newWrap);
   const formSlot = h('div', { class: 'sp-look-form-slot sp-only-browse' });
   const grid = h('div', { class: 'sp-look-grid sp-only-browse', role: 'list', 'aria-label': `${info.title} versions` });
-  dropdown(newBtn, newWrap, () => [
-    { label: 'Ask the agent…', icon: 'sparkles', run: () => ctx.askAgent(info.prompt) },
-    {
-      label: 'From a template…',
-      icon: 'file-plus',
-      run: () =>
-        d.openCreate(kind === 'background' ? 'background' : kind === 'theme' ? 'theme' : `look:${kind}`, formSlot, (m) => {
-          const set = lookSets([m], 1)[0];
-          const ref = set?.[kind] ?? null;
-          if (ref) preview(ref);
-        }),
-    },
-    ...(kind === 'background' ? [{ label: 'Your picture…', icon: 'image' as IconName, run: () => void d.chooseImage() }] : []),
-  ]);
+  const newMenuEl = newMenu(
+    () => [
+      { label: 'Ask the agent…', icon: 'sparkles', run: () => ctx.askAgent(info.prompt) },
+      {
+        label: 'From a template…',
+        icon: 'file-plus',
+        run: () =>
+          d.openCreate(kind === 'background' ? 'background' : `look:${kind}`, formSlot, (m) => {
+            const set = lookSets([m], 1)[0];
+            const ref = set?.[kind] ?? null;
+            if (ref) preview(ref);
+          }),
+      },
+      ...(kind === 'background' ? [{ label: 'Your picture…', icon: 'image' as IconName, run: () => void d.chooseImage() }] : []),
+      { label: 'Install…', icon: 'download', run: () => d.openInstall(formSlot) },
+    ],
+    'sp-look-new',
+  );
+  const gridHead = h('div', { class: 'sp-look-grid-head sp-only-browse' }, h('span', { class: 'sp-look-grid-title' }, 'Versions'), h('span', { class: 'spacer' }), newMenuEl.wrap);
 
   const el = h('div', { class: 'sp-group sp-tab-head sp-look-tab', 'data-subtab': info.tab, 'data-kind': kind }, pane, head.el, settingsBox);
   if (d.dimRow) el.append(d.dimRow.el);
@@ -165,20 +117,9 @@ export function lookTab(d: LookTabDeps): LookTab {
   const modOf = (key: string) => d.mods().find((m) => m.key === key);
   const fresh = (v: LookVersion | null) => (v?.mod ? (modOf(v.mod.key) ?? v.mod) : null);
 
-  /** The theme the previews are dressed in: the one in use (when it applies), or on the Theme tab the version itself */
-  const themeRefFor = (v: LookVersion | null): string | null => {
-    if (kind === 'theme') return v?.ref ?? null;
-    const t = layout()?.theme ?? null;
-    const m = t ? modOf(t) : undefined;
-    return m && looksUsable(m) ? t : null;
-  };
-
   async function stateFor(v: LookVersion | null, frame: BackgroundPreview | null): Promise<PreviewState> {
     const m = fresh(v);
-    const themeRef = themeRefFor(v);
-    const themeMod = themeRef ? modOf(themeRef) : undefined;
-    const themeCss = themeRef && themeMod ? await d.css('theme', themeRef, themeMod.rev).catch(() => '') : '';
-    const st: PreviewState = { themeCss, mode: modeOf(ctx.config()) };
+    const st: PreviewState = { mode: modeOf(ctx.config()) };
     if ((kind === 'composer' || kind === 'conversation') && v?.ref && m) {
       st.lookCss = await d.css(kind, v.ref, m.rev).catch(() => '');
       st.lookRef = v.ref;
@@ -234,7 +175,7 @@ export function lookTab(d: LookTabDeps): LookTab {
     else title.append(chip('Preview', 'neutral'));
     const desc = [v?.source ?? '', v?.description ?? ''].filter(Boolean).join(' · ');
     head.setDesc(desc);
-    head.el.dataset.search = [info.title, info.noun, v?.title ?? '', desc, 'look use preview in use'].join(' ');
+    head.el.dataset.search = [info.title, info.noun, v?.title ?? '', desc, 'look use preview in use new install template'].join(' ');
     const problems = m?.problems.filter((p) => !p.warning) ?? [];
     head.problem(problems.length ? `${m!.manifest?.name ?? m!.id} has a problem: ${problems[problems.length - 1].message.split('\n')[0]}` : null);
 
@@ -283,8 +224,7 @@ export function lookTab(d: LookTabDeps): LookTab {
     const list = versions();
     const cur = current();
     const shown = shownRef();
-    const themeSig = kind === 'theme' ? '' : `${themeRefFor(null)}|${modOf(themeRefFor(null) ?? '')?.rev ?? ''}`;
-    const sig = JSON.stringify([list.map((v) => [v.ref, v.title, v.source, v.preview ?? '', fresh(v)?.rev ?? '', JSON.stringify(fresh(v)?.settings ?? {})]), themeSig, document.documentElement.dataset.theme ?? '', visible]);
+    const sig = JSON.stringify([list.map((v) => [v.ref, v.title, v.source, v.preview ?? '', fresh(v)?.rev ?? '', JSON.stringify(fresh(v)?.settings ?? {})]), document.documentElement.dataset.theme ?? '', visible]);
     if (sig !== gridSig) {
       gridSig = sig;
       for (const c of cards.values()) disposeCard(c);

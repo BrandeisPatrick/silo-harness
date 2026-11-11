@@ -119,6 +119,16 @@
       "type": "boolean",
       "description": "Look for a newer release on GitHub once a day and show a quiet line when there is one."
     },
+    "toolConcurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "How many read-only tool calls of one reply run at the same time; 1 runs every call one after another. Default 4."
+    },
+    "timingLog": {
+      "type": "boolean",
+      "description": "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."
+    },
     "ollama": {
       "type": "object",
       "additionalProperties": false,
@@ -244,7 +254,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Sites the agent may use without asking (example.com, *.example.com, localhost:3000)."
+          "description": "Sites the agent may use without asking (https://example.com, *.example.com, localhost:3000). An entry without a scheme covers https only (and http on localhost)."
         },
         "sensitive": {
           "type": "array",
@@ -283,6 +293,10 @@
         "model": {
           "type": "string",
           "description": "The safety check's model: \"<provider>:<model>\" or a model id of the session's provider. Empty: the session's own model. Your own settings.json only."
+        },
+        "learn": {
+          "type": "boolean",
+          "description": "Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only."
         }
       }
     },
@@ -427,6 +441,17 @@
               "off"
             ],
             "description": "ollama: thinking mode for models that can reason."
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "description": "Reasoning effort for the session's model calls (the pill next to the model). Unset: the model's default. Clamped to the levels the model takes."
           }
         },
         "allOf": [
@@ -520,6 +545,29 @@
                 "type": {
                   "enum": [
                     "ollama"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "effort"
+              ]
+            },
+            "then": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "anthropic",
+                    "openai",
+                    "openrouter",
+                    "portkey",
+                    "groq",
+                    "deepseek",
+                    "together",
+                    "openai-compatible"
                   ]
                 }
               }

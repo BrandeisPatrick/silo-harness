@@ -103,7 +103,7 @@ async function siteCheck(name: string, url: string, line: string, ctx: ToolConte
   const decision = siteDecision({ url, action: 'read', mode: ctx.mode, cwd: ctx.cwd, settings: lists(ctx), sessionAllowed: ctx.sitesAllowed?.() ?? new Set() });
   if (decision.kind === 'allow') return null;
   if (decision.kind === 'refuse') return decision.message;
-  const r = await ctx.approve(name, line, undefined, { browser: { site: decision.site, card: decision.card, ...(decision.note ? { note: decision.note } : {}) } });
+  const r = await ctx.approve(name, line, undefined, { browser: { site: decision.site, card: decision.card, ...(decision.note ? { note: decision.note } : {}), check: { kind: 'read', url } } });
   return r.ok ? null : r.message;
 }
 

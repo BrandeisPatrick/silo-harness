@@ -1,0 +1,137 @@
+2026-10-13T08:12:01.298Z INFO  delivery job=J-7702 sub=sub-0140 attempt=1 outcome=ok ms=585
+2026-10-13T08:12:01.999Z INFO  delivery job=J-7702 sub=sub-0140 final=delivered attempts=1
+2026-10-13T08:29:01.671Z INFO  delivery job=J-7709 sub=sub-0221 attempt=1 outcome=ok ms=889
+2026-10-13T08:29:01.999Z INFO  delivery job=J-7709 sub=sub-0221 final=delivered attempts=1
+2026-10-13T08:46:01.869Z INFO  delivery job=J-7718 sub=sub-0193 attempt=1 outcome=timeout ms=2000
+2026-10-13T08:46:04.914Z INFO  delivery job=J-7718 sub=sub-0193 attempt=2 outcome=timeout ms=2000
+2026-10-13T08:46:08.074Z INFO  delivery job=J-7718 sub=sub-0193 attempt=3 outcome=timeout ms=2000
+2026-10-13T08:46:08.999Z WARN  delivery job=J-7718 sub=sub-0193 final=failed cause=timeout attempts=3
+2026-10-13T09:03:01.193Z INFO  delivery job=J-7724 sub=sub-0175 attempt=1 outcome=ok ms=283
+2026-10-13T09:03:01.999Z INFO  delivery job=J-7724 sub=sub-0175 final=delivered attempts=1
+2026-10-13T09:20:01.383Z INFO  delivery job=J-7730 sub=sub-0306 attempt=1 outcome=ok ms=166
+2026-10-13T09:20:01.999Z INFO  delivery job=J-7730 sub=sub-0306 final=delivered attempts=1
+2026-10-13T09:37:01.673Z INFO  delivery job=J-7741 sub=sub-0118 attempt=1 outcome=ok ms=176
+2026-10-13T09:37:01.999Z INFO  delivery job=J-7741 sub=sub-0118 final=delivered attempts=1
+2026-10-14T08:00:00.000Z DEBUG queue depth=3 workers=4
+2026-10-14T08:03:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T08:06:00.000Z DEBUG queue depth=2 workers=4
+2026-10-14T08:09:00.000Z DEBUG queue depth=8 workers=4
+2026-10-14T08:12:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T08:12:01.740Z INFO  delivery job=J-7752 sub=sub-0140 attempt=1 outcome=ok ms=751
+2026-10-14T08:12:01.999Z INFO  delivery job=J-7752 sub=sub-0140 final=delivered attempts=1
+2026-10-14T08:29:01.495Z INFO  delivery job=J-7755 sub=sub-0262 attempt=1 outcome=ok ms=602
+2026-10-14T08:29:01.999Z INFO  delivery job=J-7755 sub=sub-0262 final=delivered attempts=1
+2026-10-14T08:46:01.146Z INFO  delivery job=J-7758 sub=sub-test-01 attempt=1 outcome=http_500 ms=93
+2026-10-14T08:46:03.027Z INFO  delivery job=J-7758 sub=sub-test-01 attempt=2 outcome=http_500 ms=44
+2026-10-14T08:46:06.715Z INFO  delivery job=J-7758 sub=sub-test-01 attempt=3 outcome=http_500 ms=88
+2026-10-14T08:46:06.999Z WARN  delivery job=J-7758 sub=sub-test-01 final=failed cause=http_500 attempts=3
+2026-10-14T09:03:01.862Z INFO  delivery job=J-7760 sub=sub-0221 attempt=1 outcome=timeout ms=2000
+2026-10-14T09:03:04.816Z INFO  delivery job=J-7760 sub=sub-0221 attempt=2 outcome=timeout ms=2000
+2026-10-14T09:03:08.835Z INFO  delivery job=J-7760 sub=sub-0221 attempt=3 outcome=timeout ms=2000
+2026-10-14T09:03:08.999Z WARN  delivery job=J-7760 sub=sub-0221 final=failed cause=timeout attempts=3
+2026-10-14T09:07:00.000Z DEBUG queue depth=0 workers=4
+2026-10-14T09:10:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T09:13:00.000Z DEBUG queue depth=6 workers=4
+2026-10-14T09:16:00.000Z DEBUG queue depth=4 workers=4
+2026-10-14T09:19:00.000Z DEBUG queue depth=0 workers=4
+2026-10-14T09:20:01.338Z INFO  delivery job=J-7763 sub=sub-0175 attempt=1 outcome=ok ms=148
+2026-10-14T09:20:01.999Z INFO  delivery job=J-7763 sub=sub-0175 final=delivered attempts=1
+2026-10-14T09:37:01.382Z INFO  delivery job=J-7766 sub=sub-0306 attempt=1 outcome=timeout ms=2000
+2026-10-14T09:37:04.299Z INFO  delivery job=J-7766 sub=sub-0306 attempt=2 outcome=ok ms=695
+2026-10-14T09:37:04.999Z INFO  delivery job=J-7766 sub=sub-0306 final=delivered attempts=2
+2026-10-14T09:54:01.873Z INFO  delivery job=J-7769 sub=sub-test-01 attempt=1 outcome=ok ms=364
+2026-10-14T09:54:01.999Z INFO  delivery job=J-7769 sub=sub-test-01 final=delivered attempts=1
+2026-10-14T10:11:01.461Z INFO  delivery job=J-7772 sub=sub-0118 attempt=1 outcome=ok ms=276
+2026-10-14T10:11:01.999Z INFO  delivery job=J-7772 sub=sub-0118 final=delivered attempts=1
+2026-10-14T10:14:00.000Z DEBUG queue depth=1 workers=4
+2026-10-14T10:17:00.000Z DEBUG queue depth=8 workers=4
+2026-10-14T10:20:00.000Z DEBUG queue depth=0 workers=4
+2026-10-14T10:23:00.000Z DEBUG queue depth=8 workers=4
+2026-10-14T10:26:00.000Z DEBUG queue depth=8 workers=4
+2026-10-14T10:28:01.414Z INFO  delivery job=J-7774 sub=sub-0287 attempt=1 outcome=timeout ms=2000
+2026-10-14T10:28:04.298Z INFO  delivery job=J-7774 sub=sub-0287 attempt=2 outcome=timeout ms=2000
+2026-10-14T10:28:08.839Z INFO  delivery job=J-7774 sub=sub-0287 attempt=3 outcome=timeout ms=2000
+2026-10-14T10:28:08.999Z WARN  delivery job=J-7774 sub=sub-0287 final=failed cause=timeout attempts=3
+2026-10-14T10:45:01.716Z INFO  delivery job=J-7777 sub=sub-0140 attempt=1 outcome=ok ms=395
+2026-10-14T10:45:01.999Z INFO  delivery job=J-7777 sub=sub-0140 final=delivered attempts=1
+2026-10-14T11:02:01.086Z INFO  delivery job=J-7779 sub=sub-test-01 attempt=1 outcome=http_500 ms=63
+2026-10-14T11:02:03.590Z INFO  delivery job=J-7779 sub=sub-test-01 attempt=2 outcome=http_500 ms=74
+2026-10-14T11:02:06.524Z INFO  delivery job=J-7779 sub=sub-test-01 attempt=3 outcome=http_500 ms=54
+2026-10-14T11:02:06.999Z WARN  delivery job=J-7779 sub=sub-test-01 final=failed cause=http_500 attempts=3
+2026-10-14T11:19:01.294Z INFO  delivery job=J-7781 sub=sub-0193 attempt=1 outcome=timeout ms=2000
+2026-10-14T11:19:04.451Z INFO  delivery job=J-7781 sub=sub-0193 attempt=2 outcome=timeout ms=2000
+2026-10-14T11:19:08.079Z INFO  delivery job=J-7781 sub=sub-0193 attempt=3 outcome=timeout ms=2000
+2026-10-14T11:19:08.999Z WARN  delivery job=J-7781 sub=sub-0193 final=failed cause=timeout attempts=3
+2026-10-14T11:21:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T11:24:00.000Z DEBUG queue depth=8 workers=4
+2026-10-14T11:27:00.000Z DEBUG queue depth=7 workers=4
+2026-10-14T11:30:00.000Z DEBUG queue depth=0 workers=4
+2026-10-14T11:33:00.000Z DEBUG queue depth=4 workers=4
+2026-10-14T11:36:01.120Z INFO  delivery job=J-7783 sub=sub-0262 attempt=1 outcome=ok ms=277
+2026-10-14T11:36:01.999Z INFO  delivery job=J-7783 sub=sub-0262 final=delivered attempts=1
+2026-10-14T11:53:01.616Z INFO  delivery job=J-7786 sub=sub-0175 attempt=1 outcome=timeout ms=2000
+2026-10-14T11:53:04.931Z INFO  delivery job=J-7786 sub=sub-0175 attempt=2 outcome=ok ms=662
+2026-10-14T11:53:04.999Z INFO  delivery job=J-7786 sub=sub-0175 final=delivered attempts=2
+2026-10-14T12:10:01.393Z INFO  delivery job=J-7788 sub=sub-0331 attempt=1 outcome=ok ms=494
+2026-10-14T12:10:01.999Z INFO  delivery job=J-7788 sub=sub-0331 final=delivered attempts=1
+2026-10-14T12:27:01.616Z INFO  delivery job=J-7790 sub=sub-test-01 attempt=1 outcome=http_500 ms=80
+2026-10-14T12:27:03.000Z INFO  delivery job=J-7790 sub=sub-test-01 attempt=2 outcome=http_500 ms=53
+2026-10-14T12:27:06.282Z INFO  delivery job=J-7790 sub=sub-test-01 attempt=3 outcome=http_500 ms=51
+2026-10-14T12:27:06.999Z WARN  delivery job=J-7790 sub=sub-test-01 final=failed cause=http_500 attempts=3
+2026-10-14T12:28:00.000Z DEBUG queue depth=7 workers=4
+2026-10-14T12:31:00.000Z DEBUG queue depth=2 workers=4
+2026-10-14T12:34:00.000Z DEBUG queue depth=3 workers=4
+2026-10-14T12:37:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T12:44:01.431Z INFO  delivery job=J-7792 sub=sub-0221 attempt=1 outcome=ok ms=717
+2026-10-14T12:44:01.999Z INFO  delivery job=J-7792 sub=sub-0221 final=delivered attempts=1
+2026-10-14T13:01:01.508Z INFO  delivery job=J-7795 sub=sub-0306 attempt=1 outcome=timeout ms=2000
+2026-10-14T13:01:04.253Z INFO  delivery job=J-7795 sub=sub-0306 attempt=2 outcome=timeout ms=2000
+2026-10-14T13:01:08.292Z INFO  delivery job=J-7795 sub=sub-0306 attempt=3 outcome=timeout ms=2000
+2026-10-14T13:01:08.999Z WARN  delivery job=J-7795 sub=sub-0306 final=failed cause=timeout attempts=3
+2026-10-14T13:18:01.594Z INFO  delivery job=J-7797 sub=sub-0118 attempt=1 outcome=ok ms=340
+2026-10-14T13:18:01.999Z INFO  delivery job=J-7797 sub=sub-0118 final=delivered attempts=1
+2026-10-14T13:35:00.000Z DEBUG queue depth=2 workers=4
+2026-10-14T13:35:01.686Z INFO  delivery job=J-7799 sub=sub-0287 attempt=1 outcome=ok ms=803
+2026-10-14T13:35:01.999Z INFO  delivery job=J-7799 sub=sub-0287 final=delivered attempts=1
+2026-10-14T13:38:00.000Z DEBUG queue depth=6 workers=4
+2026-10-14T13:41:00.000Z DEBUG queue depth=2 workers=4
+2026-10-14T13:44:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T13:52:01.826Z INFO  delivery job=J-7801 sub=sub-test-01 attempt=1 outcome=ok ms=255
+2026-10-14T13:52:01.999Z INFO  delivery job=J-7801 sub=sub-test-01 final=delivered attempts=1
+2026-10-14T14:09:01.221Z INFO  delivery job=J-7804 sub=sub-0140 attempt=1 outcome=timeout ms=2000
+2026-10-14T14:09:04.454Z INFO  delivery job=J-7804 sub=sub-0140 attempt=2 outcome=timeout ms=2000
+2026-10-14T14:09:08.773Z INFO  delivery job=J-7804 sub=sub-0140 attempt=3 outcome=timeout ms=2000
+2026-10-14T14:09:08.999Z WARN  delivery job=J-7804 sub=sub-0140 final=failed cause=timeout attempts=3
+2026-10-14T14:26:01.420Z INFO  delivery job=J-7806 sub=sub-0331 attempt=1 outcome=ok ms=120
+2026-10-14T14:26:01.999Z INFO  delivery job=J-7806 sub=sub-0331 final=delivered attempts=1
+2026-10-14T14:42:00.000Z DEBUG queue depth=4 workers=4
+2026-10-14T14:43:01.277Z INFO  delivery job=J-7809 sub=sub-0262 attempt=1 outcome=timeout ms=2000
+2026-10-14T14:43:04.575Z INFO  delivery job=J-7809 sub=sub-0262 attempt=2 outcome=ok ms=894
+2026-10-14T14:43:04.999Z INFO  delivery job=J-7809 sub=sub-0262 final=delivered attempts=2
+2026-10-14T14:45:00.000Z DEBUG queue depth=1 workers=4
+2026-10-14T14:48:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T14:51:00.000Z DEBUG queue depth=1 workers=4
+2026-10-14T15:00:01.256Z INFO  delivery job=J-7811 sub=sub-test-01 attempt=1 outcome=http_500 ms=93
+2026-10-14T15:00:03.226Z INFO  delivery job=J-7811 sub=sub-test-01 attempt=2 outcome=http_500 ms=83
+2026-10-14T15:00:06.494Z INFO  delivery job=J-7811 sub=sub-test-01 attempt=3 outcome=http_500 ms=98
+2026-10-14T15:00:06.999Z WARN  delivery job=J-7811 sub=sub-test-01 final=failed cause=http_500 attempts=3
+2026-10-14T15:17:01.506Z INFO  delivery job=J-7814 sub=sub-0175 attempt=1 outcome=ok ms=733
+2026-10-14T15:17:01.999Z INFO  delivery job=J-7814 sub=sub-0175 final=delivered attempts=1
+2026-10-14T15:34:01.503Z INFO  delivery job=J-7816 sub=sub-0193 attempt=1 outcome=ok ms=727
+2026-10-14T15:34:01.999Z INFO  delivery job=J-7816 sub=sub-0193 final=delivered attempts=1
+2026-10-14T15:49:00.000Z DEBUG queue depth=2 workers=4
+2026-10-14T15:51:01.389Z INFO  delivery job=J-7819 sub=sub-0306 attempt=1 outcome=timeout ms=2000
+2026-10-14T15:51:04.583Z INFO  delivery job=J-7819 sub=sub-0306 attempt=2 outcome=timeout ms=2000
+2026-10-14T15:51:08.887Z INFO  delivery job=J-7819 sub=sub-0306 attempt=3 outcome=timeout ms=2000
+2026-10-14T15:51:08.999Z WARN  delivery job=J-7819 sub=sub-0306 final=failed cause=timeout attempts=3
+2026-10-14T15:52:00.000Z DEBUG queue depth=7 workers=4
+2026-10-14T15:55:00.000Z DEBUG queue depth=4 workers=4
+2026-10-14T15:58:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T16:02:00.000Z DEBUG queue depth=5 workers=4
+2026-10-14T16:05:00.000Z DEBUG queue depth=6 workers=4
+2026-10-14T16:08:01.743Z INFO  delivery job=J-7821 sub=sub-0118 attempt=1 outcome=ok ms=383
+2026-10-14T16:08:01.999Z INFO  delivery job=J-7821 sub=sub-0118 final=delivered attempts=1
+2026-10-14T16:25:01.180Z INFO  delivery job=J-7824 sub=sub-0221 attempt=1 outcome=ok ms=801
+2026-10-14T16:25:01.999Z INFO  delivery job=J-7824 sub=sub-0221 final=delivered attempts=1
+2026-10-14T16:56:00.000Z DEBUG queue depth=1 workers=4
+2026-10-14T16:59:00.000Z DEBUG queue depth=3 workers=4

@@ -13,8 +13,13 @@ agent.ts       Agent: one run loop bound to one session for its life (approvals,
 agent/         prompt.ts (the system prompt and its parts), complete.ts (one model call, streamed or not, and its fallbacks),
                permissions.ts (the permission rules as a pure decision, and the card's labels), errors.ts (what a run's errors say),
                classifier.ts (Auto mode's safety check: its instructions, what it reads, its model, its answer),
-               auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block)
-auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs
+               auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block),
+               learned.ts (the user's answers on cards, which the check reads as earlier decisions),
+               schedule.ts (which calls of one reply run together: read-only ones, the rest alone, results in call order),
+               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log)
+timing-service.ts  /timing, the last run's breakdown as a local note
+auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs;
+               the learned answers' store (auto-learned.json) and Settings → Permissions → Auto mode
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)
@@ -26,9 +31,11 @@ tools/groups.ts   the tool groups loaded when needed, load_tools, and the groups
 ## The browser (src/main/browser/, tools/browser.ts)
 
 ```
-index.ts         what the rest of the app imports: BrowserController, setupBrowser, openChatLink, browserSession, zoomMenuItems
-controller.ts    BrowserController: the tabs (MAX_TABS 12; one active, the others hidden), the active view's bounds, what the
-                 browser_* tools do on the active tab, the agent's action stamps (acting()), find, zoom, the context menu's
+index.ts         what the rest of the app imports: BrowserController, SessionTabs, setupBrowser, openChatLink, browserSession, zoomMenuItems
+session-tabs.ts  SessionTabs: a BrowserController per session, made on first use; the pane shows the session in front's,
+                 the others are parked (views off the window at the pane's size); deleting a session closes its tabs
+controller.ts    BrowserController: one session's tabs (MAX_TABS 12; one active, the others hidden), the active view's bounds,
+                 what that session's browser_* tools do on its active tab, the agent's action stamps (acting()), find, zoom, the context menu's
                  actions, DevTools, the blocked-popup strip, a popup's tab (tabIdOf), the certificate interstitial's state
 tab.ts           BrowserTab: one WebContentsView in persist:browser, its TabState, the shortcuts pressed in the page
                  (shortcutOf: ⌘⇧N ⌘W ⌘L ⌘F ⌘+ ⌘− ⌘0 ⌥⌘I, taken in before-input-event so neither the page nor the menu sees them)
@@ -56,7 +63,7 @@ field away from an exempt host is refused before anything is typed), `siteCheck`
 cards, browser_eval's card, refused schemes and plan mode, all from `policy.siteDecision` through `ctx.approve` with
 `browser: { card, site }`), and for browser_click `clickCheck` (CAPTCHA refused, purchase and account cards). browser_type
 also has the controller ask the page again after its own click (`allowSecret` only on an exempt host). Results and errors
-have the page's credential values replaced with `•••`. The window's side: `browser-pane.ts` (the tab strip, the popups'
+have the page's credential values replaced with `•••`. The window's side: `browser-pane.ts` (the page tabs in the pane's strip, the popups'
 state, the profile note, the zoom chip, the blocked-popup strip), `browser-bars.ts` (the permission and download bars, the
 certificate interstitial, the lock in the URL pill, the downloads tray), `browser-find.ts` (the find bar), all created by
 `side-pane.ts`; `settings/browser-section.ts` is Settings → Browser. None of them can answer a bar for the agent: the
@@ -189,7 +196,7 @@ from another session is held instead: see Messages between sessions).
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
 `unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the
-browser pane belongs to the session on screen (a background `browser_*` call gets an error result; a background
+browser's tabs are per session (a background session's `browser_*` calls act on its own tabs, out of sight; a background
 artifact is stored without navigating). Terminal tabs and MCP servers are shared.
 
 ## Agent, tools, store
@@ -262,8 +269,11 @@ tool-groups.ts    tool rows and the runs that fold into one line (settleRun, upd
 session-messages.ts  "Received message from …" and "Messaged …" lines, the other session's name linked
 approvals.ts      the approval card and the question card, and which one waits
 status-line.ts    run state, the status line, the spinners' one timer, compaction status, /compact, the context meter
-side-pane.ts      the Browser, Diff and Terminal tabs (the mods' tabs join through mods-host.ts), the resizer, the URL bar, the native browser view's bounds
-browser-pane.ts   the browser's tab strip, popups, profile note, zoom chip and blocked-popup strip
+side-pane.ts      the pane's one strip (page tabs, and Diff, Terminal and the mods' panes as tabs), the pane toggle, the resizer, the URL bar, the native browser view's bounds
+strip-fit.ts      how the strip shares its width: natural widths, shorter titles, icon-only tools, icon-only pages (pure; test/strip-fit.js)
+browser-pane.ts   the browser's page tabs, popups, profile note, zoom chip and blocked-popup strip
+new-tab-page.ts   a blank tab's page: the tools the strip can open
+terminal.ts       the Terminal pane: an xterm per shell tab, and their own row of tabs, shown only while there are two or more
 browser-bars.ts   the permission and download bars, the certificate interstitial, the URL pill's lock, the downloads tray
 browser-find.ts   the find bar under the URL bar
 settings/browser-section.ts  Settings → Browser

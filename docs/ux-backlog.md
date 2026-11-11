@@ -21,6 +21,7 @@ Decided with the user on 2026-11-06; the version rule is in [releasing.md](relea
 | 0.12.0 | Auto mode with a safety-check model (blocks as a quiet line with Allow, pause after repeated blocks, fail closed), much less text across the app, the ~/Documents/Silo default folder and a folder menu on the welcome screen | released 2026-11-09 |
 | 0.13.0 | Cheaper sessions (prompt caching on Claude and through gateways, tools sent when needed, smaller tool results), `web_search` and `web_fetch`, a browser that treats pages as data and checks clicks, downloads, tabs and the clipboard, MCP sign-in with OAuth and reconnection, retries, `/create-skill` and `/create-mod`, and no macOS prompt the user did not cause | released 2026-11-10 |
 | 0.13.1 | Fix: a page in the Browser pane can no longer make its tab a window-drag area (clicks did not reach the Microsoft sign-in page after Teams) | released 2026-11-10 |
+| 0.14.0 | Latency: the reads of one reply run together, `/timing` and an opt-in timing log, a reasoning-effort pill and `/effort`, recognised `aws` reads without the safety check, shell sign-ins and wildcards fixed, a paused circle on the task card, lighter icons, themes removed, and evals for the safety check and for answers | released 2026-11-10 |
 
 ## Done in earlier rounds
 

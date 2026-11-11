@@ -1,23 +1,22 @@
 ---
 name: create-mod
-description: Writes or changes a Silo Harness mod, a folder of mod.json plus HTML or CSS that adds a rail panel, side-pane tab, strip above the composer, hidden hook worker, background, theme, conversation or chat-bar look, or slash command to the app. Use when the user asks to make, change, fix or debug a mod, panel, widget, theme, background, look or custom slash command for Silo Harness.
+description: Writes or changes a Silo Harness mod, a folder of mod.json plus HTML or CSS that adds a rail panel, side-pane tab, strip above the composer, hidden hook worker, background, conversation or chat-bar look, or slash command to the app. Use when the user asks to make, change, fix or debug a mod, panel, widget, background, look or custom slash command for Silo Harness.
 argument-hint: <what the mod should do>
 ---
-A mod is a folder named by its id, holding `mod.json` and the files it names. A page runs in a sandboxed frame and talks to the app only through the `harness` object; CSS (themes, looks) is applied to the app's own page. Full field tables, the harness API by permission, the kit and the stable look hooks are in `reference.md` in this skill's folder. Read the part you need before writing.
+A mod is a folder named by its id, holding `mod.json` and the files it names. A page runs in a sandboxed frame and talks to the app only through the `harness` object; a look's CSS is applied to the app's own page, scoped to its region. Full field tables, the harness API by permission, the kit and the stable look hooks are in `reference.md` in this skill's folder. Read the part you need before writing.
 
 ## 1. Pick the kind
 | The user wants | Contributes |
 | --- | --- |
 | a panel beside the chat | a view, `"seat": "rail"` |
-| a full tab next to Browser, Diff, Terminal | a view, `"seat": "tab"` (page `height: 100%`, scroll inside) |
+| a full tab in the side pane's strip, beside the pages, Diff and Terminal | a view, `"seat": "tab"` (page `height: 100%`, scroll inside) |
 | one compact row above the composer | a view, `"seat": "composer"` (up to 120 px) |
 | something that reacts to tool calls or prompts, no UI | a view, `"seat": "worker"`, plus `contributes.hooks` and the `hooks` permission |
 | an animated or pictured backdrop | a view, `"seat": "background"` (takes no clicks; `pointer` event `{ x, y }`) |
 | the conversation or the chat bar to look different | `looks` with `target` `conversation` or `composer` |
-| the whole app recoloured | `styles` (a theme); prefer overriding tokens on `:root` |
 | `/something` | `commands`, usually with a view that handles it |
 
-Backgrounds, looks and themes are "looks": no switch, one in use per kind. Views (other seats) and commands are behind the mod's switch. Use a look, not `styles`, when the request is only about the conversation or the chat bar. To change a built-in panel, copy its folder (from `mod_check` with its id) into the user folder under the same id: the copy replaces it.
+Backgrounds and looks have no switch, one in use per kind. Views (other seats) and commands are behind the mod's switch. There are no themes for the whole app any more: `contributes.styles` is ignored; recolour the conversation or the chat bar with a look (`:scope { --accent: … }`). To change a built-in panel, copy its folder (from `mod_check` with its id) into the user folder under the same id: the copy replaces it.
 
 ## 2. Pick the folder
 - This project only: `<project>/.silo-harness/mods/<id>/`.
@@ -79,7 +78,7 @@ Minimal conversation look (`look.css`, listed as `"looks": [{ "id": "main", "tit
 ```
 
 Page rules:
-- Load the kit from `/@harness/harness.css` and `/@harness/harness.js`; wait for `harness.ready`. Use its classes and tokens so the panel looks native and follows light, dark and the theme.
+- Load the kit from `/@harness/harness.css` and `/@harness/harness.js`; wait for `harness.ready`. Use its classes and tokens so the panel looks native and follows light and dark.
 - No `localStorage`, `sessionStorage`, IndexedDB or cookies: use `harness.storage` (and `harness.storage.session`).
 - No `window.open`, `alert`, submitting forms or navigating away. Open links with `harness.ui.openExternal`.
 - Offline unless the mod has `network`: no CDNs, web fonts or remote images. Put files in the folder and link them relatively.
@@ -87,11 +86,11 @@ Page rules:
 - Reset on `session.switched`; `session.changed` also fires when the title or run state changes.
 - Inline `<script>` and `<style>` are fine.
 
-Look and theme rules:
+Look rules:
 - A look is wrapped in `@scope (#messages)` or `@scope (#chatbar)`: style `:scope` and the stable hooks in `reference.md`, nothing else. Branch on `data-running`, `data-scheme`, `data-mode`, `data-set-<key>` on `:scope`.
 - `@import` is removed. `@keyframes` names are global and the app's win: prefix them with the mod id.
 - Keep the app's text size and line height; work in light and dark; animate only under `@media (prefers-reduced-motion: no-preference)`.
-- Examples to copy: `mods/hyperspace` (background, both looks, settings), `mods/theme-midnight` and `mods/theme-paper` (token-only themes).
+- Example to copy: `mods/hyperspace` (background, both looks, settings).
 
 ## 5. Check with mod_check
 `mod_check` is in the `mods` tool group: load it with `load_tools` (`{ "groups": ["mods"] }`) if it is not offered yet. Call it with `{ "id": "<id>" }`. It reports the folder and scope, the state (`on`, `off`, `paused`, `invalid`), every problem in mod.json, warnings, permissions granted and still wanted, the views, looks and commands, the errors its loaded pages threw (latest five; old ones stay listed until the app restarts, so compare times), and a `Next:` line. Without an id it checks every user and project mod.
@@ -100,7 +99,7 @@ Fix every problem it lists and call it again until it says `mod.json: valid`. Wh
 
 ## 6. Tell the user how to turn it on
 - A mod with views or commands: they turn it on from the card in the chat or in Settings → Mods.
-- A look, background or theme: they press Preview on the card (or open Settings → Mods → Background, Chat bar, Conversation or Theme), then Use. The first Use of their own look asks for approval once.
+- A look or background: they press Preview on the card (or open Settings → Mods → Background, Chat bar or Conversation), then Use. The first Use of their own look asks for approval once.
 - Never edit config files to turn a mod on or apply a look yourself.
 - Adding a permission to a mod that is on pauses it until they approve. Adding a look does not; its first Use asks.
 - Once on, every save reloads the page (a look reloads in the preview as well).

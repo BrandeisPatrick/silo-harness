@@ -1,8 +1,9 @@
-// Live checks of the look tabs of Settings → Mods (Background, Chat bar, Conversation, Theme), in the real window:
+// Live checks of the look tabs of Settings → Mods (Background, Chat bar, Conversation), in the real window:
 // each tab's preview shows what is in use; a click on another version previews it there and leaves the window as it
 // is; Use applies it to the window; Default undoes it; the first Use of a look of yours asks once (and Cancel leaves
-// everything as it was); "Use the set" applies a set's parts together; New ⌄ → From a template writes a look
-// that shows previewed, not applied, and Ask the agent… fills the composer; the chat card of a new look offers
+// everything as it was); "Use the set" applies a set's parts together; New ⌄ (the only button of the Versions head)
+// → From a template writes a look that shows previewed, not applied, Install… opens the install form there, Ask the
+// agent… fills the composer, and the menu works from the keyboard; the chat card of a new look offers
 // Preview (its tab, with it previewed) and Use.
 // Screenshots: each look tab in light and dark (one of them with another version previewed), the Use confirmation,
 // and the chat card, at scale 2.
@@ -17,8 +18,6 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const { check, done } = checker();
 const js = (v) => JSON.stringify(v);
 
-const PAPER = '#d97757';
-const MIDNIGHT = '#2f5bcc';
 const APP_ACCENT = '#1f66c4';
 const TEAL = 'rgb(0, 128, 128)';
 
@@ -74,7 +73,7 @@ function writeMod(root, id, manifest, files) {
     await ev(`(async () => { const c = await window.oc.getConfig(); c.theme = ${js(scheme)}; await window.oc.setConfig(c); document.documentElement.dataset.theme = ${js(scheme)}; })()`);
     await sleep(900);
   };
-  const TABS = ['backgrounds', 'chat-bar', 'conversation', 'themes'];
+  const TABS = ['backgrounds', 'chat-bar', 'conversation'];
   /** The background preview's geometry: the background fills the stage, which fills the pane; the window is inset */
   const BG_GEOMETRY = `(() => {
     const pane = document.querySelector('.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane');
@@ -119,8 +118,8 @@ function writeMod(root, id, manifest, files) {
     await app.waitFor(`window.oc.rpc('mods.list').then((l) => l.some((m) => m.key === 'teal-bar'))`, 15_000, 'the user look to be listed');
 
     // ---------- Each tab shows what is in use ----------
-    await rpc('mods.use', { background: 'hyperspace/starfield', composer: 'hyperspace/cockpit', conversation: 'hyperspace/holo', theme: 'theme-paper' });
-    await app.waitFor(`document.querySelector('#chatbar').dataset.look === 'hyperspace/cockpit' && !!document.querySelector('style[data-mod="theme-paper"]')`, 10_000, 'the looks in the window');
+    await rpc('mods.use', { background: 'hyperspace/starfield', composer: 'hyperspace/cockpit', conversation: 'hyperspace/holo' });
+    await app.waitFor(`document.querySelector('#chatbar').dataset.look === 'hyperspace/cockpit' && document.querySelector('#messages').dataset.look === 'hyperspace/holo'`, 10_000, 'the looks in the window');
     await app.click('#settings-btn');
     await sleep(500);
     for (const tab of TABS) {
@@ -151,21 +150,16 @@ function writeMod(root, id, manifest, files) {
     const cardGeo = await ev(`(() => { const c = document.querySelector('.sp-look-tab[data-subtab="backgrounds"] .sp-look-card[data-ref="hyperspace/starfield"] .lp-stage'); const b = c && c.querySelector(':scope > .lp-stage-backdrop'); const h = c && c.querySelector(':scope > .lp-host'); if (!c || !b || !h) return null; const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect(), hr = h.getBoundingClientRect(); return { frame: !!b.querySelector('iframe'), fills: Math.abs(br.width - cr.width) < 1 && Math.abs(br.height - cr.height) < 1, inset: (hr.left - cr.left) / cr.width }; })()`);
     check('a background\'s card shows the background itself, undimmed, around a small window', cardGeo && cardGeo.frame && cardGeo.fills && cardGeo.inset > 0.1, cardGeo);
     await backgroundShots('light');
-    await openTab('themes');
-    check('Theme: a miniature window in the Paper tokens (sidebar rows, transcript, a card, a confirming button, a switch)', (await paneAccent('themes')) === PAPER && (await inPane('themes', `!!r.querySelector('.sidebar .session-item') && !!r.querySelector('#messages .msg.user') && !!r.querySelector('.mod-offer') && !!r.querySelector('.btn.primary') && !!r.querySelector('input.switch')`)));
-    check('the previews take no input and live in their own shadow roots (no #chatbar of theirs in the document)', onlyTheWindowsIds(await ev(`document.querySelectorAll('#chatbar').length + ':' + document.querySelectorAll('#messages').length`)) && (await inPane('themes', `r.querySelector('.lp-root').hasAttribute('inert')`)));
+    await openTab('backgrounds');
+    check('Background: a miniature window in the app\'s own tokens (sidebar rows, transcript, a card, a confirming button, a switch)', (await paneAccent('backgrounds')) === APP_ACCENT && (await inPane('backgrounds', `!!r.querySelector('.sidebar .session-item') && !!r.querySelector('#messages .msg.user') && !!r.querySelector('.mod-offer') && !!r.querySelector('.btn.primary') && !!r.querySelector('input.switch')`)));
+    check('the previews take no input and live in their own shadow roots (no #chatbar of theirs in the document)', onlyTheWindowsIds(await ev(`document.querySelectorAll('#chatbar').length + ':' + document.querySelectorAll('#messages').length`)) && (await inPane('backgrounds', `r.querySelector('.lp-root').hasAttribute('inert')`)));
     for (const tab of TABS) {
       await openTab(tab);
       await shotSettings(`tab-${tab}-light`);
     }
 
     // ---------- Previewing another version: the preview changes, the window does not ----------
-    await openTab('themes');
-    await clickCard('themes', 'theme-midnight');
-    let s = await st('themes');
-    check('Theme: a click on Midnight previews it', s.previewing && s.shown === 'theme-midnight' && (await paneAccent('themes')) === MIDNIGHT && /Preview/.test((await headText('themes')) || '') && (await app.exists('.sp-look-tab[data-subtab="themes"] .sp-look-use')), s);
-    check('… and the window keeps Paper', (await accent()) === PAPER && (await layout()).theme === 'theme-paper');
-    await shotSettings('tab-themes-previewing-midnight-light');
+    let s;
     await openTab('chat-bar');
     await clickCard('chat-bar', null);
     check('Chat bar: previewing Default drops the look from the preview only', (await inPane('chat-bar', `r.querySelector('#chatbar').dataset.look ?? null`)) === null && (await ev(`document.querySelector('#chatbar').dataset.look`)) === 'hyperspace/cockpit');
@@ -173,18 +167,19 @@ function writeMod(root, id, manifest, files) {
     await sleep(500);
     check('Back to current shows the one in use again', !(await st('chat-bar')).previewing && (await inPane('chat-bar', `r.querySelector('#chatbar').dataset.look`)) === 'hyperspace/cockpit');
 
-    // ---------- Use applies it; Default undoes it ----------
-    await openTab('themes');
-    await clickUse('themes');
-    await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === ${js(MIDNIGHT)}`, 8000, 'Midnight in the window').catch(() => {});
-    s = await st('themes');
-    check('Theme: Use applies Midnight to the window, one theme at a time', (await accent()) === MIDNIGHT && (await layout()).theme === 'theme-midnight' && (await ev(`[...document.querySelectorAll('style[data-mod]')].map((x) => x.dataset.mod).join()`)) === 'theme-midnight' && !s.previewing && s.current === 'theme-midnight', s);
-    check('… without asking (a built-in look)', !(await ev(`document.querySelector('#confirm-dialog').open`)));
-    await clickCard('themes', null);
-    check('Theme: Default previewed in the pane, the window still Midnight', (await paneAccent('themes')) === APP_ACCENT && (await accent()) === MIDNIGHT);
-    await clickUse('themes');
-    await app.waitFor(`!document.querySelector('style[data-mod]')`, 8000, 'the theme to go').catch(() => {});
-    check('Theme: Use on Default puts the app\'s own look back', (await accent()) === APP_ACCENT && (await layout()).theme === null && (await st('themes')).current === null);
+    // ---------- Default undoes a look; Use puts one back ----------
+    await openTab('conversation');
+    await clickCard('conversation', null);
+    check('Conversation: Default previewed in the pane, the window still Holo', (await inPane('conversation', `r.querySelector('#messages').dataset.look ?? null`)) === null && (await ev(`document.querySelector('#messages').dataset.look`)) === 'hyperspace/holo');
+    await clickUse('conversation');
+    await app.waitFor(`!document.querySelector('#messages').dataset.look`, 8000, 'the look to go').catch(() => {});
+    check('Conversation: Use on Default puts the app\'s own look back', (await ev(`document.querySelector('#messages').dataset.look ?? null`)) === null && (await layout()).looks.conversation === null && (await st('conversation')).current === null && (await accent()) === APP_ACCENT);
+    await clickCard('conversation', 'hyperspace/holo');
+    await clickUse('conversation');
+    await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo'`, 8000, 'Holo in the window').catch(() => {});
+    s = await st('conversation');
+    check('Conversation: Use applies Holo to the window, without asking (a built-in look)', (await layout()).looks.conversation === 'hyperspace/holo' && !s.previewing && s.current === 'hyperspace/holo' && !(await ev(`document.querySelector('#confirm-dialog').open`)), s);
+    check('no stylesheet of a theme is in the window', (await ev(`document.querySelectorAll('style[data-mod]').length`)) === 0);
 
     // ---------- The first Use of a look of yours asks, once ----------
     await openTab('chat-bar');
@@ -223,15 +218,52 @@ function writeMod(root, id, manifest, files) {
     await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-acts button[aria-label^="Use the set"]');
     await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo' && document.querySelector('#chatbar').dataset.look === 'hyperspace/cockpit' && document.documentElement.classList.contains('mod-bg')`, 10_000, 'the whole set in the window').catch(() => {});
     const L1 = await layout();
-    check('"Use the set" applies its background, chat bar look and conversation look together', L1.background === 'hyperspace/starfield' && L1.looks.composer === 'hyperspace/cockpit' && L1.looks.conversation === 'hyperspace/holo' && L1.theme === null, L1);
+    check('"Use the set" applies its background, chat bar look and conversation look together', L1.background === 'hyperspace/starfield' && L1.looks.composer === 'hyperspace/cockpit' && L1.looks.conversation === 'hyperspace/holo' && !('theme' in L1), L1);
     check('… and the tab shows it in use, with no set left to use', !(await st('backgrounds')).previewing && !/Use the set/.test((await headText('backgrounds')) || ''));
 
-    // ---------- New ⌄: from a template (previewed, not applied), Ask the agent ----------
+    // ---------- New ⌄: from a template (previewed, not applied), Install…, Ask the agent, the keyboard ----------
+    const menuOf = (tab) => ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="${tab}"] .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
+    for (const tab of TABS) {
+      await openTab(tab);
+      const head = await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="${tab}"] .sp-look-grid-head button')].map((b) => b.textContent.trim())`);
+      check(`${tab}: the Versions head has one button, New (no Install… of its own)`, JSON.stringify(head) === js(['New']), head);
+      await app.click(`.sp-look-tab[data-subtab="${tab}"] .sp-look-new`);
+      await sleep(300);
+      const items = await menuOf(tab);
+      const want = ['Ask the agent…', 'From a template…', ...(tab === 'backgrounds' ? ['Your picture…'] : []), 'Install…'];
+      check(`${tab}: New ⌄ offers ${want.join(', ')}`, JSON.stringify(items) === js(want), items);
+      if (tab === 'backgrounds') await shotSettings('new-menu-backgrounds-light');
+      await app.key('Escape');
+      await sleep(200);
+    }
+    // The keyboard: Enter opens it on the first item, the arrows move, Escape closes it and gives the button its focus back
+    await openTab('conversation');
+    await ev(`document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new').focus()`);
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await sleep(300);
+    const focused = () => ev(`document.activeElement?.textContent?.trim() ?? ''`);
+    const k1 = { open: await ev(`!!document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-menu')`), first: await focused() };
+    await app.key('ArrowDown');
+    const k2 = await focused();
+    await app.key('ArrowUp');
+    await app.key('ArrowUp');
+    const k3 = await focused();
+    await app.key('Escape');
+    await sleep(200);
+    const k4 = { open: await ev(`!!document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-menu')`), onButton: await ev(`document.activeElement === document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new')`), expanded: await ev(`document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-new').getAttribute('aria-expanded')`) };
+    check('New ⌄ from the keyboard: Enter opens it on its first item, the arrows move (and wrap), Escape closes it onto the button', k1.open && k1.first === 'Ask the agent…' && k2 === 'From a template…' && k3 === 'Install…' && !k4.open && k4.onButton && k4.expanded === 'false', { k1, k2, k3, k4 });
+    // Install… opens the install form under the Versions head of the tab
+    await app.click('.sp-look-tab[data-subtab="conversation"] .sp-look-new');
+    await sleep(200);
+    await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="conversation"] .sp-menu .sp-menu-item')].find((b) => /Install/.test(b.textContent)).click()`);
+    await sleep(300);
+    check('Install… opens the install form in the tab, its field focused', (await ev(`(() => { const f = document.querySelector('.sp-look-tab[data-subtab="conversation"] .sp-look-form-slot .sp-form[aria-label="Install a mod"]'); return !!f && !f.hidden && document.activeElement === f.querySelector('input'); })()`)) === true);
+    await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="conversation"] .sp-look-form-slot .sp-form[aria-label="Install a mod"] .btn')].find((b) => b.textContent.trim() === 'Cancel').click()`);
+    await sleep(200);
     await openTab('chat-bar');
     await app.click('.sp-look-tab[data-subtab="chat-bar"] .sp-look-new');
     await sleep(300);
-    const menu = await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="chat-bar"] .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
-    check('New ⌄ offers Ask the agent… and From a template…', JSON.stringify(menu) === js(['Ask the agent…', 'From a template…']), menu);
     await ev(`[...document.querySelectorAll('.sp-look-tab[data-subtab="chat-bar"] .sp-menu .sp-menu-item')].find((b) => /template/.test(b.textContent)).click()`);
     await sleep(300);
     check('From a template opens the New form in the tab, at a chat bar look', (await ev(`(() => { const f = document.querySelector('.sp-look-tab[data-subtab="chat-bar"] .sp-look-form-slot .sp-form'); return !!f && !f.hidden && /New chat bar look/.test(f.innerText) && f.querySelector('select').value === 'look:composer'; })()`)) === true);
@@ -275,7 +307,7 @@ function writeMod(root, id, manifest, files) {
     check("the card's Use approves and applies it (the card is the approval)", (await ev(`document.querySelector('#messages').dataset.look`)) === 'dusk-chat/main' && (await ev(`document.querySelector('.mod-offer[data-mod="dusk-chat"]').classList.contains('done')`)) && /in use/i.test((await app.text('.mod-offer[data-mod="dusk-chat"]')) || ''));
 
     // ---------- Dark: each tab, one with another version previewed ----------
-    await rpc('mods.use', { theme: 'theme-paper', conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit', background: 'hyperspace/starfield' });
+    await rpc('mods.use', { conversation: 'hyperspace/holo', composer: 'hyperspace/cockpit', background: 'hyperspace/starfield' });
     await setScheme('dark');
     await app.click('#settings-btn');
     await sleep(500);
@@ -284,11 +316,12 @@ function writeMod(root, id, manifest, files) {
       await shotSettings(`tab-${tab}-dark`);
     }
     await backgroundShots('dark');
-    await openTab('themes');
-    await clickCard('themes', 'theme-glass');
-    await sleep(600);
-    check('dark: previewing Glass leaves the window in Paper', (await st('themes')).shown === 'theme-glass' && (await accent()) !== MIDNIGHT && !!(await ev(`document.querySelector('style[data-mod="theme-paper"]')`)));
-    await shotSettings('tab-themes-previewing-glass-dark');
+    await openTab('backgrounds');
+    await app.click('.sp-look-tab[data-subtab="backgrounds"] .sp-look-new');
+    await sleep(300);
+    await shotSettings('new-menu-backgrounds-dark');
+    await app.key('Escape');
+    await sleep(200);
     await openTab('chat-bar');
     await clickCard('chat-bar', 'teal-bar/main');
     await shotSettings('tab-chat-bar-previewing-teal-dark');

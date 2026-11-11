@@ -122,9 +122,10 @@ export function parseUrl(text: string): Parsed<string> {
 /**
  * A site for one of Settings → Browser's lists, as the browser's policy reads them: `example.com`, `*.example.com`,
  * `localhost:3000`, `[::1]`; a pasted URL keeps its host (and port). `prefixes`: `login.` (every host that starts
- * with it) is allowed too; `folders`: a folder (`/path`, `~/path`, `file:///path`) makes the files in it count.
+ * with it) is allowed too; `folders`: a folder (`/path`, `~/path`, `file:///path`) makes the files in it count;
+ * `schemes`: a typed `http://` or `https://` is kept (`http://example.com`), since an approval covers one scheme.
  */
-export function parseSitePattern(text: string, opts: { prefixes?: boolean; folders?: boolean } = {}): Parsed<string> {
+export function parseSitePattern(text: string, opts: { prefixes?: boolean; folders?: boolean; schemes?: boolean } = {}): Parsed<string> {
   const t = String(text ?? '').trim();
   if (!t) return { ok: false, error: 'Enter a site, like example.com.' };
   if (/^(\/|~\/|~$|file:\/\/)/i.test(t)) {
@@ -132,6 +133,7 @@ export function parseSitePattern(text: string, opts: { prefixes?: boolean; folde
     const p = t.replace(/^file:\/\//i, '').replace(/(.)\/+$/, '$1');
     return /^[/~]/.test(p) ? { ok: true, value: p } : { ok: false, error: 'A folder starts with / or ~/.' };
   }
+  const scheme = opts.schemes ? (/^(https?):\/\//i.exec(t)?.[1].toLowerCase() ?? '') : '';
   let v = t.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '');
   if (/[^\x00-\x7f]/.test(v)) {
     try {
@@ -144,7 +146,7 @@ export function parseSitePattern(text: string, opts: { prefixes?: boolean; folde
   const ipv6 = /^\[[0-9a-f:.]+\](:\d{1,5})?$/;
   const host = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:\d{1,5})?$/;
   const prefix = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+$/;
-  if (ipv6.test(v) || host.test(v)) return { ok: true, value: v };
+  if (ipv6.test(v) || host.test(v)) return { ok: true, value: scheme ? `${scheme}://${v}` : v };
   if (opts.prefixes && prefix.test(v)) return { ok: true, value: v };
   return { ok: false, error: 'Enter a site like example.com, *.example.com or localhost:3000.' };
 }
@@ -253,11 +255,11 @@ export const LOOK_WORDS: Record<ModLookTarget, string> = {
 /**
  * What a mod is, from what its manifest contributes. general: views in the rail, the side pane or above the composer,
  * or slash commands. background: a view in the background seat. composer / conversation: a look for that region.
- * theme: styles for the whole app. A mod can be several kinds; one that contributes nothing is general.
+ * A mod can be several kinds; one that contributes nothing is general.
  */
-export type ModKind = 'general' | 'background' | 'composer' | 'conversation' | 'theme';
+export type ModKind = 'general' | 'background' | 'composer' | 'conversation';
 
-export type ModTab = 'mods' | 'backgrounds' | 'chat-bar' | 'conversation' | 'themes';
+export type ModTab = 'mods' | 'backgrounds' | 'chat-bar' | 'conversation';
 
 export interface ModTabInfo {
   id: ModTab;
@@ -267,23 +269,23 @@ export interface ModTabInfo {
   newKind: NewModKind;
 }
 
-/** What the New mod form makes: a view in a seat, a look for a region, or a theme. */
-export type NewModKind = ModSeat | `look:${ModLookTarget}` | 'theme';
+/** What the New mod form makes: a view in a seat or a look for a region. */
+export type NewModKind = ModSeat | `look:${ModLookTarget}`;
 
 export const MOD_TABS: ModTabInfo[] = [
   { id: 'mods', title: 'Mods', kind: 'general', newKind: 'rail' },
   { id: 'backgrounds', title: 'Background', kind: 'background', newKind: 'background' },
   { id: 'chat-bar', title: 'Chat bar', kind: 'composer', newKind: 'look:composer' },
   { id: 'conversation', title: 'Conversation', kind: 'conversation', newKind: 'look:conversation' },
-  { id: 'themes', title: 'Theme', kind: 'theme', newKind: 'theme' },
 ];
 
 export function isModTab(s: unknown): s is ModTab {
   return typeof s === 'string' && MOD_TABS.some((t) => t.id === s);
 }
 
+/** The tab of a kind; Mods for anything else (a kind an older list may still hold) */
 export function tabOfKind(kind: ModKind): ModTab {
-  return MOD_TABS.find((t) => t.kind === kind)!.id;
+  return MOD_TABS.find((t) => t.kind === kind)?.id ?? 'mods';
 }
 
 /** The kinds a manifest contributes, in the order of the tabs. */
@@ -296,7 +298,6 @@ export function modKinds(manifest: ModInfo['manifest'] | null | undefined): ModK
     background: views.some((v) => v.seat === 'background'),
     composer: looks.some((l) => l.target === 'composer'),
     conversation: looks.some((l) => l.target === 'conversation'),
-    theme: (c.styles ?? []).length > 0,
   };
   const out = MOD_TABS.map((t) => t.kind).filter((k) => has[k]);
   return out.length ? out : ['general'];
@@ -312,12 +313,7 @@ export function modsForTab<T extends Pick<ModInfo, 'manifest'>>(mods: readonly T
   return mods.filter((m) => modTabs(m).includes(tab));
 }
 
-/** The theme mods in list order (built-in, yours, the project's, then by id). */
-export function themeMods<T extends Pick<ModInfo, 'manifest'>>(mods: readonly T[]): T[] {
-  return modsForTab(mods, 'themes');
-}
-
-/** A mod that is only looks (backgrounds, looks, a theme): it has no switch, its tabs decide what is in use. */
+/** A mod that is only looks (backgrounds, looks): it has no switch, its tabs decide what is in use. */
 export function isLookOnly(manifest: ModManifest | null | undefined): boolean {
   if (!manifest) return false;
   const kinds = modKinds(manifest);
@@ -329,7 +325,7 @@ export function refMod(ref: string): string {
   return ref.slice(0, Math.max(0, ref.lastIndexOf('/')));
 }
 
-// ---------- Looks: Settings → Mods → Background, Chat bar, Conversation, Theme ----------
+// ---------- Looks: Settings → Mods → Background, Chat bar, Conversation ----------
 
 export interface LookTabInfo {
   tab: ModTab;
@@ -347,7 +343,6 @@ export const LOOK_TABS: LookTabInfo[] = [
   { tab: 'backgrounds', kind: 'background', title: 'Background', noun: 'background', prompt: 'Make a background that ', row: 'background' },
   { tab: 'chat-bar', kind: 'composer', title: 'Chat bar', noun: 'chat bar look', prompt: 'Make a chat bar look that ', row: 'look-composer' },
   { tab: 'conversation', kind: 'conversation', title: 'Conversation', noun: 'conversation look', prompt: 'Make a conversation look that ', row: 'look-conversation' },
-  { tab: 'themes', kind: 'theme', title: 'Theme', noun: 'theme', prompt: 'Make a theme that ', row: 'look-theme' },
 ];
 
 export function lookTabOf(tab: ModTab): LookTabInfo | null {
@@ -358,11 +353,11 @@ export const SOURCE_WORDS: Record<ModInfo['scope'], string> = { bundled: 'Built-
 
 /** One version a look tab offers: Default, your picture (backgrounds), or a part of a mod. */
 export interface LookVersion {
-  /** What the layout holds while it is in use: null for Default, "image" for your picture, else "<mod key>/<id>" or a theme's mod key */
+  /** What the layout holds while it is in use: null for Default, "image" for your picture, else "<mod key>/<id>" */
   ref: string | null;
   /** The mod it belongs to (null: Default, your picture) */
   mod: ModInfo | null;
-  /** "Starfield", "Paper theme" */
+  /** "Starfield" */
   title: string;
   /** "Hyperspace · Built-in" */
   source: string;
@@ -374,7 +369,6 @@ export interface LookVersion {
 /** The ref of each kind the layout has in use: "image" for your picture behind the window. */
 export function lookInUse(layout: Partial<ModLayout> | null | undefined, kind: LookKind): string | null {
   if (!layout) return null;
-  if (kind === 'theme') return layout.theme ?? null;
   if (kind === 'background') return layout.background ?? (layout.backgroundImage ? 'image' : null);
   return layout.looks?.[kind] ?? null;
 }
@@ -388,10 +382,6 @@ export function lookVersions(mods: readonly ModInfo[], kind: LookKind, picture?:
     if (!c || m.state === 'invalid') continue;
     const name = m.manifest!.name;
     const source = `${name} · ${SOURCE_WORDS[m.scope]}`;
-    if (kind === 'theme') {
-      if ((c.styles ?? []).length) out.push({ ref: m.key, mod: m, title: name, source: SOURCE_WORDS[m.scope], description: m.manifest!.description });
-      continue;
-    }
     if (kind === 'background') {
       for (const v of c.views ?? []) if (v.seat === 'background') out.push({ ref: `${m.key}/${v.id}`, mod: m, title: v.title, source, ...(v.preview ? { preview: v.preview } : {}) });
       continue;
@@ -413,7 +403,7 @@ export function choiceWords(mods: readonly ModInfo[], layout: Partial<ModLayout>
   if (ref === 'image') return 'Your picture';
   const v = lookVersions(mods, kind).find((x) => x.ref === ref);
   if (!v) return `${ref} (not installed)`;
-  return kind === 'theme' ? v.title : `${v.mod!.manifest!.name}: ${v.title}`;
+  return `${v.mod!.manifest!.name}: ${v.title}`;
 }
 
 /** A mod's matching parts: its first look of each kind. */
@@ -423,7 +413,6 @@ export interface LookSet {
   background: string | null;
   composer: string | null;
   conversation: string | null;
-  theme: string | null;
 }
 
 export function setOf(m: ModInfo): LookSet {
@@ -433,10 +422,10 @@ export function setOf(m: ModInfo): LookSet {
     return l ? `${m.key}/${l.id}` : null;
   };
   const bg = (c.views ?? []).find((v) => v.seat === 'background');
-  return { key: m.key, name: m.manifest?.name ?? m.id, background: bg ? `${m.key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation'), theme: (c.styles ?? []).length ? m.key : null };
+  return { key: m.key, name: m.manifest?.name ?? m.id, background: bg ? `${m.key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation') };
 }
 
-const LOOK_KINDS: LookKind[] = ['background', 'composer', 'conversation', 'theme'];
+const LOOK_KINDS: LookKind[] = ['background', 'composer', 'conversation'];
 const parts = (s: LookSet) => LOOK_KINDS.filter((k) => s[k]).length;
 
 /** The sets ("Use the whole set"): every installed mod with at least `min` (default two) kinds of look. */
@@ -492,7 +481,7 @@ export function grantSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'wa
 export function useSheet(m: Pick<ModInfo, 'state' | 'manifest' | 'wants' | 'approved'>, kind: LookKind): { title: string; lines: string[]; warnings: string[] } {
   const asked = m.wants.length ? m.wants : (m.manifest?.permissions ?? []);
   const lines = asked.map(permissionWords);
-  const what = kind === 'background' ? 'It draws behind the whole window and can restyle approval cards.' : kind === 'theme' ? 'It restyles the whole app, approval cards included.' : `It restyles the ${kind === 'composer' ? 'chat bar' : 'conversation, approval cards included'}.`;
+  const what = kind === 'background' ? 'It draws behind the whole window and can restyle approval cards.' : `It restyles the ${kind === 'composer' ? 'chat bar' : 'conversation, approval cards included'}.`;
   const warnings = [what, 'Use it only if you trust where it came from.'];
   if (asked.includes('network')) warnings.push('What it reads can leave this Mac.');
   const name = m.manifest?.name ?? 'This look';

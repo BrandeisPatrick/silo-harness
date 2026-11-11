@@ -71,8 +71,8 @@ export interface AppOptions {
   saveConfig: (cfg: AppConfig) => void;
   /** Default: <userData>/sessions */
   sessionsDir?: string;
-  /** The window's browser pane (null while there is no window) */
-  browser?: () => BrowserController | null;
+  /** A session's own tabs in the window's browser pane (null while there is no window) */
+  browser?: (sessionId: string) => BrowserController | null;
   terminal?: TerminalManager;
   artifacts?: ArtifactStore;
   /** Made once the app exists, since the manager reads and saves the config through it */

@@ -23,13 +23,23 @@ function startMock() {
       if (state.apiKey && req.url.startsWith('/v1/') && !req.url.startsWith('/v1/messages') && req.headers.authorization !== `Bearer ${state.apiKey}`) {
         return json(401, { error: { message: 'Invalid API key (mock)', type: 'authentication_error' } });
       }
-      // The models list most OpenAI-compatible services have (GET /v1/models)
-      if (req.url === '/v1/models' && req.method === 'GET') return json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+      // The models list most OpenAI-compatible services have (GET /v1/models); `modelsDelayMs` holds it back and
+      // `modelsStatus` fails it with that HTTP status
+      if (req.url === '/v1/models' && req.method === 'GET') {
+        return setTimeout(() => {
+          if (state.modelsStatus) return json(state.modelsStatus, { error: { message: `mock error ${state.modelsStatus}` } });
+          json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
+        }, state.modelsDelayMs ?? 0);
+      }
       if (req.url === '/api/show') return json(200, { capabilities: ['completion', 'tools'] });
       if (req.url.startsWith('/v1/messages')) return anthropic(state, payload, res, json);
       // A gateway that refuses prompt-cache fields it does not know (`rejectCacheFields`), as some do
       if (req.url === '/v1/chat/completions' && state.rejectCacheFields && /"(?:cache_control|prompt_cache_key|session_id)"/.test(body)) {
         return json(state.rejectCacheFields === 422 ? 422 : 400, { error: { message: 'Unrecognized request argument supplied: cache_control (mock)' } });
+      }
+      // A service that refuses the reasoning-effort fields (`rejectEffort`), as one without reasoning models does
+      if (req.url === '/v1/chat/completions' && state.rejectEffort && (payload.reasoning_effort !== undefined || payload.reasoning !== undefined)) {
+        return json(400, { error: { message: `Unrecognized request argument supplied: ${payload.reasoning_effort !== undefined ? 'reasoning_effort' : 'reasoning'} (mock)` } });
       }
       // The local models, for the model menu: whatever `ollamaModels` lists (none unless a test sets it)
       if (req.url === '/api/tags' && state.ollamaModels) return json(200, { models: state.ollamaModels.map((name) => ({ name, model: name })) });
@@ -38,10 +48,11 @@ function startMock() {
       // requests never take a `nonStream` reply.
       if (!payload.stream && (req.url === '/api/chat' || req.url === '/v1/chat/completions')) {
         const at = state.replies.findIndex((r) => r.nonStream && (typeof r.when !== 'function' || r.when(seen(payload))));
-        // `classifierDefault` ({ decision, reason }): the standing answer of Auto mode's safety check when no reply
-        // for it is queued (the screenshot scripts, where every check should pass)
-        if (at < 0 && state.classifierDefault && isClassifierRequest(payload)) {
-          const d = state.classifierDefault;
+        // `classifierDefault` ({ decision, reason }, decision 'allow', 'block' or, for a browser action, 'ask'; or a
+        // function of the request that returns one, or null for no standing answer): the answer of Auto mode's safety
+        // check when no reply for it is queued (the screenshot scripts, where every check should pass)
+        const d = at < 0 && isClassifierRequest(payload) ? standingVerdict(state, payload) : null;
+        if (d) {
           const content = JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' });
           return req.url === '/api/chat'
             ? json(200, { model: payload.model, message: { role: 'assistant', content }, done: true, prompt_eval_count: 300, eval_count: 20 })
@@ -137,7 +148,8 @@ function startMock() {
  * status and error type), delayMs, chunks (the text in pieces chunkDelayMs apart), failMidStream (an error event after
  * the first text). Non-streamed requests (Auto mode's check) take `nonStream` replies, as on the other routes.
  * `stopReason` replaces the stop reason ("max_tokens", "refusal"), `headers` go with a failing status, `drop` ends the
- * stream after the text without a stop reason, and a tool call's `rawArgs` is streamed as written.
+ * stream after the text without a stop reason, a tool call's `rawArgs` is streamed as written, and `thinkingChunks`
+ * streams the thinking in pieces chunkDelayMs apart.
  */
 function anthropic(state, payload, res, json) {
   const stream = !!payload.stream;
@@ -145,16 +157,20 @@ function anthropic(state, payload, res, json) {
   if (state.rejectDeferred && JSON.stringify(payload.tools ?? []).includes('"defer_loading"')) {
     return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'tools.20.defer_loading: Extra inputs are not permitted (mock)' } });
   }
+  // An endpoint without the effort setting (`rejectEffort`): refuses output_config.effort
+  if (state.rejectEffort && payload.output_config?.effort !== undefined) {
+    return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'output_config.effort: Extra inputs are not permitted (mock)' } });
+  }
   const at = state.replies.findIndex((r) => !!r.nonStream === !stream && (typeof r.when !== 'function' || r.when(seen(payload))));
   let reply = at >= 0 ? state.replies.splice(at, 1)[0] : null;
-  if (!reply && !stream && state.classifierDefault && isClassifierRequest(payload)) {
-    const d = state.classifierDefault;
+  const d = !reply && !stream && isClassifierRequest(payload) ? standingVerdict(state, payload) : null;
+  if (d) {
     reply = { content: JSON.stringify({ decision: d.decision ?? 'allow', reason: d.reason ?? '[Local Work] part of the task' }) };
   }
   reply = reply ?? { content: stream ? 'Done.' : state.summary };
   const usage = { input_tokens: 300, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...(reply.usage || {}) };
   const blocks = [];
-  if (reply.thinking) blocks.push({ type: 'thinking', thinking: reply.thinking, signature: reply.signature ?? 'sig-mock' });
+  if (reply.thinking || reply.thinkingChunks) blocks.push({ type: 'thinking', thinking: reply.thinking ?? reply.thinkingChunks.join(''), signature: reply.signature ?? 'sig-mock' });
   if (reply.content || reply.chunks) blocks.push({ type: 'text', text: reply.content ?? reply.chunks.join('') });
   for (const c of reply.toolCalls ?? []) blocks.push({ type: 'tool_use', id: c.id ?? `toolu_${Math.random().toString(36).slice(2, 10)}`, name: c.name, input: c.args ?? {}, rawArgs: c.rawArgs });
   const stop = reply.stopReason ?? (reply.toolCalls?.length ? 'tool_use' : 'end_turn');
@@ -172,7 +188,11 @@ function anthropic(state, payload, res, json) {
     for (const [index, b] of blocks.entries()) {
       if (b.type === 'thinking') {
         send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } });
-        send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: b.thinking } });
+        // `thinkingChunks`: the thinking in pieces `chunkDelayMs` apart (a slow thinking phase)
+        for (const piece of reply.thinkingChunks ?? [b.thinking]) {
+          send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: piece } });
+          if (reply.thinkingChunks) await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+        }
         send('content_block_delta', { index, delta: { type: 'signature_delta', signature: b.signature } });
       } else if (b.type === 'text') {
         send('content_block_start', { index, content_block: { type: 'text', text: '' } });
@@ -230,6 +250,12 @@ function askUserReply(questions, extra = {}) {
 /** Marks Auto mode's safety-check requests (src/main/agent/classifier.ts CLASSIFIER_MARK). */
 const CLASSIFIER_MARK = 'You are the safety check of Auto mode in Silo Harness';
 
+/** state.classifierDefault for this check request: the object, or what the function returns for the request. */
+function standingVerdict(state, payload) {
+  const d = state.classifierDefault;
+  return typeof d === 'function' ? d(payload) ?? null : d ?? null;
+}
+
 /** True for a request of Auto mode's safety check (its system message). */
 function isClassifierRequest(payload) {
   // Anthropic's native requests carry the instructions as system blocks
@@ -239,7 +265,7 @@ function isClassifierRequest(payload) {
 }
 
 /**
- * A scripted answer of Auto mode's safety check: decision 'allow' or 'block' with its reason, as one line of JSON.
+ * A scripted answer of Auto mode's safety check: decision 'allow', 'block' or (a browser action) 'ask' with its reason, as one line of JSON.
  * `extra` adds fields: `when` (and-ed with being a check request), `content` (a raw answer: garbage, say), `status`
  * (fail with that HTTP status), `delayMs`. Push it onto `state.replies` like any other.
  */

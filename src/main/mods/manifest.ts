@@ -132,7 +132,6 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
   permissions = MOD_PERMISSIONS.filter((p) => permissions.includes(p)); // a stable order, so grants compare simply
 
   const views: ModViewManifest[] = [];
-  const styles: string[] = [];
   const looks: ModLookManifest[] = [];
   const commands: ModCommandManifest[] = [];
   const settings: ModSettingField[] = [];
@@ -186,16 +185,8 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
     }
   }
 
-  if (contributes.styles !== undefined) {
-    if (!Array.isArray(contributes.styles)) bad('contributes.styles: must be a list of CSS files, e.g. ["theme.css"]');
-    else {
-      contributes.styles.forEach((s, i) => {
-        const p = modFileProblem(dir, s, { ext: ['.css'] });
-        if (p) return /does not exist|is not a file/.test(p) ? missing(`styles[${i}]: ${p}`) : bad(`styles[${i}]: ${p}`);
-        if (!styles.includes(s as string)) styles.push(s as string);
-      });
-    }
-  }
+  // Themes (CSS for the whole app) were removed: the field still loads, its files are never read
+  if (contributes.styles !== undefined) warn('Themes were removed; contributes.styles is ignored.');
 
   if (contributes.looks !== undefined) {
     if (!Array.isArray(contributes.looks)) bad('contributes.looks: must be a list of looks, e.g. [{ "id": "main", "title": "…", "target": "conversation", "styles": ["look.css"] }]');
@@ -306,7 +297,6 @@ export function validateManifest(raw: unknown, dir: string, folderName = path.ba
   if (permissions.length) manifest.permissions = permissions;
   const c: NonNullable<ModManifest['contributes']> = {};
   if (views.length) c.views = views;
-  if (styles.length) c.styles = styles;
   if (looks.length) c.looks = looks;
   if (commands.length) c.commands = commands;
   if (settings.length) c.settings = settings;
@@ -364,24 +354,24 @@ function settingField(f: unknown, at: string, keys: Set<string>, bad: (m: string
   }
 }
 
-/** Whether the manifest contributes something that needs the "styles" approval: CSS for the app, a look, or a background. */
+/** Whether the manifest contributes something that needs the "styles" approval: a look or a background. */
 export function needsStylesApproval(m: ModManifest | null): boolean {
-  return !!m && (!!m.contributes?.styles?.length || !!m.contributes?.looks?.length || !!m.contributes?.views?.some((v) => v.seat === 'background'));
+  return !!m && (!!m.contributes?.looks?.length || !!m.contributes?.views?.some((v) => v.seat === 'background'));
 }
 
 /**
  * Whether a mod has parts behind a switch: a view in the rail, the side pane, the composer strip or the worker seat,
- * or a slash command. A mod with none is only looks (backgrounds, looks, a theme): it has no switch.
+ * or a slash command. A mod with none is only looks (backgrounds, looks): it has no switch.
  */
 export function hasFeatureParts(m: ModManifest | null | undefined): boolean {
   const c = m?.contributes;
   return !!c && ((c.views ?? []).some((v) => v.seat !== 'background') || (c.commands ?? []).length > 0);
 }
 
-/** Whether a mod has looks: a background view, a look for a region, or styles (a theme). */
+/** Whether a mod has looks: a background view or a look for a region. */
 export function hasLookParts(m: ModManifest | null | undefined): boolean {
   const c = m?.contributes;
-  return !!c && ((c.views ?? []).some((v) => v.seat === 'background') || (c.looks ?? []).length > 0 || (c.styles ?? []).length > 0);
+  return !!c && ((c.views ?? []).some((v) => v.seat === 'background') || (c.looks ?? []).length > 0);
 }
 
 /** The mod key and the part id in "<mod key>/<id>" (a project mod's key holds "/" itself, so the last one splits). */
@@ -390,7 +380,7 @@ export function splitRef(ref: string): { key: string; id: string } | null {
   return i > 0 && i < ref.length - 1 ? { key: ref.slice(0, i), id: ref.slice(i + 1) } : null;
 }
 
-/** A mod's first look of each kind, as the layout names it ("<key>/<id>", or the key for its theme); null where it has none. */
+/** A mod's first look of each kind, as the layout names it ("<key>/<id>"); null where it has none. */
 export function lookPartsOf(key: string, m: ModManifest | null | undefined): Record<LookKind, string | null> {
   const c = m?.contributes ?? {};
   const look = (t: ModLookTarget) => {
@@ -398,14 +388,13 @@ export function lookPartsOf(key: string, m: ModManifest | null | undefined): Rec
     return l ? `${key}/${l.id}` : null;
   };
   const bg = (c.views ?? []).find((v) => v.seat === 'background');
-  return { background: bg ? `${key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation'), theme: (c.styles ?? []).length ? key : null };
+  return { background: bg ? `${key}/${bg.id}` : null, composer: look('composer'), conversation: look('conversation') };
 }
 
 /** Whether `ref` names a part of kind `kind` of the mod `key` with manifest `m`. */
 export function isPartOf(kind: LookKind, ref: string, key: string, m: ModManifest | null | undefined): boolean {
   const c = m?.contributes;
   if (!c) return false;
-  if (kind === 'theme') return ref === key && (c.styles ?? []).length > 0;
   const at = splitRef(ref);
   if (!at || at.key !== key) return false;
   if (kind === 'background') return (c.views ?? []).some((v) => v.id === at.id && v.seat === 'background');
@@ -415,7 +404,6 @@ export function isPartOf(kind: LookKind, ref: string, key: string, m: ModManifes
 /** The ref the layout has in use for a kind ("image" for the user's picture counts as no mod's). */
 export function layoutRef(layout: Partial<ModLayout> | null | undefined, kind: LookKind): string | null {
   if (!layout) return null;
-  if (kind === 'theme') return layout.theme ?? null;
   if (kind === 'background') return layout.background ?? null;
   return layout.looks?.[kind] ?? null;
 }
@@ -429,7 +417,7 @@ export function inUseKinds(key: string, m: ModManifest | null | undefined, layou
 }
 
 /** The kinds of look, in the order of the tabs of Settings → Mods */
-export const LOOK_KINDS: readonly LookKind[] = ['background', 'composer', 'conversation', 'theme'];
+export const LOOK_KINDS: readonly LookKind[] = ['background', 'composer', 'conversation'];
 
 /** Whether `value` fits a setting field (type, options, range). */
 export function settingFits(field: ModSettingField, value: unknown): boolean {
