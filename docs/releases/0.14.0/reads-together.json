@@ -1,0 +1,11 @@
+{
+  "title": "Three reads asked for in one reply",
+  "subtitle": "Reads that take 300, 100 and 200 ms (simulated); wall time of the whole run, median of 20 runs",
+  "bars": [
+    { "label": "One at a time, as in 0.13.1", "value": 620 },
+    { "label": "0.14.0, together", "value": 316, "now": true }
+  ],
+  "format": "0 ms",
+  "hero": { "value": "−49%", "label": "wall time of the run, against one read at a time" },
+  "source": "docs/latency.md, scenario A of scripts/latency-bench.js: toolConcurrency 1 against 4."
+}
