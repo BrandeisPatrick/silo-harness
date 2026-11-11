@@ -2,7 +2,10 @@
 // It sees the user's messages, the agent's most recent tool calls (not their results), the project's instructions files,
 // the user's autoMode settings and the action, and answers allow or block with a short reason that names a category.
 // Its model is autoMode.model, else the session's own; it is called the way the title generator is (titles.ts).
+// On Anthropic's own API it asks for the least thinking each model accepts (checkReasoning), set here and nowhere
+// else, so a reasoning setting of the session's never reaches it.
 
+import type Anthropic from '@anthropic-ai/sdk';
 import type { AppConfig, NamedProviderConfig } from '../../shared/types';
 import { isSyntheticUser } from '../compact';
 import { loadInstructions } from '../instructions';
@@ -10,13 +13,61 @@ import { contextSize, ollamaComplete } from '../ollama';
 import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
 import { LOAD_TOOLS } from '../tools/groups';
-import { nativeError, thinkingFor } from './anthropic';
+import { isNativeAnthropic, nativeError } from './anthropic';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
 import { errorMessage } from './errors';
 
 /** How long the check may take before the action is blocked (a local model reads the whole request first). */
 export const CLASSIFIER_TIMEOUT_MS = 60_000;
 const MAX_REPLY_TOKENS = 400;
+
+/**
+ * A faster model for the check, off while empty (the check then runs on the session's model, as before). Set, it is
+ * used instead of the session's model when the session runs on Anthropic's own API with a larger Claude model than it
+ * (classifierTarget); gateways and other providers keep the session's model, and autoMode.model always wins. Set it
+ * only to a model that passed scripts/check-eval.js with no false allow (docs/evals.md).
+ */
+export const CHECK_MODEL_CANDIDATE = '';
+
+/**
+ * What the check's request on Anthropic's own API sets for thinking and effort: the least thinking each model accepts
+ * (off where it can be turned off, else effort low), from the API's model notes. Nothing for a model of a family
+ * this does not know beyond its adaptive thinking, as before: an effort it may not take would fail every check.
+ */
+export interface CheckReasoning {
+  thinking?: Anthropic.ThinkingConfigParam;
+  effort?: 'low';
+  maxTokens: number;
+}
+
+export function checkReasoning(model: string): CheckReasoning {
+  const m = model.toLowerCase();
+  // Claude 3 and 4 (up to 4.8): no thinking unless asked for
+  if (/claude-(?:opus|sonnet|haiku)-[34](?:-|$)|claude-[34]-/.test(m)) return { maxTokens: MAX_REPLY_TOKENS };
+  // Off: Haiku 5.5, Opus 5 and Sonnet 5 accept "disabled" at their default effort (high or below)
+  if (/claude-haiku-5-5|claude-opus-5(?!-\d)|claude-sonnet-5(?!-\d)/.test(m)) return { thinking: { type: 'disabled' }, maxTokens: MAX_REPLY_TOKENS };
+  // Off on Sonnet 5.5 is "between_tools" (its default effort is high)
+  if (/claude-sonnet-5-5/.test(m)) return { thinking: { type: 'between_tools' }, maxTokens: MAX_REPLY_TOKENS };
+  // Always thinks (Opus 5.5, Fable, Mythos): the lowest effort, with room for the thinking before the line of JSON
+  if (/claude-opus-5-5(?!\d)|claude-(?:fable|mythos)-5(?:-1)?(?!-?\d)/.test(m)) return { thinking: { type: 'adaptive' }, effort: 'low', maxTokens: MAX_REPLY_TOKENS * 10 };
+  return { thinking: { type: 'adaptive' }, maxTokens: MAX_REPLY_TOKENS * 10 };
+}
+
+const FAMILY_SIZE: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4, mythos: 4 };
+
+/** The size of a Claude model's family (Haiku 1 … Fable 4); 0 for a model that is not one of them. */
+function claudeSize(model: string): number {
+  const f = /claude-(haiku|sonnet|opus|fable|mythos)-\d/.exec(model.toLowerCase())?.[1];
+  return f ? FAMILY_SIZE[f] : 0;
+}
+
+/** What one check used, as the provider reported it (Anthropic's API and OpenAI-compatible ones; Ollama reports none). */
+export interface CheckUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
 
 /** Marks the check's requests (the mock model in the tests tells them apart by it). */
 export const CLASSIFIER_MARK = 'You are the safety check of Auto mode in Silo Harness';
@@ -47,7 +98,7 @@ Allow by default:
 
 The user's words:
 - A user message approves a risky action only when it names that action and its risk, like "force-push the feature branch" or "delete the staging bucket". A general request ("ship it", "clean up", "fix everything") does not approve a destructive step.
-- A boundary the user stated ("don't push", "leave production alone", "no deploys") blocks every action that crosses it, even one you would otherwise allow.
+- A boundary the user stated ("don't push", "leave production alone", "no deploys", "don't change any files") blocks every action that crosses it, even one you would otherwise allow. Sending a command's output to a file (>, >>, tee) changes that file.
 - The user's notes (environment, allow rules) widen what you allow and tell you what is safe on this Mac.
 
 When you cannot tell whether an action destroys something, reaches production or sends data out, block it.
@@ -252,16 +303,21 @@ function withModel(cfg: AppConfig, provider: string, model: string): AppConfig {
 
 /**
  * The model the check runs on: autoMode.model ("<provider>:<model>", or a model id of the session's provider), else
+ * `candidate` (CHECK_MODEL_CANDIDATE) when the session runs on Anthropic's own API with a larger Claude model, else
  * the session's own model. Null when there is none that can be called (no model set, a provider without its key or
  * not configured): Auto mode then asks with the approval cards, as it did before it had a check.
  */
-export function classifierTarget(cfg: AppConfig): ClassifierTarget | null {
+export function classifierTarget(cfg: AppConfig, candidate: string = CHECK_MODEL_CANDIDATE): ClassifierTarget | null {
   const spec = (cfg.autoMode?.model ?? '').trim();
   let use = cfg;
   if (spec) {
     const at = spec.indexOf(':');
     const prefix = at > 0 ? spec.slice(0, at) : '';
     use = prefix && providerNames(cfg).includes(prefix) ? withModel(cfg, prefix, spec.slice(at + 1).trim()) : withModel(cfg, cfg.provider || 'ollama', spec);
+  } else if (candidate.trim()) {
+    const own = resolveProvider(cfg);
+    const size = claudeSize(candidate);
+    if (!own.error && isNativeAnthropic(own) && size > 0 && claudeSize(own.model) > size) use = withModel(cfg, own.name, candidate.trim());
   }
   const r = resolveProvider(use);
   if (r.error || !r.model) return null;
@@ -273,8 +329,11 @@ export function isConnectionError(err: unknown): boolean {
   return /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|fetch failed|Connection error|socket hang up|getaddrinfo/i.test(errorMessage(err));
 }
 
-/** One call of the check; resolves with the model's raw answer. Throws on a provider error or the timeout. */
-export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal): Promise<string> {
+/**
+ * One call of the check; resolves with the model's raw answer. Throws on a provider error or the timeout. `onUsage`
+ * gets the tokens it used, when the provider reports them (the evals count them).
+ */
+export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal, onUsage?: (u: CheckUsage) => void): Promise<string> {
   const timeout = signal ? AbortSignal.any([signal, AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS)]) : AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
   const cfg = target.cfg;
   if (isOllama(cfg)) {
@@ -304,9 +363,7 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
     // user's notes and the instruction files at the start of the user message (nativeMessage)
     const system = messages.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n');
     const rest = messages.filter((m) => m.role !== 'system').map((m) => nativeMessage(m, system.length));
-    const thinking = thinkingFor(model);
-    // A model that always thinks needs room for it before the one line of JSON
-    const maxTokens = thinking?.type === 'adaptive' ? MAX_REPLY_TOKENS * 10 : MAX_REPLY_TOKENS;
+    const { thinking, effort, maxTokens } = checkReasoning(model);
     try {
       const res = await native.messages.create(
         {
@@ -315,15 +372,19 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
           system: [{ type: 'text', text: system, ...(system.length >= CACHE_MIN_CHARS ? { cache_control: { type: 'ephemeral' as const } } : {}) }],
           messages: rest,
           ...(thinking ? { thinking } : {}),
+          ...(effort ? { output_config: { effort } } : {}),
         },
         { signal: timeout, maxRetries: 0 },
       );
+      const u = res.usage;
+      if (u) onUsage?.({ inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0 });
       return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
     } catch (err) {
       throw nativeError(err);
     }
   }
   const res = await client.chat.completions.create({ model, messages, max_tokens: MAX_REPLY_TOKENS, stream: false }, { signal: timeout, maxRetries: 0 });
+  if (res.usage) onUsage?.({ inputTokens: res.usage.prompt_tokens ?? 0, outputTokens: res.usage.completion_tokens ?? 0, ...(res.usage.prompt_tokens_details?.cached_tokens ? { cacheReadTokens: res.usage.prompt_tokens_details.cached_tokens } : {}) });
   return res.choices?.[0]?.message?.content ?? '';
 }
 

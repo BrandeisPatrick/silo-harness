@@ -1,9 +1,9 @@
 /* Styles for the mod host: the rail, mod tabs, the composer strip, backgrounds. Tokens come from styles.css. */
 
 /* ---------- Top bar: icon-only buttons (rail, Terminal, Diff, Browser, ⋯) ---------- */
-.top-btn { position: relative; }
+.top-btn { position: relative; color: var(--text-400); }
 .top-btn > span:first-child { display: inline-flex; }
-.top-btn.active, .top-btn[aria-pressed="true"] { background: var(--bg-300); color: var(--text-100); }
+.top-btn.active, .top-btn[aria-pressed="true"] { background: var(--bg-300); color: var(--text-200); }
 .top-btn.active:hover, .top-btn[aria-pressed="true"]:hover { background: var(--bg-400); }
 .top-btn[aria-expanded="true"] { background: var(--hover); color: var(--text-100); }
 .top-btn .count-badge {

@@ -1,0 +1,31 @@
+{
+  "job": "J-7790",
+  "subscriber": "sub-test-01",
+  "test": true,
+  "createdAt": "2026-10-14T12:27:00.000Z",
+  "event": "return.received",
+  "endpoint": "https://hooks.stest-01.example.com/notify",
+  "attempts": [
+    {
+      "outcome": "http_500",
+      "ms": 80,
+      "at": "2026-10-14T12:27:01.616Z"
+    },
+    {
+      "outcome": "http_500",
+      "ms": 53,
+      "at": "2026-10-14T12:27:03.000Z"
+    },
+    {
+      "outcome": "http_500",
+      "ms": 51,
+      "at": "2026-10-14T12:27:06.282Z"
+    }
+  ],
+  "final": "failed",
+  "cause": "http_500",
+  "message": {
+    "subject": "Update for J-7790",
+    "body": "Line 1 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 2 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 3 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 4 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 5 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 6 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 7 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 8 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 9 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 10 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 11 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 12 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 13 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 14 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 15 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 16 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 17 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes. Line 18 of the message for J-7790: your parcel update is ready; see the tracking page for the latest scan, the estimated window and the depot notes."
+  }
+}

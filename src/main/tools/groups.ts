@@ -26,7 +26,7 @@ const GROUP_LINES: Record<ToolGroup, string> = {
   terminal: 'run what keeps running (dev servers, watchers) or what the user should watch, in the Terminal pane',
   sessions: 'start sub-sessions that work in parallel, message, read or merge other sessions, rename this one',
   schedules: 'run a prompt later or on a schedule',
-  mods: "write, change and check the app's mods (panels, themes, slash commands)",
+  mods: "write, change and check the app's mods (panels, looks, slash commands)",
   web: 'web_search the web and web_fetch a public page as text, without the Browser pane',
 };
 

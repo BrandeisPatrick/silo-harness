@@ -62,7 +62,8 @@ console.warn = (...a) => {
   const zshrc = path.join(home, '.zshrc');
   check('order: ~/.zshrc goes to the check even with "writes outside" allowed', d('write_file', zshrc, zshrc, base({ rules: { reasons: ['writes outside the working directory'] } })).kind === 'classify');
   check('order: .mcp.json in the project is protected', d('write_file', path.join(cwd, '.mcp.json'), path.join(cwd, '.mcp.json')).kind === 'classify');
-  check('order: anything else goes to the check', d('bash', 'npm test').kind === 'classify' && d('bash', 'aws sts get-caller-identity').kind === 'classify');
+  check('order: anything else goes to the check', d('bash', 'npm test').kind === 'classify' && d('bash', 'aws ec2 run-instances --image-id ami-0abc').kind === 'classify');
+  check('order: a recognised aws read runs without the check', d('bash', 'aws sts get-caller-identity').kind === 'allow');
   let r = d('bash', 'sudo -n true');
   check('always asks: sudo shows the card, with its reason', r.kind === 'ask' && r.reason === 'uses sudo', r);
   check('always asks: … unless the user allowed that reason', d('bash', 'sudo -n true', undefined, base({ rules: { reasons: ['uses sudo'] } })).kind === 'allow');
@@ -253,13 +254,12 @@ console.warn = (...a) => {
   const waitIdx = afterWait.findIndex((m) => m.role === 'tool' && m.tool_call_id === 'c_live_wait');
   check('allow mid-run: the note follows the tool results, before the next model call', waitIdx >= 0 && afterWait[waitIdx + 1]?.role === 'user' && /\[Auto mode\]/.test(afterWait[waitIdx + 1].content), afterWait.slice(-3).map((m) => m.role));
 
-  // 4g. aws: read-only allowed, terminate blocked, as the check says (decided without running aws)
+  // 4g. aws: a recognised read runs without the check, terminate blocked as the check says (decided without running aws)
   agent.session = store.create({ cwd });
   reset();
   const approve = (cmd, id) => agent['requestApproval']('bash', cmd, undefined, {}, false, { id, args: { command: cmd } });
-  state.replies.push(classifierReply('allow', '[Read Only] shows the caller identity', { when: (p) => JSON.stringify(p.messages).includes('get-caller-identity') }));
   let res = await approve('aws sts get-caller-identity', 'c_aws1');
-  check('aws sts get-caller-identity: allowed by the check', res.ok === true && checkRequests().length === 1, res);
+  check('aws sts get-caller-identity: a recognised read, allowed without the check', res.ok === true && checkRequests().length === 0, res);
   state.replies.push(classifierReply('block', '[Infrastructure] terminates EC2 instances', { when: (p) => JSON.stringify(p.messages).includes('terminate-instances') }));
   res = await approve('aws ec2 terminate-instances --instance-ids i-0abc', 'c_aws2');
   check('aws ec2 terminate-instances: blocked by the check', res.ok === false && res.message === blockedResult('[Infrastructure] terminates EC2 instances'), res);

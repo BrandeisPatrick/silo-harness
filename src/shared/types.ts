@@ -51,6 +51,20 @@ export interface NamedProviderConfig {
   numCtx?: number;
   /** ollama: thinking mode */
   think?: 'auto' | 'on' | 'off';
+  /** Reasoning effort for the session's model calls; unset: the model's default (agent/effort.ts) */
+  effort?: EffortLevel;
+}
+
+/** A reasoning-effort level, as the Messages API names them (agent/effort.ts) */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** The effort pill of a provider: the levels the model takes, the one chosen (clamped to them) and the model's default. */
+export interface EffortInfo {
+  levels: EffortLevel[];
+  /** null: none chosen, nothing is sent */
+  chosen: EffortLevel | null;
+  /** The model's documented default; null where it is not known (OpenAI-compatible services) */
+  default: EffortLevel | null;
 }
 
 /**
@@ -79,6 +93,8 @@ export interface ProviderView {
   owner?: 'user' | 'project';
   /** Why it cannot be used as it is (no key, no model, no base URL), in plain words */
   error?: string;
+  /** The effort pill; absent where the model or the service takes no effort setting */
+  effort?: EffortInfo;
 }
 
 export interface ProvidersView {
@@ -320,6 +336,10 @@ export interface AppConfig {
   webSearch?: WebSearchConfig;
   /** Look for a newer release on GitHub once a day (absent: on) */
   checkForUpdates?: boolean;
+  /** Append each run's timing (numbers only, docs/latency.md) to <profile>/timing/timing.jsonl; SILO_TIMING=1 does the same */
+  timingLog?: boolean;
+  /** How many read-only tool calls of one reply run at the same time (1 to 10; absent: 4; 1: one after another) */
+  toolConcurrency?: number;
 }
 
 /** AppConfig.webSearch: the provider, its key (a secret, masked in the window) and SearXNG's address. */
@@ -459,7 +479,7 @@ export type AgentEvent =
    * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
    * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; callId?: string }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */

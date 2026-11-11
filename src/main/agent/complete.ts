@@ -5,15 +5,17 @@
 import { randomUUID } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import type OpenAI from 'openai';
-import type { AgentEvent, AppConfig } from '../../shared/types';
+import type { AgentEvent, AppConfig, EffortLevel } from '../../shared/types';
 import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
 import { ollamaOf, resolveProvider } from '../providers';
 import type { Msg } from '../sessions';
 import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropic';
+import { compatEffortFields, effortRefused, effortRefusedNotice, isEffortRefusal } from './effort';
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
 import { idleWatch, isRetryable, StreamDropped, withRetries } from './retry';
+import type { RequestTiming } from './perf';
 
 /** What the agent lends a model call: its events, its usage report and the memories kept across calls. */
 export interface CompletionHost {
@@ -29,6 +31,19 @@ export interface CompletionHost {
   thinking?: { stripBefore: number };
   /** The session's id: the key a provider's prompt cache is steered by (agent/gateway-cache.ts) */
   cacheKey?: string;
+  /** Where the request's time goes (agent/perf.ts): attempts, retries, fallbacks, the provider's events */
+  timing?: RequestTiming;
+  /** The reasoning effort chosen for a provider, read at each request (agent/effort.ts); undefined: send nothing */
+  effort?(provider: string): EffortLevel | undefined;
+}
+
+/** The type of the provider a request goes to ('openai-compatible' when it cannot be resolved). */
+function resolveProviderType(cfg: AppConfig) {
+  try {
+    return resolveProvider(cfg).type;
+  } catch {
+    return 'openai-compatible' as const;
+  }
 }
 
 /** What a request adds for the provider's prompt cache (gateway-cache.ts), or nothing. */
@@ -133,6 +148,7 @@ export async function complete(
   return withRetries(
     async () => {
       shown = false;
+      host.timing?.attempt();
       try {
         return await completeAttempt(attemptHost, cfg, client, model, history, specs, signal, turn, native);
       } catch (err) {
@@ -145,6 +161,7 @@ export async function complete(
     {
       onWait: (text) => {
         waiting = true;
+        host.timing?.retryWait();
         host.emit({ type: 'retry_status', text });
       },
       onClear: clear,
@@ -163,8 +180,9 @@ async function completeAttempt(
   turn: number,
   native?: Anthropic,
 ): Promise<Reply> {
+  const providerName = cfg.provider || 'ollama';
   // Anthropic's own API: the Messages path, which caches (agent/anthropic.ts)
-  if (native) return completeAnthropic(host, native, model, history, specs, signal, turn);
+  if (native) return completeAnthropic({ ...host, effort: () => host.effort?.(providerName) }, native, model, history, specs, signal, turn);
   // The thinking blocks kept for that path go to no other provider
   history = withoutNative(history);
   if (!client) {
@@ -190,6 +208,7 @@ async function completeAttempt(
       // An Ollama too old to report capabilities only tells us here: retry once as a plain chat.
       if (!specs.length || signal.aborted || !/does not support tools/i.test(errorMessage(err))) throw err;
       host.toolSupport.set(`${ol.baseURL}|${model}`, false);
+      host.timing?.fallback('plain_chat');
       host.emit({ type: 'error', kind: 'notice', message: noToolsNotice(model) });
       return chat([]);
     }
@@ -204,10 +223,22 @@ async function completeAttempt(
     shape = null;
   }
   const noFields = refusedCacheFields;
-  const decorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
+  const cacheDecorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
+  // The effort field (agent/effort.ts), read at each request, unless this endpoint refused it
+  let effortFields: Record<string, unknown> = {};
+  const decorate = (): Decorate => {
+    const cache = cacheDecorate();
+    effortFields = effortRefused.has(endpoint) ? {} : compatEffortFields(resolveProviderType(cfg), host.effort?.(providerName));
+    if (!Object.keys(effortFields).length) return cache;
+    const fields = effortFields;
+    return (m, t) => {
+      const d = cache(m, t);
+      return { ...d, extra: { ...d.extra, ...fields } };
+    };
+  };
   for (;;) {
     const includeUsage = !host.noStreamUsage.has(endpoint);
-    const withFields = decorate() !== plain;
+    const withFields = cacheDecorate() !== plain;
     try {
       return await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit, decorate());
     } catch (err) {
@@ -216,17 +247,28 @@ async function completeAttempt(
       // A gateway or provider that rejects stream_options still streams without it.
       if (includeUsage && /stream_options|include_usage/i.test(errorMessage(err))) {
         host.noStreamUsage.add(endpoint);
+        host.timing?.fallback('no_stream_usage');
+        continue;
+      }
+      // A service that refuses the effort field gets the request without it, now and for the rest of the process
+      if (Object.keys(effortFields).length && isEffortRefusal(err)) {
+        console.warn('[agent] the provider refused the effort field; sending without it:', errorMessage(err));
+        effortRefused.add(endpoint);
+        host.timing?.fallback('no_effort');
+        host.emit({ type: 'error', kind: 'notice', message: effortRefusedNotice(model) });
         continue;
       }
       // A gateway that refuses the cache fields gets the request without them, now and for the rest of the process
       if (withFields && isFieldRefusal(err)) {
         console.warn('[agent] the provider refused the prompt-cache fields; sending without them:', errorMessage(err));
         noFields.add(client.baseURL);
+        host.timing?.fallback('no_cache_fields');
         continue;
       }
       // Some gateways/models reject streaming with tools; fall back to a single request
       // as long as nothing has been shown to the user yet.
       console.warn('[agent] streaming failed, retrying without streaming:', errorMessage(err));
+      host.timing?.fallback('non_streaming');
       return completeOnce(host, client, model, history, specs, signal, turn, decorate());
     }
   }
@@ -281,6 +323,7 @@ async function readStream(
 
   for await (const chunk of stream) {
     watch.touch();
+    host.timing?.event();
     // With include_usage the counts arrive on a final chunk whose choices array is empty.
     if (chunk.usage) usage = mergeUsage(usage, chunk.usage as RawUsage);
     const choice = chunk.choices?.[0];
@@ -301,6 +344,7 @@ async function readStream(
     }
     for (const tc of delta.tool_calls ?? []) {
       received = true;
+      host.timing?.toolDelta();
       let call: ToolCall;
       const fresh = (id: string): ToolCall => {
         const c: ToolCall = { id, type: 'function', function: { name: '', arguments: '' } };
@@ -364,6 +408,7 @@ async function completeOnce(
 ): Promise<Reply> {
   const d = decorate(history, specs);
   const res = await client.chat.completions.create({ model, messages: d.messages, tools: d.tools, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}), ...d.extra } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal, maxRetries: 0 });
+  host.timing?.event();
   if (res.usage) host.reportUsage(usageOf(res.usage as RawUsage));
   const msg = res.choices?.[0]?.message;
   const text = msg?.content ?? '';

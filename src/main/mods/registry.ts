@@ -304,6 +304,8 @@ export class ModRegistry {
   private offers(cfg: ModsConfig): void {
     for (const info of this.infos) {
       if (info.scope === 'bundled' || info.state === 'invalid' || !info.manifest) continue;
+      // Nothing to turn on or use (an old theme, say): its card could never be answered.
+      if (!hasFeatureParts(info.manifest) && !hasLookParts(info.manifest)) continue;
       const sig = `${info.key}|${(info.manifest.permissions ?? []).join(',')}|${needsStylesApproval(info.manifest)}`;
       if (this.offered.has(sig)) continue;
       this.offered.add(sig);

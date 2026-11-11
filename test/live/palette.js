@@ -1,8 +1,8 @@
 // Live check of the app's palette in the real window, in light and in dark: the page, the rail and the sidebar are
 // the neutral greys of the tokens, the user's bubble is its grey, a default button is white (or the raised grey in
 // dark) with a hairline and the button that confirms is a grey fill with the text colour, a switch that is on is
-// blue, the spinner is neutral, and nothing visible in the window or in Settings is the old terracotta. Then the
-// bundled Paper theme brings the warm page and the terracotta button back, and turning it off takes them away.
+// blue, the spinner is neutral, and nothing visible in the window or in Settings is the old terracotta. No theme
+// (the Paper theme brought the terracotta back) is bundled any more.
 // Run: npm run build && node test/live/palette.js [shots-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -124,30 +124,10 @@ async function setTheme(app, scheme) {
       await sleep(400);
     }
 
-    // The Paper theme: the warm page and the terracotta button come back, and go again when it is off
-    await setTheme(app, 'light');
+    // Themes were removed: no Paper theme to bring the terracotta back, and no stylesheet of a mod in the window
     const mods = await app.evaluate(`window.oc.rpc('mods.list')`);
-    const paper = mods.find((m) => m.id === 'theme-paper');
-    check('Paper: bundled, off by default', paper && paper.state === 'off', paper && paper.state);
-    await app.evaluate(`window.oc.rpc('mods.setEnabled', 'theme-paper', true)`);
-    await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--bg-100').trim() === '#faf9f5'`, 10_000, 'the Paper theme').catch(() => {});
-    await sleep(900);
-    for (const scheme of ['light', 'dark']) {
-      await setTheme(app, scheme);
-      const p = await app.evaluate(READ);
-      await app.screenshot(path.join(SHOTS, `palette-paper-${scheme}.png`));
-      const page = scheme === 'light' ? [250, 249, 245] : [38, 38, 36];
-      check(`Paper ${scheme}: the warm page is back`, same(p.page && p.page.c, page), p.page);
-      check(`Paper ${scheme}: Allow once is terracotta with a white label, Deny is not`, same(p.answer && p.answer.c, TERRACOTTA[0]) && same(p.answerText && p.answerText.c, [255, 255, 255]) && !!p.deny && !same(p.deny.c, TERRACOTTA[0]), { answer: p.answer, text: p.answerText, deny: p.deny });
-      check(`Paper ${scheme}: the mark is terracotta again`, same(p.mark && p.mark.c, TERRACOTTA[0]), p.mark);
-      check(`Paper ${scheme}: the scan for terracotta finds it (so the scans above can see it)`, terracotta(p.all).length >= 3, terracotta(p.all).length);
-    }
-    await setTheme(app, 'light');
-    await app.evaluate(`window.oc.rpc('mods.setEnabled', 'theme-paper', false)`);
-    await app.waitFor(`!document.querySelector('style[data-mod="theme-paper"]')`, 10_000, 'the Paper theme to go').catch(() => {});
-    await sleep(900);
-    const off = await app.evaluate(READ);
-    check('Paper off: the white page and the inverted Allow once are back', same(off.page && off.page.c, WANT.light.page) && same(off.answer && off.answer.c, WANT.light.text), { page: off.page, answer: off.answer });
+    check('no theme mod is bundled (Paper, Midnight, Glass are gone)', !mods.some((m) => /^theme-/.test(m.id)), mods.map((m) => m.id));
+    check('no stylesheet of a mod is in the window', (await app.evaluate(`document.querySelectorAll('style[data-mod]').length`)) === 0);
 
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));

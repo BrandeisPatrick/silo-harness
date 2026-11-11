@@ -14,7 +14,7 @@ Checked against `src/main/mods/manifest.ts`, `src/main/mods/permissions.ts`, `sr
 | `icon` | a built-in icon name (`gauge`, `list`, `message`, `clock`, `folder`, `sparkles`, `plug`, `image`, `terminal`, `globe`, `settings`, ...) or an `.svg` file in the mod |
 | `permissions` | list from the table under Permissions |
 | `contributes.views` | `[{ id, title, entry, seat, order?, maxHeight?, icon?, preview? }]` |
-| `contributes.styles` | `["theme.css"]`: CSS files for the app's whole page (a theme) |
+| `contributes.styles` | ignored (themes were removed); the mod still loads, with a note |
 | `contributes.looks` | `[{ id, title, target, styles, description?, preview? }]` |
 | `contributes.commands` | `[{ name, description, view? }]` |
 | `contributes.settings` | see Settings |
@@ -112,17 +112,13 @@ Tokens: `--bg-000` to `--bg-400`, `--text-100`, `--text-200`, `--text-400`, `--b
 
 Scale: rows 14 px on a 32 px pitch (`h-item`), dense rows 13 px on 24 px, secondary text 13 px, nothing under 12 px; 8 px gaps; no page padding beyond the kit's. Rail and composer views size to their content by themselves; call `ui.resize()` after an animation.
 
-## Themes (`styles`)
-
-CSS added to the app's page while it is the theme in use (one at a time, Settings → Mods → Theme). Override tokens on `:root` (`--bg-100`, `--text-100`, `--accent`, `--r-composer`, `--button-fill`, `--switch-on`, `--spinner`, `--badge-bg`, `--badge-ink`, `--mark`, `--mark-ink`, `--segment-on`, `--answer-fill`, `--answer-ink`, `--quiet-fill`, `--quiet-fill-hover`, `--side-hover`, `--side-active`, `--tree-line`) rather than restyling elements. `@import`, `@charset`, `@namespace`, `@page` and comments are removed; relative `url()` points at the mod's files; `https:` does not load.
-
 ## Looks
 
 Root attributes while active: `data-look` (`"<mod key>/<look id>"`), `data-running` (`"true"`/`"false"`), `data-scheme` (`"light"`/`"dark"`), `data-mode` (`ask`, `acceptEdits`, `auto`, `plan`, `bypass`), `data-set-<key>`.
 
-Hoisted out of the scope into `@layer mod-looks`: `@keyframes`, `@counter-style`, `@font-face`, `@property`. Only `@property --mod-<id>-...` and `@font-face` with a `font-family` starting `mod-<id>` are kept. A stray `}` is dropped and unclosed blocks are closed. `#messages` gets `contain: paint` under a conversation look; the chat bar is not contained.
+Hoisted out of the scope into `@layer mod-looks`: `@keyframes`, `@counter-style`, `@font-face`, `@property`. Only `@property --mod-<id>-...` and `@font-face` with a `font-family` starting `mod-<id>` are kept. `@import`, `@charset`, `@namespace`, `@page` and comments are removed; relative `url()` points at the mod's files; `https:` does not load. A stray `}` is dropped and unclosed blocks are closed. `#messages` gets `contain: paint` under a conversation look; the chat bar is not contained.
 
-A mod with two or more kinds of look (background, chat bar, conversation, theme) is a set: "Use the whole set" applies them together.
+A mod with two or more kinds of look (background, chat bar, conversation) is a set: "Use the whole set" applies them together.
 
 Stable hooks, conversation (`#messages`):
 - `.msg.user`, `.msg.user .bubble` (`.bubble.rich` for Markdown), `.session-msg.received`, `.session-msg.sent`, `.session-msg-link`, `.session-msg-body`

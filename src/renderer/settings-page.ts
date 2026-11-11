@@ -74,9 +74,9 @@ export interface SettingsDebug {
 }
 
 export interface OpenOptions {
-  /** A tab of the section: Mods has mods, backgrounds, chat-bar, conversation and themes */
+  /** A tab of the section: Mods has mods, backgrounds, chat-bar and conversation */
   tab?: string;
-  /** On a look tab of Mods: the version to show in its preview ("<mod key>/<id>", a theme's mod key) */
+  /** On a look tab of Mods: the version to show in its preview ("<mod key>/<id>") */
   preview?: string;
 }
 

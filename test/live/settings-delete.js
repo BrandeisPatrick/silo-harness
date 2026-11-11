@@ -1,6 +1,6 @@
 // Live: Settings → History → Delete all sessions and Settings → Mods → Delete all custom mods in the real window,
 // through the rig, on a throwaway profile with the mock model (no key needed). Three sessions (one running) and two
-// mods of yours (a panel turned on, a theme in use) are made; each row is clicked, its confirmation read and
+// mods of yours (a panel turned on, a conversation look in use) are made; each row is clicked, its confirmation read and
 // confirmed, and the result checked: the sidebar, the fresh session, the trash, the stats and the search; the folders
 // gone, the rail, the config and the Mods grid. The mod folders go to the macOS Trash, the real one, since that is
 // what the row does; they are two tiny folders of the throwaway profile.
@@ -27,7 +27,7 @@ const page = (body) => `<!doctype html>\n<link rel="stylesheet" href="/@harness/
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-profile-'));
   const userMods = path.join(profile, 'home-config', 'mods');
   writeMod(userMods, 'hello', { name: 'Hello', contributes: { views: [{ id: 'main', title: 'Hello', entry: 'panel.html', seat: 'rail', order: 15 }] } }, { 'panel.html': page('<div class="h-row"><span class="h-label">Hello</span></div>') });
-  writeMod(userMods, 'tint', { name: 'Tint', contributes: { styles: ['theme.css'] } }, { 'theme.css': `:root { --accent: ${TINT}; }` });
+  writeMod(userMods, 'tint', { name: 'Tint', contributes: { looks: [{ id: 'main', title: 'Tint', target: 'conversation', styles: ['look.css'] }] } }, { 'look.css': `:scope { --tint: ${TINT}; }` });
 
   const app = await launch({ profile, mock: true, mode: 'bypass', config: { theme: 'light' } });
   const ev = app.evaluate;
@@ -47,7 +47,7 @@ const page = (body) => `<!doctype html>\n<link rel="stylesheet" href="/@harness/
   const confirmText = () => app.text('#confirm-dialog');
   const enabled = (selector) => ev(`(() => { const b = document.querySelector(${js(selector)}); return Boolean(b && b.offsetParent && !b.disabled); })()`);
   const disabled = (selector) => ev(`(() => { const b = document.querySelector(${js(selector)}); return Boolean(b && b.disabled); })()`);
-  const accent = () => ev(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
+  const tint = () => ev(`getComputedStyle(document.querySelector('#messages')).getPropertyValue('--tint').trim()`);
   // In the hidden window a capture right after Settings changed can come back stale: a tiny capture first draws a fresh frame.
   const shotOf = async (name, selector) => {
     await app.cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } });
@@ -76,13 +76,13 @@ const page = (body) => `<!doctype html>\n<link rel="stylesheet" href="/@harness/
     check('three sessions are listed, one running', list0.length === 3 && list0.filter((m) => m.status && m.status.running).length === 1, list0.map((m) => [m.title, m.status]));
     check('the sidebar shows the three', (await app.count('.session-item')) === 3 && (await app.exists('.session-item.running')));
 
-    // ---------- Mods: a panel of yours turned on, a theme of yours in use ----------
+    // ---------- Mods: a panel of yours turned on, a look of yours in use ----------
     await app.waitFor(`window.oc.rpc('mods.list').then((l) => l.some((m) => m.key === 'hello') && l.some((m) => m.key === 'tint'))`, 10_000, 'the mods of yours to be listed');
     await rpc('mods.setEnabled', 'hello', true);
     await app.waitFor(`window.__oc_debug.mods.views().some((v) => v.key === 'hello/main' && v.hello)`, 10_000, 'the Hello panel in the rail');
-    await rpc('mods.use', { theme: 'tint' }, { approve: true });
-    await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === ${js(TINT)}`, 5000, 'the theme to apply');
-    check('the Hello panel is in the rail and the Tint theme applies', (await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'hello/main')`)) && (await accent()) === TINT);
+    await rpc('mods.use', { conversation: 'tint/main' }, { approve: true });
+    await app.waitFor(`document.querySelector('#messages').dataset.look === 'tint/main'`, 5000, 'the look to apply');
+    check('the Hello panel is in the rail and the Tint look applies', (await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'hello/main')`)) && (await tint()) === TINT);
 
     // ---------- Settings → History → Delete all sessions ----------
     await openSettings('history');
@@ -150,12 +150,12 @@ const page = (body) => `<!doctype html>\n<link rel="stylesheet" href="/@harness/
     await app.click('#confirm-ok');
     await app.waitFor(`window.oc.rpc('mods.list').then((l) => !l.some((m) => m.scope === 'user'))`, 10_000, 'the mods of yours to go');
     await app.waitFor(`!window.__oc_debug.mods.views().some((v) => v.key === 'hello/main')`, 10_000, 'the Hello panel to leave the rail');
-    await app.waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() !== ${js(TINT)}`, 5000, 'the theme to go');
+    await app.waitFor(`!document.querySelector('#messages').dataset.look`, 5000, 'the look to go');
     await sleep(300);
     check('the folders are gone from the profile', !fs.existsSync(path.join(userMods, 'hello')) && !fs.existsSync(path.join(userMods, 'tint')), fs.existsSync(userMods) ? fs.readdirSync(userMods) : 'no folder');
     const mcfg = (await cfg()).mods;
-    check('the config forgot them and the theme is Default', !mcfg.enabled.hello && !(mcfg.approved || {}).tint && mcfg.layout.theme === null, { enabled: Object.keys(mcfg.enabled), approved: Object.keys(mcfg.approved || {}), theme: mcfg.layout.theme });
-    check('the rail has no Hello panel and the accent is the app’s own', !(await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'hello/main')`)) && (await accent()) !== TINT, await accent());
+    check('the config forgot them and the conversation look is Default', !mcfg.enabled.hello && !(mcfg.approved || {}).tint && mcfg.layout.looks.conversation === null, { enabled: Object.keys(mcfg.enabled), approved: Object.keys(mcfg.approved || {}), looks: mcfg.layout.looks });
+    check('the rail has no Hello panel and the conversation is the app’s own', !(await ev(`window.__oc_debug.mods.views().some((v) => v.key === 'hello/main')`)) && (await tint()) !== TINT, await tint());
     const status = (await app.text('#sp-modpanel > .sp-inline-status')) || '';
     check('the Mods grid has no card of yours and the status says what happened', !(await app.exists('#sp-row-mod-hello')) && /Moved 2 mods to the Trash/.test(status), status);
     check('the button is disabled with nothing left to delete', (await disabled('#sp-row-mods-remove-all button')) && !(await enabled('#sp-row-mods-remove-all button')));

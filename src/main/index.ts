@@ -28,6 +28,7 @@ import { setupPower } from './power';
 import { setupDreaming } from './dreaming';
 import { setupProviders } from './providers-service';
 import { setupUpdates } from './updates';
+import { setupTiming } from './timing-service';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -290,6 +291,7 @@ app.whenReady().then(() => {
   setupBrowser(a, () => browser);
   setupChatCards(a, () => browser);
   setupUpdates(a);
+  setupTiming(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

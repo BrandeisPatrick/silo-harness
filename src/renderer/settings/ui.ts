@@ -241,6 +241,69 @@ export function iconButton(name: IconName, label: string, onClick: (btn: HTMLBut
   return b;
 }
 
+export interface MenuItem {
+  label: string;
+  icon: IconName;
+  danger?: boolean;
+  run: () => void;
+}
+
+/** A small menu under a button, inside the page (the window's menus sit under the Settings dialog). */
+export function dropdown(btn: HTMLButtonElement, wrap: HTMLElement, items: () => MenuItem[]): void {
+  let menu: HTMLElement | null = null;
+  const close = () => {
+    menu?.remove();
+    menu = null;
+    btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+  };
+  const outside = (e: Event) => {
+    if (menu && !menu.contains(e.target as Node) && e.target !== btn && !btn.contains(e.target as Node)) close();
+  };
+  btn.setAttribute('aria-haspopup', 'menu');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.addEventListener('click', () => {
+    if (menu) return close();
+    menu = h('div', { class: 'sp-menu', role: 'menu' });
+    for (const it of items()) {
+      const b = h('button', { type: 'button', class: `sp-menu-item${it.danger ? ' danger' : ''}`, role: 'menuitem', html: `${icon(it.icon, 14)}<span>${escapeHtml(it.label)}</span>` });
+      b.addEventListener('click', () => {
+        close();
+        it.run();
+      });
+      menu.append(b);
+    }
+    menu.addEventListener('keydown', (e) => {
+      const list = [...menu!.querySelectorAll<HTMLButtonElement>('.sp-menu-item')];
+      const i = list.indexOf(document.activeElement as HTMLButtonElement);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        btn.focus();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]?.focus();
+      }
+    });
+    wrap.append(menu);
+    btn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('pointerdown', outside, true);
+    menu.querySelector<HTMLButtonElement>('.sp-menu-item')?.focus();
+  });
+}
+
+/** A "New ⌄" button with its menu (`items` is read each time it opens); `wrap` goes in the page. */
+export function newMenu(items: () => MenuItem[], cls?: string): { wrap: HTMLElement; btn: HTMLButtonElement } {
+  const wrap = h('span', { class: 'sp-menu-wrap' });
+  const btn = button('New', () => {}, { icon: 'plus' });
+  btn.insertAdjacentHTML('beforeend', icon('chevron-down', 12));
+  if (cls) btn.classList.add(cls);
+  wrap.append(btn);
+  dropdown(btn, wrap, items);
+  return { wrap, btn };
+}
+
 export function actions(...items: (HTMLElement | null | false | undefined)[]): HTMLElement {
   const el = h('div', { class: 'sp-actions' });
   for (const i of items) if (i) el.append(i);

@@ -7,7 +7,9 @@ import path from 'node:path';
 import type { CliStatus } from '../shared/providers';
 import type { App } from './app';
 import { loginPath } from './mcp';
-import { listModels, resolveProvider, testProvider } from './providers';
+import type { EffortLevel } from '../shared/types';
+import { isEffortLevel } from './agent/effort';
+import { listModels, providerView, resolveProvider, testProvider } from './providers';
 import { envVar } from './paths';
 
 /** The command's name (it was open-harness before the rename) */
@@ -42,6 +44,9 @@ export function removeOldLink(dir: string): void {
     /* nothing there */
   }
 }
+
+/** How the window names each level */
+const EFFORT_WORDS: Record<EffortLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 
 export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): () => void {
   const linkDir = () => opts.linkDir ?? (envVar('CLI_LINK_DIR') || path.join(os.homedir(), '.local', 'bin'));
@@ -87,6 +92,14 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
         return { ...c, providers: { ...c.providers, [n]: { ...entry, model: m } } };
       });
     }),
+    app.rpc.handle('providers.setEffort', (name, level) => setEffort(String(name || app.config().provider), level)),
+    app.commands.register({
+      name: 'effort',
+      description: 'Reasoning effort for this provider',
+      argsHint: '<low|medium|high|xhigh|max|default>',
+      source: 'app',
+      run: (args) => effortCommand(args),
+    }),
     app.rpc.handle('providers.test', async (name) => testProvider(resolveProvider(app.config(), name ? String(name) : undefined))),
     app.rpc.handle('cli.status', () => status()),
     app.rpc.handle('cli.install', async () => {
@@ -106,6 +119,37 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
       return status();
     }),
   ];
+  /** Stores the effort of a provider entry (null: none, the model's default). */
+  function setEffort(n: string, level: EffortLevel | null): void {
+    if (level !== null && !isEffortLevel(level)) throw new Error('Choose low, medium, high, xhigh or max.');
+    app.updateConfig((c) => {
+      const entry = c.providers?.[n];
+      if (!entry) throw new Error(`Effort is set per provider entry; "${n}" has none.`);
+      const { effort: _old, ...rest } = entry;
+      return { ...c, providers: { ...c.providers, [n]: level ? { ...rest, effort: level } : rest } };
+    });
+  }
+
+  /** /effort [level]: shows or sets the effort of the provider in use. */
+  function effortCommand(args: string): { notice?: string; error?: string } {
+    const name = app.config().provider || 'ollama';
+    const view = providerView(resolveProvider(app.config(), name));
+    const info = view.effort;
+    if (!info) return { error: `${view.model || view.label} takes no effort setting.` };
+    const word = args.trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const label = (l: EffortLevel | null) => (l ? EFFORT_WORDS[l] : 'Default');
+    if (!word) return { notice: `Effort: ${label(info.chosen ?? info.default)}. Levels: ${info.levels.join(', ')}, default.` };
+    const level = word === 'default' || word === 'auto' ? null : word === 'extrahigh' ? 'xhigh' : word;
+    if (level !== null && !isEffortLevel(level)) return { error: `Unknown level "${args.trim()}". Use ${info.levels.join(', ')} or default.` };
+    try {
+      setEffort(name, level);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+    const now = providerView(resolveProvider(app.config(), name)).effort;
+    return { notice: `Effort: ${label(now?.chosen ?? now?.default ?? null)}.` };
+  }
+
   const dispose = () => {
     for (const d of disposers) d();
   };

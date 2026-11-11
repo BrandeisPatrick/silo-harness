@@ -29,7 +29,7 @@
    ollama pull qwen3:8b
    ```
 
-The app picks the change up while it runs. Other providers (OpenAI, Anthropic, Portkey, Groq, DeepSeek, Together, LM Studio, any OpenAI-compatible service) are in [configure.md](docs/configure.md); a coding agent can do the setup for you from that page.
+The app picks the change up while it runs. Other providers (OpenAI, Anthropic, Portkey, Groq, DeepSeek, Together, LM Studio, any OpenAI-compatible service) are in [configure.md](docs/configure.md); a coding agent can do the setup for you from that page. Under the chat bar, the model pill switches models and the pill after it sets the reasoning effort where the model takes one.
 
 ## Why
 
@@ -58,7 +58,7 @@ npm install && npm start
 | --- | --- |
 | <img src="docs/screenshots/tool-activity.png" width="400"> | **Tool activity in one line.** Each run of tool calls folds into a quiet line that says what happened ("Read 3 files, edited 2 files, ran 2 commands"), with the lines added and removed and anything that failed or was denied; click it to see every row. |
 | <img src="docs/screenshots/mods.png" width="400"> | **Mods.** Environment, Context, Tasks, Plan, Outputs, Sub-sessions and Skills in the rail; Side chat and Scheduled as tabs. All written against the protocol in [docs/mods.md](docs/mods.md). |
-| <img src="docs/screenshots/hyperspace.png" width="400"> | **Looks.** A mod can restyle just the conversation or just the chat bar, and bring a background; Settings → Mods has a tab for each (Backgrounds, Chat bar, Conversation, Themes) to pick one, or a whole set. Hyperspace, a bundled set, jumps to lightspeed while the agent works. |
+| <img src="docs/screenshots/hyperspace.png" width="400"> | **Looks.** A mod can restyle just the conversation or just the chat bar, and bring a background; Settings → Mods has a tab for each (Background, Chat bar, Conversation) to pick one, or a whole set. Hyperspace, a bundled set, jumps to lightspeed while the agent works. |
 | <img src="docs/screenshots/sidebar.png" width="400"> | **Sessions.** Several at once, grouped by day, forks and sub-sessions nested under where they came from, search inside conversations. |
 | <img src="docs/screenshots/images.png" width="400"> | **Images in replies.** The model shows a screenshot or a chart inline; tool rows carry thumbnails. |
 | <img src="docs/screenshots/settings.png" width="400"> | **Settings.** One control per row, applied as you change it, searchable; a Mods section with permissions in plain words. |

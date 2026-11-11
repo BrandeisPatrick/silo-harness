@@ -1,7 +1,7 @@
 /* Styles for the sidebar: navigation rows, session groups and the session tree, search, the footer.
    Tokens come from styles.css; the few below are the sidebar's own (row fills, the tree's hairline, the unread dot). */
 
-/* They are set on :root so a theme can restyle them like any other token. */
+/* They are set on :root like any other token. */
 :root {
   --side-hover: rgba(0, 0, 0, 0.045);
   --side-active: rgba(0, 0, 0, 0.09);

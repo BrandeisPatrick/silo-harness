@@ -4,7 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const { bash, shellResult } = require(path.join(projectDir, 'dist/main/tools/shell.js'));
+const { bash, shellResult, interactiveLogin, loginRedirect } = require(path.join(projectDir, 'dist/main/tools/shell.js'));
 const { truncateMiddle } = require(path.join(projectDir, 'dist/main/tools/types.js'));
 const { check, done } = require('./support/check.js');
 
@@ -89,6 +89,60 @@ const alive = (pid) => {
     await pending;
     check('a command that ignores the polite signal is killed anyway', Date.now() - started < 6000, Date.now() - started);
   }
+
+  // Sign-ins that wait for the user: said at once, before any approval, never run
+  const logins = [
+    ['aws sso login', 'aws sso login'],
+    ['aws sso login --profile dev', 'aws sso login'],
+    ['aws --profile dev sso login', 'aws sso login'],
+    ['AWS_PROFILE=dev aws sso login', 'aws sso login'],
+    ['aws configure sso', 'aws configure sso'],
+    ['aws login', 'aws login'],
+    ['gcloud auth login', 'gcloud auth login'],
+    ['gcloud auth login --no-launch-browser', 'gcloud auth login'],
+    ['gcloud auth application-default login', 'gcloud auth application-default login'],
+    ['az login', 'az login'],
+    ['az login --use-device-code', 'az login'],
+    ['gh auth login', 'gh auth login'],
+    ['gh auth login --web -h github.com', 'gh auth login'],
+    ['npm login', 'npm login'],
+    ['npm adduser', 'npm adduser'],
+    ['docker login', 'docker login'],
+    ['docker login registry.example.com -u someone', 'docker login'],
+    ['cd app && aws sso login && aws sts get-caller-identity', 'aws sso login'],
+  ];
+  for (const [cmd, want] of logins) check(`login: ${cmd}`, interactiveLogin(cmd) === want, interactiveLogin(cmd));
+  for (const cmd of ['aws sts get-caller-identity', 'aws s3 ls', 'aws logs tail /example', 'gcloud auth list', 'gcloud auth login --cred-file=key.json', 'az login --service-principal -u a -p b --tenant t', 'az login --identity', 'az account show', 'gh auth status', 'gh auth login --with-token < token.txt', 'npm run login', 'npm install', 'docker login --password-stdin -u someone', 'docker login -u someone -p x', 'docker logout', 'grep -r login src', 'echo aws sso login']) {
+    check(`not a login: ${cmd}`, interactiveLogin(cmd) === null, interactiveLogin(cmd));
+  }
+  let asked = 0;
+  const redirect = await bash.run({ command: 'aws sso login --profile dev' }, { cwd, approve: async () => (asked++, { ok: true }) });
+  check('login: the result says to use terminal_run, without asking or running', redirect.content === loginRedirect('aws sso login') && asked === 0, redirect.content);
+  check('login: … in two short lines at most', redirect.content.length < 200 && /terminal_run/.test(redirect.content), redirect.content.length);
+
+  // Unmatched wildcards pass through as in bash
+  const glob = await bash.run({ command: 'echo --include=*.no-such-ext src/*.zzz' }, ctx());
+  check('an unmatched wildcard passes through, as in bash', glob.content === '--include=*.no-such-ext src/*.zzz\n[exit code: 0]', glob.content);
+  fs.writeFileSync(path.join(cwd, 'one.ts'), 'x');
+  const matched = await bash.run({ command: 'echo *.ts' }, ctx());
+  check('… a matching one still expands', matched.content === 'one.ts\n[exit code: 0]', matched.content);
+
+  // The pipeline's exit code is still its last command's (no pipefail)
+  const piped = await bash.run({ command: 'false | true' }, ctx());
+  check('a pipeline keeps its last command\'s exit code', /\[exit code: 0\]$/.test(piped.content), piped.content);
+
+  // Results that say what happened, and what to do, the exit code last (the transcript reads it from the end)
+  const slow = await bash.run({ command: 'sleep 5', timeout_ms: 1000 }, ctx());
+  check('timeout: one line on raising timeout_ms or using the terminal, then the exit code', /\n?\[timed out: raise timeout_ms \(up to 600000, now 1000\), or run it with terminal_run\]\n\[exit code: killed \(timeout after 1000 ms\)\]$/.test(slow.content), slow.content);
+  const noTimeout = await bash.run({ command: 'print -u2 "zsh:1: command not found: timeout"; exit 127' }, ctx());
+  check('timeout missing: says to use timeout_ms', noTimeout.content.endsWith("[macOS has no timeout: use this tool's timeout_ms]\n[exit code: 127]"), noTimeout.content);
+  const gnu = await bash.run({ command: 'print -u2 "zsh:1: command not found: gtimeout"; exit 127' }, ctx());
+  check('gtimeout missing: the same', gnu.content.includes("[macOS has no timeout: use this tool's timeout_ms]"), gnu.content);
+  const nostart = await bash.run({ command: 'echo hi' }, { cwd: path.join(cwd, 'no-such-folder'), approve: async () => ({ ok: true }) });
+  check('could not start: says so', /^\[exit code: could not start \(.+\)\]$/.test(nostart.content), nostart.content);
+  const signalled = await bash.run({ command: 'kill -9 $$' }, ctx());
+  check('killed by a signal: names it', /\[exit code: killed \(SIGKILL\)\]$/.test(signalled.content), signalled.content);
+  check('the description stays short', bash.description.length < 420, bash.description.length);
 
   fs.rmSync(cwd, { recursive: true, force: true });
   done();
