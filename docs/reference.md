@@ -46,7 +46,7 @@ Paths are gitignore patterns: `//abs/path` from `/`, `~/path` from the home fold
 
 **Where rules live.** Your settings.json (`permissions`), for every project; the app's own store, per project (what cards and Settings save; the older "programs, edits, servers" entries read as `Bash(p:*)`, `Edit`, `mcp__s`). A `permissions` block in a project's `.silo-harness/settings.json` is ignored, allow, ask and deny alike. Writing your settings.json or the app's `config.json`, by a tool or a command, asks in every mode, Bypass included: the agent cannot give itself a rule. Rules a hook's `if` field uses are matched more loosely (a hook fires when unsure).
 
-**Limits.** `Read` and `Edit` rules apply to the file tools, not to what a shell command reads (`cat .env`). Bash deny rules and the protection of the rule files read the command's text, so an interpreter (`python -c`, `node -e`) can get past them: deny the interpreter, or keep Auto mode's check on.
+**Limits.** `Read` and `Edit` rules apply to the file tools, not to what a shell command reads (`cat .env`). Bash deny rules and the protection of the rule files read the command's text, so an interpreter (`python -c`, `node -e`) can get past them: deny the interpreter, or keep Auto mode's check on. In Bypass, so can a write to a path held in a variable (`> $D/settings.json`). An allowed program runs in whatever folder an allowed `cd` moved to: with `Bash(cd:*)` and `Bash(make:*)`, `cd .. && make` runs, whatever `make` writes there.
 
 ## Auto mode
 
