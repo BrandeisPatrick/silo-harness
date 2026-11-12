@@ -111,7 +111,9 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
     if (said) body.insertAdjacentHTML('beforeend', `<p class="prompt-text">${escapeHtml(said)}</p>`);
     // A purchase or an account card says what it saw as written; a browser_eval's reason reads like a guard's
     const custom = browser ? browser.card === 'purchase' || browser.card === 'account' : typeof ev.alwaysLabel === 'string' && !ev.alwaysLabel.trim() && typeof ev.projectLabel === 'string' && !ev.projectLabel.trim();
-    if (reason) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note">${escapeHtml(stopNote(ev.mode, reason, custom))}</p>`);
+    // After a shell sandbox block: Allow and Deny only, but in Auto mode's words, with the line that showed the block
+    const sandboxLine = typeof ev.sandboxLine === 'string' ? ev.sandboxLine.trim() : '';
+    if (reason) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note">${escapeHtml(stopNote(ev.mode, reason, custom && !sandboxLine))}</p>`);
     if (said || reason || browser) el.setAttribute('aria-describedby', body.id);
     let subject = ev.name;
     /** The decided line (a call without a row) names the action in words rather than a tool name or a path */
@@ -171,6 +173,7 @@ export function createApprovals({ input: inputEl, api, setConfig, running, curre
       pre.textContent = ev.name === 'write_file' || ev.name === 'edit_file' ? ev.detail.replace(/^[^\n]+/, (line) => displayPath(line)) : ev.detail;
       body.appendChild(pre);
     }
+    if (sandboxLine) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note">It ran once in the sandbox and was blocked: <code class="prompt-line">${escapeHtml(sandboxLine)}</code> Allowed, it runs again outside.</p>`);
     // The amber line under the rest: "This looks like a sign-in site"
     const note = typeof ev.note === 'string' ? ev.note.trim() : '';
     if (note) body.insertAdjacentHTML('beforeend', `<p class="prompt-text prompt-note warn">${escapeHtml(note)}</p>`);

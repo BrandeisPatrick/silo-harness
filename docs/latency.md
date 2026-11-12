@@ -44,6 +44,9 @@ Waiting on you 1m 05s
 Safety checks 1, 3s in all, slowest 3s
 - allow 1
 
+Shell sandbox 6 commands, 5 stayed inside
+- blocked: 1, 1 run again outside
+
 Retries 1, 1s waiting before them
 - why: no data 1
 - longest failed attempt: 5m 00s (no data)
@@ -63,6 +66,7 @@ Compactions 1
 - **Model calls** are timed as the gap before each `usage` record: from the record before it (a retry inside the call aside) to the reply's token count. That includes the harness's work just before the request and any retries.
 - **Tool calls** count each tool's own work; the wait for a card or a safety check is left out. A tool that is not built in shows as `MCP tools` or `other tools`, never by its name.
 - **Longest stretches with no record** are the five longest gaps between two records inside a turn, with what came before and after in fixed words. A stretch "before retry" is a model call that failed and was tried again; one that ends "now (still running)" is the turn going on.
+- **Shell sandbox** appears only when a command ran in it: how many stayed inside, were blocked, and ran again outside after a check or your Allow.
 - **Safety checks** and **Retries** come from records that 0.17.0 did not write yet; for a session from 0.17.0 the report says "not recorded" for them, and takes the question time from the `ask_user` call.
 
 In the window the report is a card; outside the app, `node scripts/session-report.js <history .jsonl>` prints the same report as Markdown for one session's log (`history/<session id>.jsonl` in the app's data folder; needs `npm run build`). A last line torn by a crash is skipped.
@@ -100,7 +104,7 @@ The line's `run` is a random id; the session's history log keeps the same id in 
 node scripts/timing-report.js ~/Library/Application\ Support/Silo\ Harness/timing/timing.jsonl --last 5 --tools
 ```
 
-A line holds, per run: the provider's type, the model id's last part, the mode, the wall time and how it ended; per model turn: the harness's steps before the request, when the request went out, the first event, the first thinking, text and tool-call delta, the last event, the longest silence between two content events (`maxGapMs`), attempts, each failed attempt with how long it ran and why (`failedAttempts`: `idle`, `connection`, `rate_limited`, `busy`, `too_long` or `other`), retry waits, fallbacks, the finish reason and the token counts; per tool call: the built-in tool's name (an MCP tool is `mcp`), the queue, hooks, each permission question (how it was settled and how long it took, a safety check's result and time, your wait on a card; an `ask_user` question is kept the same way, as `question`, so its wait is not tool time), execution, storing, its wall time, its outcome and how many calls ran alongside it. A value the provider did not report is left out, not set to 0.
+A line holds, per run: the provider's type, the model id's last part, the mode, the wall time and how it ended; per model turn: the harness's steps before the request, when the request went out, the first event, the first thinking, text and tool-call delta, the last event, the longest silence between two content events (`maxGapMs`), attempts, each failed attempt with how long it ran and why (`failedAttempts`: `idle`, `connection`, `rate_limited`, `busy`, `too_long` or `other`), retry waits, fallbacks, the finish reason and the token counts; per tool call: the built-in tool's name (an MCP tool is `mcp`), the queue, hooks, each permission question (how it was settled and how long it took, a safety check's result and time, your wait on a card; an `ask_user` question is kept the same way, as `question`, so its wait is not tool time), execution, storing, its wall time, its outcome and how many calls ran alongside it; for a command in the shell sandbox, `sandbox`: `inside`, `blocked` or `rerun` (its permission question settles as `sandbox`), and the run's summary gains `sandboxed`, `sandboxBlocked` and `sandboxReruns`. A value the provider did not report is left out, not set to 0.
 
 ### The newer history records
 
@@ -114,6 +118,7 @@ Besides the timing log, the history log keeps these records, numbers and fixed w
 | `question.request` | `count`, the number of questions on the card |
 | `question.resolved` | `outcome`: `answered` or `skipped` |
 | `compaction.start` | `reason`: `auto` or `manual`; its end is the `compaction` record |
+| `tool.end` | gains `sandbox` for a command in the shell sandbox: `inside`, `blocked` or `rerun` |
 
 **Never recorded**: prompts, arguments, commands, paths, URLs, output, session titles, account or profile names, base URLs, keys. A session is a short random id. Recording is always on in memory and costs well under a microsecond per streamed event.
 

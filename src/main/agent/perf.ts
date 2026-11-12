@@ -13,15 +13,17 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SandboxMark, SandboxWord } from '../../shared/types';
 
 /** How a tool call ended. */
 export type Outcome = 'ok' | 'failed' | 'denied' | 'blocked' | 'stopped' | 'timed_out';
 /**
  * How one permission question was settled: a rule of the mode or project, a read-only command, something the user
- * allowed earlier in the session, an approval card, Auto mode's safety check, a refusal, or a PreToolUse hook.
+ * allowed earlier in the session, an approval card, Auto mode's safety check, a refusal, a PreToolUse hook, or the
+ * shell sandbox (the command ran inside it with no check; a block's check or card is a second question).
  * 'question' is not a permission: it is ask_user's question card, whose wait for the user is kept the same way.
  */
-export type PermissionPath = 'rule' | 'read_only' | 'allowed_before' | 'card' | 'check' | 'refused' | 'hook' | 'question';
+export type PermissionPath = 'rule' | 'read_only' | 'allowed_before' | 'card' | 'check' | 'refused' | 'hook' | 'question' | 'sandbox';
 /** A changed request after a refusal, or a slower way of asking (see complete.ts, anthropic.ts). */
 export type Fallback = 'no_stream_usage' | 'no_cache_fields' | 'no_effort' | 'non_streaming' | 'plain_chat' | 'deferred_tools' | 'thinking_stripped' | 'compacted';
 /** The work the harness does before a request goes out (Agent.run's turn loop). */
@@ -43,7 +45,7 @@ const PROVIDERS = new Set(['openrouter', 'portkey', 'openai', 'anthropic', 'groq
 const MODES = new Set(['ask', 'acceptEdits', 'auto', 'plan', 'bypass']);
 const RUN_ENDS = new Set(['done', 'aborted', 'max_turns', 'error', 'plan', 'loop']);
 const OUTCOMES = new Set<Outcome>(['ok', 'failed', 'denied', 'blocked', 'stopped', 'timed_out']);
-const PATHS = new Set<PermissionPath>(['rule', 'read_only', 'allowed_before', 'card', 'check', 'refused', 'hook', 'question']);
+const PATHS = new Set<PermissionPath>(['rule', 'read_only', 'allowed_before', 'card', 'check', 'refused', 'hook', 'question', 'sandbox']);
 const FALLBACKS = new Set<Fallback>(['no_stream_usage', 'no_cache_fields', 'no_effort', 'non_streaming', 'plain_chat', 'deferred_tools', 'thinking_stripped', 'compacted']);
 const FINISHES = new Set<Finish>(['stop', 'tool_use', 'length', 'refusal', 'error', 'aborted']);
 
@@ -141,6 +143,8 @@ export interface ToolSpan {
   outcome: Outcome;
   /** How many other calls ran at some point while it ran */
   alongside: number;
+  /** bash in the shell sandbox: it stayed inside, was blocked, or ran again outside */
+  sandbox?: SandboxWord;
 }
 
 export interface TurnSpan {
@@ -213,6 +217,10 @@ export interface RunSummary {
   maxGapMs: number;
   /** The turn that took longest (1-based), from the harness's start on it to its reply */
   slowest?: number;
+  /** bash calls in the shell sandbox (present only when there were some): all of them, those blocked, those run again outside */
+  sandboxed?: number;
+  sandboxBlocked?: number;
+  sandboxReruns?: number;
 }
 
 export interface RunRecord {
@@ -443,6 +451,11 @@ export class ToolTimer {
 
   postHook(msSpent: number): void {
     this.span.postHookMs = ms(this.span.postHookMs + msSpent);
+  }
+
+  /** A bash call ran in the shell sandbox: how it went, in fixed words */
+  sandboxed(mark: SandboxMark): void {
+    this.span.sandbox = mark.outside ? 'rerun' : mark.blocked ? 'blocked' : 'inside';
   }
 
   /** Done (post hooks included). */
@@ -718,7 +731,15 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
     fallbacks,
     maxGapMs: ms(maxGapMs),
     slowest,
+    ...sandboxCounts(r.tools),
   };
+}
+
+/** The shell sandbox's counts for a run summary, or nothing when no call ran in it */
+function sandboxCounts(tools: ToolSpan[]): Pick<RunSummary, 'sandboxed' | 'sandboxBlocked' | 'sandboxReruns'> {
+  const words = tools.map((t) => t.sandbox).filter((w): w is SandboxWord => !!w);
+  if (!words.length) return {};
+  return { sandboxed: words.length, sandboxBlocked: words.filter((w) => w !== 'inside').length, sandboxReruns: words.filter((w) => w === 'rerun').length };
 }
 
 // ---------- Words ----------

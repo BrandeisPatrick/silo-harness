@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AppConfig } from '../shared/types';
 import type { SettingsFileInfo, SettingsInfo } from '../shared/settings-info';
-import { ENV_NAME, expandEnvRefs } from './env';
+import { ENV_NAME, expandEnvRefs, SECRET_ENV_NAME } from './env';
 import { isRecord } from './json';
 import { between, bool, describe, intBetween, kind, nonNegative, oneOf, positiveInt, str, stringList, timeOfDay, type Check } from './checks';
 import { BUILT_IN_PROVIDERS, providerEntrySchema, validateProviderEntry } from './provider-presets';
@@ -81,8 +81,22 @@ const SCALARS: Record<string, Check> = {
   timingLog: describe(bool, "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder. On unless set to false."),
 };
 
+/** sandbox.allowWrite: folders, absolute or under ~, never / or the home folder itself or a folder above it */
+const folderList: Check = Object.assign((v: unknown): string | null => {
+  const listed = stringList(v);
+  if (listed) return listed;
+  const home = os.homedir();
+  for (const [i, raw] of (v as string[]).entries()) {
+    const p = raw.trim().replace(/^~(?=$|\/)/, home);
+    if (!path.isAbsolute(p)) return `item ${i + 1}: expected an absolute folder (/… or ~/…), got "${raw}"`;
+    const abs = path.resolve(p);
+    if (abs === '/' || abs === home || home.startsWith(abs.endsWith('/') ? abs : `${abs}/`)) return `item ${i + 1}: "${raw}" would make your whole home folder writable`;
+  }
+  return null;
+}, { schema: stringList.schema });
+
 /** Sections a settings file may set field by field. */
-const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode' | 'webSearch', Record<string, Check>> = {
+const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode' | 'sandbox' | 'webSearch', Record<string, Check>> = {
   ollama: {
     baseURL: describe(str, "The Ollama server's OpenAI-compatible endpoint, e.g. http://localhost:11434/v1."),
     model: describe(str, 'The Ollama model tag, e.g. qwen3:8b.'),
@@ -120,6 +134,11 @@ const SECTIONS: Record<'ollama' | 'portkey' | 'dreaming' | 'browser' | 'autoMode
     allow: describe(stringList, 'Plain-language rules the safety check allows, e.g. "Deploys to staging". Your own settings.json only.'),
     model: describe(str, 'The safety check\'s model: "<provider>:<model>" or a model id of the session\'s provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic\'s API, else the session\'s own model. Your own settings.json only.'),
     learn: describe(bool, 'Record your answers on approval cards and give them to the safety check as earlier decisions (default true). Your own settings.json only.'),
+  },
+  sandbox: {
+    enabled: describe(bool, "Run Auto mode's commands in a macOS sandbox that writes only in the project and temp folders, with no network and no secrets, instead of the safety check; Plan mode's reads run read-only (default false). Your own settings.json only."),
+    loopback: describe(bool, "Let sandboxed commands use this Mac's own ports (localhost), but databases, Docker, Ollama and Silo's own (default false). Your own settings.json only."),
+    allowWrite: describe(folderList, 'Folders sandboxed commands may also write: absolute or ~/…, not / or your home folder itself. Your own settings.json only.'),
   },
   webSearch: {
     provider: describe(oneOf('duckduckgo', 'brave', 'tavily', 'exa', 'searxng'), 'The web_search backend. duckduckgo needs no key.'),
@@ -170,7 +189,7 @@ export function validatePrices(value: unknown): { prices: Record<string, Record<
 export const SECRET_FIELDS = ['portkey.apiKey', 'portkey.providerApiKey', 'webSearch.apiKey'];
 
 /** Variable names that hold a secret by their look; a project's env block may not set them. */
-const SECRET_ENV = /(KEY|TOKEN|SECRET|PASSWORD)$/i;
+const SECRET_ENV = SECRET_ENV_NAME;
 
 /** Keys an editor puts in for itself; ignored without a complaint. */
 const IGNORED = new Set(['$schema']);
@@ -495,7 +514,13 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
       bad(key, "a project's settings.json may not set autoMode; set it in your own settings.json");
       continue;
     }
-    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser' || key === 'autoMode' || key === 'webSearch') {
+    if (key === 'sandbox' && scope === 'project') {
+      // What runs without the check, and where it may write, is the user's alone: a cloned repository could otherwise
+      // turn the sandbox on, open local ports or make more folders writable.
+      bad(key, "a project's settings.json may not set sandbox; set it in your own settings.json");
+      continue;
+    }
+    if (key === 'ollama' || key === 'portkey' || key === 'dreaming' || key === 'browser' || key === 'autoMode' || key === 'sandbox' || key === 'webSearch') {
       if (!isRecord(value)) {
         bad(key, `expected an object of ${key} fields, got ${kind(value)}`);
         continue;
