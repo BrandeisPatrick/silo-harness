@@ -202,6 +202,16 @@ const queueList = createQueueList({
     }
     return false;
   },
+  sendNow: async (msg, button) => {
+    try {
+      if (typeof oc.sendNow !== 'function') throw new Error('No handler registered');
+      // False: no longer queued (delivered, removed, or the run ended); its own event moves the row
+      return await oc.sendNow(msg.id);
+    } catch (err) {
+      showInlineError(button, `Couldn't send the message now: ${cleanError(err)}`);
+    }
+    return false;
+  },
   onChange: () => syncQueueHeight(),
 });
 
@@ -1267,13 +1277,15 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       // Cards of calls that no reply came after
       chatCards.flush();
       clearBrowsing();
-      if (ev.reason === 'aborted') addSystemMessage('Interrupted.');
+      // Cut by "Send now": the next run starts at once with the chosen message, so not "Interrupted."
+      if (ev.reason === 'aborted' && !ev.continued) addSystemMessage('Interrupted.');
       if (ev.reason === 'max_turns') addSystemMessage('Stopped at the tool turn limit. Raise it in Settings.');
       if (ev.reason === 'plan') showPlanReady();
       // The turn's header stops counting; with its answer in, the process folds away
       turnFold.runEnded(ev.reason);
-      {
+      if (!ev.continued) {
         // Queued messages normally come back through queue_dropped before this; anything still listed goes back too.
+        // After "Send now" they stay queued for the next run (and the chosen one becomes its bubble).
         const left = queueList.clear();
         if (left.length) returnToComposer(left);
       }

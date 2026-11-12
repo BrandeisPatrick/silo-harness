@@ -101,6 +101,7 @@ const TEST_SERVER = path.join(__dirname, 'support', 'test-mcp-server.js');
   check('fold: one server', JSON.stringify(C.mcpFoldWords([{ server: 'files', outcome: 'ok' }, { server: 'files', outcome: 'ok' }])) === JSON.stringify({ text: 'Used files' }));
   check('fold: two servers, a sign-in failure named', JSON.stringify(C.mcpFoldWords([{ server: 'files', outcome: 'ok' }, { server: 'docs', outcome: 'ok' }, { server: 'docs', outcome: 'failed', problem: { server: 'docs', kind: 'sign-in' } }])) === JSON.stringify({ text: 'Used docs and files', failed: 'docs needs sign-in' }));
   check('fold: three servers keep the activity words; a built-in call in the run leaves the line alone', C.mcpFoldWords([{ server: 'a', outcome: 'ok' }, { server: 'b', outcome: 'ok' }, { server: 'c', outcome: 'ok' }]).text === undefined && JSON.stringify(C.mcpFoldWords([{ server: 'a', outcome: 'ok' }, { outcome: 'ok' }])) === '{}');
+  check('fold: the present form for a live run\'s opened list', C.mcpFoldWords([{ server: 'files', outcome: 'running' }, { server: 'docs', outcome: 'ok' }], { tense: 'present' }).text === 'Using docs and files');
   check('fold: two failures say "2 failed" as before', C.mcpFoldWords([{ server: 'a', outcome: 'failed', problem: { server: 'a', kind: 'sign-in' } }, { server: 'a', outcome: 'failed' }]).failed === undefined);
 
   // ---------- The manager's list carries the masked config, the vars and the log ----------

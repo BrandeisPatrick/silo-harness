@@ -501,6 +501,13 @@ export class SessionRuntime {
         status = !this.isRunning(id);
         break;
       case 'run_end': {
+        // Cut by "Send now": the next run starts at once (the agent is still running), so no unread mark, no status
+        if (ev.continued) {
+          l.tools.clear();
+          l.approvals.clear();
+          l.questions.clear();
+          break;
+        }
         Object.assign(l, { running: false, startedAt: undefined, turnStartedAt: undefined, turnSeen: false, text: '', thinking: '' });
         l.tools.clear();
         l.approvals.clear();

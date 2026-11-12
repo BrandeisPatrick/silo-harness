@@ -141,6 +141,14 @@ const { check, done } = require('./support/check.js');
   const sys = bd.slices.find((s) => s.key === 'system');
   check('5: the breakdown counts the note with the system prompt', sys.tokens > 0 && Math.abs(bd.slices.reduce((a, b) => a + b.tokens, 0) - bd.limit) <= 1, sys);
 
+  // ---- 6: the base prompt asks for short updates while working; a session with its own tools is not asked ----
+  const UPDATES = '- Say what you are doing as you work: one short sentence before your first call, then one whenever you find something that matters, change approach or hit a problem (what you found, what you do next). Not before every call, and never repeat an update.';
+  const basePrompt = P.systemPrompt(config, [], null);
+  check('6: the base prompt carries the updates bullet, right after "Keep going…"', basePrompt.includes(UPDATES) && /- Keep going until the task is complete[^\n]*\n- Say what you are doing as you work:/.test(basePrompt));
+  check('6: it is in the base prompt the model got', system[0].includes(UPDATES));
+  const ownPrompt = P.systemPrompt(config, [], null, '', ['remember', 'recall']);
+  check('6: a session with its own tool set is not asked for it', !ownPrompt.includes('Say what you are doing') && P.systemPromptParts(config, [], null, '', ['remember']).base.indexOf('Say what you are doing') < 0);
+
   mock.close();
   done();
 })().catch((err) => {

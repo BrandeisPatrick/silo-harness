@@ -55,6 +55,8 @@ export function setupPower(app: App, opts: { blocker?: SleepBlocker } = {}): voi
   app.events.on((sessionId, ev) => {
     if (ev.type === 'run_start') running.add(sessionId);
     else if (ev.type === 'run_end') {
+      // Cut by "Send now": the session runs on with the next message, so the Mac stays awake
+      if (ev.continued) return;
       running.delete(sessionId);
       // Drop sessions whose end we missed, so a lost event cannot keep the Mac awake for good
       for (const id of running) if (!app.runtime.isRunning(id)) running.delete(id);
