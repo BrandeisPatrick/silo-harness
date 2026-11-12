@@ -115,9 +115,12 @@ function startMock() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         const send = (obj) => res.write(`data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: payload.model, ...obj })}\n\n`);
+        // `opening`: the role chunk OpenAI and most gateways send first, before any content
+        if (reply.opening) send({ choices: [{ index: 0, delta: { role: 'assistant', content: '' } }] });
         // `silenceMs`: the stream is open but nothing comes for that long; `pingMs` sends a chunk without content that
-        // often meanwhile, as a gateway's keep-alive does
-        if (reply.silenceMs) await quiet(reply.silenceMs, reply.pingMs, () => send({ choices: [] }));
+        // often meanwhile, as a gateway's keep-alive does (`pingComment`: an SSE comment line instead, which the SDK
+        // never passes on)
+        if (reply.silenceMs) await quiet(reply.silenceMs, reply.pingMs, () => (res.destroyed ? null : reply.pingComment ? res.write(': keep-alive\n\n') : send({ choices: [] })));
         if (reply.chunks) {
           for (const piece of reply.chunks) {
             send({ choices: [{ index: 0, delta: { role: 'assistant', content: piece } }] });
@@ -143,6 +146,9 @@ function startMock() {
         if (state.cachedTokens) counts.prompt_tokens_details = { cached_tokens: state.cachedTokens };
         // `noUsage`: no usage chunk at all, as a server that does not count tokens
         if (!reply.noUsage) send({ choices: [], usage: reply.usage ?? counts });
+        // `holdOpenMs`: the reply is complete, but the connection stays open that long before [DONE]
+        if (reply.holdOpenMs) await new Promise((r) => setTimeout(r, reply.holdOpenMs));
+        if (res.destroyed) return;
         res.write('data: [DONE]\n\n');
         res.end();
       }, reply.delayMs ?? state.delayMs);

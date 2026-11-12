@@ -15,6 +15,10 @@ Long steps say what they are doing while they run, and a session's time can be r
 - **Silence notice.** After 30 s with no output from the model, the status line counts up and says when the connection is tried again.
 - **Timing log on.** Each run's timing is kept in the data folder by default, numbers only; `"timingLog": false` turns it off ([format](docs/latency.md#the-timing-log)).
 
+### Fixed
+
+- **Stalled replies through a gateway.** A reply that goes silent for 5 minutes after it starts is now tried again, instead of ending empty.
+
 ### For developers
 
 - **Session report script.** `node scripts/session-report.js <log>` prints the report for one session's history log, outside the app.

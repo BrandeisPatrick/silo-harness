@@ -412,6 +412,10 @@ async function readStream(
       host.activity?.toolInput(calls.indexOf(call), call.function.name, call.function.arguments.length - before);
     }
   }
+  // The idle limit ended the stream before the model finished: the OpenAI SDK ends an aborted stream quietly instead of
+  // throwing, so without this a stall after the first chunk (a gateway's opening role chunk, or keep-alive comments)
+  // would read as a finished, empty reply. A reply that did finish is kept, even if the connection stayed open after it.
+  if (watch.idled() && !finish) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`, true);
   // A reply that began and then ended without a finish reason (or the usage that comes after it) was cut off by the
   // connection, not by the model
   if (received && !finish && !usage) throw new StreamDropped();
