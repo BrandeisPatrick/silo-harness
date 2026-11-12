@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { PermissionLists, StoredRules } from '../../shared/types';
-import { allSimpleCommands, commandShape, lineCommands, substitutions, words } from '../guard';
+import { allSimpleCommands, commandShape, judgedCommand, lineCommands, substitutions, words } from '../guard';
 
 export type RuleListName = 'allow' | 'ask' | 'deny';
 export const RULE_LISTS: RuleListName[] = ['deny', 'ask', 'allow'];
@@ -525,7 +525,8 @@ function ruleMatchesCall(rule: Rule, name: string, args: unknown, cwd: string, s
     }
     case 'bash': {
       if (!BASH_TOOLS.has(name)) return false;
-      const command = argString(args, 'command') ?? '';
+      // bash's path is matched as `cd <path> && <command>`, as its card shows it
+      const command = judgedCommand(name, args, cwd) ?? '';
       if (rule.spec.type === 'any') return true;
       // deny and ask look through sudo and doas too (sudo -u root rm x is rm x); allow rules do not
       for (const simple of lineCommands(command.trim())) {

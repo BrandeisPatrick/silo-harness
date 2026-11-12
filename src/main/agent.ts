@@ -66,7 +66,7 @@ import { answerText, forCheck, LearnedStore } from './agent/learned';
 import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
-import { guardCommand, isReadOnlyCommand } from './guard';
+import { guardCommand, isReadOnlyCall, isReadOnlyCommand, judgedCommand } from './guard';
 import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
 import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
@@ -762,8 +762,9 @@ export class Agent {
     if (this.sessionConfig().permissionMode !== 'plan') return false;
     if (EDIT_TOOLS.has(name)) return true;
     if (!BASH_TOOLS.has(name)) return false;
-    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
-    return typeof command !== 'string' || !isReadOnlyCommand(command);
+    // (bash's path is judged as `cd <path> && <command>`, as its card shows it)
+    const command = judgedCommand(name, args, this.sessionConfig().workingDirectory);
+    return command === null || !isReadOnlyCall(name, command);
   }
 
   /**
@@ -805,7 +806,7 @@ export class Agent {
       probe?.settle(path, r.ok);
       return r;
     };
-    const allowedPath = (): PermissionPath => (before ? 'allowed_before' : mode !== 'bypass' && (name === 'bash' || name === 'terminal_run') && isReadOnlyCommand(detail) ? 'read_only' : 'rule');
+    const allowedPath = (): PermissionPath => (before ? 'allowed_before' : mode !== 'bypass' && (name === 'bash' || name === 'terminal_run') && isReadOnlyCall(name, detail) ? 'read_only' : 'rule');
     const settle = async (d: ApprovalDecision): Promise<ApprovalResult> => {
       if (d.kind === 'refuse') return done('refused', { ok: false, message: d.message });
       if (d.kind !== 'ask') return done(allowedPath(), { ok: true });
@@ -2401,8 +2402,8 @@ export class Agent {
     if (!tool || tool.mcp || !BUILT_IN_TOOLS.has(tool)) return false;
     if (SHARED_READS.has(name)) return true;
     if (name !== 'bash') return false;
-    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
-    if (typeof command !== 'string' || !command.trim()) return false;
+    const command = judgedCommand(name, args, cwd);
+    if (command === null || !command.trim()) return false;
     try {
       return isReadOnlyCommand(command.trim()) && guardCommand(command.trim(), cwd) === null;
     } catch {
