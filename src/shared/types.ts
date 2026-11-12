@@ -364,6 +364,8 @@ export interface AppConfig {
   browser: BrowserConfig;
   /** Auto mode's safety check: what it is told about this Mac, the user's own allow rules, and its model */
   autoMode?: AutoModeConfig;
+  /** The shell sandbox around bash (src/main/sandbox): off unless the user's own settings.json turns it on */
+  sandbox?: SandboxConfig;
   /** web_search's backend (docs/web.md); absent: DuckDuckGo */
   webSearch?: WebSearchConfig;
   /** Look for a newer release on GitHub once a day (absent: on) */
@@ -403,6 +405,19 @@ export interface AutoModeConfig {
   model: string;
   /** Record the user's answers on approval cards and give them to the check (absent: on) */
   learn?: boolean;
+}
+
+/**
+ * AppConfig.sandbox ("sandbox" in your own settings.json; a project's file may not set it). `enabled`: in Auto mode a
+ * command no rule settles runs in a macOS sandbox that writes only in the project and temp folders, with no network
+ * and no secrets, instead of going to the safety check; Plan mode's reads run read-only. `loopback`: sandboxed
+ * commands may use this Mac's own ports (but well-known services and Silo's own). `allowWrite`: folders they may
+ * also write. Each absent: off, off, none.
+ */
+export interface SandboxConfig {
+  enabled?: boolean;
+  loopback?: boolean;
+  allowWrite?: string[];
 }
 
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */

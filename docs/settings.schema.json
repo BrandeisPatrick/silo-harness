@@ -300,6 +300,28 @@
         }
       }
     },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Run Auto mode's commands in a macOS sandbox that writes only in the project and temp folders, with no network and no secrets, instead of the safety check; Plan mode's reads run read-only (default false). Your own settings.json only."
+        },
+        "loopback": {
+          "type": "boolean",
+          "description": "Let sandboxed commands use this Mac's own ports (localhost), but databases, Docker, Ollama and Silo's own (default false). Your own settings.json only."
+        },
+        "allowWrite": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Folders sandboxed commands may also write: absolute or ~/…, not / or your home folder itself. Your own settings.json only."
+        }
+      }
+    },
     "webSearch": {
       "type": "object",
       "additionalProperties": false,

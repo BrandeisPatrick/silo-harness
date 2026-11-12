@@ -30,6 +30,28 @@ export interface ApproveOptions {
    * Allow and Deny only.
    */
   browser?: BrowserApproval;
+  /** bash with outside: true: the rules decide as with the sandbox off (Auto mode: the check, then a run outside) */
+  outside?: boolean;
+  /**
+   * bash, after a sandboxed run hit the sandbox's walls (sandbox/index.ts detectBlock): the line that showed it. Auto
+   * mode's check decides on a run outside (a card while it is paused or cannot run); the check is told it ran once.
+   */
+  sandboxBlock?: { line: string };
+}
+
+/**
+ * How an allowed bash call runs in the shell sandbox (ApprovalResult.sandbox): the profile, whether a block is the
+ * result (Plan mode's read-only sandbox) or goes on to the check, what the login profile prints on its own, and how
+ * to say the profile does not work here.
+ */
+export interface SandboxPlan {
+  profile: { text: string; params: Record<string, string> };
+  /** Plan mode: nothing is written; a blocked run is the result, never run again outside */
+  readOnly: boolean;
+  /** The lines the login profile prints in this sandbox with no command (once per session), ignored when looking for a block */
+  baseline(): Promise<string[]>;
+  /** sandbox-exec refused the profile: the sandbox is off for the rest of the session */
+  broken(): void;
 }
 
 /** What a browser card is about (ApproveOptions.browser). */
@@ -51,7 +73,7 @@ export interface BrowserApproval {
 }
 
 /** Outcome of asking for permission: denied actions carry the message the model should read. */
-export type ApprovalResult = { ok: true } | { ok: false; message: string };
+export type ApprovalResult = { ok: true; sandbox?: SandboxPlan } | { ok: false; message: string };
 
 export interface ToolContext {
   /** The session's folder (the folder the run started in) */

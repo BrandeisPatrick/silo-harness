@@ -36,7 +36,9 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
+import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type SandboxPlan, type Tool, type ToolContext, type ToolResult } from './tools';
+import { runShell } from './tools/shell';
+import { deniedPorts, outputLines, probeSandbox, profileFor, realish, sandboxableFolder, sandboxHostNow, sandboxSettings } from './sandbox';
 import { truncate } from './tools/types';
 import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isMcpGroup, isToolGroup, loadToolsTool, mcpGroupsForMessage, requestedGroups, type GroupId, type McpGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
@@ -176,7 +178,7 @@ interface CallRef {
 const TIMED_OUT = /killed \(timeout after \d+ ms\)/;
 
 /** The built-in tools (the reads below are shared only when the tool is the built-in one, not a registered namesake) */
-const BUILT_IN_TOOLS: ReadonlySet<Tool> = new Set([...allTools('ask'), ...allTools('plan')]);
+const BUILT_IN_TOOLS: ReadonlySet<Tool> = new Set([...allTools('ask'), ...allTools('plan'), ...allTools('ask', true), ...allTools('plan', true)]);
 /** Built-in tools that only read, safe to run alongside each other (Agent.shareable; bash is judged per command) */
 const SHARED_READS = new Set(['read_file', 'grep', 'glob', 'list_directory', 'web_fetch']);
 
@@ -286,6 +288,10 @@ export class Agent {
   private autoAllowed = new Map<string, Set<string>>();
   /** Per session: notes for the model (an allowed block) waiting for the run's next model call */
   private autoNotes = new Map<string, string[]>();
+  /** Sessions whose shell sandbox profile failed (sandbox-exec refused it): their commands are decided as without it */
+  private sandboxOff = new Set<string>();
+  /** Per session and profile: what the login profile prints in the sandbox with no command (ignored when looking for a block) */
+  private sandboxBaselines = new Map<string, Promise<string[]>>();
   /** Tokens the tool specs take on every request (measured at the start of each run). */
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
@@ -450,7 +456,8 @@ export class Agent {
     const registered = this.opts.tools?.() ?? [];
     const own = this.ownTools();
     if (own) {
-      const pool = [...allTools('ask'), ...allTools('plan'), ...registered];
+      const sb = this.sandboxOffered(cfg);
+      const pool = [...allTools('ask', sb), ...allTools('plan', sb), ...registered];
       const out: Tool[] = [];
       for (const name of own) {
         const t = pool.find((x) => x.name === name && !x.mcp);
@@ -462,7 +469,7 @@ export class Agent {
     const plan = cfg.permissionMode === 'plan';
     const essential = essentialToolsOnly(cfg);
     const extraTools = registered.filter((t) => !t.scoped && !(essential && t.optional));
-    return [...allTools(cfg.permissionMode), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+    return [...allTools(cfg.permissionMode, this.sandboxOffered(cfg)), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
   }
 
   /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
@@ -507,7 +514,7 @@ export class Agent {
     const loadable = this.loadableGroups(cfg, pool);
     if (!loadable.length) return pool;
     const offered = pool.filter((t) => !this.groupOf(t));
-    const builtIn = new Set(allTools(cfg.permissionMode));
+    const builtIn = new Set(allTools(cfg.permissionMode, this.sandboxOffered(cfg)));
     let at = 0;
     offered.forEach((t, i) => {
       if (builtIn.has(t)) at = i + 1;
@@ -777,6 +784,8 @@ export class Agent {
    */
   private requestApproval(name: string, detail: string, target?: string, opts: ApproveOptions = {}, hookAllowed: boolean | 'rule' = false, call?: CallRef): Promise<ApprovalResult> {
     const cfg = this.sessionConfig();
+    // The shell sandbox's probe runs once per app, before the first bash call it may apply to is decided
+    if (name === 'bash' && sandboxSettings(cfg.sandbox).enabled && sandboxHostNow() === undefined) return probeSandbox().then(() => this.requestApproval(name, detail, target, opts, hookAllowed, call));
     const mode = cfg.permissionMode;
     const cwd = cfg.workingDirectory;
     const st = this.autoState();
@@ -787,10 +796,13 @@ export class Agent {
       if (yes) before = true;
       return yes;
     };
-    const decide = (auto: AutoLevel) =>
+    // (sandbox: whether this call may run in the shell sandbox; agent/permissions.ts decides when it does)
+    const decide = (auto: AutoLevel, sandbox = name === 'bash' && this.sandboxOn(cfg)) =>
       decideApproval(name, detail, target, opts, {
         mode,
         auto,
+        sandbox,
+        loopback: sandboxSettings(cfg.sandbox).loopback,
         cwd,
         rules: cfg.allowRules?.[cwd],
         global: cfg.permissions,
@@ -809,6 +821,11 @@ export class Agent {
     const allowedPath = (): PermissionPath => (before ? 'allowed_before' : mode !== 'bypass' && (name === 'bash' || name === 'terminal_run') && isReadOnlyCall(name, detail) ? 'read_only' : 'rule');
     const settle = async (d: ApprovalDecision): Promise<ApprovalResult> => {
       if (d.kind === 'refuse') return done('refused', { ok: false, message: d.message });
+      if (d.kind === 'sandbox') {
+        const plan = this.sandboxPlan(cfg, d.readOnly);
+        // (a profile that cannot be built: decided again as without the sandbox)
+        return plan ? done('sandbox', { ok: true, sandbox: plan }) : settle(decide(level(), false));
+      }
       if (d.kind !== 'ask') return done(allowedPath(), { ok: true });
       const session = d.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
       return done('card', await this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session, probe, call?.id));
@@ -825,6 +842,8 @@ export class Agent {
       // An action Auto mode blocked and the user then allowed runs once, without the check or a card (a browser action
       // by its card, site and first line, a page script also by its code: the model's reason under it may differ on the retry)
       if (onceKey && this.sessionSet(this.autoAllowed).delete(onceKey)) return Promise.resolve(done('allowed_before', { ok: true }));
+      // The shell sandbox needs no card and no check (a hook's allow and an Allow after a block run outside, above)
+      if (decision.kind === 'sandbox') return settle(decision);
       return null;
     };
     const level = (): AutoLevel => (mode !== 'auto' ? 'guard' : st.paused ? 'paused' : st.unavailable ? 'guard' : 'check');
@@ -845,10 +864,59 @@ export class Agent {
         this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
         return settle(decide('guard'));
       }
-      const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}) };
+      const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}), ...(opts.sandboxBlock ? { sandbox: { line: opts.sandboxBlock.line } } : {}) };
       const r = await this.autoCheck(checker, cfg, action, () => settle(decide('guard')), { key: onceKey ?? actionKey(name, detail), browser: opts.browser }, probe);
       return probe ? done('check', r) : r;
     });
+  }
+
+  // ---------- The shell sandbox ----------
+
+  /** bash says it runs in the sandbox (and takes outside: true) while the setting is on and the probe has not failed */
+  private sandboxOffered(cfg: AppConfig): boolean {
+    if (!sandboxSettings(cfg.sandbox).enabled || process.platform !== 'darwin') return false;
+    void probeSandbox();
+    return sandboxHostNow() !== null;
+  }
+
+  /** The sandbox can run this session's bash calls: on in the user's settings, the probe worked, the profile has not failed this session, and the folder can be sandboxed. */
+  private sandboxOn(cfg: AppConfig): boolean {
+    if (!sandboxSettings(cfg.sandbox).enabled || !sandboxHostNow() || this.sandboxOff.has(this.session.id)) return false;
+    return sandboxableFolder(realish(cfg.workingDirectory));
+  }
+
+  /** How an allowed bash call runs in the sandbox (tools/shell.ts), or null when its profile cannot be built. */
+  private sandboxPlan(cfg: AppConfig, readOnly: boolean): SandboxPlan | null {
+    const host = sandboxHostNow();
+    if (!host) return null;
+    let live: number | null = null;
+    try {
+      live = this.opts.app?.service<{ status(): { port: number | null } }>('remote')?.status().port ?? null;
+    } catch {
+      live = null;
+    }
+    const cwd = cfg.workingDirectory;
+    const profile = profileFor({ cwd, settings: sandboxSettings(cfg.sandbox), host, readOnly, deniedPorts: deniedPorts(cfg, [cfg.remote?.port, live]) });
+    if (!profile) return null;
+    const sessionId = this.session.id;
+    const key = `${sessionId}\u0000${profile.text}\u0000${JSON.stringify(profile.params)}`;
+    return {
+      profile,
+      readOnly,
+      baseline: () => {
+        let b = this.sandboxBaselines.get(key);
+        if (!b) {
+          b = runShell('true', cwd, { timeout: 15_000, sandbox: profile }).then((r) => outputLines(r.stdout, r.stderr));
+          this.sandboxBaselines.set(key, b);
+        }
+        return b;
+      },
+      broken: () => {
+        this.sandboxOff.add(sessionId);
+        console.warn('[sandbox] sandbox-exec refused the profile: commands in this session are checked as without the sandbox');
+        if (this.session.id === sessionId) this.autoNotice('sandbox', 'The shell sandbox does not work here: commands are checked as without it.');
+      },
+    };
   }
 
   // ---------- Auto mode ----------

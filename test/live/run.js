@@ -66,6 +66,7 @@ const SCRIPTS = [
   { name: 'questions' },
   { name: 'auto-mode' },
   { name: 'cd-reads' },
+  { name: 'sandbox' },
   { name: 'permission-rules' },
   { name: 'aws-reads' },
   { name: 'shell-traps' },
