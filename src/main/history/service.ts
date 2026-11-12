@@ -18,6 +18,7 @@ import { CONVERSATION_TYPES, hasOpenRun, lastSnapshot, missingToolResults, repla
 import { DEFAULT_LIMIT, queryWords, SearchIndex } from './search';
 import { DAY_MS, sizeOf, Trash } from './trash';
 import { sessionMarkdown, type ExportFormat } from './export';
+import { count, failKindLabel, verdictLabel } from '../agent/perf';
 
 /** The replaceAll reason recovery uses; the log ignores it, since the messages it puts back are already logged. */
 export const RECOVERY_REASON = 'recovery';
@@ -79,8 +80,10 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
 
   /** Records of sessions that have no log yet and no messages (every start makes an empty session; it gets a log only once it is used) */
   const pending = new Map<string, Pending[]>();
-  /** run_start waits for the user_message right after it, which carries the origin */
-  const pendingRun = new Map<string, number>();
+  /** run_start waits for the user_message right after it, which carries the origin; `timing` is the run's timing-log id */
+  const pendingRun = new Map<string, { t: number; timing?: string }>();
+  /** The run's id in the timing log (agent/perf.ts RunTimer.id), when it is one: eight hex digits, nothing else */
+  const timingId = (v: unknown): { timing: string } | {} => (typeof v === 'string' && /^[0-9a-f]{8}$/.test(v) ? { timing: v } : {});
   const thinking = new Map<string, { text: string; started: number }>();
 
   const hasContent = (id: string) => log.exists(id) || (store.get(id)?.messages.length ?? 0) > 0;
@@ -90,7 +93,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
     const run = pendingRun.get(id);
     if (run !== undefined && type !== 'run.start') {
       pendingRun.delete(id);
-      write(id, 'run.start', { origin: 'user' }, run);
+      write(id, 'run.start', { origin: 'user', ...timingId(run.timing) }, run.t);
     }
     if (!hasContent(id)) {
       // Records of a session the store does not know (deleted, or never existed) are dropped.
@@ -200,17 +203,17 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
   function onEvent(id: string, ev: AgentEvent): void {
     switch (ev.type) {
       case 'run_start':
-        pendingRun.set(id, now());
+        pendingRun.set(id, { t: now(), timing: ev.timing });
         return;
       case 'user_message': {
-        const at = pendingRun.get(id);
-        if (at === undefined) return;
+        const run = pendingRun.get(id);
+        if (run === undefined) return;
         pendingRun.delete(id);
-        write(id, 'run.start', ev.from ? { origin: ev.origin, from: ev.from } : { origin: ev.origin }, at);
+        write(id, 'run.start', { origin: ev.origin, ...(ev.from ? { from: ev.from } : {}), ...timingId(run.timing) }, run.t);
         return;
       }
       case 'run_end':
-        write(id, 'run.end', ev.text ? { reason: ev.reason, text: ev.text } : { reason: ev.reason });
+        write(id, 'run.end', { reason: ev.reason, ...(ev.text ? { text: ev.text } : {}), ...(ev.continued ? { continued: true } : {}) });
         return;
       case 'thinking_delta': {
         const th = thinking.get(id);
@@ -249,6 +252,22 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
       case 'approval_resolved':
         write(id, 'approval.resolved', { id: ev.id, ok: ev.ok, scope: ev.scope });
         return;
+      // The records below are numbers and fixed words only (the session report reads them, history/report.ts)
+      case 'question_request':
+        write(id, 'question.request', { count: Array.isArray(ev.questions) ? ev.questions.length : 0 });
+        return;
+      case 'question_resolved':
+        write(id, 'question.resolved', { outcome: ev.answers ? 'answered' : 'skipped' });
+        return;
+      case 'check_status':
+        if (!ev.running) write(id, 'check', { ms: count(ev.ms), verdict: verdictLabel(ev.verdict), timedOut: ev.timedOut === true });
+        return;
+      case 'retry_status':
+        if (ev.text && ev.retry) write(id, 'retry', { attempt: count(ev.retry.attempt), waitMs: count(ev.retry.waitMs), ranMs: count(ev.retry.ranMs), kind: failKindLabel(ev.retry.kind) });
+        return;
+      case 'compact_start':
+        write(id, 'compaction.start', { reason: ev.reason === 'manual' ? 'manual' : 'auto' });
+        return;
       case 'plan_proposed':
         write(id, 'plan', { id: ev.plan.id, title: ev.plan.title, status: ev.plan.status });
         return;
@@ -270,8 +289,9 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
       case 'error':
         write(id, ev.kind === 'notice' ? 'notice' : 'error', { message: ev.message });
         return;
-      // Not logged: text_delta, thinking_delta (folded into `thinking`), context, and the events that only mirror
-      // what the store's records already hold (user_message, assistant_message, session_changed, queue_*, …).
+      // Not logged: text_delta, thinking_delta (folded into `thinking`), context, input_progress, stream_idle, and the
+      // events that only mirror what the store's records already hold (user_message, assistant_message,
+      // session_changed, queue_*, …).
     }
   }
 

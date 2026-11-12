@@ -13,6 +13,8 @@ import { configDir } from './paths';
 interface Part {
   cmd: string;
   op: string;
+  /** Where its text starts in the line (just after the operator before it) */
+  at: number;
 }
 
 /**
@@ -26,12 +28,15 @@ function splitParts(command: string): Part[] {
   let op = '';
   let quote: string | null = null;
   let depth = 0;
+  let at = 0;
+  let i = 0;
   const push = (next: string) => {
-    parts.push({ cmd: cur, op });
+    parts.push({ cmd: cur, op, at });
     cur = '';
     op = next;
+    at = i + 1;
   };
-  for (let i = 0; i < command.length; i++) {
+  for (; i < command.length; i++) {
     const c = command[i];
     if (quote === "'") {
       cur += c;
@@ -101,8 +106,8 @@ function splitParts(command: string): Part[] {
     }
     cur += c;
   }
-  parts.push({ cmd: cur, op });
-  return parts.map((p) => ({ cmd: p.cmd.trim(), op: p.op })).filter((p) => p.cmd);
+  parts.push({ cmd: cur, op, at });
+  return parts.map((p) => ({ cmd: p.cmd.trim(), op: p.op, at: p.at })).filter((p) => p.cmd);
 }
 
 /** Split a command line into simple commands on newlines, ;, &, &&, |, || (quote-aware, no heredoc parsing). */
@@ -635,9 +640,80 @@ function writesOutside(paths: string[], folders: LineFolders, cwd: string): bool
   });
 }
 
-/** True when a path the line names is a secret at any folder the line may be in */
+/**
+ * True when a path the line names is a secret at any folder the line may be in. At a folder a cd moved to, the path is
+ * also judged where it lands (cd ~/.docker && cat config.json reads ~/.docker/config.json); at the session's own
+ * folder (dirs[0]) by its text, as before.
+ */
 function secretAt(p: string, folders: LineFolders): boolean {
-  return folders.dirs.some((d) => isSecretPath(p, d));
+  return folders.dirs.some((d, i) => isSecretPath(p, d) || (i > 0 && SECRET_PATH_RE.test(path.resolve(d, expandHome(p)))));
+}
+
+/** A word `cd` may take as one plain literal folder: bare (no expansion, glob or escape), or one quoted word */
+const CD_LINE = /^(?:cd|pushd)[ \t]+(?:([A-Za-z0-9_@%+=:,./~-]+)|'([^']*)'|"([^"$`\\!]*)")[ \t]*$/;
+
+/**
+ * The folder of a simple command that is exactly `cd <dir>` or `pushd <dir>` with one plain literal path, or null:
+ * not for a variable, glob, brace, substitution, escape, ~user (~+, ~-, ~1 …), a leading - or +, =word, an option,
+ * a second argument, a redirection, or a quoted ~ (literal to the shell, the home folder to the guard). `~` and `~/…`
+ * are the home folder, as the shell and the guard both read them.
+ */
+function plainCdTarget(simple: string): string | null {
+  const m = CD_LINE.exec(simple);
+  if (!m) return null;
+  const quoted = m[1] === undefined;
+  const dir = m[1] ?? m[2] ?? m[3] ?? '';
+  if (!dir || /^[-+=]/.test(dir) || /[\x00-\x1f\x7f]/.test(dir)) return null;
+  if (quoted ? dir.startsWith('~') : /^~[^/]|.~/.test(dir)) return null;
+  const e = quoted ? dir : expandHome(dir);
+  if (/[$`*?[\]{}\\]/.test(e) || e.startsWith('~')) return null;
+  return e;
+}
+
+/**
+ * A line that starts with `cd <dir> &&` (or pushd; several in a row chain), each <dir> one plain literal path
+ * (plainCdTarget): those folders in order and the rest of the line, as its text. Null for any other join after a cd
+ * (; || | & a new line), and when the rest joins its commands with anything but && and | (after ; || & or a new line a
+ * command may run in the folder the line started in, when a cd failed). The shell runs the rest in the last folder.
+ */
+export function leadingCd(command: string): { dirs: string[]; rest: string } | null {
+  const raw = command.trim();
+  const parts = splitParts(raw);
+  const dirs: string[] = [];
+  let k = 0;
+  while (k < parts.length && (k === 0 || parts[k].op === '&&')) {
+    const d = plainCdTarget(parts[k].cmd);
+    if (d === null) break;
+    dirs.push(d);
+    k++;
+  }
+  if (!dirs.length || k >= parts.length || parts[k].op !== '&&') return null;
+  if (parts.slice(k + 1).some((p) => p.op !== '&&' && p.op !== '|')) return null;
+  const rest = raw.slice(parts[k].at).trim();
+  return rest ? { dirs, rest } : null;
+}
+
+/** Where a shell call starts: `folder` (the bash tool's path) against the session's folder, ~ for home; the session's folder when none is given. */
+export function shellStart(folder: unknown, cwd: string): string {
+  if (typeof folder !== 'string' || !folder.trim()) return path.resolve(cwd);
+  return path.resolve(cwd, folder.trim().replace(/^~(?=$|\/)/, os.homedir()));
+}
+
+/**
+ * The command line the rules judge for a shell call that starts in `start` (shellStart): the command itself in the
+ * session's folder, else `cd '<start>' && <command>`, which the guard, the read-only check, the permission rules,
+ * hooks, the safety check and the approval card all read as the command run there (leadingCd).
+ */
+export function commandIn(command: string, start: string, cwd: string): string {
+  if (path.resolve(start) === path.resolve(cwd)) return command;
+  return `cd '${start.replace(/'/g, `'\\''`)}' && ${command.trim()}`;
+}
+
+/** The command line the rules judge for a bash or terminal_run call's arguments (bash's path folded in by commandIn), or null without a command. */
+export function judgedCommand(name: string, args: unknown, cwd: string): string | null {
+  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+  if (typeof a.command !== 'string') return null;
+  return name === 'bash' ? commandIn(a.command, shellStart(a.path, cwd), cwd) : a.command;
 }
 
 const BROAD_TARGETS = new Set(['/', '~', '$HOME', '*', './*', '..', '../', '.', './', '~/', '/*']);
@@ -1602,11 +1678,32 @@ export function isAwsRead(simple: string): boolean {
  * a listed program with a flag that writes or runs something (sed -i, sort -o, git -c, rg --pre …), or an aws
  * command isAwsRead does not recognise. False as well for anything zsh could read differently from the lexers here
  * or expand into code or into other words (plainForShell), and for a wildcard that a file's name could turn into an
- * option or a second operand (namesStayNames).
+ * option or a second operand (namesStayNames). A line that starts with `cd <dir> &&` (leadingCd: one plain literal
+ * folder, joined by && and | only) is judged by the rest, as if the shell had started in <dir>; the guard
+ * (guardCommand) reads its paths at that folder, and asks "reads secrets" for a folder that is a secret path itself.
+ * The whole line, the cd included, has to be plain for the shell first.
  */
 export function isReadOnlyCommand(command: string): boolean {
   const raw = command.trim();
   if (!raw) return false;
+  if (!plainForShell(raw)) return false;
+  const cd = leadingCd(raw);
+  return readOnlyLine(cd ? cd.rest : raw);
+}
+
+/**
+ * isReadOnlyCommand for a tool call. A leading cd is seen through only for bash, whose shell this app starts itself:
+ * not interactive, with no cd search path (shell.ts), and back in its own folder on the next call. In a terminal tab
+ * (terminal_run) a cd moves the user's own shell, which may search cdpath or run hooks on it, so that line keeps its
+ * check.
+ */
+export function isReadOnlyCall(name: string, command: string): boolean {
+  if (name !== 'bash' && leadingCd(command)) return false;
+  return isReadOnlyCommand(command);
+}
+
+/** isReadOnlyCommand for a line as it is, a leading cd included (cd is not a read-only program) */
+function readOnlyLine(raw: string): boolean {
   if (!plainForShell(raw)) return false;
   if (substitutions(raw).found) return false;
   for (const simple of splitCommands(raw)) {

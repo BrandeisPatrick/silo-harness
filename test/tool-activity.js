@@ -78,6 +78,18 @@ const { check, done } = require('./support/check.js');
   check('the phrases are all kept for whoever needs them', activityWords(['read_file', 'bash', 'edit_file', 'grep', 'skill']).phrases.length === 5);
   check('nothing at all is an empty line', say([]) === '');
 
+  // ---------- The present tense: the heading of a live run's opened list ----------
+  const now = (calls) => groupSummary(calls, { tense: 'present' });
+  check('present: one command', now(['bash']) === 'Running a command', now(['bash']));
+  check('present: counts every call', now(['bash', 'bash', 'terminal_run']) === 'Running 3 commands', now(['bash', 'bash', 'terminal_run']));
+  check('present: kinds in order, same phrases', now([{ name: 'read_file', path: 'a' }, { name: 'read_file', path: 'b' }, 'bash']) === 'Reading 2 files, running a command');
+  check('present: the same file twice is one file', now([{ name: 'edit_file', path: 'a' }, { name: 'edit_file', path: 'a' }]) === 'Editing a file');
+  check('present: writes, searches, the web, MCP', now([{ name: 'write_file', path: 'n', created: true }, 'grep', 'web_search', { name: 'mcp__docs__find', server: 'docs' }]) === 'Creating a file, running a search, searching the web, calling a tool on docs', now([{ name: 'write_file', path: 'n', created: true }, 'grep', 'web_search', { name: 'mcp__docs__find', server: 'docs' }]));
+  check('present: past MAX_KINDS kinds, three named and "and N more"', now(['read_file', 'bash', 'edit_file', 'grep', 'skill']) === 'Reading a file, running a command, editing a file and 2 more');
+  check('present: every kind of tool has a present verb', Object.entries({ read_file: 0, edit_file: 0, list_directory: 0, glob: 0, terminal_read: 0, terminal_list: 0, terminal_stop: 0, skill: 0, create_artifact: 0, show_image: 0, update_tasks: 0, ask_user: 0, submit_plan: 0, session_spawn: 0, session_send: 0, session_list: 0, session_read: 0, session_merge: 0, session_rename: 0, schedule_create: 0, schedule_list: 0, schedule_update: 0, schedule_delete: 0, mod_check: 0, history_search: 0, propose_skill: 0, propose_memory: 0, propose_mod: 0, withdraw_proposal: 0, browser_screenshot: 0, web_fetch: 0, browser_click: 0, write_file: 0, unknown_tool: 0 }).every(([n]) => /^[A-Z][a-z]+ing\b/.test(now([n]))), ['read_file', 'withdraw_proposal', 'browser_click', 'unknown_tool', 'write_file'].map((n) => now([n])));
+  check('present: a line of denials only stays as it is', now([{ name: 'bash', denied: true }]) === 'Denied a command');
+  check('past is still the default', say(['bash']) === 'Ran a command' && groupSummary(['bash'], { tense: 'past' }) === 'Ran a command');
+
   // ---------- write_file says whether it made the file ----------
   const { writeFile } = require(path.join(projectDir, 'dist/main/tools/fs.js'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-activity-'));

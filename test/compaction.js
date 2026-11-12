@@ -224,8 +224,10 @@ function cleanCut(msgs, cut) {
   const baseConfig = {
     provider: 'portkey',
     ollama: { baseURL: `http://127.0.0.1:${model.port}/v1`, model: 'mock', numCtx: 4096, think: 'auto' },
-    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12150 },
-    // 12,000 until the system prompt's guidance on reads, searches and evidence (about 120 tokens) came in
+    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12380 },
+    // 12,000 until the system prompt's guidance on reads, searches and evidence (about 120 tokens) came in; 12,150
+    // until the bullet asking for short updates while working (about 60 tokens); 12,240 until the bash tool's path
+    // argument with its two sentences and edit_file's edits list (about 110 tokens)
     workingDirectory: cwd, permissionMode: 'bypass', autoApprove: true, maxTurns: 30, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
     mcpServers: {}, mcpTrusted: {}, autoCompact: true, compactThreshold: 0.8, pruneToolResults: true, notifications: false, allowRules: {}, recentDirs: [],
     // Changed on purpose: the window sizes below were chosen with every tool offered from the first request; tool

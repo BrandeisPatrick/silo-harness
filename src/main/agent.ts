@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
-import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
+import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CheckVerdictWord, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
 import { effortOf, isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
@@ -36,7 +36,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
+import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
 import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isMcpGroup, isToolGroup, loadToolsTool, mcpGroupsForMessage, requestedGroups, type GroupId, type McpGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
@@ -66,13 +66,13 @@ import { answerText, forCheck, LearnedStore } from './agent/learned';
 import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
 import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
-import { guardCommand, isReadOnlyCommand } from './guard';
+import { guardCommand, isReadOnlyCall, isReadOnlyCommand, judgedCommand } from './guard';
 import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
 import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
 
 // The tool names a timing record keeps (agent/perf.ts): the built-in ones
-setBuiltInToolNames([...allTools('ask'), ...allTools('plan')].map((t) => t.name).concat(LOAD_TOOLS));
+setBuiltInToolNames(builtInToolNames());
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
 export { contextLimit, essentialToolsOnly } from './context-window';
@@ -358,6 +358,8 @@ export class Agent {
   readonly mcp: McpManager | null;
   /** Messages sent while a run was in progress; delivered before the model's next turn */
   private queued: QueuedMessage[] = [];
+  /** A queued message the user chose to send now (sendNow): the run is being cut, and this message starts the next */
+  private sendingNow: QueuedMessage | null = null;
   private readonly opts: AgentOptions;
   /** The folder of the run in progress: a folder change while it runs applies from the next run on */
   private runCwd: string | null = null;
@@ -760,8 +762,9 @@ export class Agent {
     if (this.sessionConfig().permissionMode !== 'plan') return false;
     if (EDIT_TOOLS.has(name)) return true;
     if (!BASH_TOOLS.has(name)) return false;
-    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
-    return typeof command !== 'string' || !isReadOnlyCommand(command);
+    // (bash's path is judged as `cd <path> && <command>`, as its card shows it)
+    const command = judgedCommand(name, args, this.sessionConfig().workingDirectory);
+    return command === null || !isReadOnlyCall(name, command);
   }
 
   /**
@@ -803,7 +806,7 @@ export class Agent {
       probe?.settle(path, r.ok);
       return r;
     };
-    const allowedPath = (): PermissionPath => (before ? 'allowed_before' : mode !== 'bypass' && (name === 'bash' || name === 'terminal_run') && isReadOnlyCommand(detail) ? 'read_only' : 'rule');
+    const allowedPath = (): PermissionPath => (before ? 'allowed_before' : mode !== 'bypass' && (name === 'bash' || name === 'terminal_run') && isReadOnlyCall(name, detail) ? 'read_only' : 'rule');
     const settle = async (d: ApprovalDecision): Promise<ApprovalResult> => {
       if (d.kind === 'refuse') return done('refused', { ok: false, message: d.message });
       if (d.kind !== 'ask') return done(allowedPath(), { ok: true });
@@ -883,6 +886,11 @@ export class Agent {
     let verdict: Verdict | null = null;
     const checkAt = Date.now();
     probe?.checkStarted();
+    // The window shows the call as being checked (not as running) until the verdict; the history log keeps the end
+    const callId = action.callId;
+    this.emit({ type: 'check_status', ...(callId ? { id: callId } : {}), running: true });
+    const checked = (said: CheckVerdictWord, timedOut = false) =>
+      this.emit({ type: 'check_status', ...(callId ? { id: callId } : {}), running: false, ms: Math.max(0, Date.now() - checkAt), verdict: said, ...(timedOut ? { timedOut: true } : {}) });
     try {
       const ask = (t: ClassifierTarget) => runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage));
       let raw: string;
@@ -901,10 +909,12 @@ export class Agent {
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       probe?.checkEnded(verdict?.decision ?? 'error');
+      checked(signal?.aborted ? 'stopped' : (verdict?.decision ?? 'error'));
       if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
     } catch (err) {
       const timedOut = !signal?.aborted && ((err as { name?: string })?.name === 'TimeoutError' || Date.now() - checkAt >= CLASSIFIER_TIMEOUT_MS - 250);
       probe?.checkEnded('error', timedOut);
+      checked(signal?.aborted ? 'stopped' : 'error', timedOut);
       if (signal?.aborted) return { ok: false, message: INTERRUPTED };
       if (!isConnectionError(err)) st.reached = true;
       else if (!st.reached) {
@@ -1202,6 +1212,15 @@ export class Agent {
 
   async run(userText: string, attachments: ImageAttachment[] = [], opts: SendOptions = {}): Promise<void> {
     if (this.running) throw new Error('A run is already in progress.');
+    return this.startRun(userText, attachments, opts);
+  }
+
+  /**
+   * The run itself. `queuedId`: the run starts from the queued message of that id (sendNow), which leaves the queue
+   * on screen through queue_delivered once its hooks accepted it, or goes back to the composer (queue_dropped). Such a
+   * run keeps the rest of the queue until after its first model call.
+   */
+  private async startRun(userText: string, attachments: ImageAttachment[], opts: SendOptions, queuedId?: string): Promise<void> {
     this.running = true;
     this.planSubmitted = false;
     this.abortController = new AbortController();
@@ -1232,16 +1251,23 @@ export class Agent {
     this.runStartedAt = Date.now();
     this.turnClock = null;
     if (early) {
-      this.emit({ type: 'run_start' });
+      this.emit({ type: 'run_start', timing: timer.id });
       await this.startSessionHooks();
       accepted = await this.promptHooks(userText, origin, opts.from);
       if (!accepted.ok || signal.aborted) {
-        this.running = false;
+        // A message sent from the queue goes back to the composer as a refused queued one does
+        if (queuedId) this.emit({ type: 'queue_dropped', id: queuedId });
+        const next = this.takeSendingNow();
         this.abortController = null;
         this.runCwd = null;
         this.runTimer = null;
-        this.dropQueue();
-        this.emit({ type: 'run_end', reason: signal.aborted ? 'aborted' : 'done' });
+        if (!next) {
+          this.running = false;
+          this.dropQueue();
+        }
+        const ended = signal.aborted ? 'aborted' : 'done';
+        this.emit(next ? { type: 'run_end', reason: ended, continued: true } : { type: 'run_end', reason: ended });
+        if (next) this.continueWith(next);
         return;
       }
     } else this.sessionStarted = true;
@@ -1253,7 +1279,9 @@ export class Agent {
     this.stuckAt = -1;
     // Auto mode's check gets another chance to reach its model with each run
     this.autoState().unavailable = false;
-    if (!early) this.emit({ type: 'run_start' });
+    if (!early) this.emit({ type: 'run_start', timing: timer.id });
+    // The queued row leaves the queue and becomes the message's bubble, as a delivered queued message does
+    if (queuedId) this.emit({ type: 'queue_delivered', id: queuedId });
     this.emitUserMessage(userText, attachments.length, origin, opts.from);
     // Saved now, not only at the end: the session gets its title from this message at once, so a sidebar with
     // several running sessions does not show several "New session" rows.
@@ -1345,7 +1373,8 @@ export class Agent {
         this.turnTimer = tt;
         this.flushAutoNotes();
         tt.step('notes');
-        if (this.queued.length && (await this.drainQueue(skills))) continuations = 0;
+        // A run started by "Send now" leaves the rest of the queue for after its first model call
+        if (this.queued.length && (turn > 0 || !queuedId) && (await this.drainQueue(skills))) continuations = 0;
         tt.step('queue');
         await this.autoCompactIfNeeded(cfg, client, model, signal);
         tt.step('prune_compact');
@@ -1446,7 +1475,7 @@ export class Agent {
         }
         if (!toolCalls.length) {
           // A message queued during the run keeps it going instead of ending it.
-          if (this.queued.length && (await this.drainQueue(skills))) {
+          if (this.queued.length && !signal.aborted && (await this.drainQueue(skills))) {
             continuations = 0;
             continue;
           }
@@ -1546,15 +1575,23 @@ export class Agent {
       this.repairTail();
       this.store.save(this.session);
       this.finishTiming(timer, reason);
-      this.running = false;
+      // "Send now": the session stays running (no other send can start a run, the queue stays) into the next run
+      const next = this.takeSendingNow();
       this.abortController = null;
       this.runCwd = null;
-      this.dropQueue();
+      if (!next) {
+        this.running = false;
+        this.dropQueue();
+      }
       this.emit({ type: 'session_changed', session: toMeta(this.session) });
-      this.emit(lastText ? { type: 'run_end', reason, text: lastText } : { type: 'run_end', reason });
-      if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
-      if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
-        this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
+      const end: AgentEvent = { type: 'run_end', reason, ...(lastText ? { text: lastText } : {}), ...(next ? { continued: true } : {}) };
+      this.emit(end);
+      if (next) this.continueWith(next);
+      else {
+        if (reason !== 'aborted' && !this.windowFocused()) this.notifyHook('idle_prompt', 'Silo Harness is waiting for your input');
+        if (reason === 'done' || reason === 'max_turns' || reason === 'plan' || reason === 'loop') {
+          this.generateSessionTitle(this.session).catch((err: unknown) => console.warn('[agent] title generation failed:', errorMessage(err)));
+        }
       }
     }
   }
@@ -2211,6 +2248,32 @@ export class Agent {
     return delivered;
   }
 
+  /**
+   * "Send now" on the queued message `id`: cuts the current step short exactly as stop() does (a running command is
+   * stopped, a waiting card closes as interrupted, a retry wait ends) and, when the run has ended (its tail repaired
+   * and saved), starts the next run with this message. The rest of the queue stays queued. False when the message is
+   * not queued here any more, or another message is already on its way this way.
+   */
+  sendNow(id: string): boolean {
+    if (!this.running || this.sendingNow) return false;
+    const i = this.queued.findIndex((m) => m.id === id);
+    if (i < 0) return false;
+    this.sendingNow = this.queued.splice(i, 1)[0];
+    this.stop();
+    return true;
+  }
+
+  private takeSendingNow(): QueuedMessage | null {
+    const m = this.sendingNow;
+    this.sendingNow = null;
+    return m;
+  }
+
+  /** Starts the run of a message sent with sendNow; called while `running` is still true, so nothing comes between. */
+  private continueWith(m: QueuedMessage): void {
+    this.startRun(m.text, m.attachments, { origin: m.origin ?? 'queue', ...(m.from ? { from: m.from } : {}) }, m.id).catch((err: unknown) => console.error('[agent] run failed', err));
+  }
+
   /** The run ended with messages still queued: hand them back to the renderer. */
   private dropQueue(): void {
     const left = this.queued.splice(0);
@@ -2346,8 +2409,8 @@ export class Agent {
     if (!tool || tool.mcp || !BUILT_IN_TOOLS.has(tool)) return false;
     if (SHARED_READS.has(name)) return true;
     if (name !== 'bash') return false;
-    const command = args && typeof args === 'object' ? (args as Record<string, unknown>).command : undefined;
-    if (typeof command !== 'string' || !command.trim()) return false;
+    const command = judgedCommand(name, args, cwd);
+    if (command === null || !command.trim()) return false;
     try {
       return isReadOnlyCommand(command.trim()) && guardCommand(command.trim(), cwd) === null;
     } catch {
@@ -2472,6 +2535,20 @@ export class Agent {
           }
         },
       };
+      // ask_user's question card: the user's wait is its own number in the timing record, not tool time (agent/perf.ts)
+      const ask = ctx.askUser;
+      if (ask && timing) {
+        timedCtx.askUser = async (questions) => {
+          const probe = timing.permission();
+          probe.cardShown();
+          try {
+            return await ask(questions);
+          } finally {
+            probe.cardAnswered();
+            probe.settle('question', true);
+          }
+        };
+      }
       const started = Date.now();
       const elapsed = () => Math.max(0, Date.now() - started - waited);
       let result: ToolResult;

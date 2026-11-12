@@ -31,6 +31,7 @@ import { setupProviders } from './providers-service';
 import { setupUpdates } from './updates';
 import { setupTiming } from './timing-service';
 import { setupCost } from './cost-service';
+import { setupReport } from './report-service';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -193,7 +194,8 @@ function notify(a: AppHost, sessionId: string, ev: AgentEvent): void {
   let title: string;
   let body: string;
   if (ev.type === 'run_end') {
-    if (ev.reason === 'aborted') return;
+    // Stopped, or cut by "Send now" (the next run starts at once): nothing finished
+    if (ev.reason === 'aborted' || ev.continued) return;
     title = ev.reason === 'error' ? `${APP_NAME} hit an error` : ev.reason === 'plan' ? `${APP_NAME} has a plan for you` : ev.reason === 'max_turns' ? `${APP_NAME} stopped at the turn limit` : ev.reason === 'loop' ? `${APP_NAME} stopped a repeating call` : `${APP_NAME} finished`;
     body = name;
   } else if (ev.type === 'approval_request') {
@@ -316,6 +318,7 @@ app.whenReady().then(() => {
   setupUpdates(a);
   setupTiming(a);
   setupCost(a);
+  setupReport(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

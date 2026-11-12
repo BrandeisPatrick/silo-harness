@@ -305,7 +305,7 @@ The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on 
 
 `toolConcurrency` (1 to 10, default 4): how many read-only tool calls of one reply run at the same time; `1` runs every call one after another. See [latency.md](latency.md).
 
-`timingLog` (or `SILO_TIMING=1` in the environment) appends each run's timing, numbers only, to `timing/timing.jsonl` in the app's data folder; `/timing` shows the last run's without it. See [latency.md](latency.md).
+`timingLog` (on unless set to `false`; `SILO_TIMING=1` in the environment forces it on) appends each run's timing, numbers only, to `timing/timing.jsonl` in the app's data folder; `/timing` shows the last run's without it, and `/report` the whole session's from its history log. See [latency.md](latency.md).
 
 ## For coding agents
 

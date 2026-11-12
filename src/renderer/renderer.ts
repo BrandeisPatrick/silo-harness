@@ -28,7 +28,7 @@ import type {
 import { brandMark, hydrateIcons, icon, type IconName } from './icons.js';
 import { byId, escapeHtml, isTextField, writeClipboard } from './dom.js';
 import { renderMarkdown } from './markdown.js';
-import { asArgs, resetFileCache, statusVerb } from './tools.js';
+import { asArgs, inputProgressText, resetFileCache, statusVerb } from './tools.js';
 import { closeMenu, initTooltips, isMenuOpen } from './popover.js';
 import { MODES } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
@@ -199,6 +199,16 @@ const queueList = createQueueList({
       showInlineError(button, 'Already sent to the agent.');
     } catch (err) {
       showInlineError(button, `Couldn't remove the message: ${cleanError(err)}`);
+    }
+    return false;
+  },
+  sendNow: async (msg, button) => {
+    try {
+      if (typeof oc.sendNow !== 'function') throw new Error('No handler registered');
+      // False: no longer queued (delivered, removed, or the run ended); its own event moves the row
+      return await oc.sendNow(msg.id);
+    } catch (err) {
+      showInlineError(button, `Couldn't send the message now: ${cleanError(err)}`);
     }
     return false;
   },
@@ -1042,6 +1052,7 @@ async function runCommand(cmd: CommandInfo, args: string): Promise<void> {
     res = { error: cleanError(err) };
   }
   if (typeof res.notice === 'string' && res.notice) addSystemMessage(res.notice, 'notice');
+  if (typeof res.card === 'string' && res.card) addNoticeCard(res.card);
   if (typeof res.error === 'string' && res.error) addSystemMessage(res.error, 'error');
   if (typeof res.insert === 'string' && res.insert) {
     restoreComposerText(res.insert);
@@ -1074,9 +1085,43 @@ const hiddenTools = new Map<string, unknown>();
 /** The arguments of the calls in flight, by id: a finished call's pull request or document card reads them */
 const callArgs = new Map<string, unknown>();
 const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', ...PROPOSAL_TOOLS]);
+/** Events that mean the model is not silent (or the request is over): a silence on the status line ends */
+const ENDS_SILENCE = new Set<AgentEvent['type']>(['text_delta', 'thinking_delta', 'input_progress', 'thinking_done', 'reply_discarded', 'retry_status', 'tool_start', 'run_end']);
+/** The status line shows a tool call's input being written (input_progress) */
+let inputShown = false;
+const CHECKING_TEXT = 'Checking…';
+
+/**
+ * Auto mode's safety check of a call began or ended (check_status): its row says "Checking…" meanwhile instead of
+ * looking as if the command already ran. Returns the call's tool name when its row is on screen.
+ */
+function markChecking(id: string | undefined, on: boolean): string | undefined {
+  const card = id ? toolGroups.cardFor(id) : undefined;
+  if (!card) return undefined;
+  card.el.classList.toggle('checking', on);
+  const summary = card.el.querySelector(':scope > summary');
+  const tag = summary?.querySelector(':scope > .tool-check');
+  if (on && summary && !tag) {
+    const el = document.createElement('span');
+    el.className = 'tool-check';
+    el.textContent = CHECKING_TEXT;
+    const meta = summary.querySelector(':scope > .tool-meta');
+    if (meta) meta.before(el);
+    else summary.append(el);
+  } else if (!on) tag?.remove();
+  // The shut line of the run of calls reads like this row, "Checking…" included
+  toolGroups.updateLastGroup();
+  return card.el.dataset.tool;
+}
 
 function handleEvent(ev: AgentEvent, synthetic = false): void {
   if ((ev.type === 'tool_start' || ev.type === 'approval_request') && ev.mcp) rememberMcpNames(ev.name, ev.mcp);
+  if (ENDS_SILENCE.has(ev.type)) statusLine.setSilence(null);
+  if (inputShown && ev.type !== 'input_progress' && ENDS_SILENCE.has(ev.type)) {
+    // The reply is complete (or taken back): the line goes back to what the run does; tool_start sets its verb below
+    inputShown = false;
+    setStatusText(baseVerb());
+  }
   switch (ev.type) {
     case 'run_start':
       setRunning(true);
@@ -1172,6 +1217,20 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
     case 'cost':
       statusLine.reportCost(typeof ev.label === 'string' ? ev.label : undefined);
       break;
+    case 'input_progress':
+      // The model is writing a call's input; the call's row comes once the reply is complete
+      inputShown = true;
+      setStatusText(inputProgressText(String(ev.name ?? ''), Number(ev.chars) || 0));
+      break;
+    case 'stream_idle':
+      statusLine.setSilence(typeof ev.ms === 'number' ? { ms: ev.ms, dropMs: ev.dropMs, pings: ev.pings === true } : null);
+      break;
+    case 'check_status': {
+      const tool = markChecking(ev.id, ev.running === true);
+      if (ev.running) setStatusText(CHECKING_TEXT);
+      else if (statusLine.statusText() === CHECKING_TEXT) setStatusText(tool ? statusVerb(tool) : baseVerb());
+      break;
+    }
     case 'hook_status':
     case 'retry_status':
       // A hook's statusMessage while it runs, or the wait before a model call is tried again (one line; the status
@@ -1267,13 +1326,15 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       // Cards of calls that no reply came after
       chatCards.flush();
       clearBrowsing();
-      if (ev.reason === 'aborted') addSystemMessage('Interrupted.');
+      // Cut by "Send now": the next run starts at once with the chosen message, so not "Interrupted."
+      if (ev.reason === 'aborted' && !ev.continued) addSystemMessage('Interrupted.');
       if (ev.reason === 'max_turns') addSystemMessage('Stopped at the tool turn limit. Raise it in Settings.');
       if (ev.reason === 'plan') showPlanReady();
       // The turn's header stops counting; with its answer in, the process folds away
       turnFold.runEnded(ev.reason);
-      {
+      if (!ev.continued) {
         // Queued messages normally come back through queue_dropped before this; anything still listed goes back too.
+        // After "Send now" they stay queued for the next run (and the chosen one becomes its bubble).
         const left = queueList.clear();
         if (left.length) returnToComposer(left);
       }

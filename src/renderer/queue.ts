@@ -22,6 +22,11 @@ export interface QueueListOptions {
   root: HTMLElement;
   /** The row's ×: asks the main process to drop the message; resolves true when it was removed */
   unqueue: (msg: QueuedMessage, button: HTMLElement) => Promise<boolean>;
+  /**
+   * The row's "Send now": asks the main process to stop the current step and send this message at once; resolves true
+   * when it will (the row then leaves through queue_delivered, or comes back to the composer through queue_dropped)
+   */
+  sendNow: (msg: QueuedMessage, button: HTMLElement) => Promise<boolean>;
   /** After rows were added or removed */
   onChange: () => void;
 }
@@ -56,6 +61,7 @@ export function createQueueList(opts: QueueListOptions): QueueList {
       `<span class="queue-kicker">Queued</span>` +
       (line ? `<span class="queue-text" data-tip="${escapeHtml(tip)}">${escapeHtml(line)}</span>` : `<span class="queue-text muted">${escapeHtml(imageLabel)}</span>`) +
       (line && images ? `<span class="queue-meta">· ${escapeHtml(imageLabel)}</span>` : '') +
+      `<button type="button" class="queue-send-now" aria-label="Send now" data-tip="Stops the current step and sends this message">Send now</button>` +
       `<button type="button" class="icon-btn sm queue-remove" aria-label="Remove from queue" data-tip="Remove from queue">${icon('x', 14)}</button>`;
     el.setAttribute('aria-label', `Queued: ${line || imageLabel}${line && images ? ` · ${imageLabel}` : ''}`);
     const btn = el.querySelector<HTMLButtonElement>('.queue-remove')!;
@@ -69,6 +75,18 @@ export function createQueueList(opts: QueueListOptions): QueueList {
         btn.disabled = false;
       }
       if (removed) list.remove(msg.id);
+    };
+    const now = el.querySelector<HTMLButtonElement>('.queue-send-now')!;
+    now.onclick = async () => {
+      if (now.disabled) return;
+      now.disabled = true;
+      let sending = false;
+      try {
+        sending = await opts.sendNow(msg, now);
+      } finally {
+        // On its way: the button stays off until the row leaves; otherwise it can be tried again
+        if (!sending) now.disabled = false;
+      }
     };
     return el;
   };

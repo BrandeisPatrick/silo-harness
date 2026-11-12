@@ -6,17 +6,17 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { launch, checker, sleep, LIVE_MODEL } = require('./rig.js');
+const { launch, checker, sleep, LIVE_MODEL, liveSource } = require('./rig.js');
 
 const WORDS = ['Apple', 'Banana', 'Cherry', 'Damson', 'Elderberry'];
-const WINDOW = 10250;
+const WINDOW = 10500;
 const FILLER = 'This line is filler text that pads the file so that reading it takes a fair share of a small context window. ';
 
 (async () => {
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-compaction-'));
   const { check, done } = checker();
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.log('No ANTHROPIC_API_KEY: the mock model cannot call tools, so this check needs the real API. Skipped.');
+  if (!liveSource()) {
+    console.log('No ANTHROPIC_API_KEY (or SILO_HARNESS_LIVE_ANT): the mock model cannot call tools, so this check needs the real API. Skipped.');
     process.exit(0);
   }
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-compaction-project-'));
@@ -25,6 +25,9 @@ const FILLER = 'This line is filler text that pads the file so that reading it t
   // Changed on purpose again: the system prompt grew by about 170 tokens, which at a 10,000-token window made
   // compaction due one read earlier, when what it would fold is already too small to summarise. 10,250 keeps the
   // same sequence as before: two prunes, then a summary.
+  // And once more for 0.18.0: the prompt's line on progress sentences, bash's path and edit_file's edits add about
+  // 240 tokens of fixed request, which at 10,250 again brought compaction one read early (the summary was then not
+  // smaller than what it folded, so the oldest messages were dropped and the first words lost). 10,500 restores it.
   WORDS.forEach((w, i) => fs.writeFileSync(path.join(project, `${'abcde'[i]}.txt`), `${w} ${FILLER.repeat(40)}\nEnd of file ${'abcde'[i]}.txt.\n`));
   const app = await launch({
     mode: 'bypass',

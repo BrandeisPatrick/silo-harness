@@ -1268,6 +1268,8 @@
           const cards = takeCards('');
           if (cards) append(cards);
         }
+        // Cut by "Send now" on the Mac: the next run starts at once with that message, so no "Stopped"
+        if (ev.continued) break;
         if (ev.reason === 'aborted') append(note('Stopped'));
         else if (ev.reason === 'max_turns') append(note('Stopped at the step limit'));
         setRunning(false);

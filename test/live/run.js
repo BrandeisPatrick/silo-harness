@@ -1,6 +1,7 @@
 // Runs the live checks one after another. Each launches the real app hidden, on a throwaway profile, so nothing
 // here touches your own sessions or settings. With ANTHROPIC_API_KEY set they talk to the real API (a few cents
 // of the cheapest model in all); without it they fall back to the mock model and skip what needs a real one.
+// With no key and SILO_HARNESS_LIVE_ANT=1 they reach the real API through the ant CLI's sign-in (ant-relay.js).
 //
 //   npm run build && npm run test:live            every script
 //   npm run test:live -- mods sidebar             only those whose name contains one of the words
@@ -9,6 +10,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { liveSource } = require('./rig.js');
 
 const root = path.join(__dirname, '..', '..');
 if (!fs.existsSync(path.join(root, 'dist', 'main', 'index.js'))) {
@@ -43,7 +45,12 @@ const SCRIPTS = [
   { name: 'tool-rows' },
   { name: 'tool-concurrency' },
   { name: 'chat-fold' },
+  { name: 'group-live' },
+  { name: 'interim-replies' },
+  { name: 'queue-look' },
+  { name: 'queue-send-now' },
   { name: 'quiet' },
+  { name: 'run-visibility' },
   { name: 'notices', shots: 'none' },
   { name: 'mods', shots: 'env' },
   { name: 'mods-look', shots: 'env' },
@@ -58,6 +65,7 @@ const SCRIPTS = [
   { name: 'hooks', shots: 'env' },
   { name: 'questions' },
   { name: 'auto-mode' },
+  { name: 'cd-reads' },
   { name: 'permission-rules' },
   { name: 'aws-reads' },
   { name: 'shell-traps' },
@@ -84,12 +92,13 @@ const SCRIPTS = [
 const words = process.argv.slice(2);
 const chosen = SCRIPTS.filter((s) => !words.length || words.some((w) => s.name.includes(w)));
 const shotsRoot = process.env.SHOTS ? path.resolve(process.env.SHOTS) : fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-'));
-console.log(`model: ${process.env.ANTHROPIC_API_KEY ? 'the real API' : 'the mock model (set ANTHROPIC_API_KEY for the real one)'}; screenshots: ${shotsRoot}\n`);
+const source = liveSource();
+console.log(`model: ${source === 'key' ? 'the real API' : source === 'ant' ? 'the real API, signed in through the ant CLI' : 'the mock model (set ANTHROPIC_API_KEY, or SILO_HARNESS_LIVE_ANT=1 with the ant CLI signed in, for the real one)'}; screenshots: ${shotsRoot}\n`);
 
 let failed = 0;
 let skipped = 0;
 for (const s of chosen) {
-  if (s.needsApi && !process.env.ANTHROPIC_API_KEY) {
+  if (s.needsApi && !source) {
     skipped++;
     console.log(`SKIP  ${s.name.padEnd(16)} needs the real API (set ANTHROPIC_API_KEY)`);
     continue;

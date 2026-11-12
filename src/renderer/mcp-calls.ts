@@ -32,14 +32,15 @@ export interface FoldCall {
 }
 
 /**
- * A folded line over MCP calls from one or two servers: "Used files" / "Used docs and files"; and in place of
+ * A folded line over MCP calls from one or two servers: "Used files" / "Used docs and files" ("Using …" with tense
+ * 'present', the heading of a live run's opened list); and in place of
  * "1 failed", "tracker needs sign-in" when that is the one failure. Empty fields leave the line as it is.
  */
-export function mcpFoldWords(calls: FoldCall[]): { text?: string; failed?: string } {
+export function mcpFoldWords(calls: FoldCall[], opts: { tense?: 'past' | 'present' } = {}): { text?: string; failed?: string } {
   if (!calls.length || calls.some((c) => !c.server)) return {};
   const servers = [...new Set(calls.map((c) => c.server!))];
   const out: { text?: string; failed?: string } = {};
-  if (servers.length <= 2) out.text = `Used ${servers.sort((a, b) => a.localeCompare(b)).join(' and ')}`;
+  if (servers.length <= 2) out.text = `${opts.tense === 'present' ? 'Using' : 'Used'} ${servers.sort((a, b) => a.localeCompare(b)).join(' and ')}`;
   const failed = calls.filter((c) => c.outcome === 'failed');
   if (failed.length === 1 && failed[0].problem?.kind === 'sign-in') out.failed = problemText(failed[0].problem);
   return out;

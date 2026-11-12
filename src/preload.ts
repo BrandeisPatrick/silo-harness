@@ -15,6 +15,7 @@ const api: SiloHarnessApi = {
 
   send: (text: string, attachments?: ImageAttachment[]): Promise<SendResult> => ipcRenderer.invoke('chat:send', text, attachments ?? []),
   unqueue: (id: string): Promise<boolean> => ipcRenderer.invoke('chat:unqueue', id),
+  sendNow: (id: string): Promise<boolean> => ipcRenderer.invoke('chat:sendNow', id),
   queue: (): Promise<QueuedMessage[]> => ipcRenderer.invoke('chat:queue'),
   modelCapabilities: (): Promise<ModelCapabilities> => ipcRenderer.invoke('models:capabilities'),
   abort: (): Promise<void> => ipcRenderer.invoke('chat:abort'),

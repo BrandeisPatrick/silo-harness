@@ -16,8 +16,10 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
                auto-rules.ts (what always asks in Auto mode, protected paths, the words of a block),
                learned.ts (the user's answers on cards, which the check reads as earlier decisions),
                schedule.ts (which calls of one reply run together: read-only ones, the rest alone, results in call order),
-               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log)
+               perf.ts (where a run's time goes: numbers per run, turn and tool call, the /timing note, the timing log),
+               progress.ts (what the window hears while a request streams: a tool call's input being written, a long silence)
 timing-service.ts  /timing, the last run's breakdown as a local note
+report-service.ts  /report, the session's report (history/report.ts: numbers and fixed words from its history log) as a card
 auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs;
                the learned answers' store (auto-learned.json) and Settings → Permissions → Auto mode
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
@@ -192,7 +194,14 @@ Every agent emits through the runtime, which notes the event in the session's Li
 `onEvent` listeners (= `app.events`), then to the window as `('agent:event', ev, sessionId)`, deltas coalesced every
 30 ms per session. `send` with a non-user origin to a running session queues it like a typed message; if the run is
 stopped before delivery the message is dropped (`queue_dropped`), so the sender decides whether to resend (a message
-from another session is held instead: see Messages between sessions).
+from another session is held instead: see Messages between sessions). "Send now" on a queued row (`chat:sendNow` →
+`Agent.sendNow(id)`) takes the message out of the queue and calls `stop()`; the run's end emits
+`run_end { reason, continued: true }` with the agent still `running` and starts the next run with that message at once
+(`queue_delivered` when its UserPromptSubmit hooks accept it, `queue_dropped` when they refuse it). The rest of the queue
+stays and is delivered after that run's first model call. Listeners treat a `continued` end as no end at all: no
+notification, unread mark, schedule or dream status, and keep-awake holds. A sub-session reports nothing at a
+`continued` end; when the cut run was one another session started, the run that follows keeps that origin and reports
+once, at its own end, with its reason and text (a turn the user drove stays unreported).
 Status: `running`; `attention` 'approval' while an approval card waits, 'question' while an ask_user card waits,
 'plan' after a run ended with an undecided plan;
 `unread` (stored on the session) when a run ended off screen or a message from another session reached it there, cleared by `setForeground`. Shared resources: the

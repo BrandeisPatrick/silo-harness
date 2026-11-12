@@ -53,6 +53,25 @@ export function createTranscript({ messages: messagesEl, emptyState, workingDire
     { passive: true },
   );
 
+  // A line opened or shut changes how much lies below the view: whether the reader is at the bottom is measured again,
+  // so the next call or reply does not pull the view away from a line just opened
+  messagesEl.addEventListener(
+    'toggle',
+    () => {
+      stick = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 64;
+    },
+    true,
+  );
+
+  // A fold line clicked with the mouse (a run's line, a row, thinking, a turn's header) does not take the focus: the
+  // composer keeps it, and the next key types there instead of drawing a focus ring round the line and toggling it.
+  // Tab still reaches every line, and Enter and Space toggle it there.
+  messagesEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const t = e.target as HTMLElement;
+    if (t.closest(':is(.tool-group, .tool, .thinking) > summary, .turn-head-btn')) e.preventDefault();
+  });
+
   /** Follows new content while the user is at the bottom; otherwise offers a "Jump to latest" pill instead of yanking the view. */
   function scrollToBottom(force = false): void {
     if (force) stick = true;

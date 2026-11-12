@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.18.0 — 2026-11-12
+
+Auto mode asks for fewer safety checks, long steps say what they are doing, `/report` shows where a session's time went, and a queued message can be sent at once.
+
+### Highlights
+
+- **Fewer safety checks.** In Auto mode a read in another folder, such as `cd repo && git log`, runs without waiting for the safety check ([details](docs/reference.md#auto-mode)).
+- **Session report.** `/report` shows where a session's time went: turns, model and tool calls, waits, checks, retries and silent stretches, numbers only ([details](docs/latency.md#report)).
+  ![The /report card: a session's time by turn, with model calls, tool calls, waits and checks](docs/releases/0.18.0/report.png)
+- **Long steps speak up.** The status line says "Writing a file… 12 KB" while the model writes a large tool input, and "Checking…" during a safety check ([details](docs/latency.md#while-it-runs)).
+  ![The status line reading Writing a file with its size while a run goes on](docs/releases/0.18.0/status-line.png)
+
+### New
+
+- **Send now.** A queued message has a "Send now" button that stops the current step and sends that message as the next turn; the rest keeps waiting.
+
+### Improved
+
+- **Progress in words.** The agent says in a short sentence what it is doing before its first tool call, and when it finds something or changes approach.
+- **Several edits at once.** `edit_file` makes several replacements in one file in one call, all or nothing, with one card showing every change.
+- **Silence notice.** After 30 s with no output from the model, the status line counts up and says when the connection is tried again.
+- **Live run line.** An opened run line heads its list in the present tense, such as "Running 2 commands", and keeps your open or shut choice.
+- **Queue over backgrounds.** Over a background look the queue and status line paint no band; the end of the transcript fades under them instead.
+- **Timing log on.** Each run's timing is kept in the data folder by default, numbers only; `"timingLog": false` turns it off ([format](docs/latency.md#the-timing-log)).
+
+### Fixed
+
+- **Stalled gateway replies.** A reply that goes silent for 5 minutes after it starts is now tried again, instead of ending empty.
+
+### Security
+
+- **Terminal tabs stay checked.** A command with a leading `cd` in a terminal tab keeps Auto mode's check, because there it moves your own shell.
+- **No cd search path.** `bash` ignores `CDPATH`, so `cd sub` goes to `./sub` or fails, as the safety rules read it.
+
+### For developers
+
+- **Folder for bash.** `bash` takes `path`, the folder a command starts in; its card and row show it as `cd <folder> && <command>`.
+- **Session report script.** `node scripts/session-report.js <log>` prints the report for one session's history log, outside the app.
+- **New history records.** The history log keeps retries, safety checks, question cards and compaction starts as numbers and fixed words ([format](docs/latency.md#the-newer-history-records)).
+- **Keyless live tests.** `SILO_HARNESS_LIVE_ANT=1 npm run test:live` reaches the real API through the `ant` CLI's sign-in ([details](docs/releasing.md#making-a-release)).
+
+### Known issues
+
+- **Sessions answering in turn.** Two sessions that message each other can keep replying to one another; stop either run to end it.
+
 ## 0.17.1 — 2026-11-11
 
 Commands that only look like reads now get Auto mode's check, and Plan mode refuses them.

@@ -3,7 +3,7 @@
 
 import type { PermissionLists, PermissionMode, StoredRules } from '../../shared/types';
 import { siteCardLabels, type Site } from '../browser/policy';
-import { commandWritesRuleFile, guardCommand, guardWrite, isHomeScanRoot, isReadOnlyCommand, programsOf, SCAN_REASON, writesRuleFile } from '../guard';
+import { commandWritesRuleFile, guardCommand, guardWrite, isHomeScanRoot, isReadOnlyCall, programsOf, SCAN_REASON, writesRuleFile } from '../guard';
 import { bashAllow, compileRules, mcpRuleMatches, pathAllow } from './rules';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
@@ -134,7 +134,7 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (mode === 'plan') {
     if (isEdit) return refuse(PLAN_EDIT_BLOCKED);
     if (isCmd) {
-      if (!isReadOnlyCommand(detail)) return refuse(PLAN_CMD_BLOCKED);
+      if (!isReadOnlyCall(name, detail)) return refuse(PLAN_CMD_BLOCKED);
       // A read-only command the guard flags (cat ~/.aws/credentials: "reads secrets") asks with that reason
       const r = guardCommand(detail, cwd);
       return r && !reasonAllowed(r) ? ask(r, programsOf(detail)) : allow;
@@ -163,7 +163,7 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (isCmd) {
       // (allowing sudo does not allow what sudo runs: a reason for that still counts below)
       if (always && !reasonAllowed(always)) return ask(always, programs);
-      if (!reason && isReadOnlyCommand(detail)) return allow;
+      if (!reason && isReadOnlyCall(name, detail)) return allow;
       if (reason && reasonAllowed(reason)) return allow;
       const autoOk = !!cmd?.covered && !cmd.broad && !programs.some((p) => INTERPRETERS.has(p));
       if (reason && autoOk && cmdCovers(reason)) return allow;

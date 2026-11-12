@@ -368,7 +368,7 @@ export interface AppConfig {
   webSearch?: WebSearchConfig;
   /** Look for a newer release on GitHub once a day (absent: on) */
   checkForUpdates?: boolean;
-  /** Append each run's timing (numbers only, docs/latency.md) to <profile>/timing/timing.jsonl; SILO_TIMING=1 does the same */
+  /** Append each run's timing (numbers only, docs/latency.md) to <profile>/timing/timing.jsonl: on unless false; SILO_TIMING=1 forces it on */
   timingLog?: boolean;
   /** How many read-only tool calls of one reply run at the same time (1 to 10; absent: 4; 1: one after another) */
   toolConcurrency?: number;
@@ -529,7 +529,8 @@ export interface PlanInfo {
 }
 
 export type AgentEvent =
-  | { type: 'run_start' }
+  /** A run began. `timing`: the run's id in the timing log (agent/perf.ts), which the history log's run.start keeps */
+  | { type: 'run_start'; timing?: string }
   | { type: 'text_delta'; text: string }
   | { type: 'text_done' }
   | { type: 'thinking_delta'; text: string }
@@ -594,7 +595,23 @@ export type AgentEvent =
    * A model call failed and waits to be tried again (text: "Connection lost. Retrying in 4 s (2 of 6)."), or the wait
    * is over (null: the reply started, or the call ended). One status line that replaces itself, like hook_status.
    */
-  | { type: 'retry_status'; text: string | null }
+  | { type: 'retry_status'; text: string | null; retry?: RetryInfo }
+  /**
+   * The model is writing a tool call's input and the reply is not complete yet: the tool's name and how many characters
+   * of input it has written so far. Sent when the name is known, then at most about once a second (agent/progress.ts).
+   */
+  | { type: 'input_progress'; name: string; chars: number }
+  /**
+   * No content (thinking, text or a tool call's input) has come from the model for `ms` (30 s or more); null: content
+   * came again, or the attempt ended. `dropMs`: after that long with no data at all the connection is dropped and the
+   * request tried again, when that applies; `pings`: keep-alive data is arriving, so that drop is not coming.
+   */
+  | { type: 'stream_idle'; ms: number | null; dropMs?: number; pings?: boolean }
+  /**
+   * Auto mode's safety check of the call `id` began (running) or ended: how long it took, what it said and whether it
+   * ran out of time. The window shows the call as being checked meanwhile; the history log keeps the end.
+   */
+  | { type: 'check_status'; id?: string; running: boolean; ms?: number; verdict?: CheckVerdictWord; timedOut?: boolean }
   /**
    * The model call that streamed the text and thinking since the last thinking_done failed and is tried again: what it
    * showed is not the answer and goes (the window, the phone and the history log drop it).
@@ -607,8 +624,24 @@ export type AgentEvent =
   | { type: 'auto_blocked'; block: AutoBlock }
   /** The user allowed the blocked call `id` (here, in Settings or on the phone): it runs once when the agent retries it */
   | { type: 'auto_allowed'; id: string }
-  /** `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times. */
-  | { type: 'run_end'; reason: RunEndReason; text?: string };
+  /**
+   * `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times.
+   * `continued`: the user chose "Send now" on a queued message, so the run was cut (reason usually `aborted`) and the
+   * next one, with that message, starts right after this event; the session never counts as idle in between.
+   */
+  | { type: 'run_end'; reason: RunEndReason; text?: string; continued?: boolean };
+
+/** Why an attempt at a model request failed, in the words the records keep (agent/perf.ts FailKind) */
+export type FailKindWord = 'idle' | 'connection' | 'rate_limited' | 'busy' | 'too_long' | 'other';
+/** What Auto mode's safety check said, in the words the records keep (agent/perf.ts CheckVerdict) */
+export type CheckVerdictWord = 'allow' | 'block' | 'ask' | 'error' | 'stopped';
+/** A retry of a model request, in numbers: the attempt coming (2 to 6), the wait before it, how long the failed one ran and why it failed */
+export interface RetryInfo {
+  attempt: number;
+  waitMs: number;
+  ranMs?: number;
+  kind: FailKindWord;
+}
 
 /** Why a run ended */
 export type RunEndReason = 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop';
@@ -674,6 +707,8 @@ export interface CommandInfo {
 /** What running a slash command asks the window to do. */
 export interface CommandResult {
   notice?: string;
+  /** A notice card rendered from Markdown (the /report card) */
+  card?: string;
   error?: string;
   /** Send this text as the user's message */
   send?: string;
@@ -861,6 +896,11 @@ export interface SiloHarnessApi {
   send(text: string, attachments?: ImageAttachment[]): Promise<SendResult>;
   /** Removes a queued message before it is delivered; false when it was already delivered or unknown */
   unqueue(id: string): Promise<boolean>;
+  /**
+   * "Send now" on a queued message: stops the current step (as Stop does) and sends this message at once as the next
+   * user turn; the rest of the queue stays. False when it is no longer queued (delivered, removed, or the run ended).
+   */
+  sendNow(id: string): Promise<boolean>;
   /** Messages still waiting to be delivered (for restoring the queue after a reload) */
   queue(): Promise<QueuedMessage[]>;
   /** Whether the configured model accepts images and tools (cached per provider+model) */

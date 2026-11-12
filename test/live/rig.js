@@ -1,9 +1,11 @@
 // Live test rig: launches the built app under Electron with a throwaway profile and drives the real window over
 // the Chrome DevTools Protocol. No dependencies (Node 22+ for the global WebSocket).
 //
-// The model is the real API when ANTHROPIC_API_KEY is set (Anthropic's OpenAI-compatible endpoint through the
-// app's gateway fields; the key travels in the environment and is never written to the profile), otherwise the
-// mock model server from test/support. Nothing here touches your own profile, settings or sessions: the app gets
+// The model is the real API when ANTHROPIC_API_KEY is set (Anthropic's own endpoint through the app's gateway
+// fields; the key travels in the environment and is never written to the profile), or, with no key and
+// SILO_HARNESS_LIVE_ANT=1, the real API through a local relay that signs requests with the `ant` CLI's sign-in
+// (ant-relay.js; the app is given a secret made for the run, never the token). Otherwise it is the mock model
+// server from test/support. Nothing here touches your own profile, settings or sessions: the app gets
 // its own --user-data-dir and its own config directory, and the window stays hidden.
 //
 //   const { launch } = require('./rig.js');
@@ -25,6 +27,12 @@ const mockUrls = new Set();
 
 /** The model live checks use unless a test asks for another one: the cheapest that handles tools well. */
 const LIVE_MODEL = process.env.SILO_HARNESS_LIVE_MODEL || 'claude-haiku-5-5';
+
+/** Where live runs get a real model from: 'key' (ANTHROPIC_API_KEY), 'ant' (the ant CLI's sign-in through ant-relay.js), or '' (the mock model). */
+function liveSource() {
+  if (process.env.ANTHROPIC_API_KEY) return 'key';
+  return process.env.SILO_HARNESS_LIVE_ANT ? 'ant' : '';
+}
 
 async function freePort() {
   const net = require('node:net');
@@ -70,9 +78,10 @@ async function launch(opts = {}) {
   const ownConfigDir = !(opts.env && 'SILO_HARNESS_CONFIG_DIR' in opts.env);
   if (ownConfigDir) fs.mkdirSync(home, { recursive: true });
 
-  const key = opts.mock ? '' : process.env.ANTHROPIC_API_KEY || '';
+  const ant = !opts.mock && liveSource() === 'ant' ? await require('./ant-relay.js').relay() : null;
+  const key = opts.mock ? '' : process.env.ANTHROPIC_API_KEY || (ant ? ant.key : '');
   let mock = null;
-  let baseURL = 'https://api.anthropic.com/v1';
+  let baseURL = ant ? ant.baseURL : 'https://api.anthropic.com/v1';
   if (!key) {
     const { startMock } = require(path.join(root, 'test', 'support', 'mock-model.js'));
     mock = await startMock();
@@ -89,6 +98,15 @@ async function launch(opts = {}) {
     autoTitles: false,
     ...(opts.config || {}),
   };
+  if (ant && config.provider === 'portkey') {
+    // The relay is not api.anthropic.com, so the gateway block would talk to it in the OpenAI format. A provider of
+    // type anthropic keeps the app on Anthropic's own API, as with a key; it takes the block's model and context size,
+    // and the label the block has with a key, so the window reads the same.
+    const block = { ...config.portkey, baseURL: ant.baseURL };
+    config.portkey = block;
+    config.providers = { ...(config.providers || {}), live: { type: 'anthropic', label: 'Gateway', baseURL: ant.baseURL, apiKeyEnv: 'SILO_HARNESS_LIVE_RELAY_KEY', model: block.model, contextWindow: block.contextWindow } };
+    config.provider = 'live';
+  }
   const configFile = path.join(profile, 'config.json');
   if (!fs.existsSync(configFile)) {
     if (opts.seed !== false) fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
@@ -113,6 +131,7 @@ async function launch(opts = {}) {
     // The app's own config directory (settings.json, skills, mods) is redirected too, so a test never reads yours.
     SILO_HARNESS_CONFIG_DIR: home,
     PORTKEY_API_KEY: key || 'mock-key',
+    ...(ant ? { SILO_HARNESS_LIVE_RELAY_KEY: ant.key } : {}),
     ...(opts.env || {}),
   };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -505,4 +524,4 @@ function checker() {
   };
 }
 
-module.exports = { launch, checker, sleep, evalAt, cdpAt, LIVE_MODEL };
+module.exports = { launch, checker, sleep, evalAt, cdpAt, LIVE_MODEL, liveSource };

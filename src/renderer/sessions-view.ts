@@ -62,6 +62,8 @@ export function createSessionsView({ api, input: inputEl, running, renderTranscr
     const before = statusOf(id);
     let next: SessionStatus | null = null;
     if (ev.type === 'run_start') next = { running: true, unread: onScreen ? undefined : before.unread };
+    // Cut by "Send now": the session runs on with the next message
+    else if (ev.type === 'run_end' && ev.continued) return;
     else if (ev.type === 'run_end') next = { running: false, attention: ev.reason === 'plan' ? 'plan' : undefined, unread: onScreen ? undefined : true };
     else if (ev.type === 'approval_request') next = { ...before, attention: 'approval' };
     else if (ev.type === 'approval_resolved' && before.attention === 'approval') next = { ...before, attention: undefined };

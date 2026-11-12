@@ -318,6 +318,31 @@ async function waitFor(fn, ms = 8000, what = 'condition') {
   await fire();
   check('7: a user message lets them flow again', notesTo(R).length === NOTE_CAP + 1);
 
+  // ---- 7b: "Send now" in a sub-session ----
+  // the parent's task cut by Send now: the next run carries it and reports once, at its end, with its own text
+  rt.setForeground(P);
+  replyLast('[K1]', { content: 'still counting', delayMs: 3000 });
+  replyLast('[K2]', { content: 'steered answer 7' });
+  const SN = svc.spawn(P, { title: 'Steered', prompt: 'count slowly [K1]' }).id;
+  await waitFor(() => state.requests.some((r) => r.payload.stream && has(firstUser(r.payload), '[K1]')), 5000, 'the sub-session request');
+  const kq = rt.send(SN, 'steer it [K2]');
+  check('7b: the steer queued', kq.ok && kq.queued);
+  check('7b: Send now accepted', rt.findQueued(kq.id)?.sendNow(kq.id) === true);
+  await allIdle();
+  const kNotes = notesTo(P).filter((e) => e.from === SN);
+  const kEnds = of(SN, 'run_end');
+  check('7b: exactly one report, after the second run, with its text', kNotes.length === 1 && /steered answer 7/.test(kNotes[0].text) && !/still counting/.test(kNotes[0].text) && /done/.test(kNotes[0].text), kNotes.map((e) => e.text.slice(0, 160)));
+  check('7b: the first run ended continued, the second done', kEnds.length === 2 && kEnds[0].continued === true && kEnds[1].reason === 'done' && !kEnds[1].continued, kEnds);
+  // a turn the user drove, cut by Send now: no report
+  replyLast('[K3]', { content: 'typed slow', delayMs: 3000 });
+  replyLast('[K4]', { content: 'typed steer answer' });
+  rt.send(SN, 'typed by the user [K3]');
+  await waitFor(() => state.requests.some((r) => r.payload.stream && has(lastUser(r.payload), '[K3]')), 5000, 'the typed request');
+  const kq2 = rt.send(SN, 'steer the typed turn [K4]');
+  check('7b: Send now on a user-driven turn accepted', kq2.queued && rt.findQueued(kq2.id)?.sendNow(kq2.id) === true);
+  await allIdle();
+  check('7b: no report for a user-driven run cut by Send now', notesTo(P).filter((e) => e.from === SN).length === 1 && of(SN, 'run_end').length === 4);
+
   // ---- 8: slash commands ----
   const S = rt.create({ cwd: dir, foreground: true }).id;
   reply('[S0]', { content: 's first' });

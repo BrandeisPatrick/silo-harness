@@ -145,6 +145,19 @@ function browserLabel(name: string, a: Args): ToolLabel | null {
   }
 }
 
+/** An edit_file call's replacements: old_string and new_string, or each of its edits (old, new, replace_all) */
+function editPairs(a: Args): [string, string, boolean][] {
+  if (typeof a.old_string === 'string' && typeof a.new_string === 'string') return [[a.old_string, a.new_string, !!a.replace_all]];
+  const list = Array.isArray(a.edits) ? (a.edits as unknown[]) : [];
+  return list.flatMap((e) => (e && typeof e === 'object' && typeof (e as Args).old_string === 'string' && typeof (e as Args).new_string === 'string' ? [[(e as Args).old_string as string, (e as Args).new_string as string, !!(e as Args).replace_all] as [string, string, boolean]] : []));
+}
+
+/** A bash call's command as its row shows it: `cd <folder> && <command>` when it starts in another folder (its path) */
+function bashShown(a: Args): string {
+  const where = displayPath(str(a, 'path'), 80);
+  return (where && where !== '.' ? `cd ${/\s/.test(where) ? `'${where}'` : where} && ` : '') + str(a, 'command');
+}
+
 export function toolLabel(name: string, a: Args): ToolLabel {
   const mcp = mcpParts(name);
   if (mcp) return mcpLabel(mcp, a);
@@ -159,7 +172,7 @@ export function toolLabel(name: string, a: Args): ToolLabel {
     case 'list_directory': return { verb: 'List', arg: displayPath(str(a, 'path') || '.'), title: str(a, 'path') || '.', icon: 'folder', mono: true };
     case 'glob': return { verb: 'Glob', arg: str(a, 'pattern'), icon: 'search', mono: true };
     case 'grep': return { verb: 'Search', arg: str(a, 'pattern'), icon: 'search-code', mono: true };
-    case 'bash': return { verb: 'Bash', arg: short(str(a, 'command').split('\n')[0], 120), icon: 'terminal', mono: true };
+    case 'bash': return { verb: 'Bash', arg: short(bashShown(a).split('\n')[0], 120), icon: 'terminal', mono: true };
     case 'terminal_run': return { verb: 'Terminal', arg: short(str(a, 'command').split('\n')[0], 120), title: str(a, 'command'), icon: 'terminal', mono: true };
     case 'terminal_read': return { verb: 'Read terminal', arg: tabArg(a) || 'active tab', icon: 'terminal', mono: Boolean(tabArg(a)) };
     case 'terminal_list': return { verb: 'Terminal tabs', arg: '', icon: 'list', mono: false };
@@ -307,6 +320,38 @@ export function statusVerb(name: string): string {
   const mcp = mcpParts(name);
   if (mcp) return `Calling ${mcp.server}…`;
   return `Running ${name}…`;
+}
+
+/** "12 KB", "1.4 MB"; nothing under 1 KB (a call that small is written in a moment) */
+export function inputSize(chars: number): string {
+  const n = Number(chars) || 0;
+  if (n < 1024) return '';
+  return n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The status line while the model writes a tool call's input, before the call's row appears (input_progress):
+ * "Writing a file… 12 KB". The size counts characters of the call's input.
+ */
+export function inputProgressText(name: string, chars: number): string {
+  const what =
+    name === 'write_file'
+      ? 'Writing a file…'
+      : name === 'edit_file'
+        ? 'Writing an edit…'
+        : name === 'bash' || name === 'terminal_run'
+          ? 'Writing a command…'
+          : name === 'create_artifact'
+            ? 'Writing an artifact…'
+            : name === 'submit_plan'
+              ? 'Writing the plan…'
+              : name === 'update_tasks'
+                ? 'Writing the tasks…'
+                : name === 'ask_user'
+                  ? 'Writing a question…'
+                  : 'Preparing a tool call…';
+  const size = inputSize(chars);
+  return size ? `${what} ${size}` : what;
 }
 
 const KNOWN_TOOLS = new Set([
@@ -892,10 +937,14 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
   // Bodies that are known before the tool runs
   let editRows: DiffRow[] | undefined;
   const path = str(a, 'path');
-  if (name === 'edit_file' && typeof a.old_string === 'string' && typeof a.new_string === 'string') {
-    editRows = lineDiff(a.old_string, a.new_string);
-    const at = startLine(path, a.old_string);
-    if (at !== undefined) editRows = numberRows(editRows, at);
+  const edits = name === 'edit_file' ? editPairs(a) : [];
+  if (edits.length) {
+    // Several replacements (edits): each one's lines, one after another
+    editRows = edits.flatMap(([o, n]) => {
+      const rows = lineDiff(o, n);
+      const at = startLine(path, o);
+      return at !== undefined ? numberRows(rows, at) : rows;
+    });
     body.appendChild(rowDiff(path, editRows));
     const st = diffStats(editRows);
     summary.querySelector('.tool-meta')!.innerHTML = statHtml(st.added, st.removed);
@@ -903,7 +952,7 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
     const rows = numberRows(fileLines(a.content).map((t) => ({ kind: 'add' as const, text: t })), 1);
     body.appendChild(rowDiff(path, rows));
   } else if ((name === 'bash' || name === 'terminal_run') && str(a, 'command')) {
-    body.appendChild(cmdBlock(str(a, 'command')));
+    body.appendChild(cmdBlock(name === 'bash' ? bashShown(a) : str(a, 'command')));
   } else if (name === 'browser_eval' && str(a, 'code')) {
     body.appendChild(codeView([], str(a, 'code'), 'js', 'no-gutter'));
   } else if (name === 'browser_type' && str(a, 'text').length > 80) {
@@ -1006,11 +1055,14 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
         files.set(fileKey(path), str(a, 'content'));
       } else if (name === 'edit_file') {
         const key = fileKey(path);
-        const content = files.get(key);
-        const oldS = str(a, 'old_string');
-        if (content !== undefined && oldS && content.includes(oldS)) {
-          files.set(key, a.replace_all ? content.split(oldS).join(str(a, 'new_string')) : content.replace(oldS, () => str(a, 'new_string')));
-        } else files.delete(key);
+        const pairs = editPairs(a);
+        let content = pairs.length ? files.get(key) : undefined;
+        for (const [oldS, newS, all] of pairs) {
+          if (content === undefined || !oldS || !content.includes(oldS)) content = undefined;
+          else content = all ? content.split(oldS).join(newS) : content.replace(oldS, () => newS);
+        }
+        if (content !== undefined) files.set(key, content);
+        else files.delete(key);
       } else if (name === 'bash') {
         const { output } = bashParts(res.result);
         body.appendChild(output.trim() ? outBlock(clip(stripCwd(output).replace(/\n$/, ''))) : Object.assign(document.createElement('div'), { className: 'tool-note', textContent: 'No output' }));
