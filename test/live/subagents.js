@@ -44,10 +44,11 @@ const { launch, checker, sleep } = require('./rig.js');
       rel = await related(P);
       check('both finished and merged into the parent', rel.children.every((c) => c.mergedInto === P && !c.status?.running), rel.children.map((c) => [c.title, c.mergedInto]));
       // On screen a report is one line, "Received message from <sub-session>", that opens to what it said: the frame
-      // written for the model (its id, which tools to use next) stays out of sight.
+      // written for the model (its head line, which tools to use next) stays out of sight. A sub-session's own reply
+      // may name its session and id, so an id alone is not read as a leaked frame.
       const reports = await app.evaluate(`[...document.querySelectorAll('.msg.user.session-msg.received')].map((e) => ({ label: e.querySelector('.session-msg-line > summary')?.innerText.trim() ?? '', text: e.querySelector('.session-msg-body')?.textContent ?? '' }))`);
       const notes = reports.filter((r) => /^Received message from .+/.test(r.label)).length;
-      check('reports on screen are "Received message from …" lines and show no frame, id or tool name', notes >= 2 && !reports.some((r) => /\[Sub-session "|session_read|session_merge|[0-9a-f]{8}-[0-9a-f]{4}-/.test(r.text)), reports.map((r) => [r.label, r.text.slice(0, 80)]));
+      check('reports on screen are "Received message from …" lines and show no frame or tool name', notes >= 2 && !reports.some((r) => /\[Sub-session "|finished a turn:|Next: read more with|session_read|session_send|session_merge/.test(r.text)), reports.map((r) => [r.label, r.text.slice(0, 400)]));
       const transcript = await app.evaluate(`oc.rpc('sessions.transcript', ${JSON.stringify(P)})`);
       const noteItems = transcript.filter((i) => i.role === 'user' && /^\[Sub-session "/.test(i.text));
       check('the parent got both notes', noteItems.length >= 2 && new Set(noteItems.map((i) => /\(([0-9a-f-]{36})\)/.exec(i.text)?.[1])).size >= 2, { onScreen: notes, stored: noteItems.length });
