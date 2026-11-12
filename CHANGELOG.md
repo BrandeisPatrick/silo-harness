@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.19.0 — 2026-11-12
+
+A shell sandbox for Auto mode, off by default: commands that stay inside the project run without a safety check, and macOS limits what they can reach.
+
+### Highlights
+
+- **Shell sandbox.** With "Run commands in a sandbox" on, Auto mode runs commands that stay in the project and temp folders without a safety check ([details](docs/reference.md#the-shell-sandbox)).
+  ![Settings, Permissions, Auto mode: Run commands in a sandbox, Local ports, and Folders commands may also write](docs/releases/0.19.0/sandbox-settings.png)
+- **Blocked, then checked.** A sandboxed command that hits a wall goes to the safety check and, if allowed, runs again outside; its row shows both runs.
+  ![A command row marked sandbox: blocked in the sandbox, checked, then run again outside](docs/releases/0.19.0/sandbox-row.png)
+
+### New
+
+- **Read-only planning.** With the sandbox on, Plan mode runs its read-only commands in a sandbox that writes nothing and reaches no network.
+- **Sandbox counts.** `/report` and the timing log count the commands that ran in the sandbox, were blocked and ran again outside.
+- **Sandbox settings.** "Local ports" and "Folders commands may also write" widen the sandbox; only your own settings can turn them on.
+
+### Improved
+
+- **Wider secret list.** Shell history, cloud and cluster sign-ins, Git and Cargo credentials, the keychains and browser profiles count as secrets for commands and file tools.
+- **Nested folders protected.** A write to a nested `.git`, `.vscode` or `.envrc` asks as one at the project's root does.
+
+### Security
+
+- **What the sandbox stops.** A sandboxed command cannot write outside the project and temp folders, read secrets, change any `.git`, or reach the network.
+
+### Known issues
+
+- **Swallowed errors.** A command that hides a refused write or read is not seen as blocked; the agent can ask to run it outside.
+- **Servers on all interfaces.** A server that binds `0.0.0.0` is refused even with "Local ports" on.
+
 ## 0.18.1 — 2026-11-12
 
 Two sessions can no longer keep answering each other, and a message from another session is answered in the reply.

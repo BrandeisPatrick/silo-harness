@@ -51,4 +51,6 @@ export interface AutoModeRpc {
   'auto.learned': () => LearnedAnswer[];
   /** Forgets one learned answer (by id), or all of them (no id); returns what is left. */
   'auto.forget': (id?: string) => LearnedAnswer[];
+  /** Whether this Mac can run the shell sandbox (the probe, run once per app: sandbox-exec is there and works). */
+  'auto.sandbox': () => { available: boolean };
 }

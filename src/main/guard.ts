@@ -733,9 +733,25 @@ function gitWords(w: string[]): { sub: string; rest: string[]; globals: string[]
   return { sub: w[i] ?? '', rest: w.slice(i + 1), globals };
 }
 
-const SECRET_PATH_RE = /(^|\/)(\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.docker\/config\.json|\.config\/gh|\.env(\.(?!(example|sample|template|dist)(\/|$))[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|[^/]*\.key)(\/|$)/;
+/**
+ * Secrets by name, at any depth: keys and credentials, cloud and cluster sign-ins, shell and REPL history. The shell
+ * sandbox (sandbox/profile.ts) refuses to read the same names, with the .env files and *.pem, *.p12, *.key.
+ */
+export const SECRET_NAMES = [
+  '.ssh', '.aws', '.gnupg', '.netrc', '.npmrc', '.pypirc', '.docker/config.json', '.config/gh', '.config/gcloud', '.kube', '.azure',
+  '.git-credentials', '.cargo/credentials', '.cargo/credentials.toml', '.terraform.d/credentials.tfrc.json', 'id_rsa', 'id_ed25519',
+  '.zsh_history', '.zhistory', '.bash_history', '.sh_history', '.zsh_sessions', '.local/share/fish/fish_history',
+  '.python_history', '.node_repl_history', '.irb_history', '.psql_history', '.mysql_history', '.sqlite_history',
+];
+const reEscape = (s: string): string => s.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
+const SECRET_PATH_RE = new RegExp(`(^|\\/)(${SECRET_NAMES.map(reEscape).join('|')}|\\.env(\\.(?!(example|sample|template|dist)(\\/|$))[\\w-]+)?|[^/]*\\.pem|[^/]*\\.p12|[^/]*\\.key)(\\/|$)`);
 /** The app's own data under the home folder: sessions, and config.json with the provider keys */
 export const APP_DATA = ['Library/Application Support/Silo Harness', 'Library/Application Support/Open Harness'];
+/** Secrets under the home folder: the keychains and the browsers' profiles (cookies, saved passwords) */
+export const SECRET_IN_HOME = [
+  'Library/Keychains', 'Library/Cookies', 'Library/Safari',
+  ...['Google/Chrome', 'Google/Chrome Beta', 'Google/Chrome Canary', 'Chromium', 'BraveSoftware', 'Microsoft Edge', 'Arc', 'Vivaldi', 'com.operasoftware.Opera', 'Firefox'].map((b) => `Library/Application Support/${b}`),
+];
 
 /** a is b or a folder that holds b */
 function holds(a: string, b: string): boolean {
@@ -751,7 +767,7 @@ export function isSecretPath(p: string, cwd = '/'): boolean {
   if (SECRET_PATH_RE.test(e)) return true;
   const abs = path.resolve(cwd, e);
   const h = os.homedir();
-  if (APP_DATA.some((d) => holds(path.join(h, d), abs))) return true;
+  if ([...APP_DATA, ...SECRET_IN_HOME].some((d) => holds(path.join(h, d), abs))) return true;
   for (const dir of [configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')]) if (abs === path.join(dir, 'settings.json')) return true;
   return false;
 }
@@ -970,22 +986,39 @@ export function commandWritesRuleFile(command: string, cwd: string): boolean {
 /** The reasons no allow rule or "for this session" answer covers */
 export const PROTECTED_REASONS: ReadonlySet<string> = new Set(['writes a protected file', 'modifies the .git directory']);
 
+/** True when the path's segments hold `name` (one or more segments, a/b) starting at some depth, in any case (APFS ignores case). */
+function segmentsHold(segs: string[], name: string): boolean {
+  const want = name.toLowerCase().split('/');
+  for (let i = 0; i + want.length <= segs.length; i++) if (want.every((w, j) => segs[i + j].toLowerCase() === w)) return true;
+  return false;
+}
+
 /**
- * Why a write to `abs` (resolved from `cwd`) is protected, or null. Inside the working directory: .git, the app's and
- * other tools' project folders (not their skills, commands, agents or worktrees), .github/workflows, .husky, .envrc,
- * .gitmodules, .mcp.json. Anywhere: shell start-up files, git config, keys and credentials, launch agents, the app's
- * own data and the user's config folder (not its skills and instructions).
+ * Why a write to `abs`, a path inside `root`, is protected there at any depth (sub/.git, sub/.vscode/tasks.json), or
+ * null: every .git; the protected names, unless the path is also in an open folder (.claude/skills …). The shell
+ * sandbox's profile (sandbox/profile.ts) refuses the same writes.
+ */
+function protectedInProject(file: string, root: string): string | null {
+  if (!holds(root, file) || file === root) return null;
+  const segs = path.relative(root, file).split(path.sep);
+  if (segmentsHold(segs, '.git')) return 'modifies the .git directory';
+  if (PROTECTED_IN_PROJECT.some((p) => segmentsHold(segs, p)) && !OPEN_IN_PROJECT.some((p) => segmentsHold(segs, p))) return 'writes a protected file';
+  return null;
+}
+
+/**
+ * Why a write to `abs` (resolved from `cwd`) is protected, or null. Inside the working directory, at any depth: .git,
+ * the app's and other tools' project folders (not their skills, commands, agents or worktrees), .github/workflows,
+ * .husky, .envrc, .gitmodules, .mcp.json. Anywhere: shell start-up files, git config, keys and credentials, launch
+ * agents, the app's own data and the user's config folder (not its skills and instructions).
  */
 export function protectedWrite(abs: string, cwd: string): string | null {
   const file = path.resolve(cwd, expandHome(abs));
   const root = path.resolve(cwd);
   // The files that hold permission rules, wherever the session works (even inside the config folder)
   if (writesRuleFile(file, cwd)) return 'writes a protected file';
-  if (holds(root, file) && file !== root) {
-    if (path.relative(root, file).split(path.sep)[0] === '.git') return 'modifies the .git directory';
-    const under = (list: string[]) => list.some((p) => holds(path.join(root, p), file));
-    if (under(PROTECTED_IN_PROJECT) && !under(OPEN_IN_PROJECT)) return 'writes a protected file';
-  }
+  const inProject = protectedInProject(file, root);
+  if (inProject) return inProject;
   const h = os.homedir();
   for (const dir of new Set([configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')])) {
     // (a session that works inside the config folder itself edits it freely: the tests' default folder is there)
@@ -1176,9 +1209,33 @@ function guardLine(raw: string, cwd: string, folders: LineFolders, depth: number
 export function guardWrite(absPath: string, cwd: string): string | null {
   const abs = path.resolve(expandHome(absPath));
   if (!insideCwd(abs, cwd)) return 'writes outside the working directory';
-  const rel = path.relative(path.resolve(cwd), abs);
-  if (rel === '.git' || rel.startsWith('.git' + path.sep)) return 'modifies the .git directory';
+  // every .git, at any depth (sub/.git/config), as the shell sandbox refuses it
+  if (segmentsHold(path.relative(path.resolve(cwd), abs).split(path.sep), '.git')) return 'modifies the .git directory';
   return null;
+}
+
+/**
+ * What the shell sandbox's profile (sandbox/profile.ts) is given from the guard's lists, for a session working in
+ * `cwd`: secret names and paths it may not read, and the paths it may not write wherever they are (shell start-up
+ * files, launch agents, keys, the app's data, the user's config folder unless the session works in it, the rule files
+ * and the folders that hold them). Each path also as its real path, since the sandbox sees a symlink's target.
+ */
+export function sandboxGuardPaths(cwd: string): { secretNames: string[]; secretPaths: string[]; protectedPaths: string[]; protectedFolders: string[] } {
+  const h = os.homedir();
+  const root = path.resolve(cwd);
+  const both = (list: string[]) => [...new Set(list.flatMap((p) => [path.resolve(p), realish(path.resolve(p))]))];
+  const configs = [...new Set([configDir(), path.join(h, '.silo-harness'), path.join(h, '.open-harness')])];
+  const data = [...APP_DATA.map((d) => path.join(h, d)), ...(appDataDir ? [appDataDir] : [])];
+  const rules = ruleFiles();
+  // (a path inside another one on the same list adds nothing)
+  const outermost = (list: string[]) => list.filter((p) => !list.some((q) => q !== p && holds(q, p)));
+  const protectedPaths = outermost(both([...PROTECTED_IN_HOME.map((p) => path.join(h, p)), ...data, ...configs.filter((d) => !holds(d, root)), ...rules]));
+  return {
+    secretNames: [...SECRET_NAMES],
+    secretPaths: outermost(both([...data, ...SECRET_IN_HOME.map((d) => path.join(h, d)), ...configs.map((d) => path.join(d, 'settings.json'))])),
+    protectedPaths,
+    protectedFolders: both(rules.map((f) => path.dirname(f))).filter((d) => !protectedPaths.some((p) => holds(p, d))),
+  };
 }
 
 const READ_ONLY_PROGRAMS = new Set([

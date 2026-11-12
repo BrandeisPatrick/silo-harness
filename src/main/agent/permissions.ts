@@ -8,6 +8,7 @@ import { bashAllow, compileRules, mcpRuleMatches, pathAllow } from './rules';
 import type { McpToolRef } from '../mcp';
 import type { ApproveOptions } from '../tools';
 import { alwaysAskReason, protectedWrite, PROTECTED_REASONS } from './auto-rules';
+import { skipsSandbox } from '../sandbox';
 
 /** What the model is told when the user denies a card */
 export const DENIED = 'Not permitted: the user denied this action. Do not retry it; explain what you would have done and continue or stop.';
@@ -28,6 +29,8 @@ export const RULE_FILE_REASON = 'writes a protected file';
 /** The browser cards Auto mode's safety check decides (allow, block or ask the user); purchase and account always ask. */
 export const CHECKED_BROWSER_CARDS: ReadonlySet<string> = new Set(['site', 'sensitive', 'eval']);
 const PLAN_CUSTOM_BLOCKED = 'Not permitted in plan mode: this action needs the user\'s approval, which plan mode does not ask for. Describe this step in your plan instead.';
+/** Why a command that hit the shell sandbox's walls goes to the check, or asks (Allow and Deny only: no answer covers the next one) */
+export const SANDBOX_REASON = 'reaches outside the sandbox';
 
 /**
  * What the rules decide: run it, refuse it with this message, show a card (`custom`: a tool's own question, Allow and
@@ -38,7 +41,8 @@ export type ApprovalDecision =
   | { kind: 'allow' }
   | { kind: 'refuse'; message: string }
   | { kind: 'ask'; reason: string | null; programs: string[]; custom: boolean; firm?: boolean }
-  | { kind: 'classify'; reason: string | null; programs: string[] };
+  | { kind: 'classify'; reason: string | null; programs: string[] }
+  | { kind: 'sandbox'; readOnly: boolean };
 
 /**
  * How Auto mode decides what its rules do not settle: `check` the safety check (classifier.ts), `paused` an approval
@@ -52,6 +56,13 @@ export interface ApprovalContext {
   mode: PermissionMode;
   /** Auto mode only (default 'guard') */
   auto?: AutoLevel;
+  /**
+   * The shell sandbox can run this session's bash calls (sandbox.enabled, the probe worked, the profile has not
+   * failed this session, the folder can be sandboxed). Absent or false: every decision is as without it.
+   */
+  sandbox?: boolean;
+  /** Local ports are open in the sandbox (sandbox.loopback): curl to localhost runs inside */
+  loopback?: boolean;
   cwd: string;
   /** The project's saved rules for `cwd` ("Always allow … in this project", Settings → Permissions; the shape before 0.16 too) */
   rules: StoredRules | undefined;
@@ -78,6 +89,13 @@ export interface ApprovalContext {
  * path asks every time (Allow and Deny only), a guard reason asks unless allowed; auto mode and Accept edits (or a saved rule) run the rest; a command runs when every
  * program in it is allowed. Auto mode with its safety check (ctx.auto 'check' or 'paused') sends what its rules (the
  * `checked` block below) do not settle to the check, MCP calls that are not read-only included.
+ *
+ * The shell sandbox (ctx.sandbox, bash only): in Auto mode a command that no guard reason, allow rule or the list of
+ * commands that skip the sandbox settles runs in the sandbox with no check, read-only ones included ({ kind:
+ * 'sandbox' }); one that hits its walls comes back with opts.sandboxBlock and goes to the check (a card, Allow and
+ * Deny only, while Auto mode is paused or has no check). Plan mode runs its read-only commands in a read-only sandbox.
+ * outside: true decides as without the sandbox. Every other mode, terminal_run, and everything before these steps
+ * (browser and custom cards, rule files, Bypass, MCP tools, read tools, protected paths, sudo) is unchanged.
  */
 export function decideApproval(name: string, detail: string, target: string | undefined, opts: ApproveOptions, ctx: ApprovalContext): ApprovalDecision {
   const { mode, cwd } = ctx;
@@ -88,6 +106,11 @@ export function decideApproval(name: string, detail: string, target: string | un
   const refuse = (message: string): ApprovalDecision => ({ kind: 'refuse', message });
   const ask = (reason: string | null, programs: string[], custom = false): ApprovalDecision => ({ kind: 'ask', reason, programs, custom });
   const checked = mode === 'auto' && (ctx.auto === 'check' || ctx.auto === 'paused');
+  // This bash call may run in the shell sandbox (a call after a block, or with outside: true, may not)
+  const sandboxed = name === 'bash' && ctx.sandbox === true && !opts.outside && !opts.sandboxBlock;
+  const sandbox = (readOnly: boolean): ApprovalDecision | null => (sandboxed && !skipsSandbox(detail, { loopback: ctx.loopback === true }) ? { kind: 'sandbox', readOnly } : null);
+  // After a block in Auto mode: the check decides on a run outside; a card (Allow and Deny only) while it is paused or cannot run
+  const afterBlock = (programs: string[]): ApprovalDecision => (ctx.auto === 'check' ? { kind: 'classify', reason: SANDBOX_REASON, programs } : { kind: 'ask', reason: SANDBOX_REASON, programs, custom: true });
   // What the check would decide: an approval card instead while Auto mode is paused
   const check = (reason: string | null, programs: string[]): ApprovalDecision => (ctx.auto === 'paused' ? ask(reason, programs, !!reason && PROTECTED_REASONS.has(reason)) : { kind: 'classify', reason, programs });
   // Only the site card has the wider answers; the rest (a sensitive site's act, a browser_eval, a purchase, an account) are Allow and Deny.
@@ -137,7 +160,9 @@ export function decideApproval(name: string, detail: string, target: string | un
       if (!isReadOnlyCall(name, detail)) return refuse(PLAN_CMD_BLOCKED);
       // A read-only command the guard flags (cat ~/.aws/credentials: "reads secrets") asks with that reason
       const r = guardCommand(detail, cwd);
-      return r && !reasonAllowed(r) ? ask(r, programsOf(detail)) : allow;
+      if (r && !reasonAllowed(r)) return ask(r, programsOf(detail));
+      // With the sandbox, the rest runs in a read-only one (no writes, no network), but a read that needs the network
+      return (!r && sandbox(true)) || allow;
     }
     return allow;
   }
@@ -151,6 +176,8 @@ export function decideApproval(name: string, detail: string, target: string | un
   // it, never sudo or deleting a critical folder, a protected path, a home-folder scan, and "reads secrets" only by an
   // exact command
   const cmdCovers = (r: string): boolean => !!cmd?.strong && !always && !PROTECTED_REASONS.has(r) && !NEVER_BY_PATTERN.has(r) && (r !== SECRET_REASON || cmd.exact);
+  // Auto mode: rules that cover the command, but never an interpreter, which runs anything, nor bare Bash or a rule that starts with a wildcard
+  const autoOk = !!cmd?.covered && !cmd.broad && !programs.some((p) => INTERPRETERS.has(p));
   // Edits: bare Edit or Write, or a path rule, covers edits the guard has nothing to say about; one anchored at //, ~/
   // or / with a literal first folder also covers "writes outside the working directory" for the paths it matches
   const edit = isEdit && target ? pathAllow('Edit', target, cwd, rules) : null;
@@ -163,11 +190,17 @@ export function decideApproval(name: string, detail: string, target: string | un
     if (isCmd) {
       // (allowing sudo does not allow what sudo runs: a reason for that still counts below)
       if (always && !reasonAllowed(always)) return ask(always, programs);
-      if (!reason && isReadOnlyCall(name, detail)) return allow;
+      if (opts.sandboxBlock) return afterBlock(programs);
+      // A read-only command runs: in the sandbox when it is on, unless an allow rule covers it (it runs outside, as before)
+      if (!reason && isReadOnlyCall(name, detail)) return (!autoOk && sandbox(false)) || allow;
       if (reason && reasonAllowed(reason)) return allow;
-      const autoOk = !!cmd?.covered && !cmd.broad && !programs.some((p) => INTERPRETERS.has(p));
       if (reason && autoOk && cmdCovers(reason)) return allow;
       if (!reason && autoOk) return allow;
+      // Nothing the guard flags, no rule covers it: the sandbox, with no check (but the commands that skip it)
+      if (!reason) {
+        const inside = sandbox(false);
+        if (inside) return inside;
+      }
       return check(reason, programs);
     }
     // Edits: inside the working directory they run; a protected path goes to the check even when a rule allows it;
@@ -184,7 +217,11 @@ export function decideApproval(name: string, detail: string, target: string | un
   if (reason && !reasonAllowed(reason) && !(isCmd ? cmdCovers(reason) && cmd?.covered : editCovers(reason))) return ask(reason, programs);
   // sudo and deleting a critical folder ask unless that reason itself is allowed (the guard may name another reason first)
   if (always && !reasonAllowed(always)) return ask(always, programs);
-  if (mode === 'auto') return allow;
+  if (mode === 'auto') {
+    // Auto mode with no check: a command no rule covers runs in the sandbox, and a block asks; the rest runs
+    if (isCmd && opts.sandboxBlock) return afterBlock(programs);
+    return (isCmd && !reason && !autoOk && sandbox(false)) || allow;
+  }
   if (isEdit && (mode === 'acceptEdits' || edit?.any)) return allow;
   if (isCmd && cmd?.covered) return allow;
   return ask(null, programs);

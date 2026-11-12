@@ -7,11 +7,12 @@ import { escapeHtml, h } from '../dom.js';
 import { icon } from '../icons.js';
 import { MODES } from '../modes.js';
 import { onPush } from '../rpc.js';
-import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, parseUrl, TOOL_ACTIVITY, TOOL_SET } from './model.js';
+import { COMPACT_AT, KEEP_AWAKE, nearestCompactStep, parseInteger, parseText, parseUrl, TOOL_ACTIVITY, TOOL_SET, type Parsed } from './model.js';
 import { actions, button, group, iconButton, row, sectionTitle, switchControl, textControl, tildePath, type Choice } from './ui.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
 import { learnedAnswers, recentlyBlocked } from '../auto-blocked.js';
+import { homeDir } from '../home.js';
 
 export function generalSection(ctx: Ctx): Section {
   const el = h('section', {}, sectionTitle('General'));
@@ -411,6 +412,18 @@ export function modelSection(ctx: Ctx): Section {
   };
 }
 
+/** sandbox.allowWrite as typed: one folder per line, absolute or ~/…, never /, ~ or a folder above the home folder */
+export function parseFolders(text: string): Parsed<string[]> {
+  const list = [...new Set(String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean))];
+  const home = homeDir().replace(/\/+$/, '');
+  for (const f of list) {
+    const bare = f.replace(/\/+$/, '');
+    if (!bare || bare === '~' || bare === '/Users' || (home && (home === bare || home.startsWith(`${bare}/`)))) return { ok: false, error: `${f} would make your whole home folder writable.` };
+    if (!f.startsWith('/') && !f.startsWith('~/')) return { ok: false, error: `${f}: write a full path, such as ~/scratch.` };
+  }
+  return { ok: true, value: list };
+}
+
 export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
   const el = h('section', {}, sectionTitle('Permissions'));
   const order: PermissionMode[] = ['ask', 'acceptEdits', 'auto', 'plan', 'bypass'];
@@ -432,11 +445,43 @@ export function permissionsSection(ctx: Ctx, rulesEl: HTMLElement): Section {
   const learned = learnedAnswers(ctx);
   const learn = ctx.switchField({ id: 'autoMode-learn', title: 'Learn from my answers', desc: 'Auto mode decides like cases the way you did.', keywords: 'auto mode learn remember preferences answers approvals', field: 'autoMode.learn' });
   const forget = row({ id: 'auto-learned', title: 'What it learned', keywords: 'auto mode learned answers forget all' }, learned.forgetAll);
-  el.append(group(null, mode), group('This project', rules), group('Auto mode', learn, forget, learned.el), group('Recently blocked', blocked.el));
+  // The shell sandbox: on, this Mac's own ports, more folders it may write; one plain line when this Mac cannot run it
+  const SANDBOX_DESC = 'Commands that stay in the project and temp folders run without the check.';
+  const sandbox = ctx.switchField({ id: 'sandbox-enabled', title: 'Run commands in a sandbox', desc: SANDBOX_DESC, keywords: 'sandbox shell bash commands auto mode check contained seatbelt plan', field: 'sandbox.enabled' });
+  const loopback = ctx.switchField({ id: 'sandbox-loopback', title: 'Local ports', desc: 'Sandboxed commands may reach servers on this Mac, except databases, Docker and Ollama.', keywords: 'sandbox localhost loopback ports network servers tests', field: 'sandbox.loopback' });
+  const folders = ctx.textField({
+    id: 'sandbox-allowWrite',
+    inputId: 'sandbox-allowWrite',
+    title: 'Folders commands may also write',
+    desc: 'One per line.',
+    keywords: 'sandbox folders write allow paths extra',
+    field: 'sandbox.allowWrite',
+    multiline: true,
+    mono: true,
+    placeholder: '~/scratch',
+    format: (v) => (Array.isArray(v) ? v.join('\n') : ''),
+    parse: parseFolders,
+  });
+  let probed: boolean | null = null;
+  const showSandbox = (cfg: AppConfig) => {
+    const on = cfg.sandbox?.enabled === true;
+    loopback.el.hidden = !on;
+    folders.el.hidden = !on;
+    if (on && probed === null) {
+      probed = true;
+      ctx
+        .call('auto.sandbox')
+        .then((r) => sandbox.setDesc(r.available ? SANDBOX_DESC : 'This Mac cannot run the sandbox: commands are checked as before.'))
+        .catch(() => undefined);
+    }
+  };
+  el.append(group(null, mode), group('This project', rules), group('Auto mode', sandbox, loopback, folders, learn, forget, learned.el), group('Recently blocked', blocked.el));
   return {
     id: 'permissions',
     el,
+    sync: showSandbox,
     async load() {
+      showSandbox(ctx.config());
       await Promise.all([blocked.refresh(), learned.refresh()]);
       return 'ok';
     },

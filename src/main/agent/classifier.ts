@@ -18,6 +18,7 @@ import { isNativeAnthropic, nativeError, nativeUsage } from './anthropic';
 import { usageOf, type RawUsage } from './complete';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
 import { errorMessage } from './errors';
+import { BLOCK_KIND_WORDS } from '../sandbox';
 
 /** How long the check may take before the action is blocked (a local model reads the whole request first). */
 export const CLASSIFIER_TIMEOUT_MS = 60_000;
@@ -145,6 +146,8 @@ export interface ClassifiedAction {
   callId?: string;
   /** A browser card the check decides in place of the user (never page text or a tool result) */
   browser?: BrowserFacts;
+  /** bash: the command already ran once in the shell sandbox and hit its walls: what kind of wall (fixed words; never its output) */
+  sandbox?: { kind: 'refused' | 'lookup' };
 }
 
 /** What the check is told about a browser action: what the card would show, with the page's URL and an eval's code. */
@@ -248,6 +251,11 @@ function actionText(a: ClassifiedAction, cwd: string): string {
   else lines.push(`detail: ${clip(a.detail, MAX_ACTION_CHARS)}`);
   if ((a.name === 'write_file' || a.name === 'edit_file') && a.detail) lines.push(`file: ${a.detail.split('\n')[0]}`);
   lines.push(`working directory: ${cwd}`);
+  if (a.sandbox) {
+    // (fixed words by kind: the command's output is its own, and could be shaped to steer the check)
+    lines.push('sandbox: this command already ran once in a sandbox that writes only in the working directory and temp folders, with no network and no secrets, and was blocked. Allowed, it runs again outside the sandbox, so whatever it did inside the working directory before the block happens again.');
+    lines.push(`blocked by: ${BLOCK_KIND_WORDS[a.sandbox.kind] ?? BLOCK_KIND_WORDS.refused}`);
+  }
   return lines.join('\n');
 }
 

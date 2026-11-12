@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { commandArgv, commandIn, shellStart, splitCommands } from '../guard';
+import { brokenProfile, detectBlock, SANDBOX_EXEC, sandboxArgs, sandboxEnv, type Profile } from '../sandbox';
+import type { SandboxMark } from '../../shared/types';
 import type { Tool } from './types';
 import { truncateMiddle } from './types';
 
@@ -69,90 +71,167 @@ function buildPath(): string {
   return merged.join(':');
 }
 
-export const bash: Tool = {
-  name: 'bash',
-  description:
-    'Run a shell command (zsh) and return stdout, stderr and the exit code. Calls start in the working directory; path picks another folder. Edit files with edit_file or write_file, not scripts. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.',
-  parameters: {
-    type: 'object',
-    properties: {
-      command: { type: 'string', description: 'The command line to execute' },
-      path: { type: 'string', description: 'Folder to start in (default: working directory)' },
-      description: { type: 'string', description: 'What the command does, in 5–10 words, for the user (shown when it asks for approval), e.g. "List the files in src"' },
-      timeout_ms: { type: 'integer', description: 'Timeout in milliseconds (default 120000)' },
-    },
-    required: ['command'],
-  },
-  async run(args, ctx) {
-    const command = String(args.command ?? '').trim();
-    if (!command) throw new Error('command is required');
-    // A sign-in that waits for the user cannot finish here (no terminal, no stdin): said at once, before any approval
-    const login = interactiveLogin(command);
-    if (login) return { content: loginRedirect(login) };
-    // Another folder (path) is approved, checked and shown as `cd '<folder>' && <command>` (guard.ts commandIn)
-    const start = shellStart(args.path, ctx.cwd);
-    const approval = await ctx.approve('bash', commandIn(command, start, ctx.cwd));
-    if (!approval.ok) return { content: approval.message };
-    if (start !== path.resolve(ctx.cwd) && !(await fs.stat(start).then((st) => st.isDirectory(), () => false))) throw new Error(`path is not a folder: ${start}`);
-    const timeout = Math.min(Math.max(1000, Number(args.timeout_ms) || 120_000), 600_000);
-    return new Promise((resolve) => {
-      let stopped: 'user' | 'timeout' | null = null;
-      let settled = false;
-      let stdout = '';
-      let stderr = '';
-      // Its own process group, so that stopping the command also stops what it started (a sleep, a build, a server).
-      // No stdin: a command that tries to read input sees end-of-file instead of waiting for ever.
-      // An unmatched wildcard passes through as in bash (grep --include=*.ts), set after the login profile has run.
-      // No cd search path and no cd to a variable's value: `cd sub` goes to ./sub or fails, as the guard reads it
-      // (leadingCd), whatever CDPATH or the login profile set
-      const child = spawn('/bin/zsh', ['-lc', `setopt nonomatch; cdpath=(); unsetopt cdablevars; ${command}`], {
-        cwd: start,
-        env: { ...process.env, PATH: buildPath(), TERM: 'dumb', CI: '1' },
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const finish = (code: string | number) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        ctx.signal?.removeEventListener('abort', onAbort);
-        resolve({ content: shellResult(stdout, stderr, code, hintFor(code, stderr, timeout)) });
-      };
-      const outcome = (code: number | null, signal: NodeJS.Signals | null): string | number =>
-        stopped === 'user' ? 'stopped by the user' : stopped === 'timeout' ? `killed (timeout after ${timeout} ms)` : signal ? `killed (${signal})` : (code ?? 0);
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (d: string) => {
-        if (stdout.length < MAX_BUFFER) stdout += d;
-      });
-      child.stderr.on('data', (d: string) => {
-        if (stderr.length < MAX_BUFFER) stderr += d;
-      });
-      child.on('error', (err) => finish(`could not start (${err.message})`));
-      // 'close' waits for the output pipes too, so nothing a child printed is lost.
-      child.on('close', (code, signal) => finish(outcome(code, signal)));
-      const signalGroup = (sig: NodeJS.Signals) => {
-        if (!child.pid) return;
-        try {
-          process.kill(-child.pid, sig);
-        } catch {
-          child.kill(sig); // the group is already gone
-        }
-      };
-      const stop = (why: 'user' | 'timeout') => {
-        if (stopped || settled) return;
-        stopped = why;
-        signalGroup('SIGTERM');
-        // A command that ignores SIGTERM does not get to hold the run open…
-        setTimeout(() => signalGroup('SIGKILL'), 2000).unref();
-        // …and neither does a process that left the group and still holds the output pipe.
-        setTimeout(() => finish(outcome(null, null)), 3500).unref();
-      };
-      const timer = setTimeout(() => stop('timeout'), timeout);
-      // Esc (or Stop from the remote) aborts the run: the command must end with it, not run on to its own finish.
-      const onAbort = () => stop('user');
-      if (ctx.signal?.aborted) onAbort();
-      else ctx.signal?.addEventListener('abort', onAbort, { once: true });
+/** What a shell run printed and how it ended: an exit code, or why it was stopped */
+export interface ShellRun {
+  stdout: string;
+  stderr: string;
+  code: string | number;
+}
+
+/** The zsh line a call runs: the login profile, then the guard's shell options, then the command */
+export function shellLine(command: string): string {
+  return `setopt nonomatch; cdpath=(); unsetopt cdablevars; ${command}`;
+}
+
+/**
+ * Runs one command line in zsh, in `cwd`, in its own process group, with no stdin; `sandbox` runs it through
+ * /usr/bin/sandbox-exec with that profile and an environment without secret-named variables. A stop (the signal) or
+ * the timeout ends it and everything it started.
+ */
+export function runShell(command: string, cwd: string, opts: { timeout: number; signal?: AbortSignal; sandbox?: Profile }): Promise<ShellRun> {
+  const { timeout } = opts;
+  return new Promise((resolve) => {
+    let stopped: 'user' | 'timeout' | null = null;
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    const env = { ...process.env, PATH: buildPath(), TERM: 'dumb', CI: '1' };
+    const zsh = ['/bin/zsh', '-lc', shellLine(command)];
+    // Its own process group, so that stopping the command also stops what it started (a sleep, a build, a server).
+    // No stdin: a command that tries to read input sees end-of-file instead of waiting for ever.
+    // An unmatched wildcard passes through as in bash (grep --include=*.ts), set after the login profile has run.
+    // No cd search path and no cd to a variable's value: `cd sub` goes to ./sub or fails, as the guard reads it
+    // (leadingCd), whatever CDPATH or the login profile set
+    const child = opts.sandbox
+      ? spawn(SANDBOX_EXEC, sandboxArgs(opts.sandbox, zsh), { cwd, env: sandboxEnv(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(zsh[0], zsh.slice(1), { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const finish = (code: string | number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve({ stdout, stderr, code });
+    };
+    const outcome = (code: number | null, signal: NodeJS.Signals | null): string | number =>
+      stopped === 'user' ? 'stopped by the user' : stopped === 'timeout' ? `killed (timeout after ${timeout} ms)` : signal ? `killed (${signal})` : (code ?? 0);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d: string) => {
+      if (stdout.length < MAX_BUFFER) stdout += d;
     });
-  },
+    child.stderr.on('data', (d: string) => {
+      if (stderr.length < MAX_BUFFER) stderr += d;
+    });
+    child.on('error', (err) => finish(`could not start (${err.message})`));
+    // 'close' waits for the output pipes too, so nothing a child printed is lost.
+    child.on('close', (code, signal) => finish(outcome(code, signal)));
+    const signalGroup = (sig: NodeJS.Signals) => {
+      if (!child.pid) return;
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        child.kill(sig); // the group is already gone
+      }
+    };
+    const stop = (why: 'user' | 'timeout') => {
+      if (stopped || settled) return;
+      stopped = why;
+      signalGroup('SIGTERM');
+      // A command that ignores SIGTERM does not get to hold the run open…
+      setTimeout(() => signalGroup('SIGKILL'), 2000).unref();
+      // …and neither does a process that left the group and still holds the output pipe.
+      setTimeout(() => finish(outcome(null, null)), 3500).unref();
+    };
+    const timer = setTimeout(() => stop('timeout'), timeout);
+    // Esc (or Stop from the remote) aborts the run: the command must end with it, not run on to its own finish.
+    const onAbort = () => stop('user');
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** A run as the model reads it: the output cut to size, a hint, the exit code */
+function rendered(r: ShellRun, timeout: number): string {
+  return shellResult(r.stdout, r.stderr, r.code, hintFor(r.code, r.stderr, timeout));
+}
+
+/** How much of the run inside the sandbox a row keeps, when the command ran again outside */
+const FIRST_RUN_KEPT = 4000;
+
+/** What the model reads after Plan mode's read-only sandbox refused something */
+export const PLAN_SANDBOX_NOTE = '[sandbox: Plan mode runs commands read-only, with no network; this one hit that limit]';
+
+/** The first line of a result that ran outside after the sandbox blocked it */
+export function rerunNote(line: string): string {
+  return `[sandbox: blocked (${line}); allowed, ran again outside]`;
+}
+
+const BASE_DESCRIPTION =
+  'Run a shell command (zsh) and return stdout, stderr and the exit code. Calls start in the working directory; path picks another folder. Edit files with edit_file or write_file, not scripts. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.';
+
+const BASE_PROPERTIES = {
+  command: { type: 'string', description: 'The command line to execute' },
+  path: { type: 'string', description: 'Folder to start in (default: working directory)' },
+  description: { type: 'string', description: 'What the command does, in 5–10 words, for the user (shown when it asks for approval), e.g. "List the files in src"' },
+  timeout_ms: { type: 'integer', description: 'Timeout in milliseconds (default 120000)' },
 };
+
+/**
+ * The bash tool. `sandboxed`: the definition the model gets while the shell sandbox is on (sandbox.enabled), which
+ * says what the sandbox allows and takes outside: true. Both run the same way: the approval decides whether a call
+ * runs in the sandbox (ApprovalResult.sandbox).
+ */
+function makeBash(sandboxed: boolean): Tool {
+  return {
+    name: 'bash',
+    description: sandboxed
+      ? `${BASE_DESCRIPTION} Commands run in a sandbox that writes only in the working directory and temp folders, with no network and no secrets; one that hits it is checked, then run again outside. Set outside: true to skip the sandbox (the command is checked first) when a run failed for lack of access its error did not show.`
+      : BASE_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: sandboxed ? { ...BASE_PROPERTIES, outside: { type: 'boolean', description: 'Run outside the sandbox; the command is checked first' } } : BASE_PROPERTIES,
+      required: ['command'],
+    },
+    async run(args, ctx) {
+      const command = String(args.command ?? '').trim();
+      if (!command) throw new Error('command is required');
+      // A sign-in that waits for the user cannot finish here (no terminal, no stdin): said at once, before any approval
+      const login = interactiveLogin(command);
+      if (login) return { content: loginRedirect(login) };
+      // Another folder (path) is approved, checked and shown as `cd '<folder>' && <command>` (guard.ts commandIn)
+      const start = shellStart(args.path, ctx.cwd);
+      const judged = commandIn(command, start, ctx.cwd);
+      const approval = await ctx.approve('bash', judged, undefined, args.outside === true ? { outside: true } : undefined);
+      if (!approval.ok) return { content: approval.message };
+      if (start !== path.resolve(ctx.cwd) && !(await fs.stat(start).then((st) => st.isDirectory(), () => false))) throw new Error(`path is not a folder: ${start}`);
+      const timeout = Math.min(Math.max(1000, Number(args.timeout_ms) || 120_000), 600_000);
+      const outside = async () => ({ content: rendered(await runShell(command, start, { timeout, signal: ctx.signal }), timeout) });
+      const plan = approval.sandbox;
+      if (!plan) return outside();
+      const inside = await runShell(command, start, { timeout, signal: ctx.signal, sandbox: plan.profile });
+      if (brokenProfile(inside.code, inside.stderr)) {
+        // Nothing ran: the sandbox is off for the session, and the call is decided again as without it
+        plan.broken();
+        const again = await ctx.approve('bash', judged);
+        if (!again.ok) return { content: again.message };
+        return outside();
+      }
+      const mark = (m: SandboxMark): SandboxMark => (plan.readOnly ? { readOnly: true, ...m } : m);
+      // A block, unless only lines the login profile prints on its own show it (asked once per session, when needed)
+      let block = detectBlock(inside.code, inside.stdout, inside.stderr);
+      if (block) block = detectBlock(inside.code, inside.stdout, inside.stderr, await plan.baseline().catch(() => []));
+      if (!block || ctx.signal?.aborted) return { content: rendered(inside, timeout), sandbox: mark({}) };
+      const blocked = { kind: block.kind, line: block.line };
+      if (plan.readOnly) return { content: `${rendered(inside, timeout)}\n${PLAN_SANDBOX_NOTE}`, sandbox: mark({ blocked }) };
+      // Blocked: the check (or a card) decides on a run outside, told what kind of wall the first run hit
+      const again = await ctx.approve('bash', judged, undefined, { sandboxBlock: blocked });
+      if (!again.ok) return { content: `${again.message}\n\n[the run in the sandbox]\n${rendered(inside, timeout)}`, sandbox: { blocked } };
+      const out = await runShell(command, start, { timeout, signal: ctx.signal });
+      return { content: `${rerunNote(block.line)}\n${rendered(out, timeout)}`, sandbox: { blocked, outside: true, first: truncateMiddle(rendered(inside, timeout), FIRST_RUN_KEPT) } };
+    },
+  };
+}
+
+export const bash: Tool = makeBash(false);
+/** bash as offered while the shell sandbox is on */
+export const sandboxBash: Tool = makeBash(true);

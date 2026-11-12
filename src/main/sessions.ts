@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
-import type { CompactionInfo, MessageOrigin, PlanInfo, SessionMeta, SessionOrigin, TaskItem, TranscriptItem, ArtifactInfo } from '../shared/types';
+import type { CompactionInfo, MessageOrigin, PlanInfo, SandboxMark, SessionMeta, SessionOrigin, TaskItem, TranscriptItem, ArtifactInfo } from '../shared/types';
 import type { ImageInfo } from '../shared/images';
 import type { Snapshot } from './changes';
 import type { SessionCost } from './cost';
@@ -38,6 +38,8 @@ export interface Session {
   messages: Msg[];
   /** Plans proposed in plan mode, by id */
   plans?: Record<string, PlanInfo>;
+  /** bash calls that ran in the shell sandbox, by call id: how each went (its row's mark) */
+  sandboxed?: Record<string, SandboxMark>;
   /** Artifacts the model created with create_artifact (see artifacts.ts) */
   artifacts?: Record<string, ArtifactInfo>;
   /** Images the model showed with show_image, by id (see images/store.ts) */
@@ -392,7 +394,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
           items.push({ role: 'image', image });
           continue;
         }
-        items.push({ role: 'tool', name: call.function.name, args: call.function.arguments, result, ok });
+        const sandbox = s.sandboxed?.[call.id];
+        items.push({ role: 'tool', name: call.function.name, args: call.function.arguments, result, ok, ...(sandbox ? { sandbox } : {}) });
       }
     }
   });

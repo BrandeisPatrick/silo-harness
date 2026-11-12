@@ -19,6 +19,7 @@ import { DEFAULT_LIMIT, queryWords, SearchIndex } from './search';
 import { DAY_MS, sizeOf, Trash } from './trash';
 import { sessionMarkdown, type ExportFormat } from './export';
 import { count, failKindLabel, verdictLabel } from '../agent/perf';
+import { sandboxWord } from '../sandbox';
 
 /** The replaceAll reason recovery uses; the log ignores it, since the messages it puts back are already logged. */
 export const RECOVERY_REASON = 'recovery';
@@ -235,7 +236,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
         write(id, 'tool.start', { id: ev.id, name: ev.name, args: ev.args, ...(ev.mcp ? { mcp: ev.mcp } : {}) });
         return;
       case 'tool_end':
-        write(id, 'tool.end', { id: ev.id, name: ev.name, ok: ev.ok, durationMs: ev.durationMs, chars: ev.result?.length ?? 0 });
+        write(id, 'tool.end', { id: ev.id, name: ev.name, ok: ev.ok, durationMs: ev.durationMs, chars: ev.result?.length ?? 0, ...(ev.sandbox ? { sandbox: sandboxWord(ev.sandbox) } : {}) });
         return;
       case 'usage':
         // The cache counts only when the provider reported them (the token bench reads them from here)

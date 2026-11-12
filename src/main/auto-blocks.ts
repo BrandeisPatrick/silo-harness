@@ -6,6 +6,7 @@
 import path from 'node:path';
 import type { AutoBlock, RecentBlock } from '../shared/auto-mode';
 import { LearnedStore } from './agent/learned';
+import { probeSandbox } from './sandbox';
 import type { App } from './app';
 import type { AutoBlocksService } from './services';
 
@@ -46,6 +47,7 @@ export function setupAutoBlocks(app: App): AutoBlocksService {
   const learned = new LearnedStore(path.join(app.userData, 'auto-learned.json'));
   app.provide('auto-learned', learned);
   app.rpc.handle('auto.learned', () => learned.all());
+  app.rpc.handle('auto.sandbox', async () => ({ available: (await probeSandbox()) !== null }));
   app.rpc.handle('auto.forget', (id?: unknown) => {
     if (typeof id === 'string' && id) learned.remove(id);
     else learned.clear();

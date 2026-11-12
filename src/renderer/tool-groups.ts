@@ -6,7 +6,7 @@
 // card, a plan, an image, a notice), so a stored session folds the same way. An answered approval leaves no line of its own: the call's row
 // says what was decided.
 
-import type { AppConfig } from '../shared/types';
+import type { AppConfig, SandboxMark } from '../shared/types';
 import { statHtml } from './diff.js';
 import { icon, isIconName, type IconName } from './icons.js';
 import { activityWords } from './tool-activity.js';
@@ -253,11 +253,11 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     return card;
   }
 
-  function finishToolCard(ev: { id?: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }, known?: ToolCard): void {
+  function finishToolCard(ev: { id?: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number; sandbox?: SandboxMark }, known?: ToolCard): void {
     const card = known ?? (ev.id ? toolCards.get(ev.id) : undefined);
     if (!card) return;
     const group = card.el.closest('.tool-group');
-    card.finish({ result: ev.result, ok: ev.ok, image: ev.image, durationMs: ev.durationMs });
+    card.finish({ result: ev.result, ok: ev.ok, image: ev.image, durationMs: ev.durationMs, ...(ev.sandbox ? { sandbox: ev.sandbox } : {}) });
     if (ev.id) toolCards.delete(ev.id);
     // A row can leave (a shown image) or come out of hiding (an image that could not be shown): the run settles again
     if (card.el.isConnected) settleRun(card.el);

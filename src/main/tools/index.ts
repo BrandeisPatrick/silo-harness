@@ -3,7 +3,7 @@ import type { PermissionMode } from '../../shared/types';
 import type { Tool } from './types';
 import { GROUP_OF, LOAD_TOOLS } from './groups';
 import { readFile, writeFile, editFile, listDirectory, glob, grep } from './fs';
-import { bash } from './shell';
+import { bash, sandboxBash } from './shell';
 import { browserTools } from './browser';
 import { READ_ONLY_BROWSER_TOOLS } from '../browser/policy';
 import { skillTool } from './skill';
@@ -14,18 +14,19 @@ import { updateTasks } from './tasks';
 import { askUser } from './ask-user';
 import { webTools } from './web';
 
-export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions, BrowserApproval } from './types';
+export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions, BrowserApproval, SandboxPlan } from './types';
 
 /** Plan mode's browser: the tools that read the page or the pane (browser_tabs new is a navigation, with its site card). */
 const planBrowserTools = browserTools.filter((t) => READ_ONLY_BROWSER_TOOLS.has(t.name));
 
 /**
  * The tools offered to the model. Plan mode swaps the file-changing tools for submit_plan and keeps only the browser
- * tools that read; ask_user is in every mode.
+ * tools that read; ask_user is in every mode. `sandbox`: the shell sandbox is on, and bash says so (and takes outside).
  */
-export function allTools(mode: PermissionMode = 'ask'): Tool[] {
-  if (mode === 'plan') return [readFile, listDirectory, glob, grep, bash, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan, ...webTools];
-  return [readFile, writeFile, editFile, listDirectory, glob, grep, bash, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, ...webTools];
+export function allTools(mode: PermissionMode = 'ask', sandbox = false): Tool[] {
+  const sh = sandbox ? sandboxBash : bash;
+  if (mode === 'plan') return [readFile, listDirectory, glob, grep, sh, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan, ...webTools];
+  return [readFile, writeFile, editFile, listDirectory, glob, grep, sh, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, ...webTools];
 }
 
 /**
