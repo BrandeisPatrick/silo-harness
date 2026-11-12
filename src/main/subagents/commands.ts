@@ -114,7 +114,7 @@ export function subagentCommands(svc: Subagents): Command[] {
         const { target, message } = best;
         if (!message) return usage;
         if (target.id === sessionId) return { error: 'That is this session.' };
-        const r = svc.message(sessionId, target.id, message);
+        const r = svc.message(sessionId, target.id, message, { byUser: true });
         if (!r.ok) return { error: r.error ?? 'The message could not be delivered.' };
         return { notice: `Sent to "${target.title}"${r.held ? ', held until its plan is decided' : r.queued ? ', queued after its current run' : ''}.` };
       },

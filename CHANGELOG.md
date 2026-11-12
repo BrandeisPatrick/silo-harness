@@ -18,6 +18,9 @@ Auto mode asks for fewer safety checks, long steps say what they are doing, and 
 
 ### Fixed
 
+- **Sessions answering each other.** Two sessions that send each other four messages without you in between are paused, each showing one line saying how to continue.
+- **Replies between sessions.** A message from another session is answered in the reply; a message goes back only when asked, never as an acknowledgment.
+- **Paused reports line.** The notice that sub-session reports are paused shows as a quiet line instead of a message labelled "merged".
 - **Stalled replies through a gateway.** A reply that goes silent for 5 minutes after it starts is now tried again, instead of ending empty.
 
 ### Security

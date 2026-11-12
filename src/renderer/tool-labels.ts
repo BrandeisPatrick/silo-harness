@@ -205,7 +205,7 @@ export function agentToolMeta(name: string, a: Args, result: string): AgentMeta 
     case 'session_spawn':
       return { text: /^Started sub-session/.test(r) ? 'started' : 'not started' };
     case 'session_send':
-      return /^Delivered/.test(r) ? { text: /\bheld until\b/.test(r) ? 'held' : /it is busy/.test(r) ? 'queued' : 'sent' } : { text: 'not sent' };
+      return /^Delivered/.test(r) ? { text: /\bheld until\b/.test(r) ? 'held' : /exchange is paused/.test(r) ? 'paused' : /it is busy/.test(r) ? 'queued' : 'sent' } : { text: 'not sent' };
     case 'session_list': {
       const n = r.split('\n').filter((l) => /^ {2}\S/.test(l)).length;
       if (/^No session matches/m.test(r)) return { text: 'no match' };

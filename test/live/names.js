@@ -97,6 +97,15 @@ const { launch, checker, sleep } = require('./rig.js');
       check('B got the message, from C', Boolean(got) && /HELLO FROM C/.test(got.text), tb.slice(bBefore).map((i) => [i.role, i.origin, i.from, (i.text ?? '').slice(0, 80)]));
       check('B answered it', tb.slice(bBefore).some((i) => i.role === 'assistant' && /HELLO FROM C/.test(i.text)));
       check('A got nothing', !(await transcript(A)).some((i) => i.role === 'user' && /HELLO FROM C/.test(i.text ?? '')));
+      // With the head line's wording B answers in its reply; a message back is allowed but should be rare, and the
+      // app pauses the two after PEER_CAP messages whatever the model does. The parent's twenty-run check counts this line.
+      const back = tb.slice(bBefore).filter((i) => i.role === 'tool' && i.name === 'session_send').length;
+      const tcNow = await transcript(C);
+      const asked = tcNow.findIndex((i) => i.role === 'user' && i.origin === undefined && /HELLO FROM C/.test(i.text ?? ''));
+      const toC = tcNow.slice(asked).filter((i) => i.role === 'user' && i.origin === 'session' && i.from === B).length;
+      const toB = tb.slice(bBefore).filter((i) => i.role === 'user' && i.origin === 'session' && i.from === C).length;
+      console.log(`info: B sent ${back} message(s) back to C; messages that reached B or C: ${toB + toC}`);
+      check('the exchange between B and C stayed within the pause limit (4 messages)', asked >= 0 && toB + toC <= 4, { toB, toC });
 
       await app.send('Call this session Comet log.');
       await app.waitIdle(120_000);
