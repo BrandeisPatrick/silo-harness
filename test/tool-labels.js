@@ -80,7 +80,7 @@ const { check, done } = require('./support/check.js');
   check('schedule_update: a rename keeps the old name in the row', agentArgFromResult('schedule_update', { id: 'sch_1', name: 'New' }, 'Updated: sch_1  "New"  every 4 hours  next: x  last: y') === null);
   check('schedule_delete: the result names it', agentArgFromResult('schedule_delete', { id: 'sch_1' }, 'Deleted schedule "Nightly audit" (sch_1).') === 'Nightly audit');
   check('session_send: the card names the session', agentArgFromApproval('session_send', `Send to session "Fix the tests" (${SUB}):\n\nhello`) === 'to Fix the tests');
-  check('session_send: the result names it', agentArgFromResult('session_send', { to: SUB }, `Delivered to "Fix the tests" (${SUB}): it started a run on it. Its reply does not come back by itself: read it later with session_read ${SUB} or session_list, or it may answer with session_send.`) === 'to Fix the tests');
+  check('session_send: the result names it', agentArgFromResult('session_send', { to: SUB }, `Delivered to "Fix the tests" (${SUB}): it started a run on it. It answers in its own reply, which does not come back here: read it with session_read ${SUB} when you need it. It messages you back only if you asked it to; such a message needs no answer unless it asks something.`) === 'to Fix the tests');
   check('session_read: the result names it', agentArgFromResult('session_read', { id: 'x' }, 'Session x "Fix the tests" (idle): the last 6 messages of 12.\n\nUSER: hi') === 'Fix the tests');
   check('session_merge: the result names it', agentArgFromResult('session_merge', { id: 'x' }, '[Merged from "Fix the tests"]\n\nSUMMARY') === 'Fix the tests');
 

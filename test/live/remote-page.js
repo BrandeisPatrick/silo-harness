@@ -73,7 +73,7 @@ function seed(store) {
   // The session, schedule and mod tools, and a command that exited non-zero: each gets a readable row on the phone.
   const tools = [
     [tc('s1', 'session_spawn', { title: 'Split the users module', prompt: 'Move the user routes into src/api/users.ts.' }), 'Started sub-session "Split the users module" (id x1).'],
-    [tc('s2', 'session_send', { to: b.id, message: 'The API client is split; rebase on it.' }), `Delivered to "${b.title}" (${b.id}): it started a run on it. Its reply does not come back by itself: read it later with session_read ${b.id} or session_list, or it may answer with session_send.`],
+    [tc('s2', 'session_send', { to: b.id, message: 'The API client is split; rebase on it.' }), `Delivered to "${b.title}" (${b.id}): it started a run on it. It answers in its own reply, which does not come back here: read it with session_read ${b.id} when you need it. It messages you back only if you asked it to; such a message needs no answer unless it asks something.`],
     [tc('s3', 'session_list', {}), '3 sessions'],
     [tc('s4', 'session_read', { id: a.id }), 'user: The login test fails…'],
     [tc('s5', 'session_merge', { id: a.title }), 'Merged.'],

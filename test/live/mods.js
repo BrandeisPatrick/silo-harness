@@ -20,6 +20,17 @@ const dbg = (app, expr) => app.evaluate(`window.__oc_debug.mods.${expr}`);
 const views = (app) => dbg(app, 'views()');
 const view = async (app, key) => (await views(app)).find((v) => v.key === key);
 const rpc = (app, method, ...args) => app.evaluate(`window.oc.rpc(${JSON.stringify(method)}, ...${JSON.stringify(args)})`);
+/** Switches a mod the test has just written: the app sees a new folder a moment later, so "No mod" is tried again for up to ten seconds. */
+const setEnabledWhenSeen = async (app, id, on) => {
+  for (let i = 0; ; i++) {
+    try {
+      return await rpc(app, 'mods.setEnabled', id, on);
+    } catch (e) {
+      if (i >= 40 || !/No mod /.test(String(e && e.message))) throw e;
+      await sleep(250);
+    }
+  }
+};
 const errors = async (app) => (await dbg(app, 'log()')).filter((e) => e.kind === 'error');
 
 /** The native browser view's bounds as the main process holds them (through its inspector): 0 × 0 when hidden. */
@@ -418,7 +429,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       await sleep(1200);
       // The background is a look: approved at its first Use, not turned on (used once here, so its chat card is
       // settled before the window is measured, then back to Default)
-      for (const id of ['tabby', 'stripy', 'tint']) await rpc(app, 'mods.setEnabled', id, true);
+      for (const id of ['tabby', 'stripy', 'tint']) await setEnabledWhenSeen(app, id, true);
       await rpc(app, 'mods.use', { background: 'backdrop/main' }, { approve: true });
       await rpc(app, 'mods.use', { background: null });
       await sleep(800);
@@ -458,7 +469,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
       const tint = (await dbg(app, 'list()')).find((m) => m.key === 'tint');
       check('an old theme loads with a note, and its CSS never reaches the window', tint && tint.state !== 'invalid' && tint.problems.some((p) => p.warning && /Themes were removed/.test(p.message)) && (await app.evaluate(`!document.querySelector('style[data-mod]') && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#1f66c4'`)), tint && tint.problems);
       check('an old theme is not offered in the chat', await app.evaluate(`!document.querySelector('.mod-offer[data-mod="tint"]')`));
-      await rpc(app, 'mods.setEnabled', 'tint', false);
+      await setEnabledWhenSeen(app, 'tint', false);
       // The scheme: the app's tokens reach every mod page through theme.changed
       await app.waitFor(`window.__oc_debug.mods.views().find((v) => v.key === 'tabby/main')?.title === 'Tabby #1f66c4'`, 5000, 'the accent in the tab page').catch(() => {});
       check("the app's accent reaches a mod page's own CSS", (await view(app, 'tabby/main')).title === 'Tabby #1f66c4', (await view(app, 'tabby/main')).title);
@@ -513,7 +524,7 @@ const HELLO = (v) => page(`<div class="h-row"><span class="h-label">Hello</span>
           });`),
       });
       await sleep(1200);
-      await rpc(app, 'mods.setEnabled', 'probe', true);
+      await setEnabledWhenSeen(app, 'probe', true);
       await app.waitFor(`(window.__oc_debug.mods.views().find((v) => v.key === 'probe/main')?.title || '').includes('net')`, 10_000, 'the probe').catch(() => {});
       let r = {};
       try {

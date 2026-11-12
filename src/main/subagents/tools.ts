@@ -2,7 +2,7 @@
 // rename this session.
 
 import type { Tool, ToolContext, ToolResult } from '../tools/types';
-import { SubagentError, type Subagents } from './service';
+import { PEER_CAP, SubagentError, type Subagents } from './service';
 
 async function guarded(fn: () => Promise<ToolResult> | ToolResult): Promise<ToolResult> {
   try {
@@ -48,7 +48,8 @@ export function subagentTools(svc: Subagents): Tool[] {
     description:
       'Send a message to another session, named by its id or its name (written loosely is fine). It starts a turn there, or waits behind the turn in progress. The receiver sees it as a request from you, not from the user. ' +
       'Use it to answer or steer one of your sub-sessions, to tell your parent session something it needs before you finish, or to ask another session for something. Messages to your parent and your own sub-sessions go without asking; a message to any other session needs the user\'s approval. ' +
-      'The reply does not come back by itself (a sub-session\'s report does): read it later with session_read.',
+      'The receiver answers in its own reply, which does not come back by itself (a sub-session\'s report does): read it later with session_read. Ask it to message you back only when you need the answer delivered. ' +
+      `Two sessions that send each other ${PEER_CAP} messages with no message from the user in between are paused until the user writes in either.`,
     parameters: {
       type: 'object',
       properties: {
@@ -76,6 +77,14 @@ export function subagentTools(svc: Subagents): Tool[] {
         }
         const r = svc.message(ctx.sessionId, target.id, message);
         if (!r.ok) return { content: `Error: ${r.error ?? 'the message could not be delivered.'}` };
+        if (r.paused) {
+          return {
+            content:
+              `Delivered to "${target.title}" (${target.id}): the exchange is paused, so the message waits there and started no run. ` +
+              `This session and "${target.title}" sent each other ${PEER_CAP} messages with no message from the user in between; it goes on once the user writes in either session. ` +
+              `Do not message "${target.title}" again now: finish your turn, and say in your reply what is still open.`,
+          };
+        }
         const how = r.held
           ? 'its plan waits for the user, so the message is held until the user decides the plan'
           : r.queued
@@ -83,7 +92,9 @@ export function subagentTools(svc: Subagents): Tool[] {
             : 'it started a run on it';
         const reply = svc.isChild(ctx.sessionId, target)
           ? 'It is your sub-session, so its report comes back here by itself when it finishes the turn.'
-          : `Its reply does not come back by itself: read it later with session_read ${target.id} or session_list, or it may answer with session_send.`;
+          : svc.relation(ctx.sessionId, target) === 'parent'
+            ? 'It is your parent: it answers a question with a message back. If you cannot go on without the answer, end your turn.'
+            : `It answers in its own reply, which does not come back here: read it with session_read ${target.id} when you need it. It messages you back only if you asked it to; such a message needs no answer unless it asks something.`;
         return { content: `Delivered to "${target.title}" (${target.id}): ${how}. ${reply}` };
       }),
   };

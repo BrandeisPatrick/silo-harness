@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.1 — 2026-11-12
+
+Two sessions can no longer keep answering each other, and a message from another session is answered in the reply.
+
+### Fixed
+
+- **Sessions answering each other.** Two sessions that send each other four messages without you in between are paused, each showing one line saying how to continue.
+- **Replies between sessions.** A message from another session is answered in the reply; a message goes back only when asked, never as an acknowledgment.
+- **Paused reports line.** The notice that sub-session reports are paused shows as a quiet line instead of a message labelled "merged".
+
 ## 0.18.0 — 2026-11-12
 
 Auto mode asks for fewer safety checks, long steps say what they are doing, `/report` shows where a session's time went, and a queued message can be sent at once.

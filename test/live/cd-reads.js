@@ -121,5 +121,6 @@ function setUp() {
   } finally {
     await app.close();
   }
-  done();
+  // (the exit code says whether a check failed: the runner reads only that)
+  process.exit(done() ? 1 : 0);
 })();

@@ -232,8 +232,10 @@ artifact is stored without navigating). Terminal tabs and MCP servers are shared
 ## Messages between sessions (src/main/subagents/, src/renderer/session-messages.ts)
 
 `session_send`, `/send` and `sessions.message` go through `Subagents.message()`: one head line frames the text,
-`[Message from session "<title>" (<id>), your <relation>. Not from the user: … reply with session_send to <id>.]`
-(`messageHead`; one line with no `]` inside, which `origin.ts`, `remote/app.js` and `test/origin.js` rely on), then
+`[Message from session "<title>" (<id>), your <relation>. Not from the user: … <where the answer goes>]`
+(`messageHead`; one line with no `]` inside, which `origin.ts`, `remote/app.js` and `test/origin.js` rely on; `peerNote`
+words the answer by relation: a sub-session's reply reaches its parent by itself, a parent answers a sub-session's
+question with `session_send`, anyone else answers in its reply and messages back only when asked), then
 `runtime.send(…, { origin: 'session', from })` starts a run or queues it for the next turn boundary (through
 UserPromptSubmit, which sees `silo_origin`/`silo_from_session`). Parent and own sub-sessions need no approval
 (`closeKin`); any other target asks with `sessionKey: 'session_send:<id>'`; a session with a schedule or a dream in its
@@ -245,6 +247,15 @@ there once the session has a turn with origin 'session' or is a sub-session. The
 session as soon as such a message reaches it. In the window an item or event with origin 'session' is a
 `.msg.user.session-msg` line (`transcript.addUserRow` keeps Copy, Rewind and the matching to transcript items), and a
 `session_send` call is a line of its own (`ownRow` in tool-groups.ts: a ToolCard that is not a `.tool`, so it never folds).
+
+Two sessions cannot answer each other without end: `Subagents.exchanges` counts, per pair (`pairKey`), the messages
+`message()` hands over from a model (`session_send`), either way, except a parent's to its own sub-session (its report
+back is capped by `NOTE_CAP`). At `PEER_CAP` (4) the next one is held with `until: 'user'`: it starts no run and joins
+none, and both sessions get `pauseNotice()` once per pause through `notice()` (after the run, when one is going, so it
+is no extra turn). A message from the user in either session (origin user, queue or remote), or one the user sends
+between them (`/send`, `sessions.message`: `byUser`), resets the pair in `resume()`, which turns those held messages
+into `until: 'run'` ones for the receiver's next run. `notice()` lines are origin 'command' from 'sessions'; the window
+and the phone show them as quiet notices (`appNotice` in origin.ts), not as bubbles.
 
 ## RPC (src/shared/rpc.ts) and preload
 

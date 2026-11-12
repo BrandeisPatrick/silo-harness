@@ -57,7 +57,7 @@ import { createPages, navOf, type PageRoute, type PagesView } from './pages.js';
 import { createScheduledPage } from './scheduled-page.js';
 import { createDreamingPage } from './dreaming-page.js';
 import { setNameLookup } from './tool-labels.js';
-import { unframe } from './origin.js';
+import { appNotice, unframe } from './origin.js';
 import { activeProvider } from './provider-view.js';
 import { createShortcutsSheet } from './shortcuts.js';
 import { createSlashMenu } from './slash-menu.js';
@@ -541,10 +541,16 @@ function renderTranscript(items: TranscriptItem[]): void {
   let lastUser = -1;
   items.forEach((item, i) => {
     if (item.role === 'plan') lastPlan = i;
-    else if (item.role === 'user') lastUser = i;
+    else if (item.role === 'user' && appNotice(item.origin, item.from, item.text ?? '') === null) lastUser = i;
   });
   items.forEach((item, i) => {
     if (item.role === 'user') {
+      // The app's own line about other sessions (an exchange paused): a quiet notice, as it was when it came
+      const notice = appNotice(item.origin, item.from, item.text ?? '');
+      if (notice !== null) {
+        addSystemMessage(notice, 'notice');
+        return;
+      }
       let el: HTMLElement;
       if (item.origin === 'session') el = sessionMessages.addReceived(item.text ?? '', item.from, item.turn);
       else {
@@ -1132,6 +1138,11 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
         endAssistant();
         turnFold.turnStarted();
         sessionMessages.addReceived(String(ev.text ?? ''), ev.from, ev.turn);
+        break;
+      }
+      const notice = appNotice(ev.origin, ev.from, String(ev.text ?? ''));
+      if (notice !== null) {
+        addSystemMessage(notice, 'notice');
         break;
       }
       // A message typed here (or queued from here) already has its bubble; one from elsewhere gets one now, labelled.

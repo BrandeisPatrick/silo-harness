@@ -412,6 +412,9 @@
 
   function userEl(text, images, origin, from) {
     if (origin === 'session') return receivedEl(text, from);
+    // The app's own line about other sessions (an exchange paused, src/renderer/origin.ts appNotice): a quiet note
+    const notice = origin === 'command' && from === 'sessions' ? /^\[([^\n]*)\]$/.exec(String(text == null ? '' : text).trim()) : null;
+    if (notice) return note(notice[1]);
     const wrap = h('div', 'msg user');
     const bubble = h('div', 'bubble');
     const shown = unframe(origin, text);

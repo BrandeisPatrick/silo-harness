@@ -5,14 +5,14 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const { Subagents, messageHead, mergedText, NOTE_REPLY_CHARS } = require(path.join(projectDir, 'dist/main/subagents/service.js'));
+const { Subagents, messageHead, mergedText, pauseNotice, NOTE_CAP, NOTE_REPLY_CHARS } = require(path.join(projectDir, 'dist/main/subagents/service.js'));
 const { frameMessage } = require(path.join(projectDir, 'dist/main/schedules/service.js'));
 const { check, done } = require('./support/check.js');
 
 (async () => {
   // The renderer compiles to ES modules; origin.js imports types only, so its source loads as a data: module.
   const src = fs.readFileSync(path.join(projectDir, 'dist/renderer/origin.js'), 'utf8');
-  const { unframe } = await import('data:text/javascript,' + encodeURIComponent(src));
+  const { unframe, appNotice } = await import('data:text/javascript,' + encodeURIComponent(src));
 
   const child = { id: '4cd9a99f-6f07-44cc-8f0a-89064bb48750', title: 'Load-test the limiter' };
   const note = (reason, text, c = child) => Subagents.prototype.noteText.call(null, c, { type: 'run_end', reason, text });
@@ -46,6 +46,19 @@ const { check, done } = require('./support/check.js');
   u = unframe('session', `${messageHead(undefined, '')}\nHello.`);
   check('… and from a session that is gone', u.text === 'Hello.' && u.sender === undefined, u);
   check('a report names its sub-session for the row too', unframe('session', note('aborted', 'Stopped early.')).sender === child.title);
+  for (const rel of ['parent', 'sub-session', 'peer session', 'source session', 'fork']) {
+    const head = messageHead(child, rel);
+    check(`the head line for a message from a ${rel} is one line with "]" only at its end, and the row shows the text only`, /^\[[^\]\n]*\]$/.test(head) && unframe('session', `${head}\nHi.`).text === 'Hi.', head);
+  }
+
+  // ---------- the app's own lines about other sessions: a quiet notice ----------
+  const paused = pauseNotice(odd.title, 'receiver');
+  check('an exchange paused: shown as a quiet notice, without its brackets', appNotice('command', 'sessions', paused) === paused.slice(1, -1) && /^Paused the exchange with "Fix "the" \(odd\) \[title\]": /.test(appNotice('command', 'sessions', paused)), appNotice('command', 'sessions', paused));
+  check('… for the sender too', appNotice('command', 'sessions', pauseNotice('B', 'sender'))?.endsWith("so this session's last message started no run. Write in either session to continue."), pauseNotice('B', 'sender'));
+  const reportsPaused = `[Reports from sub-sessions are paused: ${NOTE_CAP} arrived here without a message from the user in between. They resume after the user's next message; session_list and session_read still show what the sub-sessions did.]`;
+  check('reports paused: a quiet notice as well (no longer a bubble labelled "merged")', appNotice('command', 'sessions', reportsPaused)?.startsWith('Reports from sub-sessions are paused'));
+  check('a merged summary is not a notice', appNotice('command', child.id, mergedText(child.title, 'r')) === null && appNotice('command', 'sessions', mergedText(child.title, 'r')) === null);
+  check('nor is a message from a session, or a line of several lines', appNotice('session', 'sessions', paused) === null && appNotice('command', 'sessions', '[a\nb]') === null);
 
   // ---------- a merged summary ----------
   u = unframe('command', mergedText(child.title, '## What it did\n\n- Replayed an hour of traffic.'));

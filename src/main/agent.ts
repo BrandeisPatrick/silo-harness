@@ -1296,7 +1296,7 @@ export class Agent {
       timer.setModel(this.providerType(cfg), model);
       // A message that clearly needs a tool group (a web page to open) loads it now, which saves the model a step; the
       // load is a load_tools call of the agent's own right after the message, so what it tells is in the conversation.
-      // A message from another session is answered with session_send, so it loads the sessions group.
+      // A message from another session may need the session tools (session_read, a message sent back), so it loads that group.
       const wanted: GroupId[] = groupsForMessage(userText);
       // …and a message that names an MCP server (a whole word) loads that server's tools
       if (this.mcp && !this.ownTools() && !allGroupsUpFront(cfg)) wanted.push(...mcpGroupsForMessage(userText, this.mcp.loadable()));
