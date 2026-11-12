@@ -148,6 +148,70 @@ const REPLY_B = 'README.md has 7 lines.';
     check('A rendered from its stored transcript still shows "Messaged stars" linked', (await app.evaluate(`document.querySelector('#messages .session-msg.sent > summary').innerText.trim()`)) === 'Messaged stars' && (await app.evaluate(`document.querySelector('#messages .session-msg.sent .session-msg-link')?.dataset.session`)) === B);
     await app.screenshot(path.join(shots, '5-sender-window.png'));
 
+    // ---- two sessions that keep answering each other: the app pauses the exchange after PEER_CAP messages ----
+    // The mock answers every message from the other session with a message back, the loop a real model fell into.
+    await app.evaluate(`(async () => { const c = await oc.getConfig(); await oc.setConfig({ ...c, permissionMode: 'bypass' }); })()`);
+    const userAt = (p) => {
+      for (let i = p.messages.length - 1; i >= 0; i--) if (p.messages[i].role === 'user' && !String(p.messages[i].content).startsWith('[Session context]')) return i;
+      return -1;
+    };
+    const fromPeer = (p) => /^\[Message from session/.test(text(p.messages[userAt(p)]));
+    const sentSince = (p) => p.messages.slice(userAt(p)).some((m) => m.role === 'assistant' && (m.tool_calls || []).some((c) => c.function?.name === 'session_send'));
+    const inB = (p) => text(firstUser(p)).includes('[B-start]');
+    let n = 0;
+    for (let i = 0; i < 6; i++) {
+      for (const [mine, other, tag] of [[inA, B, 'A'], [inB, A, 'B']]) {
+        st.replies.push({ loop: true, content: '', toolCalls: [{ id: `call_loop_${++n}`, name: 'session_send', args: { to: other, message: `${tag} answers back, round ${i}.` } }], when: (p) => mine(p) && fromPeer(p) && !sentSince(p) });
+        st.replies.push({ loop: true, content: `${tag} sent round ${i}.`, when: (p) => mine(p) && fromPeer(p) && sentSince(p) });
+      }
+    }
+    const opens = (p) => inA(p) && /\[A-loop\]/.test(text(p.messages[userAt(p)]));
+    st.replies.push({ loop: true, content: '', toolCalls: [{ id: 'call_loop_open', name: 'session_send', args: { to: B, message: 'Let us compare notes on README.md.' } }], when: (p) => opens(p) && !sentSince(p) });
+    st.replies.push({ loop: true, content: 'I wrote to stars.', when: (p) => opens(p) && sentSince(p) });
+    await app.send('Compare notes with the stars session [A-loop]');
+    const notice = (who) => `[...document.querySelectorAll('#messages .msg.system.notice')].map((e) => e.innerText.trim()).filter((t) => t.startsWith('Paused the exchange with "${who}"'))`;
+    await app.waitFor(`${notice('stars')}.length > 0`, 30_000, 'the pause notice in Release notes');
+    await app.waitFor(nothingRuns, 30_000, 'both sessions to stop');
+    await sleep(800);
+    const exchanged = async () => {
+      const ta = await app.evaluate(`oc.rpc('sessions.transcript', ${q(A)})`);
+      const tb = await app.evaluate(`oc.rpc('sessions.transcript', ${q(B)})`);
+      return { toA: ta.filter((i) => i.role === 'user' && i.origin === 'session' && i.from === B).length, toB: tb.filter((i) => i.role === 'user' && i.origin === 'session' && i.from === A && !i.text.includes(MESSAGE)).length, ta, tb };
+    };
+    const ex = await exchanged();
+    check('the two sent each other 4 messages, then the next one started no run', ex.toA + ex.toB === 4 && !ex.tb.some((i) => i.role === 'user' && /A answers back, round 1\./.test(i.text ?? '')), { toA: ex.toA, toB: ex.toB });
+    const runs = await app.evaluate(`(async () => (await oc.sessions.list()).filter((m) => m.status?.running).length)()`);
+    await sleep(1000);
+    check('nothing runs afterwards', runs === 0 && (await app.evaluate(nothingRuns)));
+    const aLines = await app.evaluate(notice('stars'));
+    check('Release notes shows one quiet notice line: paused, why, and how to go on', aLines.length === 1 && /^Paused the exchange with "stars": the two sessions sent each other 4 messages with no message from the user in between, so this session's last message started no run\. Write in either session to continue\.$/.test(aLines[0]), aLines);
+    check('… not as a message bubble, and no frame brackets on screen', !(await app.evaluate(`[...document.querySelectorAll('#messages .msg.user')].some((e) => /Paused the exchange|^\\[/.test(e.innerText.trim()))`)));
+    const lastSent = await app.evaluate(`(() => { const rows = [...document.querySelectorAll('#messages .session-msg.sent')]; const el = rows[rows.length - 1]; el.open = true; return { summary: el.querySelector(':scope > summary').innerText.trim(), note: el.querySelector('.session-msg-note')?.innerText.trim() }; })()`);
+    check('the last "Messaged stars" line says it waits and started no run', lastSent.summary === 'Messaged stars' && lastSent.note === 'Delivered: the exchange is paused, so the message waits there and started no run.', lastSent);
+    await app.evaluate(`document.querySelector('#messages .msg.system.notice:last-of-type')?.scrollIntoView({ block: 'center' })`);
+    await sleep(200);
+    await app.screenshot(path.join(shots, '6-paused-sender.png'));
+    // The receiver: the same line, drawn from its stored conversation
+    await app.evaluate(`[...document.querySelectorAll('#messages .session-msg.sent .session-msg-link')].pop().click()`);
+    await app.waitFor(`(async () => (await oc.sessions.current()).id === ${q(B)})()`, 10_000, 'stars on screen');
+    await app.waitFor(`${notice('Release notes')}.length > 0`, 10_000, 'the pause notice in stars');
+    const bLines = await app.evaluate(notice('Release notes'));
+    check('stars shows one quiet notice line too, naming Release notes', bLines.length === 1 && /so its last message here started no run\. Write in either session to continue\.$/.test(bLines[0]), bLines);
+    await app.evaluate(`[...document.querySelectorAll('#messages .msg.system.notice')].pop()?.scrollIntoView({ block: 'center' })`);
+    await sleep(200);
+    await app.screenshot(path.join(shots, '7-paused-receiver.png'));
+    await shot('8-paused-line', '#messages .msg.system.notice:last-of-type', 16);
+    // The user writes in stars: the message that waited joins that run (the mock now answers plainly)
+    st.replies.splice(0, st.replies.length, ...st.replies.filter((r) => !r.loop));
+    st.replies.push({ content: 'Carrying on.', when: (p) => inB(p) && /Go on \[B-go\]/.test(text(p.messages[userAt(p)])) });
+    await app.send('Go on [B-go]');
+    await app.waitFor(nothingRuns, 30_000, 'stars to finish');
+    await sleep(600);
+    const tb = await app.evaluate(`oc.rpc('sessions.transcript', ${q(B)})`);
+    const goAt = tb.findIndex((i) => i.role === 'user' && i.text === 'Go on [B-go]');
+    check('the user wrote in stars: the message that waited arrived in that run, after the user\'s', goAt >= 0 && tb.slice(goAt + 1).some((i) => i.role === 'user' && i.origin === 'session' && i.from === A && /A answers back, round 1\./.test(i.text)), tb.slice(goAt).map((i) => [i.role, i.origin, (i.text ?? '').slice(0, 50)]));
+    await app.evaluate(`(async () => { const c = await oc.getConfig(); await oc.setConfig({ ...c, permissionMode: 'ask' }); })()`);
+
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));
     console.log(`screenshots: ${shots}`);

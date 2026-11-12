@@ -23,6 +23,17 @@ const SCHEDULED = /^\[Scheduled task "[\s\S]*?" \([^\n]*\)\. This message was se
 /** A dream's digest (src/main/dreaming/digest.ts): the frame line and the line that asks for the review */
 const DREAM = /^\[Dream\] [^\n]*\n[^\n]*\n([\s\S]*)$/;
 
+/**
+ * A line the app itself added to the conversation about other sessions (src/main/subagents/service.ts notice(): reports
+ * paused, an exchange paused), "[…]" with origin 'command' from 'sessions': the line without its brackets, shown as a
+ * quiet notice. null for anything else.
+ */
+export function appNotice(origin: MessageOrigin | undefined, from: string | undefined, text: string): string | null {
+  if (origin !== 'command' || from !== 'sessions') return null;
+  const m = /^\[([^\n]*)\]$/.exec(String(text ?? '').trim());
+  return m ? m[1] : null;
+}
+
 export function unframe(origin: MessageOrigin | undefined, text: string): Unframed {
   const raw = String(text ?? '');
   if (origin === 'session') {
