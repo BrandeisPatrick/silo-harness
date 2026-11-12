@@ -1580,6 +1580,13 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
   font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--text-400);
 }
 .approval .cmd.json code { white-space: pre-wrap; }
+/* A command that ran in the shell sandbox: a quiet mark on its row, like the MCP server's */
+.tool-sandbox {
+  flex: none; padding: 0 6px; border: 1px solid var(--border-subtle); border-radius: 999px;
+  font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--text-400);
+}
+.prompt-line { font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-200); overflow-wrap: anywhere; }
+.tool-run-label { margin-top: 4px; }
 
 /* Context meter (under the chat bar): a 12px ring, grey track and a blue arc (amber, then red, as it fills); the percentage is in its tooltip */
 .context-meter { padding: 0 6px 0 4px; color: var(--text-400); font-variant-numeric: tabular-nums; }

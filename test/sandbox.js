@@ -235,6 +235,31 @@ const home = os.homedir();
     check('on: a write to a rule file still asks, firm', (() => { const r = d('bash', `echo x > ${path.join(home, '.silo-harness', 'settings.json')}`, on()); return r.kind === 'ask' && r.firm; })());
   }
 
+  // ---------- 6b. Counts: /report, the timing summary, the phone ----------
+  {
+    const { sessionReport } = dist('history/report.js');
+    const { summarize } = dist('agent/perf.js');
+    const { remoteEvent } = dist('remote/sanitize.js');
+    const recs = [
+      { t: 1000, seq: 1, type: 'run.start', data: { origin: 'user', timing: 'abcdef12' } },
+      { t: 1100, seq: 2, type: 'tool.end', data: { name: 'bash', ok: true, durationMs: 40, sandbox: 'inside' } },
+      { t: 1200, seq: 3, type: 'tool.end', data: { name: 'bash', ok: true, durationMs: 50, sandbox: 'rerun' } },
+      { t: 1300, seq: 4, type: 'tool.end', data: { name: 'bash', ok: false, durationMs: 30, sandbox: 'blocked' } },
+      { t: 1400, seq: 5, type: 'tool.end', data: { name: 'bash', ok: true, durationMs: 30 } },
+      { t: 1500, seq: 6, type: 'run.end', data: { reason: 'done' } },
+    ];
+    const report = sessionReport(recs, { now: 2000 });
+    check('/report: the shell sandbox line, only from fixed words', /\*\*Shell sandbox\*\* 3 commands, 1 stayed inside/.test(report) && /- blocked: 2, 1 run again outside/.test(report), report);
+    check('/report: no sandbox line when nothing ran in it', !/Shell sandbox/.test(sessionReport(recs.filter((r) => !r.data.sandbox), { now: 2000 })));
+    check('/report: an unknown word reads as inside', /\*\*Shell sandbox\*\* 1 command, 1 stayed inside/.test(sessionReport([recs[0], { ...recs[1], data: { ...recs[1].data, sandbox: '<script>' } }, recs[5]], { now: 2000 })));
+    const span = (sandbox) => ({ turn: 1, group: 0, name: 'bash', at: 0, startAt: 0, endAt: 10, queueMs: 0, preHookMs: 0, permission: [], execMs: 10, postHookMs: 0, storeMs: 0, wallMs: 10, outcome: 'ok', alongside: 0, ...(sandbox ? { sandbox } : {}) });
+    const sum = summarize({ wallMs: 100, turns: [], tools: [span('inside'), span('blocked'), span('rerun'), span()] });
+    const none = summarize({ wallMs: 100, turns: [], tools: [span()] });
+    check('timing: the run summary counts sandboxed calls, blocks and reruns; none when none ran in it', sum.sandboxed === 3 && sum.sandboxBlocked === 2 && sum.sandboxReruns === 1 && !('sandboxed' in none) && !('sandboxReruns' in none), sum);
+    const phone = remoteEvent({ type: 'tool_end', id: 'x', name: 'bash', result: 'r', ok: true, sandbox: { blocked: { kind: 'refused', line: 'l' }, outside: true, first: 'f' } });
+    check('the phone gets no sandbox mark (no first run, no line)', phone && !('sandbox' in phone), phone);
+  }
+
   // ---------- 7. The tool definition ----------
   check('tool: bash with the sandbox on says so and takes outside; off, unchanged', !('outside' in bash.parameters.properties) && 'outside' in sandboxBash.parameters.properties && /sandbox/.test(sandboxBash.description) && !/sandbox/.test(bash.description) && allTools('auto', true).includes(sandboxBash) && allTools('auto').includes(bash) && allTools('plan', true).includes(sandboxBash));
 
@@ -535,7 +560,7 @@ const home = os.homedir();
 /** The agent end to end on the mock model: the check count is the point of the sandbox. */
 async function agentRows(proj) {
   const { Agent } = require(path.join(projectDir, 'dist/main/agent.js'));
-  const { SessionStore } = require(path.join(projectDir, 'dist/main/sessions.js'));
+  const { SessionStore, toTranscript } = require(path.join(projectDir, 'dist/main/sessions.js'));
   const { ArtifactStore } = require(path.join(projectDir, 'dist/main/artifacts.js'));
   const { startMock, classifierReply, isClassifierRequest } = require('./support/mock-model.js');
   const warn = console.warn;
@@ -595,6 +620,14 @@ async function agentRows(proj) {
   await agent.run('write the editor settings');
   const seen = JSON.stringify(checks()[0]?.payload.messages ?? []);
   check('agent: a block goes to one check, then runs outside', checks().length === 1 && fs.existsSync(path.join(cwd, '.vscode', 'settings.json')) && toolText('s2').startsWith('[sandbox: blocked ('), { checks: checks().length, text: toolText('s2') });
+  {
+    const m1 = agent.session.sandboxed?.s1;
+    const m2 = agent.session.sandboxed?.s2;
+    const ev2 = toolEnd('s2')?.sandbox;
+    check('agent: the row marks are kept with the session and sent with tool_end: inside; blocked, checked, ran outside (with the first run)', !!m1 && !m1.blocked && m2?.outside === true && m2.by === 'check' && m2.blocked?.kind === 'refused' && /PermissionError/.test(m2.first ?? '') && JSON.stringify(ev2) === JSON.stringify(m2), { m1, m2 });
+    const items = toTranscript(agent.session).filter((i) => i.role === 'tool' && i.name === 'bash');
+    check('agent: a session shown again brings the marks back', items.length >= 2 && items.some((i) => i.sandbox && !i.sandbox.blocked) && items.some((i) => i.sandbox?.outside === true), items.map((i) => i.sandbox));
+  }
   check('agent: the check is told it ran once in the sandbox, in fixed words', seen.includes('already ran once in a sandbox') && seen.includes('blocked by: the sandbox refused an operation'), seen.slice(-800));
   check("agent: the check's request holds nothing of the command's output", /OUTPUT-42/.test(toolText('s2')) && !seen.includes('OUTPUT-42') && !seen.includes('PermissionError') && !seen.includes('Traceback'), seen.slice(-600));
 
@@ -635,6 +668,7 @@ async function agentRows(proj) {
   await agent.run('paused work');
   answer = null;
   const cards = events.filter((e) => e.type === 'approval_request');
+  check('agent: paused: the card shows the line that showed the block, as plain text; the row says the user allowed it', /Operation not permitted/i.test(cards[0]?.sandboxLine ?? '') && agent.session.sandboxed?.s7?.by === 'user', { line: cards[0]?.sandboxLine, mark: agent.session.sandboxed?.s7 });
   check('agent: paused: a sandboxed command runs with no card; a block shows one card, Allow and Deny only, then runs outside', fs.existsSync(path.join(cwd, 'paused.txt')) && cards.length === 1 && cards[0].reason === SANDBOX_REASON && cards[0].projectLabel === '' && fs.existsSync(path.join(cwd, '.vscode', 'p.json')) && checks().length === 0, cards);
   st.paused = false;
 

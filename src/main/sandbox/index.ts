@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { allSimpleCommands, commandArgv, isReadOnlyCommand, sandboxGuardPaths } from '../guard';
 import { SECRET_ENV_NAME } from '../env';
+import type { SandboxMark, SandboxWord } from '../../shared/types';
 import { buildProfile, embeddable, SERVICE_PORTS, type Profile } from './profile';
 
 export { buildProfile, embeddable, sandboxArgs, SERVICE_PORTS, type Profile, type ProfileInput } from './profile';
@@ -34,6 +35,11 @@ export function sandboxSettings(raw: unknown): SandboxSettings {
     loopback: r.loopback === true,
     allowWrite: Array.isArray(r.allowWrite) ? r.allowWrite.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [],
   };
+}
+
+/** A sandboxed call in fixed words (the timing log, the history log, /report): it stayed inside, was blocked, or ran again outside */
+export function sandboxWord(m: SandboxMark): SandboxWord {
+  return m.outside ? 'rerun' : m.blocked ? 'blocked' : 'inside';
 }
 
 /** What the probe found: the temp folders a sandboxed command may write. */

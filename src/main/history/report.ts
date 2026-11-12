@@ -2,8 +2,8 @@
 // read from its history log (history/log.ts) and written as numbers and fixed words only, so it is safe to paste to
 // someone else. Markdown, light: a bold label per section and a list under it.
 //
-// What it reads of a record, and nothing else: its type, time and sequence number; a tool end's durationMs, ok and
-// chars; the token counts of a usage record and of a compaction; a tool's name, only through toolLabel (agent/perf.ts:
+// What it reads of a record, and nothing else: its type, time and sequence number; a tool end's durationMs, ok,
+// chars and shell-sandbox word (a fixed list); the token counts of a usage record and of a compaction; a tool's name, only through toolLabel (agent/perf.ts:
 // a built-in name, "mcp" or "other"); a message's role; a run's origin and end reason, each through a fixed list; and
 // the numbers and fixed words of the records written for it (retry, check, question.*, compaction.start, run.start's
 // timing). An approval's id pairs a card with its answer and is dropped once paired. Message text, arguments,
@@ -39,6 +39,8 @@ interface Step {
   timedOut?: boolean;
   waitMs?: number;
   ranMs?: number;
+  /** tool.end of a bash call in the shell sandbox: inside, blocked or rerun */
+  sandbox?: string;
   fail?: string;
   answered?: boolean;
 }
@@ -92,6 +94,7 @@ const REASONS: Record<string, string> = {
   interrupted: 'app closed',
 };
 const VERDICTS = ['allow', 'block', 'ask', 'error', 'stopped'];
+const SANDBOX_WORDS = ['inside', 'blocked', 'rerun'];
 const FAIL_KINDS = ['idle', 'connection', 'rate_limited', 'busy', 'too_long', 'other'];
 const FAIL_WORDS: Record<string, string> = { idle: 'no data', connection: 'connection', rate_limited: 'rate limited', busy: 'busy', too_long: 'too long', other: 'other' };
 
@@ -121,7 +124,7 @@ function slim(r: unknown): Step | null {
     case 'tool.start':
       return s('tool.start', { tool: toolLabel(d.name as string) });
     case 'tool.end':
-      return s('tool.end', { tool: toolLabel(d.name as string), ms: num(d.durationMs), ok: d.ok !== false });
+      return s('tool.end', { tool: toolLabel(d.name as string), ms: num(d.durationMs), ok: d.ok !== false, ...(typeof d.sandbox === 'string' ? { sandbox: oneOf(SANDBOX_WORDS, d.sandbox, 'inside') } : {}) });
     case 'approval.request':
       return s('approval.request', { pair: typeof d.id === 'string' ? d.id : undefined });
     case 'approval.resolved':
@@ -409,6 +412,14 @@ export function sessionReport(records: readonly unknown[], opts: ReportOptions =
     const timedOut = checks.filter((c) => c.timedOut).length;
     out.push(`**Safety checks** ${checks.length}, ${duration(sum(ms))} in all, slowest ${duration(Math.max(...ms))}${partly}`);
     out.push(`- ${by.map(([v, n]) => `${v} ${n}`).join(', ')}${timedOut ? `; ${timedOut} timed out` : ''}`);
+  }
+  // ---------- The shell sandbox: only when a command ran in it ----------
+  const boxed = steps.filter((s) => s.kind === 'tool.end' && s.sandbox);
+  if (boxed.length) {
+    const blocked = boxed.filter((s) => s.sandbox !== 'inside').length;
+    const reruns = boxed.filter((s) => s.sandbox === 'rerun').length;
+    out.push('', `**Shell sandbox** ${boxed.length} ${boxed.length === 1 ? 'command' : 'commands'}, ${boxed.length - blocked} stayed inside`);
+    out.push(`- blocked: ${blocked ? `${blocked}, ${reruns} run again outside` : 'none'}`);
   }
   if (!marked && !retries.length) out.push('', '**Retries** not recorded');
   else if (!retries.length) out.push('', `**Retries** none${partly}`);

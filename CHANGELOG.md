@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **Shell sandbox.** Off by default: with "Run commands in a sandbox" on, Auto mode runs commands that stay in the project and temp folders without a check ([details](docs/reference.md#the-shell-sandbox)).
+- **Blocked, then checked.** A sandboxed command that hits a wall goes to the safety check and, allowed, runs again outside; its row shows both runs.
+- **Read-only planning.** With the sandbox on, Plan mode runs its read-only commands in a sandbox that writes nothing and reaches no network.
+- **Sandbox counts.** `/report` and the timing log count the commands that ran in the sandbox, were blocked and ran again outside.
+
+### Improved
+
+- **Wider secret list.** Shell history, cloud and cluster sign-ins, Git and Cargo credentials, the keychains and browser profiles count as secrets for commands and file tools.
+- **Nested folders protected.** A write to a nested `.git`, `.vscode` or `.envrc` asks as one at the project's root does.
+
 ## 0.18.0 — 2026-11-12
 
 Auto mode asks for fewer safety checks, long steps say what they are doing, `/report` shows where a session's time went, and a queued message can be sent at once.

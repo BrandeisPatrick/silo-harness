@@ -2,8 +2,10 @@
 // and "sandbox": { "enabled": true } in the test's own settings.json. In Auto mode: a heredoc into /tmp and a test
 // run go through with no check; a Python write to a protected path in the project (.vscode) hits the sandbox, goes to
 // the check, is allowed and runs again outside; git add and npm install go straight to the check (allowed, blocked),
-// with no sandboxed first run. Five calls, three checks. In Plan mode a read runs in the read-only sandbox: a grep that
-// reaches .env reads no secret, and the agent is told why. Temp folders only.
+// with no sandboxed first run. Five calls, three checks. The rows that ran in the sandbox carry its mark, and the one
+// that ran twice shows both runs. In Plan mode a read runs in the read-only sandbox: a grep that reaches .env reads no
+// secret, and the agent is told why. Then, in a fresh window with the sandbox off: Settings → Permissions → Auto mode
+// turns it on, shows Local ports and the folders, saves a folder, and is screenshotted in light and dark. Temp folders only.
 // Run: npm run build && node test/live/sandbox.js [screenshot-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -42,7 +44,16 @@ const sh = (id, args) => ({ id, name: 'bash', args });
   execFileSync('/usr/bin/git', ['init', '-q'], { cwd: project });
   const tmpFile = path.join('/private/tmp', `silo-sandbox-live-${process.pid}.txt`);
 
-  const app = await launch({ mode: 'auto', mock: true, profile, ownsProfile: true, project, config: { theme: 'light' } });
+  const app = await launch({ mode: 'auto', mock: true, profile, ownsProfile: true, project, config: { theme: 'light', toolActivity: 'all' } });
+  const theme = (a, t) => a.evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(t)}`);
+  const both = async (a, name, selector, margin = 16) => {
+    for (const t of ['light', 'dark']) {
+      await theme(a, t);
+      await new Promise((r) => setTimeout(r, 250));
+      await a.screenshotOf(path.join(shots, `${name}-${t}.png`), selector, margin);
+    }
+    await theme(a, 'light');
+  };
   const { replies, requests } = app.mock.state;
   const checkRequests = () => requests.filter((r) => isClassifierRequest(r.payload));
   // What each check decided on: its <action> section (the earlier calls it lists are context, not actions)
@@ -75,7 +86,15 @@ const sh = (id, args) => ({ id, name: 'bash', args });
     const offered = requests.find((r) => r.payload?.stream)?.payload.tools?.find((t) => t.function?.name === 'bash');
     check('auto: the model is offered bash with outside', !!offered?.function.parameters.properties.outside);
     check('auto: no approval card came up', !(await app.exists('.approval')));
-    await app.screenshot(path.join(shots, 'sandbox-auto.png'));
+    // The rows: the mark on the three that ran in the sandbox, none on git add; npm install is the quiet blocked line
+    const rows = await app.evaluate(`Object.fromEntries([...document.querySelectorAll('#messages .tool[data-tool="bash"]')].map((e) => [e.dataset.callId, { mark: e.querySelector('.tool-sandbox')?.textContent ?? '', tip: e.querySelector('.tool-sandbox')?.title ?? '' }]))`);
+    check('rows: the sandbox mark on the three that ran in it, not on git add', rows.s1?.mark === 'sandbox' && rows.s2?.mark === 'sandbox' && rows.s3?.mark === 'sandbox' && rows.s3.tip === 'Blocked in the sandbox, then ran outside' && rows.s1.tip === 'Ran in the sandbox' && rows.s4 && !rows.s4.mark, rows);
+    await app.evaluate(`(() => { const e = document.querySelector('#messages .tool[data-call-id="s3"]'); e.open = true; })()`);
+    const twoRuns = await app.text('#messages .tool[data-call-id="s3"] .tool-body');
+    check('rows: the one that ran twice shows both runs and what happened', /In the sandbox/.test(twoRuns) && /Outside/.test(twoRuns) && /Sandbox blocked · checked · ran again outside/.test(twoRuns) && /PermissionError/.test(twoRuns) && !/\[sandbox: blocked/.test(twoRuns), twoRuns);
+    await app.evaluate(`document.querySelector('#messages .tool[data-call-id="s1"]').open = true`);
+    check('rows: a clean run says it ran in the sandbox', /Ran in the sandbox/.test((await app.text('#messages .tool[data-call-id="s1"] .tool-body')) ?? ''));
+    await both(app, 'sandbox-row-two-runs', '#messages .tool[data-call-id="s3"]');
 
     // ---------- 2. Plan mode: a read in the read-only sandbox ----------
     await setConfig({ permissionMode: 'plan' });
@@ -90,6 +109,43 @@ const sh = (id, args) => ({ id, name: 'bash', args });
     fs.rmSync(tmpFile, { force: true });
     await app.close();
   }
+
+  // ---------- 3. Settings → Permissions → Auto mode, the sandbox off at first ----------
+  const app2 = await launch({ mode: 'auto', mock: true, config: { theme: 'light' } });
+  try {
+    const cfg = () => app2.evaluate('window.oc.getConfig()');
+    await app2.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-permissions')?.click(); })()`);
+    await app2.waitFor(`Boolean(document.querySelector('#sp-row-sandbox-enabled'))`, 10_000, 'the sandbox switch');
+    const shown = () => app2.evaluate(`({ on: document.querySelector('#sp-row-sandbox-enabled input').checked, ports: !document.querySelector('#sp-row-sandbox-loopback').hidden, folders: !document.querySelector('#sp-row-sandbox-allowWrite').hidden, desc: document.querySelector('#sp-row-sandbox-enabled .sp-row-desc').textContent })`);
+    let v = await shown();
+    check('settings: off by default, Local ports and the folders hidden', !v.on && !v.ports && !v.folders && (await cfg()).sandbox?.enabled !== true, v);
+    await app2.click('#sp-row-sandbox-enabled input');
+    await app2.waitFor(`window.oc.getConfig().then((c) => c.sandbox && c.sandbox.enabled === true)`, 5000, 'the setting saved');
+    await app2.waitFor(`!document.querySelector('#sp-row-sandbox-loopback').hidden`, 5000, 'Local ports to show');
+    v = await shown();
+    check('settings: on, saved, Local ports and the folders shown; this Mac can run it', v.on && v.ports && v.folders && v.desc === 'Commands that stay in the project and temp folders run without the check.', v);
+    await app2.fill('#sandbox-allowWrite', '~');
+    await app2.evaluate(`document.querySelector('#sandbox-allowWrite').dispatchEvent(new FocusEvent('blur'))`);
+    await app2.waitFor(`!document.querySelector('#sp-row-sandbox-allowWrite .sp-problem').hidden`, 5000, 'the problem line');
+    const problem = await app2.text('#sp-row-sandbox-allowWrite .sp-problem');
+    check('settings: the home folder itself is refused', /whole home folder/.test(problem ?? ''), problem);
+    await app2.fill('#sandbox-allowWrite', '~/silo-sandbox-scratch\n/Volumes/Work/builds');
+    await app2.evaluate(`document.querySelector('#sandbox-allowWrite').dispatchEvent(new FocusEvent('blur'))`);
+    await app2.waitFor(`window.oc.getConfig().then((c) => Array.isArray(c.sandbox?.allowWrite) && c.sandbox.allowWrite.length === 2)`, 5000, 'the folders saved');
+    check('settings: two folders saved', JSON.stringify((await cfg()).sandbox.allowWrite) === JSON.stringify(['~/silo-sandbox-scratch', '/Volumes/Work/builds']));
+    // The group's title and its three sandbox rows, scrolled into view (the group goes on with the learned answers)
+    await app2.evaluate(`document.querySelector('#sp-row-sandbox-enabled').closest('.sp-group').scrollIntoView({ block: 'start' })`);
+    const box = await app2.evaluate(`(() => { const top = document.querySelector('#sp-row-sandbox-enabled').closest('.sp-group').getBoundingClientRect(); const end = document.querySelector('#sp-row-sandbox-allowWrite').getBoundingClientRect(); return { x: top.x - 16, y: top.y - 16, width: top.width + 32, height: end.bottom - top.y + 32 }; })()`);
+    for (const t of ['light', 'dark']) {
+      await theme(app2, t);
+      await new Promise((r) => setTimeout(r, 250));
+      await app2.screenshot(path.join(shots, `sandbox-settings-${t}.png`), box);
+    }
+    await theme(app2, 'light');
+  } finally {
+    await app2.close();
+  }
+  console.log(`screenshots: ${shots}`);
   process.exit(done() ? 1 : 0);
 })().catch((err) => {
   console.error('CRASH', err);

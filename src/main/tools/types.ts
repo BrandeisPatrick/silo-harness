@@ -1,4 +1,4 @@
-import type { AppConfig, ArtifactInfo, PermissionMode, PlanInfo, QuestionAnswer, TaskItem, UserQuestion } from '../../shared/types';
+import type { AppConfig, ArtifactInfo, PermissionMode, PlanInfo, QuestionAnswer, SandboxMark, TaskItem, UserQuestion } from '../../shared/types';
 import type { ArtifactInput } from '../artifacts';
 import type { BrowserController } from '../browser';
 import type { BrowserCard, Site } from '../browser/policy';
@@ -116,6 +116,8 @@ export interface ToolContext {
 
 export interface ToolResult {
   content: string;
+  /** bash: how the call went in the shell sandbox (its row's mark; never sent to the model) */
+  sandbox?: SandboxMark;
   /** Optional data: URL of an image (PNG) produced by the tool, e.g. a screenshot */
   image?: string;
   /**

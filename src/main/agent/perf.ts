@@ -13,6 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SandboxMark, SandboxWord } from '../../shared/types';
 
 /** How a tool call ended. */
 export type Outcome = 'ok' | 'failed' | 'denied' | 'blocked' | 'stopped' | 'timed_out';
@@ -142,6 +143,8 @@ export interface ToolSpan {
   outcome: Outcome;
   /** How many other calls ran at some point while it ran */
   alongside: number;
+  /** bash in the shell sandbox: it stayed inside, was blocked, or ran again outside */
+  sandbox?: SandboxWord;
 }
 
 export interface TurnSpan {
@@ -214,6 +217,10 @@ export interface RunSummary {
   maxGapMs: number;
   /** The turn that took longest (1-based), from the harness's start on it to its reply */
   slowest?: number;
+  /** bash calls in the shell sandbox (present only when there were some): all of them, those blocked, those run again outside */
+  sandboxed?: number;
+  sandboxBlocked?: number;
+  sandboxReruns?: number;
 }
 
 export interface RunRecord {
@@ -444,6 +451,11 @@ export class ToolTimer {
 
   postHook(msSpent: number): void {
     this.span.postHookMs = ms(this.span.postHookMs + msSpent);
+  }
+
+  /** A bash call ran in the shell sandbox: how it went, in fixed words */
+  sandboxed(mark: SandboxMark): void {
+    this.span.sandbox = mark.outside ? 'rerun' : mark.blocked ? 'blocked' : 'inside';
   }
 
   /** Done (post hooks included). */
@@ -719,7 +731,15 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
     fallbacks,
     maxGapMs: ms(maxGapMs),
     slowest,
+    ...sandboxCounts(r.tools),
   };
+}
+
+/** The shell sandbox's counts for a run summary, or nothing when no call ran in it */
+function sandboxCounts(tools: ToolSpan[]): Pick<RunSummary, 'sandboxed' | 'sandboxBlocked' | 'sandboxReruns'> {
+  const words = tools.map((t) => t.sandbox).filter((w): w is SandboxWord => !!w);
+  if (!words.length) return {};
+  return { sandboxed: words.length, sandboxBlocked: words.filter((w) => w !== 'inside').length, sandboxReruns: words.filter((w) => w === 'rerun').length };
 }
 
 // ---------- Words ----------

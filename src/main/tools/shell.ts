@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { commandArgv, commandIn, shellStart, splitCommands } from '../guard';
 import { brokenProfile, detectBlock, SANDBOX_EXEC, sandboxArgs, sandboxEnv, type Profile } from '../sandbox';
+import type { SandboxMark } from '../../shared/types';
 import type { Tool } from './types';
 import { truncateMiddle } from './types';
 
@@ -154,6 +155,9 @@ function rendered(r: ShellRun, timeout: number): string {
   return shellResult(r.stdout, r.stderr, r.code, hintFor(r.code, r.stderr, timeout));
 }
 
+/** How much of the run inside the sandbox a row keeps, when the command ran again outside */
+const FIRST_RUN_KEPT = 4000;
+
 /** What the model reads after Plan mode's read-only sandbox refused something */
 export const PLAN_SANDBOX_NOTE = '[sandbox: Plan mode runs commands read-only, with no network; this one hit that limit]';
 
@@ -212,16 +216,18 @@ function makeBash(sandboxed: boolean): Tool {
         if (!again.ok) return { content: again.message };
         return outside();
       }
+      const mark = (m: SandboxMark): SandboxMark => (plan.readOnly ? { readOnly: true, ...m } : m);
       // A block, unless only lines the login profile prints on its own show it (asked once per session, when needed)
       let block = detectBlock(inside.code, inside.stdout, inside.stderr);
       if (block) block = detectBlock(inside.code, inside.stdout, inside.stderr, await plan.baseline().catch(() => []));
-      if (!block || ctx.signal?.aborted) return { content: rendered(inside, timeout) };
-      if (plan.readOnly) return { content: `${rendered(inside, timeout)}\n${PLAN_SANDBOX_NOTE}` };
-      // Blocked: the check (or a card) decides on a run outside, told what the first run hit
-      const again = await ctx.approve('bash', judged, undefined, { sandboxBlock: { kind: block.kind, line: block.line } });
-      if (!again.ok) return { content: `${again.message}\n\n[the run in the sandbox]\n${rendered(inside, timeout)}` };
+      if (!block || ctx.signal?.aborted) return { content: rendered(inside, timeout), sandbox: mark({}) };
+      const blocked = { kind: block.kind, line: block.line };
+      if (plan.readOnly) return { content: `${rendered(inside, timeout)}\n${PLAN_SANDBOX_NOTE}`, sandbox: mark({ blocked }) };
+      // Blocked: the check (or a card) decides on a run outside, told what kind of wall the first run hit
+      const again = await ctx.approve('bash', judged, undefined, { sandboxBlock: blocked });
+      if (!again.ok) return { content: `${again.message}\n\n[the run in the sandbox]\n${rendered(inside, timeout)}`, sandbox: { blocked } };
       const out = await runShell(command, start, { timeout, signal: ctx.signal });
-      return { content: `${rerunNote(block.line)}\n${rendered(out, timeout)}` };
+      return { content: `${rerunNote(block.line)}\n${rendered(out, timeout)}`, sandbox: { blocked, outside: true, first: truncateMiddle(rendered(inside, timeout), FIRST_RUN_KEPT) } };
     },
   };
 }

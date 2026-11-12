@@ -64,7 +64,8 @@ export function remoteLive(live: LiveState): RemoteLive {
 export function remoteEvent(ev: AgentEvent): unknown | null {
   switch (ev.type) {
     case 'tool_end': {
-      const { image: _image, ...rest } = ev;
+      // (the shell sandbox's mark is the desktop row's; the phone has no use for it)
+      const { image: _image, sandbox: _sandbox, ...rest } = ev;
       return { ...rest, result: cut(ev.result) };
     }
     case 'image':

@@ -566,7 +566,7 @@ function renderTranscript(items: TranscriptItem[]): void {
     } else if (item.role === 'tool') {
       if (item.name === 'submit_plan' && item.ok) return;
       const card = addToolCard(item.name, item.args);
-      finishToolCard({ name: item.name, result: item.result, ok: item.ok }, card);
+      finishToolCard({ name: item.name, result: item.result, ok: item.ok, ...(item.sandbox ? { sandbox: item.sandbox } : {}) }, card);
       chatCards.toolEnded(item.name, item.args, item.result, item.ok);
     } else {
       // A role a feature registered (transcript-items.ts)

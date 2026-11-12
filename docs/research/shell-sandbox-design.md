@@ -1,7 +1,9 @@
 # A sandbox for the shell: design
 
-Status: design only, 2026-11-11. Nothing is built or decided. The sandbox changes what runs without asking, so no
-product code is written before the owner says yes to the questions in section 10.
+Status: design, 2026-11-11; the owner answered section 10 on 2026-11-12 and it is built, off by default. What was built,
+with its departures from this design (secrets unwritable where commands write, protected names and every .git in temp
+folders too, .github whole, port denies as ip4/ip6, the check told the kind of block in fixed words), is in
+[reference.md](../reference.md#the-shell-sandbox).
 
 **The idea.** In Auto mode every `bash` command off the read-only list costs a safety check (a model call). Instead,
 run it in a macOS Seatbelt sandbox (`/usr/bin/sandbox-exec`) that writes only in the project and temp folders, reads

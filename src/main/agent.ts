@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
-import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CheckVerdictWord, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
+import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CheckVerdictWord, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, SandboxMark, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
 import { effortOf, isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
@@ -292,6 +292,8 @@ export class Agent {
   private sandboxOff = new Set<string>();
   /** Per session and profile: what the login profile prints in the sandbox with no command (ignored when looking for a block) */
   private sandboxBaselines = new Map<string, Promise<string[]>>();
+  /** bash calls a sandbox block's question allowed, by call id: by the check or by the user on a card (the row says which) */
+  private sandboxBy = new Map<string, 'check' | 'user'>();
   /** Tokens the tool specs take on every request (measured at the start of each run). */
   private specTokens = 2500;
   /** Usage of the most recent model call, for the context estimate. */
@@ -828,7 +830,9 @@ export class Agent {
       }
       if (d.kind !== 'ask') return done(allowedPath(), { ok: true });
       const session = d.custom && opts.sessionKey && opts.sessionLabel ? { key: opts.sessionKey, label: opts.sessionLabel } : undefined;
-      return done('card', await this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session, probe, call?.id));
+      const answer = await this.ask(name, detail, mode, d.reason, d.programs, d.custom, opts.browser, session, probe, call?.id, opts.sandboxBlock?.line);
+      if (answer.ok && opts.sandboxBlock && call) this.sandboxBy.set(call.id, 'user');
+      return done('card', answer);
     };
     const onceKey = opts.browser ? (CHECKED_BROWSER_CARDS.has(opts.browser.card) ? browserActionKey(name, detail, opts.browser) : null) : opts.custom ? null : actionKey(name, detail);
     // What the rules settle at once (run, refuse, a hook's allow, a blocked action the user allowed), or null when a
@@ -866,6 +870,7 @@ export class Agent {
       }
       const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}), ...(opts.sandboxBlock ? { sandbox: { kind: opts.sandboxBlock.kind } } : {}) };
       const r = await this.autoCheck(checker, cfg, action, () => settle(decide('guard')), { key: onceKey ?? actionKey(name, detail), browser: opts.browser }, probe);
+      if (r.ok && opts.sandboxBlock && call && !this.sandboxBy.has(call.id)) this.sandboxBy.set(call.id, 'check');
       return probe ? done('check', r) : r;
     });
   }
@@ -1099,14 +1104,15 @@ export class Agent {
    * Shows an approval card and waits for its answer. A custom card has Allow once and Deny, plus `session.label` when
    * the tool offers a "for this session" answer for its key.
    */
-  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval, session?: { key: string; label: string }, probe?: PermissionProbe, callId?: string): Promise<ApprovalResult> {
+  private ask(name: string, detail: string, mode: PermissionMode, reason: string | null, programs: string[], custom = false, browser?: BrowserApproval, session?: { key: string; label: string }, probe?: PermissionProbe, callId?: string, sandboxLine?: string): Promise<ApprovalResult> {
     const id = randomUUID();
     const learn = { tool: name, key: learnKey(name, programs, browser, session?.key), line: actionLine(name, undefined, detail) };
     this.notifyHook('permission_prompt', `Silo Harness needs your permission to use ${claudeToolName(name)}`);
     // A browser card names its kind and site for the renderer's wording, and carries the amber note
     const extra = browser ? { ...(browser.note ? { note: browser.note } : {}), browser: { card: browser.card, site: browser.site.display } } : {};
-    // The call the card belongs to, so the window puts it on that call's row when several run
-    const owner = callId ? { callId } : {};
+    // The call the card belongs to, so the window puts it on that call's row when several run; after a sandbox block,
+    // the line of the command's output that showed it (plain text, for the person only)
+    const owner = { ...(callId ? { callId } : {}), ...(sandboxLine ? { sandboxLine } : {}) };
     probe?.cardShown();
     const answered = (resolve: (r: ApprovalResult) => void) => (r: ApprovalResult) => {
       probe?.cardAnswered();
@@ -2631,6 +2637,15 @@ export class Agent {
       const durationMs = elapsed();
       // The same rule the saved transcript applies when it is shown again (sessions.ts).
       const ok = !FAILED_RESULT.test(result.content);
+      // A bash call in the shell sandbox: its row's mark, kept with the session (who allowed a run outside, too)
+      let sandbox: SandboxMark | undefined;
+      if (result.sandbox) {
+        const by = this.sandboxBy.get(call.id);
+        sandbox = { ...result.sandbox, ...(result.sandbox.outside && by ? { by } : {}) };
+        (this.session.sandboxed ??= {})[call.id] = sandbox;
+        timing?.sandboxed(sandbox);
+      }
+      this.sandboxBy.delete(call.id);
       if (result.hiddenArgs && !hidden.length) {
         // The call found a secret the look before it missed (the field turned into a password field meanwhile): hide it
         // in the stored call too, which is this same object, and from the PostToolUse hooks.
@@ -2655,7 +2670,7 @@ export class Agent {
       }
       if (post?.context.length) extra.push(`${HOOK_NOTE_PREFIX}context: ${event}]\n${post.context.join('\n\n')}`);
       if (extra.length) result = { ...result, content: `${result.content}\n\n${extra.join('\n\n')}` };
-      this.emit({ type: 'tool_end', id: call.id, name, result: result.content, ok, image: result.image, durationMs });
+      this.emit({ type: 'tool_end', id: call.id, name, result: result.content, ok, image: result.image, durationMs, ...(sandbox ? { sandbox } : {}) });
       timing?.done(outcome);
       return result;
     };

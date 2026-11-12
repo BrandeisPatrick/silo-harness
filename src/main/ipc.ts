@@ -100,6 +100,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
         browser: { ...current.browser, ...next.browser },
         webSearch: { ...current.webSearch, ...next.webSearch },
         autoMode: { ...current.autoMode, ...next.autoMode } as AppConfig['autoMode'],
+        sandbox: { ...current.sandbox, ...next.sandbox },
         // Named providers change through the files, the command line and providers.setModel only.
         providers: current.providers,
         mcpServers: current.mcpServers,

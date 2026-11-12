@@ -270,6 +270,24 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 **Only your own settings.json may set `autoMode`.** A project's file may not, since a repository could otherwise allow its own actions or send your conversation to a model of its choosing; it is ignored there with a problem line.
 
+### Shell sandbox
+
+The `sandbox` block turns on the shell sandbox (see [The shell sandbox](reference.md#the-shell-sandbox)). Settings → Permissions → Auto mode has the same three settings.
+
+| Field | Default | What it is |
+| --- | --- | --- |
+| `enabled` | `false` | In Auto mode, commands that stay in the project and temp folders run in a macOS sandbox without the safety check; Plan mode's reads run read-only. |
+| `loopback` | `false` | Sandboxed commands may reach this Mac's own ports, except databases, Docker, Ollama and Silo's own. |
+| `allowWrite` | `[]` | Folders sandboxed commands may also write: absolute or `~/…`, never `/`, your home folder or a folder above it. |
+
+```json
+{
+  "sandbox": { "enabled": true, "loopback": true, "allowWrite": ["~/scratch"] }
+}
+```
+
+**Only your own settings.json (or Settings) may set `sandbox`.** A project's file may not, since a repository could otherwise turn it on, open local ports or make more folders writable; it is ignored there with a problem line.
+
 ### Permission rules
 
 The `permissions` block holds rules for every project, in Claude Code's format (see [Permission rules](reference.md#permission-rules)). Settings → Permissions lists them read-only; a project's own rules are added there.

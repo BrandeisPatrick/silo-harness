@@ -420,6 +420,22 @@ export interface SandboxConfig {
   allowWrite?: string[];
 }
 
+/**
+ * How a bash call went in the shell sandbox (its row's mark): it ran inside, read-only in Plan mode, or hit the
+ * sandbox (`blocked`: the kind, and the line of its output that showed it) and then, allowed by the check or by the
+ * user, ran again outside (`outside`, `by`, and `first`: the run inside, cut short).
+ */
+export interface SandboxMark {
+  readOnly?: boolean;
+  blocked?: { kind: 'refused' | 'lookup'; line: string };
+  outside?: boolean;
+  by?: 'check' | 'user';
+  first?: string;
+}
+
+/** A sandboxed call in fixed words, for the timing log and /report: it stayed inside, was blocked, or ran again outside */
+export type SandboxWord = 'inside' | 'blocked' | 'rerun';
+
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */
 export type ApprovalScope = 'session' | 'project';
 
@@ -551,7 +567,7 @@ export type AgentEvent =
   | { type: 'thinking_delta'; text: string }
   | { type: 'thinking_done' }
   | { type: 'tool_start'; id: string; name: string; args: unknown; mcp?: McpCallNames }
-  | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number }
+  | { type: 'tool_end'; id: string; name: string; result: string; ok: boolean; image?: string; durationMs?: number; sandbox?: SandboxMark }
   /**
    * Token usage of one model call (prompt = input incl. history and cached tokens, completion = generated). Emitted
    * after each call. The cache counts, of the prompt, only when the provider reports them.
@@ -570,7 +586,7 @@ export type AgentEvent =
    * like a sign-in site"); its detail is the action ("Click "Pay now" on shop.example"), then on a second line the
    * model's reason when it gave one, then for browser_eval a blank line and the code.
    */
-  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; mcp?: McpCallNames; callId?: string }
+  | { type: 'approval_request'; id: string; name: string; detail: string; mode: PermissionMode; reason?: string; alwaysLabel: string; projectLabel: string; note?: string; browser?: BrowserCardInfo; mcp?: McpCallNames; callId?: string; sandboxLine?: string }
   /** The model submitted a plan (plan mode). The run ends right after this with reason 'plan'. */
   | { type: 'plan_proposed'; plan: PlanInfo }
   /** Files changed in this session (snapshot or git) may have changed; `count` is the current number of changed files. */
@@ -1024,7 +1040,7 @@ export type TranscriptItem =
    */
   | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string; worked?: number }
   | { role: 'assistant'; text: string }
-  | { role: 'tool'; name: string; args: string; result: string; ok: boolean }
+  | { role: 'tool'; name: string; args: string; result: string; ok: boolean; sandbox?: SandboxMark }
   /** A submit_plan call is shown as a plan card instead of a tool row */
   | { role: 'plan'; plan: PlanInfo }
   /** A create_artifact call is shown as an artifact card instead of a tool row */

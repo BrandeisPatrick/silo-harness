@@ -1,6 +1,7 @@
 // Tool rows: `[chevron] [tool icon] Verb  argument  …  meta`, with per-tool bodies (diffs, commands,
 // file views, outputs) and a small cache of known file contents so edit diffs can show real line numbers.
 
+import type { SandboxMark } from '../shared/types';
 import { basename, escapeHtml, formatCount, formatDuration } from './dom.js';
 import { lineDiff, numberRows, renderDiff, diffStats, statHtml, type DiffRow } from './diff.js';
 import { highlight, langFromPath } from './highlight.js';
@@ -515,6 +516,22 @@ export interface ToolResult {
   ok: boolean;
   image?: string;
   durationMs?: number;
+  /** bash in the shell sandbox: how it went (the row's mark) */
+  sandbox?: SandboxMark;
+}
+
+/** A bash result without the notes the shell sandbox wrote for the model: the row says them in its own words */
+function withoutSandboxNotes(result: string): string {
+  return result.replace(/^\[sandbox: blocked \([^\n]*\); allowed, ran again outside\]\n/, '').replace(/\n\[sandbox: Plan mode runs commands read-only[^\n]*\]\s*$/, '');
+}
+
+/** The row's line about the shell sandbox, under the command: where it ran, and what happened after a block (the output shows the block itself) */
+function sandboxNote(m: SandboxMark): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'tool-note tool-sandbox-note';
+  if (!m.blocked) el.textContent = m.readOnly ? 'Ran in the sandbox, read-only' : 'Ran in the sandbox';
+  else el.textContent = ['Sandbox blocked', ...(m.outside ? [m.by === 'user' ? 'you allowed it' : 'checked', 'ran again outside'] : m.readOnly ? ['Plan mode is read-only'] : [])].join(' · ');
+  return el;
 }
 
 export interface ToolCard {
@@ -999,6 +1016,11 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
     finish(res: ToolResult) {
       if (!card.running) return;
       card.running = false;
+      const boxed = name === 'bash' && res.sandbox && typeof res.sandbox === 'object' ? res.sandbox : null;
+      if (boxed) {
+        res = { ...res, result: withoutSandboxNotes(res.result) };
+        summary.querySelector('.tool-meta')!.insertAdjacentHTML('beforebegin', `<span class="tool-sandbox" title="${boxed.blocked ? (boxed.outside ? 'Blocked in the sandbox, then ran outside' : 'Blocked in the sandbox') : 'Ran in the sandbox'}">sandbox</span>`);
+      }
       if (name === 'show_image') {
         if (res.ok && /^Shown to the user:/.test(res.result)) {
           el.remove();
@@ -1065,7 +1087,12 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
         else files.delete(key);
       } else if (name === 'bash') {
         const { output } = bashParts(res.result);
-        body.appendChild(output.trim() ? outBlock(clip(stripCwd(output).replace(/\n$/, ''))) : Object.assign(document.createElement('div'), { className: 'tool-note', textContent: 'No output' }));
+        const shown = output.trim() ? outBlock(clip(stripCwd(output).replace(/\n$/, ''))) : Object.assign(document.createElement('div'), { className: 'tool-note', textContent: 'No output' });
+        if (boxed?.outside && typeof boxed.first === 'string') {
+          // Two runs: the one the sandbox blocked, then the one outside
+          const label = (text: string) => Object.assign(document.createElement('div'), { className: 'tool-note tool-run-label', textContent: text });
+          body.append(label('In the sandbox'), outBlock(clip(stripCwd(bashParts(boxed.first).output).replace(/\n$/, '')), 'note'), label('Outside'), shown);
+        } else body.appendChild(shown);
       } else if (name.startsWith('terminal_')) {
         terminalBody(name, body, res.result);
       } else if (name === 'update_tasks' && body.querySelector('.task-snapshot')) {
@@ -1103,6 +1130,11 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
         thumb.title = 'Open the image';
         thumb.draggable = false;
         summary.appendChild(thumb);
+      }
+      if (boxed) {
+        const cmd = body.querySelector(':scope > .cmd');
+        if (cmd) cmd.after(sandboxNote(boxed));
+        else body.prepend(sandboxNote(boxed));
       }
     },
     interrupt() {
