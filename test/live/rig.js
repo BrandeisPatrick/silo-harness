@@ -100,10 +100,11 @@ async function launch(opts = {}) {
   };
   if (ant && config.provider === 'portkey') {
     // The relay is not api.anthropic.com, so the gateway block would talk to it in the OpenAI format. A provider of
-    // type anthropic keeps the app on Anthropic's own API, as with a key; it takes the block's model and context size.
+    // type anthropic keeps the app on Anthropic's own API, as with a key; it takes the block's model and context size,
+    // and the label the block has with a key, so the window reads the same.
     const block = { ...config.portkey, baseURL: ant.baseURL };
     config.portkey = block;
-    config.providers = { ...(config.providers || {}), live: { type: 'anthropic', baseURL: ant.baseURL, apiKeyEnv: 'SILO_HARNESS_LIVE_RELAY_KEY', model: block.model, contextWindow: block.contextWindow } };
+    config.providers = { ...(config.providers || {}), live: { type: 'anthropic', label: 'Gateway', baseURL: ant.baseURL, apiKeyEnv: 'SILO_HARNESS_LIVE_RELAY_KEY', model: block.model, contextWindow: block.contextWindow } };
     config.provider = 'live';
   }
   const configFile = path.join(profile, 'config.json');
