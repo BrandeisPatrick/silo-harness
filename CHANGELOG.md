@@ -1,16 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.17.1 — 2026-11-11
 
-Commands that only look like reads no longer run without Auto mode's check or pass as reads in Plan mode.
+Commands that only look like reads now get Auto mode's check, and Plan mode refuses them.
 
 ### Security
 
-- **Hidden commands caught.** A command that hides another one in a file pattern, a comment, a here-document or `$'…'` quoting is no longer treated as a read.
-- **Wildcards stay names.** `sort *`, `uniq *` and the like are no longer treated as reads, since a file's name could become an option or the file written.
-- **Brace lists checked.** A command with a brace list such as `sort {-o,out} f` is no longer treated as a read.
-- **Lookups stay local.** `npm view`, `pip list` and `cargo search` are reads only with a plain package name and your own registry.
-- **Git history kept.** `git reflog expire` and `git reflog delete` are no longer treated as reads.
+- **Hidden commands caught.** A command that hides another in a file pattern, a comment, a here-document or `$'…'` quoting is checked like any other command ([details](docs/reference.md#auto-mode)).
+- **Wildcards stay names.** `sort *`, `uniq *` and similar commands are checked, since a file's name could become an option or the file written.
+- **Brace lists checked.** A command with a brace list such as `sort {-o,out} f` is checked like any other command.
+- **Lookups stay local.** `npm view`, `pip list` and `cargo search` run unchecked only with a plain package name and your own registry.
+- **Git history kept.** `git reflog expire` and `git reflog delete` are checked like any other command.
 
 ## 0.17.0 — 2026-11-11
 
