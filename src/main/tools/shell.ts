@@ -218,7 +218,7 @@ function makeBash(sandboxed: boolean): Tool {
       if (!block || ctx.signal?.aborted) return { content: rendered(inside, timeout) };
       if (plan.readOnly) return { content: `${rendered(inside, timeout)}\n${PLAN_SANDBOX_NOTE}` };
       // Blocked: the check (or a card) decides on a run outside, told what the first run hit
-      const again = await ctx.approve('bash', judged, undefined, { sandboxBlock: { line: block.line } });
+      const again = await ctx.approve('bash', judged, undefined, { sandboxBlock: { kind: block.kind, line: block.line } });
       if (!again.ok) return { content: `${again.message}\n\n[the run in the sandbox]\n${rendered(inside, timeout)}` };
       const out = await runShell(command, start, { timeout, signal: ctx.signal });
       return { content: `${rerunNote(block.line)}\n${rendered(out, timeout)}` };

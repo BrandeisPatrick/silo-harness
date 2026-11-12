@@ -200,11 +200,33 @@ export function sandboxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 // ---------- Blocks ----------
 
-/** Output that shows a refused write, read, connection or name lookup (Codex and DeepSeek look for the same words) */
-const BLOCK_SIGNS: RegExp[] = [/operation not permitted/i, /\bEPERM\b/, /\[Errno 1\]/, /nodename nor servname/i, /\bENOTFOUND\b/, /\bEAI_NONAME\b/, /could not resolve host/i];
+/**
+ * What a block was, by the words that showed it: a refused operation (a write, a secret's content, a connection, a
+ * signal: EPERM looks the same for each) or a refused name lookup. Only this reaches the safety check, never the
+ * command's output, which the command chooses.
+ */
+export type BlockKind = 'refused' | 'lookup';
 
-/** What showed a block: the line, cut to a readable length. */
+/** Output that shows a refused write, read, connection or name lookup (Codex and DeepSeek look for the same words) */
+const BLOCK_SIGNS: { re: RegExp; kind: BlockKind }[] = [
+  { re: /operation not permitted/i, kind: 'refused' },
+  { re: /\bEPERM\b/, kind: 'refused' },
+  { re: /\[Errno 1\]/, kind: 'refused' },
+  { re: /nodename nor servname/i, kind: 'lookup' },
+  { re: /\bENOTFOUND\b/, kind: 'lookup' },
+  { re: /\bEAI_NONAME\b/, kind: 'lookup' },
+  { re: /could not resolve host/i, kind: 'lookup' },
+];
+
+/** The fixed words the safety check reads for each kind of block */
+export const BLOCK_KIND_WORDS: Record<BlockKind, string> = {
+  refused: 'the sandbox refused an operation: a write outside the working directory and temp folders or to a protected file, reading a secret, a connection, or a signal to another process',
+  lookup: 'the sandbox refused a name lookup: the command needs the network',
+};
+
+/** What showed a block: its kind, and the line (for the person, never the check), cut to a readable length. */
 export interface SandboxBlock {
+  kind: BlockKind;
   line: string;
 }
 
@@ -221,7 +243,8 @@ export function detectBlock(code: string | number, stdout: string, stderr: strin
     for (const raw of text.split('\n')) {
       const line = raw.trim();
       if (!line || known.has(line)) continue;
-      if (BLOCK_SIGNS.some((re) => re.test(line))) return { line: line.length > 300 ? `${line.slice(0, 299)}…` : line };
+      const sign = BLOCK_SIGNS.find((s) => s.re.test(line));
+      if (sign) return { kind: sign.kind, line: line.length > 300 ? `${line.slice(0, 299)}…` : line };
     }
   }
   return null;

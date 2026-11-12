@@ -864,7 +864,7 @@ export class Agent {
         this.autoNotice('model', "No model for Auto mode's check: risky actions ask instead.");
         return settle(decide('guard'));
       }
-      const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}), ...(opts.sandboxBlock ? { sandbox: { line: opts.sandboxBlock.line } } : {}) };
+      const action: ClassifiedAction = { name, detail, args: call?.args, callId: call?.id, ...(opts.browser ? { browser: browserFacts(detail, opts.browser) } : {}), ...(opts.sandboxBlock ? { sandbox: { kind: opts.sandboxBlock.kind } } : {}) };
       const r = await this.autoCheck(checker, cfg, action, () => settle(decide('guard')), { key: onceKey ?? actionKey(name, detail), browser: opts.browser }, probe);
       return probe ? done('check', r) : r;
     });

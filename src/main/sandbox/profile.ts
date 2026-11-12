@@ -2,12 +2,18 @@
 // choice to the Seatbelt profile text and its parameters (docs/research/shell-sandbox-design.md, sections 1 and 2).
 // Pure: every path comes in as an argument, already a real path (/tmp is /private/tmp).
 //
-// Allow by default, then deny: writes outside the project, temp and extra folders; protected names in them at any
-// depth, every .git last of all; reads of secrets; the network (this Mac's own ports only when asked); other apps,
-// launchd jobs, preferences, the keychain, the clipboard, notifications and signals to anything outside.
+// Allow by default, then deny: writes outside the project, temp and extra folders; in each of them, at any depth,
+// protected names, secrets and every .git (last of all); reads of secrets; the network (this Mac's own ports only when
+// asked); other apps, launchd jobs, preferences, the keychain, the clipboard, notifications and signals to anything
+// outside. What is protected is protected in every folder a command can write, temp folders included: otherwise a
+// command could move a folder out to a temp folder, change it there and move it back, or build it there and move it in.
 
-/** Inside the project and the extra folders, at any depth: what configures git, editors, CI, direnv, the app or another agent */
-export const PROTECTED_NAMES = ['.silo-harness', '.open-harness', '.claude', '.vscode', '.idea', '.husky', '.github/workflows', '.mcp.json', '.envrc', '.gitmodules'];
+/**
+ * In every folder a command can write, at any depth: what configures git, editors, CI, direnv, the app or another
+ * agent. A name of two segments protects its first one whole (.github, not only .github/workflows), since the folder
+ * could otherwise be moved out and back.
+ */
+export const PROTECTED_NAMES = ['.silo-harness', '.open-harness', '.claude', '.vscode', '.idea', '.husky', '.github', '.mcp.json', '.envrc', '.gitmodules'];
 /** …except the folders in them that hold skills, commands, agents or worktrees, no executable configuration */
 export const OPEN_NAMES = ['.claude/skills', '.claude/commands', '.claude/agents', '.claude/worktrees', '.silo-harness/skills', '.open-harness/skills'];
 
@@ -36,14 +42,17 @@ export interface ProfileInput {
   project: string;
   /** The temp folders: /private/tmp and the user's own /private/var/folders/<x>/<y> (and $TMPDIR when it is elsewhere) */
   temp: string[];
-  /** Folders the user listed (sandbox.allowWrite): writable, with the project's protected names and .git */
+  /** Folders the user listed (sandbox.allowWrite): writable, and cannot be moved or removed themselves */
   extra: string[];
   /** Allow bind, accept and connect on this Mac's own ports (localhost), but `deniedPorts` */
   loopback: boolean;
   deniedPorts: number[];
   /** Plan mode: nothing is writable but the null device and pipes */
   readOnly: boolean;
-  /** Names of secrets at any depth (.ssh, .aws, id_rsa, .config/gh …), unreadable; the .env family and key files are built in */
+  /**
+   * Names of secrets at any depth (.ssh, .aws, id_rsa, .config/gh …), unreadable, and unwritable where a command can
+   * write (a renamed secret would be readable); the .env family and key files are built in
+   */
   secretNames: string[];
   /** Folders and files never readable: the app's data, browser profiles, the keychains, the settings files */
   secretPaths: string[];
@@ -117,18 +126,24 @@ export function buildProfile(input: ProfileInput): Profile | null {
     out.push(`(allow file-write*\n  ${[...writable, ...devices].join('\n  ')})`);
     out.push(';; The project folder and each listed folder itself cannot be moved, removed or replaced');
     out.push(`(deny file-write* ${workspaces.map((w) => `(literal ${w.ref})`).join(' ')})`);
-    const names = alternation(PROTECTED_NAMES);
-    const open = alternation(OPEN_NAMES);
-    out.push(';; In them, at any depth: what configures editors, CI, direnv, the app or another agent; their skills, commands, agents and worktrees stay open');
-    out.push(`(deny file-write*\n  ${workspaces.map((w) => `(regex #"^${escapeRegex(w.path)}/(.*/)?(${names})(/|$)")`).join('\n  ')})`);
-    out.push(`(allow file-write*\n  ${workspaces.map((w) => `(regex #"^${escapeRegex(w.path)}/(.*/)?(${open})(/|$)")`).join('\n  ')})`);
+    // Every folder a command can write, each pattern below it (a protected name in the folder's own path is not matched)
+    const under = (pattern: string) => [...workspaces.map((w) => w.path), ...temp].map((r) => `(regex #"^${escapeRegex(r)}/(.*/)?${pattern}")`).join('\n  ');
+    out.push(';; In each of them (temp folders too), at any depth: what configures git hooks, editors, CI, direnv, the app or another agent; their skills, commands, agents and worktrees stay open');
+    out.push(`(deny file-write*\n  ${under(`(${alternation(PROTECTED_NAMES)})(/|$)`)})`);
+    out.push(`(allow file-write*\n  ${under(`(${alternation(OPEN_NAMES)})(/|$)`)})`);
+    // A secret that could be renamed could be read: its name cannot be written, made, moved or removed (.env.example
+    // included, for a simpler rule), nor a folder on the way to a secret of two or more segments (.config of .config/gh)
+    const secrets = ['\\.env(\\.[-a-z0-9_]+)?', ...input.secretNames.map(escapeRegex), '[^/]*\\.(pem|p12|key)'];
+    const prefixes = [...new Set(input.secretNames.flatMap((n) => n.split('/').slice(0, -1).map((_, i, segs) => segs.slice(0, i + 1).join('/'))))];
+    out.push(';; Secrets, in each of them: cannot be made, changed, renamed or removed; nor the folders on the way to one (.config of .config/gh)');
+    out.push(`(deny file-write*\n  ${under(`(${secrets.join('|')})(/|$)`)}${prefixes.length ? `\n  ${under(`(${alternation(prefixes)})$`)}` : ''})`);
     const keep = [...input.protectedPaths.filter(embeddable).map((p) => `(subpath ${param('KEEP', p)})`), ...input.protectedFolders.filter(embeddable).map((p) => `(literal ${param('KEEP', p)})`)];
     if (keep.length) {
       out.push(";; Wherever they are: shell start-up files, launch agents, keys, the app's data, the files that hold permission rules and their folders");
       out.push(`(deny file-write*\n  ${keep.join('\n  ')})`);
     }
-    out.push(';; Every .git, at any depth: read-only, and it cannot be made, moved or replaced');
-    out.push(`(deny file-write*\n  ${workspaces.map((w) => `(regex #"^${escapeRegex(w.path)}/(.*/)?\\.git(/|$)")`).join('\n  ')})`);
+    out.push(';; Every .git, at any depth, in each of them: read-only, and it cannot be made, moved or replaced');
+    out.push(`(deny file-write*\n  ${under('\\.git(/|$)')})`);
   }
   out.push('');
 

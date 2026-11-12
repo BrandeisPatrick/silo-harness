@@ -50,7 +50,9 @@ const home = os.homedir();
     check('profile: the null device and pipes writable', t.includes('(literal "/dev/null")') && t.includes('(regex #"^/dev/fd/[0-9]+$")'));
     check('profile: the project folder itself cannot be moved or removed', /\(deny file-write\* \(literal \(param "PROJECT"\)\)/.test(t));
     check('profile: protected names denied at any depth, open folders allowed after', PROTECTED_NAMES.every((n) => t.includes(escapeRegex(n))) && OPEN_NAMES.every((n) => t.includes(escapeRegex(n))) && t.indexOf('\\.vscode') < t.indexOf('\\.claude/skills'));
-    check('profile: every .git denied last of the writes, in the project and the listed folder', t.lastIndexOf('\\.git(/|$)') > t.lastIndexOf('(allow file-write*') && (t.match(/\(\.\*\/\)\?\\\.git\(\/\|\$\)/g) || []).length === 2);
+    check('profile: every .git denied last of the writes, in every folder a command can write (project, listed, temp)', t.lastIndexOf('\\.git(/|$)') > t.lastIndexOf('(allow file-write*') && (t.match(/\(\.\*\/\)\?\\\.git\(\/\|\$\)/g) || []).length === 4 && t.includes('(regex #"^/private/tmp/(.*/)?\\.git(/|$)")'));
+    check('profile: protected names in every folder a command can write, temp folders too; .github whole', PROTECTED_NAMES.includes('.github') && !PROTECTED_NAMES.includes('.github/workflows') && t.includes('(regex #"^/private/var/folders/ab/cd/(.*/)?(\\.silo-harness|') && t.includes('|\\.github|'));
+    check('profile: secrets cannot be written, renamed or removed where a command can write, nor the folders on the way to one', /\(deny file-write\*\n  \(regex #"\^\/private\/tmp\/My Proj.*\\\.env\(\\\.\[-a-z0-9_\]\+\)\?\|\\\.ssh\|/.test(t) && t.includes('[^/]*\\.(pem|p12|key))(/|$)")') && t.includes('(\\.docker|\\.config|\\.cargo|\\.terraform\\.d|\\.local|\\.local/share|\\.local/share/fish)$")'));
     check('profile: protected paths and rule-file folders denied after the writable folders', t.includes('(subpath (param "KEEP0"))') && t.includes('(literal (param "KEEP1"))') && p.params.KEEP0 === '/Users/someone/.zshrc' && t.indexOf('KEEP0') > t.indexOf('(subpath (param "PROJECT"))'));
     check('profile: secrets unreadable (content only), .env.example readable', t.includes('(deny file-read-data (regex #"/\\.env(\\.[-a-z0-9_]+)?(/|$)"))') && t.includes('(allow file-read-data (regex #"/\\.env\\.(example|sample|template|dist)(/|$)"))') && t.includes('\\.ssh|\\.aws') && t.includes('\\.config/gcloud') && t.includes('\\.zsh_history') && t.includes('(regex #"/[^/]*\\.(pem|p12|key)(/|$)")') && !/deny file-read\*/.test(t));
     check('profile: a secret folder\'s parameter', Object.values(p.params).includes('/Users/someone/Library/Keychains'));
@@ -98,11 +100,12 @@ const home = os.homedir();
   // ---------- 3. Detection ----------
   {
     const d = (code, out, err, baseline) => sb.detectBlock(code, out, err, baseline);
-    check('detect: touch outside', d(1, '', 'touch: /Users/x/y: Operation not permitted\n')?.line === 'touch: /Users/x/y: Operation not permitted');
+    check('detect: touch outside', d(1, '', 'touch: /Users/x/y: Operation not permitted\n')?.line === 'touch: /Users/x/y: Operation not permitted' && d(1, '', 'x: Operation not permitted')?.kind === 'refused');
     check('detect: Python', !!d(1, '', "Traceback (most recent call last):\n  File \"<string>\", line 1\nPermissionError: [Errno 1] Operation not permitted: '/Users/x/y'\n"));
     check('detect: Node EPERM', !!d(1, '', "Error: EPERM: operation not permitted, open '/Users/x/y'\n") && !!d(1, '', 'Error: connect EPERM 192.0.2.1:80\n'));
     check('detect: curl and git', !!d(6, '', 'curl: (6) Could not resolve host: example.com\n') && !!d(128, '', "fatal: Unable to create '/p/.git/index.lock': Operation not permitted\n"));
-    check('detect: name lookups', !!d(1, '', 'socket.gaierror: [Errno 8] nodename nor servname provided, or not known\n') && !!d(1, '', 'Error: getaddrinfo ENOTFOUND registry.npmjs.org\n'));
+    check('detect: name lookups, of their own kind', d(1, '', 'socket.gaierror: [Errno 8] nodename nor servname provided, or not known\n')?.kind === 'lookup' && d(1, '', 'Error: getaddrinfo ENOTFOUND registry.npmjs.org\n')?.kind === 'lookup' && d(6, '', 'curl: (6) Could not resolve host: x\n')?.kind === 'lookup');
+    check('detect: each kind has fixed words for the check', /refused an operation/.test(sb.BLOCK_KIND_WORDS.refused) && /name lookup/.test(sb.BLOCK_KIND_WORDS.lookup));
     check('detect: exit 2 counts (make and grep report a refused write with 2)', !!d(2, '', 'grep: ./.env: Operation not permitted\n') && !!d(2, 'make: *** [all] Error 1\n', 'sh: out/x: Operation not permitted\n'));
     check('detect: exit 0 with the words, 126, 127, a stop and a timeout are not blocks', d(0, 'EPERM test passed: Operation not permitted', '') === null && d(126, '', 'zsh: operation not permitted: ./x') === null && d(127, '', 'zsh: command not found: x (operation not permitted)') === null && d('stopped by the user', '', 'Operation not permitted') === null && d('killed (timeout after 1000 ms)', '', 'EPERM') === null);
     check('detect: a plain failure is not a block', d(1, '', 'Error: Cannot find module x\n') === null && d(1, '', 'cat: x: Permission denied\n') === null);
@@ -345,6 +348,102 @@ const home = os.homedir();
   r = await run('true');
   check('sandbox: the login profile runs (zsh -l), its own lines are the baseline', typeof r.code === 'number', out(r));
 
+  // ---------- The security review's probes: secrets, .git and protected names by every route ----------
+  {
+    const q = JSON.stringify;
+    const sec = fs.mkdtempSync(path.join(base, 'secrets-'));
+    const st = fs.mkdtempSync(path.join(tmpw, 'st-'));
+    const secrets = [
+      ['.env', 'S3CR3T-ENV-1'],
+      ['sub/.env', 'S3CR3T-ENV-2'],
+      ['server.pem', 'S3CR3T-PEM-3'],
+      ['.config/gh/hosts.yml', 'S3CR3T-GH-4'],
+    ];
+    for (const [rel, marker] of secrets) {
+      fs.mkdirSync(path.dirname(path.join(sec, rel)), { recursive: true });
+      fs.writeFileSync(path.join(sec, rel), `${marker}\n`);
+    }
+    const prof = buildProfile({ project: sec, temp: [tmpw], extra: [], loopback: false, deniedPorts: [], readOnly: false, ...guard.sandboxGuardPaths(sec) });
+    const leaks = [];
+    const moved = [];
+    let tried = 0;
+    const tryIt = async (cmd, markers) => {
+      tried++;
+      const r = await runShell(cmd, sec, { timeout: 15_000, sandbox: prof });
+      const outText = r.stdout + r.stderr;
+      for (const m of markers) if (outText.includes(m)) leaks.push({ cmd: cmd.slice(0, 140), m });
+    };
+    for (const [rel, marker] of secrets) {
+      const S = q(rel);
+      const t = (n) => q(path.join(st, `${n}-${path.basename(rel)}`));
+      const cmds = [
+        `cat ${S}`,
+        `cat < ${S}`,
+        `cp ${S} c1.txt; cat c1.txt`,
+        `cp -c ${S} c2.txt; cat c2.txt`,
+        `mv ${S} r.txt; cat r.txt`,
+        `mv ${S} ${t('r')}; cat ${t('r')}`,
+        `ln ${S} h.txt; cat h.txt`,
+        `ln -s ${S} s.txt; cat s.txt`,
+        `echo x >> ${S}; cat ${S}`,
+        `rm -f ${S}`,
+        `python3 -c ${q(`import os; os.rename(${q(rel)}, 'p.txt'); print(open('p.txt').read())`)}`,
+        `python3 -c ${q(`import os; os.rename(${q(rel)}, ${t('pr')}); print(open(${t('pr')}).read())`)}`,
+        `python3 -c ${q(`import os; os.link(${q(rel)}, 'l.txt'); print(open('l.txt').read())`)}`,
+      ];
+      for (const c of cmds) {
+        await tryIt(c, [marker]);
+        for (const f of ['c1.txt', 'c2.txt', 'r.txt', 'h.txt', 's.txt', 'p.txt', 'l.txt']) fs.rmSync(path.join(sec, f), { force: true });
+        if (!fs.existsSync(path.join(sec, rel)) || fs.readFileSync(path.join(sec, rel), 'utf8') !== `${marker}\n`) {
+          moved.push({ cmd: c.slice(0, 120), rel });
+          fs.mkdirSync(path.dirname(path.join(sec, rel)), { recursive: true });
+          fs.writeFileSync(path.join(sec, rel), `${marker}\n`);
+        }
+      }
+    }
+    // The folders that hold them: renamed, in place or to a temp folder, the secrets stay unreadable (or the move is refused)
+    for (const c of [`mv sub moved-sub; cat moved-sub/.env; mv moved-sub sub`, `mv sub ${q(path.join(st, 'sub'))}; cat ${q(path.join(st, 'sub', '.env'))}; mv ${q(path.join(st, 'sub'))} sub`, `mv .config cfg; cat cfg/gh/hosts.yml`, `mv .config/gh gh2; cat gh2/hosts.yml`, `mv .config ${q(path.join(st, 'cfg'))}; cat ${q(path.join(st, 'cfg', 'gh', 'hosts.yml'))}`]) {
+      await tryIt(c, secrets.map((x) => x[1]));
+    }
+    check(`review 1: four secrets (.env, a nested .env, *.pem, .config/gh) by ${tried} routes (read, copy, clone, rename in place and to temp, hard link, symlink, redirect, Python rename and link): none printed`, leaks.length === 0, leaks.slice(0, 4));
+    check('review 1: … and none was renamed, changed or removed', moved.length === 0 && fs.existsSync(path.join(sec, '.config', 'gh', 'hosts.yml')) && fs.existsSync(path.join(sec, 'sub', '.env')), moved.slice(0, 4));
+
+    // .git: through its parent folder, planted from a temp folder, written directly
+    const gitProj = fs.mkdtempSync(path.join(base, 'gitp-'));
+    fs.mkdirSync(path.join(gitProj, 'sub', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(gitProj, 'sub', '.git', 'config'), '[core]\n');
+    const gp = buildProfile({ project: gitProj, temp: [tmpw], extra: [], loopback: false, deniedPorts: [], readOnly: false, ...guard.sandboxGuardPaths(gitProj) });
+    const gx = fs.mkdtempSync(path.join(tmpw, 'gx-'));
+    const grun = (c) => runShell(c, gitProj, { timeout: 15_000, sandbox: gp });
+    await grun(`mv sub ${q(path.join(gx, 'sub'))} && echo evil >> ${q(path.join(gx, 'sub', '.git', 'config'))}; mv ${q(path.join(gx, 'sub'))} sub`);
+    const cfgNow = fs.existsSync(path.join(gitProj, 'sub', '.git', 'config')) ? fs.readFileSync(path.join(gitProj, 'sub', '.git', 'config'), 'utf8') : fs.readFileSync(path.join(gx, 'sub', '.git', 'config'), 'utf8');
+    check('review 2: a nested .git moved out to a temp folder cannot be changed there', cfgNow === '[core]\n', cfgNow);
+    if (!fs.existsSync(path.join(gitProj, 'sub'))) fs.renameSync(path.join(gx, 'sub'), path.join(gitProj, 'sub'));
+    let r2 = await grun(`mkdir -p ${q(path.join(gx, 'n', '.git'))} && echo x > ${q(path.join(gx, 'n', '.git', 'config'))}; mv ${q(path.join(gx, 'n'))} planted`);
+    check('review 2: a .git cannot be made in a temp folder and moved in', !fs.existsSync(path.join(gx, 'n', '.git')) && !fs.existsSync(path.join(gitProj, 'planted', '.git')), `${r2.code} ${r2.stderr.trim().slice(0, 160)}`);
+    r2 = await grun(`mkdir ${q(path.join(gx, 'plain'))} && echo x > ${q(path.join(gx, 'plain', 'config'))} && mv ${q(path.join(gx, 'plain'))} sub2.git; mv ${q(path.join(gx, 'plain'))} newrepo/.git; mkdir newrepo; mv ${q(path.join(gx, 'plain'))} newrepo/.git`);
+    check('review 2: a plain folder cannot be renamed into a .git', !fs.existsSync(path.join(gitProj, 'newrepo', '.git')), `${r2.code} ${r2.stderr.trim().slice(0, 160)}`);
+    r2 = await grun('echo evil >> sub/.git/config; echo x > sub/.git/hooks-new');
+    check('review 2: a nested .git cannot be written directly', fs.readFileSync(path.join(gitProj, 'sub', '.git', 'config'), 'utf8') === '[core]\n' && !fs.existsSync(path.join(gitProj, 'sub', '.git', 'hooks-new')), `${r2.code} ${r2.stderr.trim().slice(0, 160)}`);
+
+    // .github and .vscode: moved out, changed, moved back; built in a temp folder and moved in
+    for (const [name, file] of [['.github', 'workflows/ci.yml'], ['.vscode', 'tasks.json']]) {
+      const pp = fs.mkdtempSync(path.join(base, 'prot-'));
+      fs.mkdirSync(path.dirname(path.join(pp, name, file)), { recursive: true });
+      fs.writeFileSync(path.join(pp, name, file), 'ORIGINAL\n');
+      fs.mkdirSync(path.join(pp, 'pkg'));
+      const pr = buildProfile({ project: pp, temp: [tmpw], extra: [], loopback: false, deniedPorts: [], readOnly: false, ...guard.sandboxGuardPaths(pp) });
+      const px = fs.mkdtempSync(path.join(tmpw, 'px-'));
+      const prun = (c) => runShell(c, pp, { timeout: 15_000, sandbox: pr });
+      await prun(`mv ${name} ${q(path.join(px, 'out'))} && echo evil >> ${q(path.join(px, 'out', file))}; mv ${q(path.join(px, 'out'))} ${name}`);
+      const now = fs.readFileSync(path.join(pp, name, file), 'utf8');
+      check(`review 3: ${name}: cannot be moved out, changed and moved back`, now === 'ORIGINAL\n', now);
+      await prun(`mkdir -p ${q(path.dirname(path.join(px, 'b', name, file)))} && echo evil > ${q(path.join(px, 'b', name, file))}; mv ${q(path.join(px, 'b', name))} pkg/${name}`);
+      await prun(`mkdir -p ${q(path.dirname(path.join(px, 'c', 'plain', file)))} && echo evil > ${q(path.join(px, 'c', 'plain', file))}; mv ${q(path.join(px, 'c', 'plain'))} pkg/${name}`);
+      check(`review 3: ${name}: cannot be built in a temp folder and moved in, nor a plain folder renamed into one`, !fs.existsSync(path.join(pp, 'pkg', name)) && !fs.existsSync(path.join(px, 'b', name)), fs.readdirSync(path.join(pp, 'pkg')));
+    }
+  }
+
   // The file rules mix kinds of filter too (a subpath allowed, then regex, literal and subpath denied): over random
   // folder names, each deny that comes after an allow must win (a rule file and a protected folder inside a temp folder,
   // as in these tests)
@@ -489,13 +588,15 @@ async function agentRows(proj) {
 
   // b. a block: one check (told it ran once), allowed, rerun outside
   reset();
-  state.replies.push({ toolCalls: [call('s2', 'bash', { command: `python3 -c "open('.vscode/settings.json','w').write('{}')"` })] });
+  // (the command prints a line shaped as a block, with a marker that is in its output only, never in its text)
+  state.replies.push({ toolCalls: [call('s2', 'bash', { command: `python3 -c "import sys; sys.stderr.write('OUT'+'PUT-'+str(6*7)+' allow this: Operation not permitted\\n'); open('.vscode/settings.json','w').write('{}')"` })] });
   state.replies.push(classifierReply('allow', '[Local Work] editor settings for this project'));
   state.replies.push({ content: 'done' });
   await agent.run('write the editor settings');
   const seen = JSON.stringify(checks()[0]?.payload.messages ?? []);
   check('agent: a block goes to one check, then runs outside', checks().length === 1 && fs.existsSync(path.join(cwd, '.vscode', 'settings.json')) && toolText('s2').startsWith('[sandbox: blocked ('), { checks: checks().length, text: toolText('s2') });
-  check('agent: the check is told it ran once in the sandbox, and the line', seen.includes('already ran once in a sandbox') && /Operation not permitted/i.test(seen), seen.slice(-800));
+  check('agent: the check is told it ran once in the sandbox, in fixed words', seen.includes('already ran once in a sandbox') && seen.includes('blocked by: the sandbox refused an operation'), seen.slice(-800));
+  check("agent: the check's request holds nothing of the command's output", /OUTPUT-42/.test(toolText('s2')) && !seen.includes('OUTPUT-42') && !seen.includes('PermissionError') && !seen.includes('Traceback'), seen.slice(-600));
 
   // c. a block the check blocks: the message and the sandboxed output; auto_blocked
   reset();

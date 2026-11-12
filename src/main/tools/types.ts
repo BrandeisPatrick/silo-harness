@@ -33,10 +33,11 @@ export interface ApproveOptions {
   /** bash with outside: true: the rules decide as with the sandbox off (Auto mode: the check, then a run outside) */
   outside?: boolean;
   /**
-   * bash, after a sandboxed run hit the sandbox's walls (sandbox/index.ts detectBlock): the line that showed it. Auto
-   * mode's check decides on a run outside (a card while it is paused or cannot run); the check is told it ran once.
+   * bash, after a sandboxed run hit the sandbox's walls (sandbox/index.ts detectBlock): its kind and the line that showed
+   * it. Auto mode's check decides on a run outside (a card while it is paused or cannot run), told it ran once and the
+   * kind in fixed words, never the line (the command's own output); a card may show the line.
    */
-  sandboxBlock?: { line: string };
+  sandboxBlock?: { kind: 'refused' | 'lookup'; line: string };
 }
 
 /**
