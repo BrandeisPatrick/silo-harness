@@ -520,6 +520,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200);
 }
 .msg.system.card .md ul { margin-bottom: 0; }
+/* A card in sections (/report): each label sits with its own list, and the next label starts a new block */
+.msg.system.card .md p:has(+ ul) { margin-bottom: 4px; }
+.msg.system.card .md ul + p { margin-top: 16px; }
 
 /* Markdown */
 .md { overflow-wrap: anywhere; }
@@ -621,6 +624,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .tool-arg.mono { font-family: var(--mono); font-size: 0.9em; }
 .tool-meta { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tool-meta:empty { display: none; }
+/* Auto mode's safety check of the call is running (check_status): said quietly beside the command, which has not run yet */
+.tool-check { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; }
 .tool.denied .tool-verb { text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 50%, transparent); }
 .meta-err { color: var(--danger); }
 .git-add { color: var(--git-add); }
@@ -883,6 +888,11 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .status-line > * { flex: none; white-space: nowrap; }
 .status-line > .spacer { flex: 1 1 0; min-width: 0; }
 .status-line > .status-text { flex: 0 1 auto; min-width: 24px; overflow: hidden; text-overflow: ellipsis; }
+/* A narrow chat column (the rail and a pane open): what the run is doing keeps the room. "to interrupt" goes first (esc
+   stays, with its tooltip), then the token count */
+.status-line { container: status-line / inline-size; }
+@container status-line (max-width: 480px) { .stop-hint > span { display: none; } }
+@container status-line (max-width: 400px) { .status-line > .status-tokens { display: none; } }
 .status-icon { display: none; color: var(--success); }
 .status-hint { display: none; }
 .status-line.idle .spinner, .status-line.idle .status-time, .status-line.idle .status-tokens, .status-line.idle .stop-hint { display: none; }

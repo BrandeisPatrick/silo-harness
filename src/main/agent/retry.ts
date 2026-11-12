@@ -6,6 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { isContextLengthError } from '../compact';
+import type { FailKind } from './perf';
 
 /** The first try and five retries */
 export const MAX_ATTEMPTS = 6;
@@ -30,9 +31,15 @@ const QUOTA = /insufficient_quota|billing|credit balance/i;
 /** Refusals complete.ts answers with a changed request, never by sending the same one again */
 const FIELD_REFUSAL = /stream_options|include_usage|cache_control|prompt_cache_key|does not support tools/i;
 
-/** The connection closed (or went silent) before the reply finished: retryable like any dropped connection. */
+/**
+ * The connection closed (or went silent) before the reply finished: retryable like any dropped connection. `idle`:
+ * no data came for STREAM_IDLE_MS (the record calls that kind of failure "idle", agent/perf.ts).
+ */
 export class StreamDropped extends Error {
-  constructor(message = 'The connection closed before the reply finished.') {
+  constructor(
+    message = 'The connection closed before the reply finished.',
+    readonly idle = false,
+  ) {
     super(message);
     this.name = 'StreamDropped';
   }
@@ -125,6 +132,22 @@ export function isBusy(err: unknown): boolean {
   return BUSY_TYPES.has(bodyType(err));
 }
 
+/**
+ * What kind of failure ended an attempt, in the fixed words a record keeps (agent/perf.ts FailKind): no data for
+ * STREAM_IDLE_MS, a dropped or refused connection, a rate limit, a busy or failing service, a request too long for the
+ * context, or anything else. Reads only the status, the error type and the error's class, never its message's text
+ * into the result.
+ */
+export function failureKind(err: unknown): FailKind {
+  const e = err as Loose & { idle?: unknown };
+  if ((err instanceof StreamDropped || e?.name === 'StreamDropped') && e?.idle === true) return 'idle';
+  if (isContextLengthError(err)) return 'too_long';
+  if (statusOf(err) === 429 || bodyType(err) === 'rate_limit_error') return 'rate_limited';
+  if (isBusy(err)) return 'busy';
+  if (isConnectionError(err)) return 'connection';
+  return 'other';
+}
+
 /** The wait a Retry-After or retry-after-ms header asks for, in ms; undefined without a usable one. */
 export function retryAfterMs(err: unknown, now = Date.now()): number | undefined {
   const ms = headerOf(err, 'retry-after-ms');
@@ -189,8 +212,8 @@ export const retryTiming = {
 };
 
 export interface RetryHooks {
-  /** Waiting `delayMs` before attempt `next`: the status line says so */
-  onWait(text: string, delayMs: number, next: number): void;
+  /** Waiting `delayMs` before attempt `next`, after `err` ended the one before: the status line says so */
+  onWait(text: string, delayMs: number, next: number, err: unknown): void;
   /** The waiting is over (the reply started, or the loop ended): the status line goes back */
   onClear(): void;
 }
@@ -216,7 +239,7 @@ export async function withRetries<T>(attempt: (n: number) => Promise<T>, signal:
         if (delay > MAX_RETRY_AFTER_MS) throw new RetryGaveUp(`${statusOf(err) === 429 ? 'Rate limited.' : 'Provider busy.'} Try again in ${waitWords(delay)}.`, err);
         if (n >= MAX_ATTEMPTS) throw new RetryGaveUp(`Could not reach the provider after ${MAX_ATTEMPTS} tries:`, err);
         waiting = true;
-        hooks.onWait(retryStatusText(err, delay, n + 1), delay, n + 1);
+        hooks.onWait(retryStatusText(err, delay, n + 1), delay, n + 1, err);
         await retryTiming.sleep(delay, signal);
       }
     }

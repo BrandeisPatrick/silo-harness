@@ -14,8 +14,9 @@ import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropi
 import { compatEffortFields, effortRefused, effortRefusedNotice, isEffortRefusal } from './effort';
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
-import { idleWatch, isRetryable, StreamDropped, withRetries } from './retry';
+import { failureKind, idleWatch, isRetryable, StreamDropped, withRetries } from './retry';
 import type { RequestTiming } from './perf';
+import { StreamActivity, type StreamProgress } from './progress';
 
 /** What the agent lends a model call: its events, its usage report and the memories kept across calls. */
 export interface CompletionHost {
@@ -33,6 +34,8 @@ export interface CompletionHost {
   cacheKey?: string;
   /** Where the request's time goes (agent/perf.ts): attempts, retries, fallbacks, the provider's events */
   timing?: RequestTiming;
+  /** What the window is told as the request streams (agent/progress.ts); complete() sets it for each call */
+  activity?: StreamProgress;
   /** The reasoning effort chosen for a provider, read at each request (agent/effort.ts); undefined: send nothing */
   effort?(provider: string): EffortLevel | undefined;
 }
@@ -113,8 +116,9 @@ export function mergeUsage(prev: Usage | null, raw: RawUsage): Usage {
 
 /**
  * One model call, tried again while it fails in a way another try may mend (agent/retry.ts): a status line while it
- * waits (retry_status), and the text and thinking a failed attempt showed taken back (reply_discarded), so only the
- * attempt that completes is shown, kept and counted.
+ * waits (retry_status, with the retry in numbers for the history log), and the text and thinking a failed attempt
+ * showed taken back (reply_discarded), so only the attempt that completes is shown, kept and counted. While it streams
+ * the window hears of a tool call's input being written and of a long silence (agent/progress.ts).
  */
 export async function complete(
   host: CompletionHost,
@@ -129,15 +133,26 @@ export async function complete(
 ): Promise<Reply> {
   let shown = false;
   let waiting = false;
+  /** When the current attempt went out, and how long the last failed one ran */
+  let attemptAt = 0;
+  let ranMs = 0;
   const clear = () => {
     if (!waiting) return;
     waiting = false;
     host.emit({ type: 'retry_status', text: null });
   };
+  const activity = new StreamActivity((ev) => {
+    // A tool call's input being written: the reply started, as with text
+    if (ev.type === 'input_progress') clear();
+    host.emit(ev);
+  });
   const attemptHost: CompletionHost = {
     ...host,
+    activity,
     emit: (ev) => {
       if (ev.type === 'text_delta' || ev.type === 'thinking_delta') {
+        // Content: a silence on screen ends before the text shows
+        activity.content();
         // The reply started: the status line goes back to what the run is doing
         clear();
         shown = true;
@@ -148,21 +163,27 @@ export async function complete(
   return withRetries(
     async () => {
       shown = false;
+      attemptAt = Date.now();
       host.timing?.attempt();
+      activity.start();
       try {
         return await completeAttempt(attemptHost, cfg, client, model, history, specs, signal, turn, native);
       } catch (err) {
+        ranMs = Date.now() - attemptAt;
+        if (!signal.aborted) host.timing?.attemptFailed(failureKind(err));
         // What this attempt showed is not the answer: the window, the phone and the log drop it (a Stop keeps it)
         if (shown && !signal.aborted) host.emit({ type: 'reply_discarded' });
         throw err;
+      } finally {
+        activity.stop();
       }
     },
     signal,
     {
-      onWait: (text) => {
+      onWait: (text, delayMs, next, err) => {
         waiting = true;
         host.timing?.retryWait();
-        host.emit({ type: 'retry_status', text });
+        host.emit({ type: 'retry_status', text, retry: { attempt: next, waitMs: Math.max(0, Math.round(delayMs)), ranMs: Math.max(0, Math.round(ranMs)), kind: failureKind(err) } });
       },
       onClear: clear,
     },
@@ -289,10 +310,11 @@ async function completeStreaming(
   const d = decorate(history, specs);
   // A stream with no chunk for STREAM_IDLE_MS is a dropped connection
   const watch = idleWatch(signal);
+  host.activity?.dropAfter(watch.ms);
   try {
     return await readStream(host, client, model, d, includeUsage, onEmit, turn, watch);
   } catch (err) {
-    if (watch.idled()) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`);
+    if (watch.idled()) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`, true);
     throw err;
   } finally {
     watch.done();
@@ -324,6 +346,7 @@ async function readStream(
   for await (const chunk of stream) {
     watch.touch();
     host.timing?.event();
+    host.activity?.event();
     // With include_usage the counts arrive on a final chunk whose choices array is empty.
     if (chunk.usage) usage = mergeUsage(usage, chunk.usage as RawUsage);
     const choice = chunk.choices?.[0];
@@ -382,10 +405,17 @@ async function readStream(
       }
       if (tc.function?.name) call.function.name += tc.function.name;
       const args = tc.function?.arguments as unknown;
+      const before = call.function.arguments.length;
       if (typeof args === 'string') call.function.arguments += args;
       else if (args && typeof args === 'object') call.function.arguments += JSON.stringify(args);
+      // The window hears the call's name and size (never its input), throttled (agent/progress.ts)
+      host.activity?.toolInput(calls.indexOf(call), call.function.name, call.function.arguments.length - before);
     }
   }
+  // The idle limit ended the stream before the model finished: the OpenAI SDK ends an aborted stream quietly instead of
+  // throwing, so without this a stall after the first chunk (a gateway's opening role chunk, or keep-alive comments)
+  // would read as a finished, empty reply. A reply that did finish is kept, even if the connection stayed open after it.
+  if (watch.idled() && !finish) throw new StreamDropped(`No data from the provider for ${Math.round(watch.ms / 1000)} s.`, true);
   // A reply that began and then ended without a finish reason (or the usage that comes after it) was cut off by the
   // connection, not by the model
   if (received && !finish && !usage) throw new StreamDropped();
@@ -407,6 +437,8 @@ async function completeOnce(
   decorate: Decorate = plain,
 ): Promise<Reply> {
   const d = decorate(history, specs);
+  // Not streamed: no idle limit applies (the window never says when it would be dropped)
+  host.activity?.dropAfter(undefined);
   const res = await client.chat.completions.create({ model, messages: d.messages, tools: d.tools, stream: false, ...(host.maxOutput() ? { max_tokens: host.maxOutput() } : {}), ...d.extra } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal, maxRetries: 0 });
   host.timing?.event();
   if (res.usage) host.reportUsage(usageOf(res.usage as RawUsage));

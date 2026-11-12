@@ -1,6 +1,7 @@
 // The status line above the composer: the run (spinner, verb, elapsed time, tokens, esc) or, after a plan, a quiet
 // line with the keys; the compaction status while the conversation is summarised (/compact, "Compact now" and the
-// automatic one inside a run); the spinners' one shared timer; and the context meter.
+// automatic one inside a run); a long silence from the model ("No output for 45 s", counting up); the spinners' one
+// shared timer; and the context meter.
 
 import type { AppConfig, PermissionMode, SiloHarnessApi } from '../shared/types';
 import { createContextMeter, normalizeContext } from './context.js';
@@ -63,7 +64,53 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
   }
 
   function setStatusText(text: string): void {
+    // While a silence is shown it keeps the line; the text comes back when it ends
+    if (silence) {
+      silence.under = text;
+      return;
+    }
     if (statusState === 'run' && statusText.textContent !== text) statusText.textContent = text;
+  }
+
+  // ---------- A long silence from the model (stream_idle, agent/progress.ts) ----------
+
+  /**
+   * No content from the model for 30 s or more: the line counts up from `since` until content comes again, with when
+   * the connection is tried again (`dropMs`) or, while keep-alive data arrives, that it is still connected. `under` is
+   * the text it covers, put back when it ends.
+   */
+  let silence: { since: number; dropMs?: number; pings: boolean; under: string } | null = null;
+
+  /** "45 s", "2 min 05 s" */
+  function silenceTime(ms: number): string {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+  }
+
+  function silenceText(): string {
+    if (!silence) return '';
+    const tail = silence.pings ? ' · still connected' : silence.dropMs ? ` · retries at ${Math.max(1, Math.round(silence.dropMs / 60_000))} min` : '';
+    return `No output for ${silenceTime(Date.now() - silence.since)}${tail}`;
+  }
+
+  function paintSilence(): void {
+    if (silence && statusState === 'run') statusText.textContent = silenceText();
+  }
+
+  /** A stream_idle event: a silence of `ms` so far, or (null) content came again or the attempt ended. */
+  function setSilence(s: { ms: number; dropMs?: number; pings?: boolean } | null): void {
+    if (!s) {
+      if (!silence) return;
+      const under = silence.under;
+      silence = null;
+      statusLine.classList.remove('silent');
+      if (statusState === 'run') statusText.textContent = under || baseVerb();
+      return;
+    }
+    const under = silence?.under ?? statusText.textContent ?? baseVerb();
+    silence = { since: Date.now() - Math.max(0, Number(s.ms) || 0), dropMs: typeof s.dropMs === 'number' && s.dropMs > 0 ? s.dropMs : undefined, pings: s.pings === true, under };
+    statusLine.classList.add('silent');
+    paintSilence();
   }
 
   /** "Working…", or "Planning…" in plan mode */
@@ -116,6 +163,9 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
     setRunningStatus(v);
     // The last run of calls is live while a run goes on (a session brought on screen mid-run, too)
     updateLastGroup();
+    // A silence belonged to the run before (or to the session that was on screen)
+    silence = null;
+    statusLine.classList.remove('silent');
     if (v) {
       runStartedAt = startedAt;
       setStatus('run', baseVerb());
@@ -127,6 +177,7 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
       window.clearInterval(timer);
       timer = window.setInterval(() => {
         statusTime.textContent = elapsed(Date.now() - runStartedAt);
+        paintSilence();
       }, 1000);
     } else {
       if (statusState === 'run') setStatus('off');
@@ -265,6 +316,9 @@ export function createStatusLine({ boundary, api, config, currentMode, composerH
     },
     setStatus,
     setStatusText,
+    /** The verb under a silence, or the line's text */
+    statusText: () => silence?.under ?? statusText.textContent ?? '',
+    setSilence,
     baseVerb,
     showPlanReady,
     syncPlanStatus,

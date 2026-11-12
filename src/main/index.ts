@@ -31,6 +31,7 @@ import { setupProviders } from './providers-service';
 import { setupUpdates } from './updates';
 import { setupTiming } from './timing-service';
 import { setupCost } from './cost-service';
+import { setupReport } from './report-service';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -317,6 +318,7 @@ app.whenReady().then(() => {
   setupUpdates(a);
   setupTiming(a);
   setupCost(a);
+  setupReport(a);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

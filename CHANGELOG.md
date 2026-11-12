@@ -2,19 +2,33 @@
 
 ## Unreleased
 
-Fewer safety checks in Auto mode: reads in another folder run without one, and several edits to a file take one call.
+Auto mode asks for fewer safety checks, long steps say what they are doing, and `/report` shows where a session's time went.
+
+### New
+
+- **Session report.** `/report` shows where a session's time went: turns, model and tool calls, waits, checks, retries and silent stretches, numbers only ([details](docs/latency.md#report)).
 
 ### Improved
 
 - **Several edits at once.** `edit_file` makes several replacements in one file in one call, all or nothing, with one card showing every change.
+- **Tool input progress.** While the model writes a large tool input, the status line says so with its size: "Writing a file… 12 KB".
+- **Safety check status.** While Auto mode checks a command, its row and the status line say "Checking…" instead of looking as if it ran.
+- **Silence notice.** After 30 s with no output from the model, the status line counts up and says when the connection is tried again.
+- **Timing log on.** Each run's timing is kept in the data folder by default, numbers only; `"timingLog": false` turns it off ([format](docs/latency.md#the-timing-log)).
+
+### Fixed
+
+- **Stalled replies through a gateway.** A reply that goes silent for 5 minutes after it starts is now tried again, instead of ending empty.
 
 ### Security
 
-- **Reads after cd.** `cd repo && git log` and other reads behind a plain `cd` run without Auto mode's check, judged as if run in that folder ([details](docs/reference.md#auto-mode)).
+- **Reads after cd.** In `bash`, `cd repo && git log` and other reads behind a plain `cd` run without Auto mode's check, judged as if run in that folder ([details](docs/reference.md#auto-mode)).
 
 ### For developers
 
 - **Folder for bash.** `bash` takes `path`, the folder a command starts in; its card and row show it as `cd <folder> && <command>`.
+- **Session report script.** `node scripts/session-report.js <log>` prints the report for one session's history log, outside the app.
+- **New history records.** The history log keeps retries, safety checks, question cards and compaction starts as numbers and fixed words ([format](docs/latency.md#the-newer-history-records)).
 
 ## 0.17.1 — 2026-11-11
 

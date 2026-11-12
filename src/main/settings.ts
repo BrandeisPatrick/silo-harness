@@ -78,7 +78,7 @@ const SCALARS: Record<string, Check> = {
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
   checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
   toolConcurrency: describe(intBetween(1, 10), 'How many read-only tool calls of one reply run at the same time; 1 runs every call one after another. Default 4.'),
-  timingLog: describe(bool, "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder."),
+  timingLog: describe(bool, "Write each run's timing (numbers only, no content) to timing/timing.jsonl in the app's data folder. On unless set to false."),
 };
 
 /** Sections a settings file may set field by field. */

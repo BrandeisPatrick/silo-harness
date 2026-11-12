@@ -126,9 +126,32 @@ function fakeClock() {
     p.settle('/Users/jdoe/secret-project', 'acme-corp');
     tool.done('https://internal.example.com/x');
     t.group('acme-corp', 'Project Falcon', 'x');
-    const out = JSON.stringify(run.finish('jdoe@example.com')) + P.formatRun(run.finish('x'));
+    // The newer entry points: a failed attempt's kind, the silence between deltas, ask_user's question
+    const t2 = run.turn();
+    t2.attempt();
+    t2.attemptFailed('sk-ant-SECRET123');
+    t2.retryWait();
+    c.tick(30);
+    t2.attempt();
+    t2.toolDelta();
+    c.tick(4000);
+    t2.toolDelta();
+    t2.end('tool_use', 1);
+    const asking = t2.tool('ask_user', 1);
+    const q = asking.permission();
+    q.cardShown();
+    c.tick(2000);
+    q.cardAnswered();
+    q.settle('question', 'jdoe@example.com');
+    asking.done('ok');
+    const rec = run.finish('jdoe@example.com');
+    const out = JSON.stringify(rec) + P.formatRun(rec);
     const leaked = SECRETS.filter((x) => out.includes(x));
     check('2: secrets through every entry point of the recorder: none in the record or the note', leaked.length === 0, leaked);
+    const t2span = rec.turns[1];
+    check('2: …a failed attempt keeps a fixed word, the silence and the question are numbers', JSON.stringify(t2span.failedAttempts) === '[{"ms":0,"kind":"other"}]' && t2span.maxGapMs === 4000 && rec.tools[1].permission[0].path === 'question' && rec.summary.questionsMs === 2000 && rec.summary.failedAttempts === 1 && rec.summary.maxGapMs === 4000, { failed: t2span.failedAttempts, gap: t2span.maxGapMs, q: rec.tools[1].permission[0], s: rec.summary });
+    check('2: …and the words the history records keep come from fixed lists', P.failKindLabel('sk-ant-SECRET123') === 'other' && P.failKindLabel('idle') === 'idle' && P.verdictLabel('Project Falcon') === 'error' && P.verdictLabel('block') === 'block' && P.count('sk-ant-SECRET123') === 0 && P.count(-4) === 0 && P.count(12.6) === 13);
+    check('2: …the note says the user\'s answers apart from the approvals', /your answers 2s/.test(P.formatRun(rec)), P.formatRun(rec));
   }
 
   // ---------- 3: a real run: secrets in the prompt, arguments, paths, URLs, output, title, base URL, key ----------
@@ -232,7 +255,7 @@ function fakeClock() {
     const cur = fs.readFileSync(path.join(dir, 'timing.jsonl'), 'utf8');
     const old = fs.existsSync(path.join(dir, 'timing.1.jsonl'));
     check('6: past its cap the log moves to timing.1.jsonl and starts again', old && Buffer.byteLength(cur) <= 3000 + JSON.stringify(rec).length, { size: Buffer.byteLength(cur), old });
-    check('6: SILO_TIMING=1 or the setting turns it on, nothing else', P.timingLogOn({}, { SILO_TIMING: '1' }) && P.timingLogOn({ timingLog: true }, {}) && !P.timingLogOn({}, {}) && !P.timingLogOn({ timingLog: 'yes' }, { SILO_TIMING: 'true' }));
+    check('6: on by default, off only with timingLog false, and SILO_TIMING=1 forces it on', P.timingLogOn({}, {}) && P.timingLogOn(null, {}) && P.timingLogOn({ timingLog: true }, {}) && !P.timingLogOn({ timingLog: false }, {}) && !P.timingLogOn({ timingLog: false }, { SILO_TIMING: 'true' }) && P.timingLogOn({ timingLog: false }, { SILO_TIMING: '1' }));
   }
 
   // ---------- 7: the cost of recording ----------

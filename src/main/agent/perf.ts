@@ -1,5 +1,6 @@
-// Where a run's time goes: numbers per run, model turn and tool call, kept in memory for /timing and, when asked for
-// (SILO_TIMING=1 or the timingLog setting), appended to a JSON-lines file in the profile folder.
+// Where a run's time goes: numbers per run, model turn and tool call, kept in memory for /timing and appended to a
+// JSON-lines file in the profile folder at the run's end (on unless the timingLog setting is false; SILO_TIMING=1
+// forces it on).
 //
 // Privacy: nothing here takes text. Every field is a number, a count, or one of a fixed set of words; a tool's name is
 // kept only when it is one of the built-in tools (an MCP tool is "mcp", anything else "other"), the provider only as
@@ -18,8 +19,9 @@ export type Outcome = 'ok' | 'failed' | 'denied' | 'blocked' | 'stopped' | 'time
 /**
  * How one permission question was settled: a rule of the mode or project, a read-only command, something the user
  * allowed earlier in the session, an approval card, Auto mode's safety check, a refusal, or a PreToolUse hook.
+ * 'question' is not a permission: it is ask_user's question card, whose wait for the user is kept the same way.
  */
-export type PermissionPath = 'rule' | 'read_only' | 'allowed_before' | 'card' | 'check' | 'refused' | 'hook';
+export type PermissionPath = 'rule' | 'read_only' | 'allowed_before' | 'card' | 'check' | 'refused' | 'hook' | 'question';
 /** A changed request after a refusal, or a slower way of asking (see complete.ts, anthropic.ts). */
 export type Fallback = 'no_stream_usage' | 'no_cache_fields' | 'no_effort' | 'non_streaming' | 'plain_chat' | 'deferred_tools' | 'thinking_stripped' | 'compacted';
 /** The work the harness does before a request goes out (Agent.run's turn loop). */
@@ -27,12 +29,21 @@ export type PreStep = 'notes' | 'queue' | 'prune_compact' | 'context_note' | 'bu
 export const PRE_STEPS: readonly PreStep[] = ['notes', 'queue', 'prune_compact', 'context_note', 'build'];
 /** How a model turn ended. */
 export type Finish = 'stop' | 'tool_use' | 'length' | 'refusal' | 'error' | 'aborted';
+/**
+ * Why an attempt at a model request failed (agent/retry.ts failureKind): no data for the idle limit, a dropped or
+ * refused connection, a rate limit, a busy or failing service, a request too long for the context, anything else.
+ */
+export type FailKind = 'idle' | 'connection' | 'rate_limited' | 'busy' | 'too_long' | 'other';
+export const FAIL_KINDS: ReadonlySet<FailKind> = new Set<FailKind>(['idle', 'connection', 'rate_limited', 'busy', 'too_long', 'other']);
+/** What Auto mode's safety check said, as a record keeps it ('stopped': the run was stopped while it ran). */
+export type CheckVerdict = 'allow' | 'block' | 'ask' | 'error' | 'stopped';
+export const CHECK_VERDICTS: ReadonlySet<CheckVerdict> = new Set<CheckVerdict>(['allow', 'block', 'ask', 'error', 'stopped']);
 
 const PROVIDERS = new Set(['openrouter', 'portkey', 'openai', 'anthropic', 'groq', 'deepseek', 'together', 'ollama', 'lmstudio', 'openai-compatible']);
 const MODES = new Set(['ask', 'acceptEdits', 'auto', 'plan', 'bypass']);
 const RUN_ENDS = new Set(['done', 'aborted', 'max_turns', 'error', 'plan', 'loop']);
 const OUTCOMES = new Set<Outcome>(['ok', 'failed', 'denied', 'blocked', 'stopped', 'timed_out']);
-const PATHS = new Set<PermissionPath>(['rule', 'read_only', 'allowed_before', 'card', 'check', 'refused', 'hook']);
+const PATHS = new Set<PermissionPath>(['rule', 'read_only', 'allowed_before', 'card', 'check', 'refused', 'hook', 'question']);
 const FALLBACKS = new Set<Fallback>(['no_stream_usage', 'no_cache_fields', 'no_effort', 'non_streaming', 'plain_chat', 'deferred_tools', 'thinking_stripped', 'compacted']);
 const FINISHES = new Set<Finish>(['stop', 'tool_use', 'length', 'refusal', 'error', 'aborted']);
 
@@ -65,9 +76,24 @@ export function modelLabel(model: unknown): string {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(last) ? last : 'other';
 }
 
-const pick = <T extends string>(set: Set<T>, v: unknown, dflt: T): T => (typeof v === 'string' && set.has(v as T) ? (v as T) : dflt);
+const pick = <T extends string>(set: ReadonlySet<T>, v: unknown, dflt: T): T => (typeof v === 'string' && set.has(v as T) ? (v as T) : dflt);
 /** A duration or count: a finite number of 0 or more, rounded; else undefined (unknown, not zero). */
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : undefined);
+
+/** A failure kind as a record keeps it: one of FAIL_KINDS, else "other". */
+export function failKindLabel(v: unknown): FailKind {
+  return pick(FAIL_KINDS, v, 'other');
+}
+
+/** A safety check's verdict as a record keeps it: one of CHECK_VERDICTS, else "error". */
+export function verdictLabel(v: unknown): CheckVerdict {
+  return pick(CHECK_VERDICTS, v, 'error');
+}
+
+/** A duration or count for a record: a finite number of 0 or more, rounded; else 0. */
+export function count(v: unknown): number {
+  return num(v) ?? 0;
+}
 const ms = (v: number): number => Math.max(0, Math.round(v));
 
 /** A short random id: a session's or a run's, never the session's own id. */
@@ -140,6 +166,10 @@ export interface TurnSpan {
   attempts: number;
   /** The measured wait before each retry */
   retryWaits: number[];
+  /** Each attempt that failed: how long it ran (ms from its start to its failure) and why */
+  failedAttempts?: { ms: number; kind: FailKind }[];
+  /** The longest silence between two content events (thinking, text or a tool call's input) of the answering attempt */
+  maxGapMs?: number;
   fallbacks: Fallback[];
   finish?: Finish;
   promptTokens?: number;
@@ -169,12 +199,18 @@ export interface RunSummary {
   toolsMs: number;
   checksMs: number;
   approvalsMs: number;
+  /** The user's wait on ask_user's question cards (not counted as tool time) */
+  questionsMs: number;
   /** The rest: the harness between turns, hooks at the start and end, compaction */
   otherMs: number;
   compactionMs: number;
   retries: number;
   retryWaitMs: number;
+  /** Attempts that failed (the retried ones, and the last one when the request failed) */
+  failedAttempts: number;
   fallbacks: number;
+  /** The longest silence between content events in any turn */
+  maxGapMs: number;
   /** The turn that took longest (1-based), from the harness's start on it to its reply */
   slowest?: number;
 }
@@ -209,6 +245,8 @@ const perfClock: Clock = { now: () => performance.now() };
 export interface RequestTiming {
   /** An attempt goes out (the first, or a retry) */
   attempt(): void;
+  /** The attempt failed (not a user Stop), for this reason */
+  attemptFailed(kind: FailKind): void;
   /** The retry loop waits before the next attempt */
   retryWait(): void;
   /** A refused request is sent again changed, or a slower way is taken */
@@ -226,6 +264,7 @@ export class TurnTimer implements RequestTiming {
   readonly span: TurnSpan;
   private stepAt = 0;
   private reqAt = -1;
+  private attemptAt = -1;
   private waitAt = -1;
   private lastAt = -1;
   private phases = { thinking: 0, writing: 0 };
@@ -258,12 +297,19 @@ export class TurnTimer implements RequestTiming {
       this.span.retryWaits.push(ms(t - this.waitAt));
       this.waitAt = -1;
     }
+    this.attemptAt = t;
     this.span.attempts++;
     // The answering attempt's events count: what a failed one streamed was taken back
-    this.span.firstEventMs = this.span.firstThinkingMs = this.span.firstTextMs = this.span.firstToolMs = this.span.lastEventMs = undefined;
+    this.span.firstEventMs = this.span.firstThinkingMs = this.span.firstTextMs = this.span.firstToolMs = this.span.lastEventMs = this.span.maxGapMs = undefined;
     this.phases = { thinking: 0, writing: 0 };
     this.lastPhase = null;
     this.lastAt = -1;
+  }
+
+  attemptFailed(kind: FailKind): void {
+    if (this.attemptAt < 0) return;
+    (this.span.failedAttempts ??= []).push({ ms: ms(this.run.now() - this.attemptAt), kind: failKindLabel(kind) });
+    this.attemptAt = -1;
   }
 
   retryWait(): void {
@@ -299,7 +345,10 @@ export class TurnTimer implements RequestTiming {
     if (this.span.firstEventMs === undefined) this.span.firstEventMs = rel;
     this.span.lastEventMs = rel;
     // The time up to a delta went into making it; the time before the first one was waiting
-    if (this.lastAt >= 0) this.phases[phase] += t - this.lastAt;
+    if (this.lastAt >= 0) {
+      this.phases[phase] += t - this.lastAt;
+      this.span.maxGapMs = Math.max(this.span.maxGapMs ?? 0, ms(t - this.lastAt));
+    }
     this.lastAt = t;
     this.lastPhase = phase;
   }
@@ -598,6 +647,8 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
   let writingMs = 0;
   let retries = 0;
   let retryWaitMs = 0;
+  let failedAttempts = 0;
+  let maxGapMs = 0;
   let fallbacks = 0;
   let compactionMs = 0;
   let slowest: number | undefined;
@@ -609,6 +660,8 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
     writingMs += t.writingMs ?? 0;
     retries += t.retryWaits.length;
     retryWaitMs += t.retryWaits.reduce((a, b) => a + b, 0);
+    failedAttempts += t.failedAttempts?.length ?? 0;
+    maxGapMs = Math.max(maxGapMs, t.maxGapMs ?? 0);
     fallbacks += t.fallbacks.length;
     compactionMs += t.pre.prune_compact ?? 0;
     const own = (t.requestAt !== undefined ? t.requestAt - t.at : 0) + (t.endMs ?? 0);
@@ -620,26 +673,31 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
   let toolsMs = 0;
   let checksMs = 0;
   let approvalsMs = 0;
+  let questionsMs = 0;
   const byTurn = new Map<number, ToolSpan[]>();
   for (const s of r.tools) byTurn.set(s.turn, [...(byTurn.get(s.turn) ?? []), s]);
   for (const list of byTurn.values()) {
     // The reply's tool phase: from the first call's preparation to the last one's end
     const phase = unionLength(list.map((s) => [s.at, s.endAt + s.storeMs] as Interval));
     const human: Interval[] = [];
+    const asked: Interval[] = [];
     const check: Interval[] = [];
     for (const s of list) {
       for (const p of s.permission) {
-        if (p.humanAt !== undefined && p.humanMs) human.push([p.humanAt, p.humanAt + p.humanMs]);
+        if (p.humanAt !== undefined && p.humanMs) (p.path === 'question' ? asked : human).push([p.humanAt, p.humanAt + p.humanMs]);
         if (p.checkAt !== undefined && p.checkMs) check.push([p.checkAt, p.checkAt + p.checkMs]);
       }
     }
+    // ask_user runs alone, so its question never overlaps a card or a check
+    const q = unionLength(subtract(asked, human));
     const a = unionLength(human);
-    const c = unionLength(subtract(check, human));
+    const c = unionLength(subtract(check, [...human, ...asked]));
     approvalsMs += a;
+    questionsMs += q;
     checksMs += c;
-    toolsMs += Math.max(0, phase - a - c);
+    toolsMs += Math.max(0, phase - a - q - c);
   }
-  const otherMs = Math.max(0, r.wallMs - modelMs - toolsMs - checksMs - approvalsMs);
+  const otherMs = Math.max(0, r.wallMs - modelMs - toolsMs - checksMs - approvalsMs - questionsMs);
   return {
     wallMs: ms(r.wallMs),
     turns: r.turns.filter((t) => t.requestAt !== undefined).length,
@@ -651,11 +709,14 @@ export function summarize(r: Pick<RunRecord, 'wallMs' | 'turns' | 'tools'>): Run
     toolsMs: ms(toolsMs),
     checksMs: ms(checksMs),
     approvalsMs: ms(approvalsMs),
+    questionsMs: ms(questionsMs),
     otherMs: ms(otherMs),
     compactionMs: ms(compactionMs),
     retries,
     retryWaitMs: ms(retryWaitMs),
+    failedAttempts,
     fallbacks,
+    maxGapMs: ms(maxGapMs),
     slowest,
   };
 }
@@ -693,6 +754,7 @@ export function formatRun(r: Pick<RunRecord, 'summary' | 'turns'>): string {
   ];
   if (s.checksMs) parts.push(`safety checks ${duration(s.checksMs)}`);
   if (s.approvalsMs) parts.push(`your approvals ${duration(s.approvalsMs)}`);
+  if (s.questionsMs) parts.push(`your answers ${duration(s.questionsMs)}`);
   parts.push(`other ${duration(s.otherMs)}${s.compactionMs >= 1000 ? ` (compaction ${duration(s.compactionMs)})` : ''}`);
   const lines = [parts.join(' · ')];
   const t = r.turns.find((x) => x.n === s.slowest);
@@ -702,6 +764,7 @@ export function formatRun(r: Pick<RunRecord, 'summary' | 'turns'>): string {
     if (t.thinkingMs) bits.push(`thinking ${duration(t.thinkingMs)}`);
     if (t.writingMs) bits.push(`writing ${duration(t.writingMs)}`);
     if (t.retryWaits.length) bits.push(`${t.retryWaits.length} retr${t.retryWaits.length === 1 ? 'y' : 'ies'}`);
+    if ((t.maxGapMs ?? 0) >= 5000) bits.push(`longest silence ${duration(t.maxGapMs ?? 0)}`);
     if (t.fallbacks.length) bits.push(`fallback: ${t.fallbacks.join(', ')}`);
     if (before >= 1000) bits.push(`${duration(before)} before the request`);
     let line = `Slowest turn: #${t.n}, ${duration(before + t.endMs)} (${bits.join(', ')})`;
@@ -719,9 +782,9 @@ export function formatRun(r: Pick<RunRecord, 'summary' | 'turns'>): string {
 /** The log's size before it is rotated (the previous one is kept as timing.1.jsonl). */
 export const LOG_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Whether the file log is on: SILO_TIMING=1 in the environment, or the timingLog setting. */
+/** Whether the file log is on: unless the timingLog setting is false; SILO_TIMING=1 in the environment forces it on. */
 export function timingLogOn(cfg: { timingLog?: unknown } | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.SILO_TIMING === '1' || cfg?.timingLog === true;
+  return env.SILO_TIMING === '1' || cfg?.timingLog !== false;
 }
 
 /** JSON lines in <profile>/timing/timing.jsonl, size-capped and rotated; written in order, off the run's path. */

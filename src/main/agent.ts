@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type OpenAI from 'openai';
 import type { ContextBreakdown, ContextSlice } from '../shared/context';
-import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
+import type { AgentEvent, AppConfig, ApprovalScope, ArtifactInfo, CheckVerdictWord, CompactionInfo, ContextInfo, ImageAttachment, MessageOrigin, PermissionMode, PlanInfo, QuestionAnswer, QueuedMessage, TaskItem, UserQuestion } from '../shared/types';
 import { expandMentions } from './mentions';
 import { effortOf, isOllama, makeClient, modelCapabilities, ollamaOf, resolveProvider } from './providers';
 import { contextSize, ollamaComplete, type ToolCall, type Usage } from './ollama';
@@ -36,7 +36,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { allTools, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
+import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type Tool, type ToolContext, type ToolResult } from './tools';
 import { truncate } from './tools/types';
 import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGroups, groupsForMessage, isMcpGroup, isToolGroup, loadToolsTool, mcpGroupsForMessage, requestedGroups, type GroupId, type McpGroup } from './tools/groups';
 import { cleanAnswers } from './tools/ask-user';
@@ -72,7 +72,7 @@ import { concurrencyLimit, runSchedule } from './agent/schedule';
 import { RunTimer, setBuiltInToolNames, shortId, TimingLog, timingLogOn, type Finish, type Outcome, type PermissionPath, type PermissionProbe, type RunRecord, type ToolTimer, type TurnTimer } from './agent/perf';
 
 // The tool names a timing record keeps (agent/perf.ts): the built-in ones
-setBuiltInToolNames([...allTools('ask'), ...allTools('plan')].map((t) => t.name).concat(LOAD_TOOLS));
+setBuiltInToolNames(builtInToolNames());
 
 // The window size facts live in context-window.ts; re-exported because test/*.js loads them from here.
 export { contextLimit, essentialToolsOnly } from './context-window';
@@ -886,6 +886,11 @@ export class Agent {
     let verdict: Verdict | null = null;
     const checkAt = Date.now();
     probe?.checkStarted();
+    // The window shows the call as being checked (not as running) until the verdict; the history log keeps the end
+    const callId = action.callId;
+    this.emit({ type: 'check_status', ...(callId ? { id: callId } : {}), running: true });
+    const checked = (said: CheckVerdictWord, timedOut = false) =>
+      this.emit({ type: 'check_status', ...(callId ? { id: callId } : {}), running: false, ms: Math.max(0, Date.now() - checkAt), verdict: said, ...(timedOut ? { timedOut: true } : {}) });
     try {
       const ask = (t: ClassifierTarget) => runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage));
       let raw: string;
@@ -904,10 +909,12 @@ export class Agent {
       st.reached = true;
       verdict = parseVerdict(raw, { ask: !!browser });
       probe?.checkEnded(verdict?.decision ?? 'error');
+      checked(signal?.aborted ? 'stopped' : (verdict?.decision ?? 'error'));
       if (!verdict) console.warn('[auto] the safety check gave no decision:', raw.slice(0, 200));
     } catch (err) {
       const timedOut = !signal?.aborted && ((err as { name?: string })?.name === 'TimeoutError' || Date.now() - checkAt >= CLASSIFIER_TIMEOUT_MS - 250);
       probe?.checkEnded('error', timedOut);
+      checked(signal?.aborted ? 'stopped' : 'error', timedOut);
       if (signal?.aborted) return { ok: false, message: INTERRUPTED };
       if (!isConnectionError(err)) st.reached = true;
       else if (!st.reached) {
@@ -1244,7 +1251,7 @@ export class Agent {
     this.runStartedAt = Date.now();
     this.turnClock = null;
     if (early) {
-      this.emit({ type: 'run_start' });
+      this.emit({ type: 'run_start', timing: timer.id });
       await this.startSessionHooks();
       accepted = await this.promptHooks(userText, origin, opts.from);
       if (!accepted.ok || signal.aborted) {
@@ -1272,7 +1279,7 @@ export class Agent {
     this.stuckAt = -1;
     // Auto mode's check gets another chance to reach its model with each run
     this.autoState().unavailable = false;
-    if (!early) this.emit({ type: 'run_start' });
+    if (!early) this.emit({ type: 'run_start', timing: timer.id });
     // The queued row leaves the queue and becomes the message's bubble, as a delivered queued message does
     if (queuedId) this.emit({ type: 'queue_delivered', id: queuedId });
     this.emitUserMessage(userText, attachments.length, origin, opts.from);
@@ -2528,6 +2535,20 @@ export class Agent {
           }
         },
       };
+      // ask_user's question card: the user's wait is its own number in the timing record, not tool time (agent/perf.ts)
+      const ask = ctx.askUser;
+      if (ask && timing) {
+        timedCtx.askUser = async (questions) => {
+          const probe = timing.permission();
+          probe.cardShown();
+          try {
+            return await ask(questions);
+          } finally {
+            probe.cardAnswered();
+            probe.settle('question', true);
+          }
+        };
+      }
       const started = Date.now();
       const elapsed = () => Math.max(0, Date.now() - started - waited);
       let result: ToolResult;

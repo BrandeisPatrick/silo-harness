@@ -227,6 +227,29 @@ const withStatus = (status, extra = {}) => Object.assign(new Error(extra.message
   R.retryTiming.idleMs = R.STREAM_IDLE_MS;
   check('5: no chunk for the idle limit: a dropped connection, tried again', runEnd()?.text === 'Quick.' && events.some((e) => e.type === 'reply_discarded') && chat().length === 2, { text: runEnd()?.text, n: chat().length });
 
+  // The idle limit after the first chunk, before any content. The OpenAI SDK ends an aborted stream quietly; this used
+  // to read as a finished, empty reply, which the agent answered with its "empty response" nudge instead of a retry.
+  const nudged = () => agent.session.messages.some((m) => m.role === 'user' && /returned an empty response/.test(String(m.content)));
+  const idleRetry = () => events.find((e) => e.type === 'retry_status' && e.retry)?.retry;
+  for (const [label, reply] of [
+    ['a gateway\'s opening role chunk, then nothing', { content: 'Never sent.', opening: true, silenceMs: 600 }],
+    ['keep-alive comments the SDK never passes on, then nothing', { content: 'Never sent.', silenceMs: 600, pingMs: 40, pingComment: true }],
+  ]) {
+    reset();
+    R.retryTiming.idleMs = 150;
+    state.replies.push(reply, { content: 'After the stall.' });
+    await agent.run('Stall?');
+    R.retryTiming.idleMs = R.STREAM_IDLE_MS;
+    check(`5: ${label}: dropped (kind idle) and tried again, not an empty reply and a nudge`, runEnd()?.text === 'After the stall.' && idleRetry()?.kind === 'idle' && statuses()[0] === 'Connection lost. Retrying in 1 s (2 of 6).' && chat().length === 2 && !nudged() && !errors().length, { text: runEnd()?.text, retry: idleRetry(), n: chat().length, nudged: nudged() });
+  }
+  // A reply that finished, on a connection the server then holds open past the idle limit: kept, not tried again
+  reset();
+  R.retryTiming.idleMs = 150;
+  state.replies.push({ content: 'Complete.', holdOpenMs: 600 });
+  await agent.run('Finish and hold?');
+  R.retryTiming.idleMs = R.STREAM_IDLE_MS;
+  check('5: a finished reply on a connection held open past the idle limit is kept, with no retry', runEnd()?.text === 'Complete.' && chat().length === 1 && !statuses().length && !nudged(), { text: runEnd()?.text, n: chat().length, statuses: statuses() });
+
   // finish_reason "length" with half-written arguments
   reset();
   state.replies.push({ content: '', toolCalls: [{ id: 'call_cut', name: 'write_file', rawArgs: '{"path":"big.txt","content":"aaaa' }], finishReason: 'length' });

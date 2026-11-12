@@ -115,6 +115,12 @@ function startMock() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         const send = (obj) => res.write(`data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: payload.model, ...obj })}\n\n`);
+        // `opening`: the role chunk OpenAI and most gateways send first, before any content
+        if (reply.opening) send({ choices: [{ index: 0, delta: { role: 'assistant', content: '' } }] });
+        // `silenceMs`: the stream is open but nothing comes for that long; `pingMs` sends a chunk without content that
+        // often meanwhile, as a gateway's keep-alive does (`pingComment`: an SSE comment line instead, which the SDK
+        // never passes on)
+        if (reply.silenceMs) await quiet(reply.silenceMs, reply.pingMs, () => (res.destroyed ? null : reply.pingComment ? res.write(': keep-alive\n\n') : send({ choices: [] })));
         if (reply.chunks) {
           for (const piece of reply.chunks) {
             send({ choices: [{ index: 0, delta: { role: 'assistant', content: piece } }] });
@@ -122,7 +128,16 @@ function startMock() {
           }
         } else if (reply.content) send({ choices: [{ index: 0, delta: { role: 'assistant', content: reply.content } }] });
         if (reply.drop) return res.end();
-        if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: c.rawArgs ?? JSON.stringify(c.args) } })) } }] });
+        // `argChunks`: each call's arguments in that many pieces, `chunkDelayMs` apart (a model writing a large input)
+        if (reply.toolCalls && reply.argChunks) {
+          for (const [i, c] of reply.toolCalls.entries()) {
+            const pieces = split(c.rawArgs ?? JSON.stringify(c.args), reply.argChunks);
+            for (const [k, piece] of pieces.entries()) {
+              send({ choices: [{ index: 0, delta: { tool_calls: [k === 0 ? { index: i, id: c.id, type: 'function', function: { name: c.name, arguments: piece } } : { index: i, function: { arguments: piece } }] } }] });
+              await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+            }
+          }
+        } else if (reply.toolCalls) send({ choices: [{ index: 0, delta: { tool_calls: reply.toolCalls.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: c.rawArgs ?? JSON.stringify(c.args) } })) } }] });
         send({ choices: [{ index: 0, delta: {}, finish_reason: reply.finishReason ?? (reply.toolCalls ? 'tool_calls' : 'stop') }] });
         // `usage` replaces the counts (cache fields and all), as a gateway that caches would send them
         // `promptTokensFromBody`: about a token per four characters of the request, as a real model would count;
@@ -131,6 +146,9 @@ function startMock() {
         if (state.cachedTokens) counts.prompt_tokens_details = { cached_tokens: state.cachedTokens };
         // `noUsage`: no usage chunk at all, as a server that does not count tokens
         if (!reply.noUsage) send({ choices: [], usage: reply.usage ?? counts });
+        // `holdOpenMs`: the reply is complete, but the connection stays open that long before [DONE]
+        if (reply.holdOpenMs) await new Promise((r) => setTimeout(r, reply.holdOpenMs));
+        if (res.destroyed) return;
         res.write('data: [DONE]\n\n');
         res.end();
       }, reply.delayMs ?? state.delayMs);
@@ -185,6 +203,8 @@ function anthropic(state, payload, res, json) {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (type, obj) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...obj })}\n\n`);
     send('message_start', { message: { id: 'msg_mock', type: 'message', role: 'assistant', model: payload.model, content: [], stop_reason: null, stop_sequence: null, usage: { ...usage, output_tokens: 1 } } });
+    // `silenceMs`: nothing for that long; `pingMs` sends the API's ping event that often meanwhile
+    if (reply.silenceMs) await quiet(reply.silenceMs, reply.pingMs, () => send('ping', {}));
     for (const [index, b] of blocks.entries()) {
       if (b.type === 'thinking') {
         send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } });
@@ -208,9 +228,11 @@ function anthropic(state, payload, res, json) {
       } else {
         send('content_block_start', { index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } });
         const args = b.rawArgs ?? JSON.stringify(b.input);
-        // The arguments in two pieces, as the API streams them
-        send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(0, Math.ceil(args.length / 2)) } });
-        send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: args.slice(Math.ceil(args.length / 2)) } });
+        // The arguments in two pieces, as the API streams them; `argChunks` pieces `chunkDelayMs` apart (a large input)
+        for (const piece of split(args, reply.argChunks ?? 2)) {
+          send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: piece } });
+          if (reply.argChunks) await new Promise((r) => setTimeout(r, reply.chunkDelayMs ?? 50));
+        }
       }
       send('content_block_stop', { index });
     }
@@ -219,6 +241,24 @@ function anthropic(state, payload, res, json) {
     res.end();
   };
   setTimeout(answer, reply.delayMs ?? state.delayMs ?? 0);
+}
+
+/** `text` in `n` pieces of about the same length (the last may be shorter); at least one piece */
+function split(text, n) {
+  const size = Math.max(1, Math.ceil(text.length / Math.max(1, n)));
+  const out = [];
+  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  return out.length ? out : [''];
+}
+
+/** Waits `ms`, calling `ping` every `pingMs` meanwhile when it is set. */
+async function quiet(ms, pingMs, ping) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    const step = pingMs ? Math.min(pingMs, until - Date.now()) : until - Date.now();
+    await new Promise((r) => setTimeout(r, Math.max(0, step)));
+    if (pingMs && Date.now() < until) ping();
+  }
 }
 
 /** The app's context note (src/main/compact.ts CONTEXT_NOTE_PREFIX): appended when the mode, folder or name changes */
