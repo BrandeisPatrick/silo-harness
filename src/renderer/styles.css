@@ -277,6 +277,12 @@ kbd {
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: padding-box; border: 1px solid transparent; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+/* Inside code (code blocks, tool output, the file view, a diff): a 6px bar with no track whose rounded, muted thumb
+   shows only while the panel is hovered or holds focus; scrolling by keys or the trackpad is untouched. */
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar { width: 6px; height: 6px; }
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar-thumb { background: transparent; border: 0; border-radius: 3px; }
+:is(.code-block:is(:hover, :focus-within) > pre, .out:is(:hover, :focus-within) > pre, pre.args:is(:hover, :focus), .cmd:is(:hover, :focus-within), .code-view:is(:hover, :focus-within), .diff:is(:hover, :focus-within) .diff-body)::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-400) 40%, transparent); }
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-400) 65%, transparent); }
 
 /* ---------- Controls ---------- */
 .btn {
