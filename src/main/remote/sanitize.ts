@@ -68,6 +68,15 @@ export function remoteEvent(ev: AgentEvent): unknown | null {
       const { image: _image, sandbox: _sandbox, ...rest } = ev;
       return { ...rest, result: cut(ev.result) };
     }
+    // What a run ran with and its totals are for the history log, not the phone
+    case 'run_start': {
+      const { info: _info, ...rest } = ev;
+      return rest;
+    }
+    case 'run_end': {
+      const { result: _result, ...rest } = ev;
+      return rest;
+    }
     case 'image':
       return { type: 'image', image: image(ev.image) };
     case 'artifact':

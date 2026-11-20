@@ -20,6 +20,85 @@ import { DAY_MS, sizeOf, Trash } from './trash';
 import { sessionMarkdown, type ExportFormat } from './export';
 import { count, failKindLabel, verdictLabel } from '../agent/perf';
 import { sandboxWord } from '../sandbox';
+import { CALL_PURPOSES, logModelId } from '../calls';
+import type { CallRecord, RunInfo, RunResult } from '../../shared/history';
+
+// ---------- The numbers-only fields of run.start, run.end and usage ----------
+
+const MODES = ['ask', 'acceptEdits', 'auto', 'plan', 'bypass'];
+/** A finite number of 0 or more, else undefined */
+const nonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+/** A count or duration, rounded: a finite number of 0 or more, else 0 */
+const whole = (v: unknown): number => Math.round(nonNeg(v) ?? 0);
+
+/** run.start's info as the log keeps it: the model id, the provider's label, the mode, the sandbox, the app's version. */
+export function runInfo(v: unknown): RunInfo {
+  if (!v || typeof v !== 'object') return {};
+  const i = v as Record<string, unknown>;
+  const out: RunInfo = {};
+  if (typeof i.model === 'string' && i.model) out.model = logModelId(i.model);
+  // The label the window shows (a preset's name or the user's own label), on one line
+  if (typeof i.provider === 'string') {
+    const label = i.provider.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 80);
+    if (label) out.provider = label;
+  }
+  if (typeof i.mode === 'string') out.mode = MODES.includes(i.mode) ? i.mode : 'other';
+  if (typeof i.sandbox === 'boolean') out.sandbox = i.sandbox;
+  if (typeof i.app === 'string' && /^[0-9A-Za-z.+-]{1,40}$/.test(i.app)) out.app = i.app;
+  return out;
+}
+
+/** run.end's result as the log keeps it (numbers and model ids only), or undefined when there is none. */
+export function runResult(v: unknown): RunResult | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const r = v as Record<string, unknown>;
+  const tk = (o: unknown) => {
+    const t = (o && typeof o === 'object' ? o : {}) as Record<string, unknown>;
+    return { input: whole(t.input), output: whole(t.output), cacheRead: whole(t.cacheRead), cacheWrite: whole(t.cacheWrite) };
+  };
+  const byModel: RunResult['byModel'] = {};
+  if (r.byModel && typeof r.byModel === 'object') {
+    for (const [id, m] of Object.entries(r.byModel as Record<string, unknown>)) {
+      const mm = (m && typeof m === 'object' ? m : {}) as Record<string, unknown>;
+      const usd = nonNeg(mm.usd);
+      byModel[logModelId(id)] = { calls: whole(mm.calls), ...tk(mm), ...(usd !== undefined ? { usd } : {}) };
+    }
+  }
+  const usd = nonNeg(r.usd);
+  return {
+    wallMs: whole(r.wallMs),
+    modelMs: whole(r.modelMs),
+    toolMs: whole(r.toolMs),
+    checkMs: whole(r.checkMs),
+    waitMs: whole(r.waitMs),
+    modelCalls: whole(r.modelCalls),
+    toolCalls: whole(r.toolCalls),
+    checks: whole(r.checks),
+    blocked: whole(r.blocked),
+    retries: whole(r.retries),
+    tokens: tk(r.tokens),
+    byModel,
+    ...(usd !== undefined ? { usd } : {}),
+  };
+}
+
+/** A usage record's data from a cost event's call, or null when the event carries none. */
+export function callData(v: unknown): CallRecord | null {
+  if (!v || typeof v !== 'object') return null;
+  const c = v as Record<string, unknown>;
+  const ms = nonNeg(c.ms);
+  const usd = nonNeg(c.usd);
+  return {
+    promptTokens: whole(c.promptTokens),
+    completionTokens: whole(c.completionTokens),
+    ...(c.cacheReadTokens !== undefined ? { cacheReadTokens: whole(c.cacheReadTokens) } : {}),
+    ...(c.cacheWriteTokens !== undefined ? { cacheWriteTokens: whole(c.cacheWriteTokens) } : {}),
+    model: logModelId(c.model),
+    for: CALL_PURPOSES.includes(c.for as CallRecord['for']) ? (c.for as CallRecord['for']) : 'turn',
+    ...(ms !== undefined ? { ms: Math.round(ms) } : {}),
+    ...(usd !== undefined ? { usd } : {}),
+  };
+}
 
 /** The replaceAll reason recovery uses; the log ignores it, since the messages it puts back are already logged. */
 export const RECOVERY_REASON = 'recovery';
@@ -82,7 +161,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
   /** Records of sessions that have no log yet and no messages (every start makes an empty session; it gets a log only once it is used) */
   const pending = new Map<string, Pending[]>();
   /** run_start waits for the user_message right after it, which carries the origin; `timing` is the run's timing-log id */
-  const pendingRun = new Map<string, { t: number; timing?: string }>();
+  const pendingRun = new Map<string, { t: number; timing?: string; info?: unknown }>();
   /** The run's id in the timing log (agent/perf.ts RunTimer.id), when it is one: eight hex digits, nothing else */
   const timingId = (v: unknown): { timing: string } | {} => (typeof v === 'string' && /^[0-9a-f]{8}$/.test(v) ? { timing: v } : {});
   const thinking = new Map<string, { text: string; started: number }>();
@@ -94,7 +173,7 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
     const run = pendingRun.get(id);
     if (run !== undefined && type !== 'run.start') {
       pendingRun.delete(id);
-      write(id, 'run.start', { origin: 'user', ...timingId(run.timing) }, run.t);
+      write(id, 'run.start', { origin: 'user', ...timingId(run.timing), ...runInfo(run.info) }, run.t);
     }
     if (!hasContent(id)) {
       // Records of a session the store does not know (deleted, or never existed) are dropped.
@@ -204,18 +283,20 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
   function onEvent(id: string, ev: AgentEvent): void {
     switch (ev.type) {
       case 'run_start':
-        pendingRun.set(id, { t: now(), timing: ev.timing });
+        pendingRun.set(id, { t: now(), timing: ev.timing, info: ev.info });
         return;
       case 'user_message': {
         const run = pendingRun.get(id);
         if (run === undefined) return;
         pendingRun.delete(id);
-        write(id, 'run.start', { origin: ev.origin, ...(ev.from ? { from: ev.from } : {}), ...timingId(run.timing) }, run.t);
+        write(id, 'run.start', { origin: ev.origin, ...(ev.from ? { from: ev.from } : {}), ...timingId(run.timing), ...runInfo(run.info) }, run.t);
         return;
       }
-      case 'run_end':
-        write(id, 'run.end', { reason: ev.reason, ...(ev.text ? { text: ev.text } : {}), ...(ev.continued ? { continued: true } : {}) });
+      case 'run_end': {
+        const result = runResult(ev.result);
+        write(id, 'run.end', { reason: ev.reason, ...(ev.text ? { text: ev.text } : {}), ...(ev.continued ? { continued: true } : {}), ...(result ? { result } : {}) });
         return;
+      }
       case 'thinking_delta': {
         const th = thinking.get(id);
         if (th) th.text += ev.text;
@@ -238,15 +319,14 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
       case 'tool_end':
         write(id, 'tool.end', { id: ev.id, name: ev.name, ok: ev.ok, durationMs: ev.durationMs, chars: ev.result?.length ?? 0, ...(ev.sandbox ? { sandbox: sandboxWord(ev.sandbox) } : {}) });
         return;
-      case 'usage':
-        // The cache counts only when the provider reported them (the token bench reads them from here)
-        write(id, 'usage', {
-          promptTokens: ev.promptTokens,
-          completionTokens: ev.completionTokens,
-          ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-          ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
-        });
+      case 'cost': {
+        // One usage record per counted model call (the agent's turns, checks, the title, compaction and merge
+        // summaries), from the call's record on its cost event. The cache counts only when the provider reported them
+        // (the token bench reads them from here).
+        const c = callData(ev.call);
+        if (c) write(id, 'usage', c);
         return;
+      }
       case 'approval_request':
         write(id, 'approval.request', ev.reason ? { id: ev.id, name: ev.name, detail: ev.detail, reason: ev.reason } : { id: ev.id, name: ev.name, detail: ev.detail });
         return;
@@ -290,7 +370,8 @@ export function createHistory(app: App, opts: HistoryOptions = {}): History {
       case 'error':
         write(id, ev.kind === 'notice' ? 'notice' : 'error', { message: ev.message });
         return;
-      // Not logged: text_delta, thinking_delta (folded into `thinking`), context, input_progress, stream_idle, and the
+      // Not logged: text_delta, thinking_delta (folded into `thinking`), context, input_progress, stream_idle, usage
+      // (its usage record comes from the cost event after it, which says what the call was for), and the
       // events that only mirror what the store's records already hold (user_message, assistant_message,
       // session_changed, queue_*, …).
     }

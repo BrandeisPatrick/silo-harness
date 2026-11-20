@@ -368,6 +368,11 @@ export class TurnTimer implements RequestTiming {
     this.span.cacheWriteTokens = num(u.cacheWriteTokens);
   }
 
+  /** ms since the turn's first attempt went out (retries included), or undefined before it did */
+  sinceRequest(): number | undefined {
+    return this.reqAt < 0 ? undefined : ms(this.run.now() - this.reqAt);
+  }
+
   /** The reply is complete, or the request failed. */
   end(finish: Finish, calls = 0): void {
     if (this.reqAt < 0 || this.span.endMs !== undefined) return;
