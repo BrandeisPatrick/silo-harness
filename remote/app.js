@@ -1001,7 +1001,7 @@
     const recap = stepText(step.recap, 300);
     if (!recap) return null;
     const question = stepText(step.question, 100);
-    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(r, 24)).filter(Boolean).slice(0, 2) : [];
+    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(typeof r === 'string' ? r.replace(/\s*\(recommended\)\s*$/i, '') : r, 40)).filter(Boolean).slice(0, 2) : [];
     const card = h('div', 'next-step' + (live ? ' live' : ''));
     const p = h('p', 'next-step-recap');
     p.textContent = recap;

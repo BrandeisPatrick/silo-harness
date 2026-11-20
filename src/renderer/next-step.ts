@@ -11,7 +11,8 @@ import { registerTranscriptItem } from './transcript-items.js';
 // The tool checked these already (parseNextStep); the window keeps to them too, without refusing anything
 const MAX_RECAP = 300;
 const MAX_QUESTION = 100;
-const MAX_REPLY = 24;
+const MAX_REPLY = 40;
+const RECOMMENDED = /\s*\(recommended\)\s*$/i;
 const MAX_REPLIES = 2;
 
 /** Plain text on one line, at most `max` characters. */
@@ -36,7 +37,7 @@ export function cardOf(args: unknown): NextStep | null {
   const recap = plain(a.recap, MAX_RECAP);
   if (!recap) return null;
   const question = plain(a.question, MAX_QUESTION);
-  const replies = question && Array.isArray(a.replies) ? a.replies.map((r) => plain(r, MAX_REPLY)).filter(Boolean).slice(0, MAX_REPLIES) : [];
+  const replies = question && Array.isArray(a.replies) ? a.replies.map((r) => plain(typeof r === 'string' ? r.replace(RECOMMENDED, '') : r, MAX_REPLY)).filter(Boolean).slice(0, MAX_REPLIES) : [];
   return { recap, question, replies };
 }
 

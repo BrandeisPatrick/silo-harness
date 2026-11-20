@@ -44,7 +44,10 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   check('no recap: refused, saying it is required', /recap is required/.test(throws(() => parseNextStep({ question: 'Ship?' }))) && /recap is required/.test(throws(() => parseNextStep('nope'))));
   check('a recap of 300 characters passes, 301 is refused', parseNextStep({ recap: 'a'.repeat(300) }).recap.length === 300 && /301 characters; keep it to 300/.test(throws(() => parseNextStep({ recap: 'a'.repeat(301) }))));
   check('a question of 100 characters passes, 101 is refused', parseNextStep({ recap: 'r', question: 'q'.repeat(100) }).question.length === 100 && /keep it to 100/.test(throws(() => parseNextStep({ recap: 'r', question: 'q'.repeat(101) }))));
-  check('a reply of 24 characters passes, 25 is refused', parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(24)] }).replies[0].length === 24 && /keep each to 24/.test(throws(() => parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(25)] }))));
+  check('a reply of 40 characters passes, 41 is refused with the length and the limit', parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(40)] }).replies[0].length === 40 && /is 41 characters; keep each to 40/.test(throws(() => parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(41)] }))));
+  check('a 30-character reply passes', parseNextStep({ recap: 'r', question: 'q?', replies: ['Add ESLint and tsc to the CI'.padEnd(30, '!')] }).replies[0].length === 30);
+  const rec = parseNextStep({ recap: 'r', question: 'Which checks?', replies: ['ESLint + tsc (Recommended)', 'Only tsc (recommended) '] });
+  check('a trailing "(Recommended)" is dropped before measuring', JSON.stringify(rec.replies) === JSON.stringify(['ESLint + tsc', 'Only tsc']) && parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(40) + ' (Recommended)'] }).replies[0].length === 40, rec.replies);
   check('three replies: refused', /at most 2 replies/.test(throws(() => parseNextStep({ ...CARD, replies: ['A', 'B', 'C'] }))));
   check('replies that are not a list: refused', /must be a list/.test(throws(() => parseNextStep({ ...CARD, replies: 'Yes' }))));
   check('an empty reply: refused', /needs a label/.test(throws(() => parseNextStep({ ...CARD, replies: ['Yes', '  '] }))) && /needs a label/.test(throws(() => parseNextStep({ ...CARD, replies: [3] }))));
@@ -59,7 +62,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   for (const mode of ['ask', 'acceptEdits', 'auto', 'plan', 'bypass']) check(`offered in ${mode} mode`, allTools(mode).some((t) => t.name === 'next_step'));
   const props = nextStep.parameters.properties;
   check('the schema: recap required, replies at most 2', nextStep.parameters.required.join() === 'recap' && props.replies.maxItems === 2 && props.recap.type === 'string' && props.question.type === 'string');
-  check('the spec: call it when the work is done, then write the reply; the first reply is the recommended one, unmarked', /decision or a step/.test(nextStep.description) && /then write your reply to the user in full/.test(nextStep.description) && /does not replace it/.test(nextStep.description) && /first reply is the recommended one/.test(nextStep.description));
+  check('the spec: call it when the work is done, then write the reply; the first reply is the recommended one, unmarked', /decision or a step/.test(nextStep.description) && /then write your reply to the user in full/.test(nextStep.description) && /does not replace it/.test(nextStep.description) && /first reply is the recommended one; do not mark it/.test(nextStep.description));
   check('the tool returns at once with the fixed text', (await nextStep.run(CARD, {})).content === SHOWN && /write your reply to the user in full/.test(SHOWN) && /without asking the card's question again/.test(SHOWN) && !/End your turn/.test(SHOWN));
   check('the tool refuses a bad card with the reason', /add the question/.test(await nextStep.run({ recap: 'r', replies: ['Yes'] }, {}).then(() => '', (e) => e.message)));
 
@@ -128,14 +131,14 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   check('2: the stored card marks the chosen reply', card?.chosen === 'Yes, new branch', card);
 
   // 1b. The call first, then the reply (as the tool asks): the card's turn has its reply after the card
-  state.replies.push({ content: '', toolCalls: [{ id: 'n1b', name: 'next_step', args: { recap: 'Lint is not set up yet.', question: 'Which checks should CI run?', replies: ['ESLint + tsc', 'Only tsc'] } }] });
+  state.replies.push({ content: '', toolCalls: [{ id: 'n1b', name: 'next_step', args: { recap: 'Lint is not set up yet.', question: 'Which checks should CI run?', replies: ['ESLint + tsc (Recommended)', 'Only tsc'] } }] });
   state.replies.push({ content: 'I looked at the CI config: nothing lints the code today. Adding ESLint and tsc would catch both style and type errors.' });
   rt.send(A, 'What should CI check?');
   await idle();
   items = toTranscript(app.store.get(A));
   const c1b = items.filter((i) => i.role === 'next_step').pop();
   const after1b = items[items.indexOf(c1b) + 1];
-  check('1b: the call first, then the reply: no nudge, the reply after the card', !JSON.stringify(app.store.get(A).messages).includes('empty response') && !JSON.stringify(app.store.get(A).messages).includes(NEXT_STEP_NUDGE) && after1b?.role === 'assistant' && /nothing lints/.test(after1b.text) && c1b.step.replies.join('|') === 'ESLint + tsc|Only tsc', { c1b, after1b });
+  check('1b: the call first, then the reply: no nudge, the reply after the card, the "(Recommended)" mark dropped', !JSON.stringify(app.store.get(A).messages).includes('empty response') && !JSON.stringify(app.store.get(A).messages).includes(NEXT_STEP_NUDGE) && after1b?.role === 'assistant' && /nothing lints/.test(after1b.text) && c1b.step.replies.join('|') === 'ESLint + tsc|Only tsc', { c1b, after1b });
   check('1b: the model read that the card is ready and the reply is owed', state.requests.some((q) => JSON.stringify(q.payload.messages ?? []).includes('Now write your reply to the user in full')));
 
   // 1c. The call first, then nothing: asked once for the reply; still nothing, the recap is the reply (and counted)

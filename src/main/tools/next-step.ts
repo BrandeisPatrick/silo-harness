@@ -12,14 +12,15 @@ import type { Tool } from './types';
 
 export const MAX_RECAP = 300;
 export const MAX_QUESTION = 100;
-export const MAX_REPLY = 24;
+export const MAX_REPLY = 40;
 export const MAX_REPLIES = 2;
 /** What the model reads after a card was shown */
 export const SHOWN =
   'The card is ready; it is drawn under your reply. Now write your reply to the user in full, standing on its own, without asking the card\'s question again. (If you already wrote it before this call, you are done.)';
 /** The nudge when the message after a card is empty (it starts as the app's own nudge does, so the transcript, compaction and dreams leave it out alike) */
 export const NEXT_STEP_NUDGE = 'You returned an empty response. Your reply to the user is still missing: write it now, in full. The next-step card is drawn under it and does not replace it.';
-
+/** A trailing "(Recommended)" on a reply: the first reply is the recommended one, so the mark is dropped */
+const RECOMMENDED = /\s*\(recommended\)\s*$/i;
 
 /** Plain text on one line: control, zero-width and direction characters and runs of white space become one space. */
 function plain(v: unknown): string {
@@ -52,7 +53,7 @@ export function parseNextStep(args: unknown): NextStep {
   if (chars(question) > MAX_QUESTION) throw new Error(`question is ${chars(question)} characters; keep it to ${MAX_QUESTION}.`);
   const raw = a.replies === undefined || a.replies === null ? [] : a.replies;
   if (!Array.isArray(raw)) throw new Error('replies must be a list of one or two short labels.');
-  const replies = raw.map(plain);
+  const replies = raw.map((r) => plain(r).replace(RECOMMENDED, '').trim());
   if (replies.some((r) => !r)) throw new Error('Each reply needs a label.');
   if (replies.length > MAX_REPLIES) throw new Error(`Give at most ${MAX_REPLIES} replies (got ${replies.length}).`);
   for (const r of replies) if (chars(r) > MAX_REPLY) throw new Error(`The reply "${r}" is ${chars(r)} characters; keep each to ${MAX_REPLY}.`);
@@ -73,7 +74,7 @@ export function nextStepOrNull(args: unknown): NextStep | null {
 export const nextStep: Tool = {
   name: 'next_step',
   description:
-    "Call it once when the turn's work is done and leaves the user a decision or a step to take, then write your reply to the user in full: the card (a recap, optionally one question with one or two replies to click) is drawn under that reply and does not replace it. The first reply is the recommended one. Plain text.",
+    "Call it once when the turn's work is done and leaves the user a decision or a step to take, then write your reply to the user in full: the card (a recap, optionally one question with one or two replies to click) is drawn under that reply and does not replace it. The first reply is the recommended one; do not mark it. Plain text.",
   parameters: {
     type: 'object',
     properties: {

@@ -571,6 +571,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .next-step-replies { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .next-step-reply.btn { height: 32px; padding: 0 12px; gap: 8px; border: 0; border-radius: 9px; box-shadow: none; background: var(--button-fill); color: var(--text-100); }
 .next-step-reply.btn:hover { background: var(--button-fill-hover); }
+/* Two long replies that do not fit side by side wrap to a second row; one too long for the card is cut with an ellipsis */
+.next-step-reply.btn { max-width: 100%; min-width: 0; }
+.next-step-reply > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .next-step-reply.btn.primary { background: var(--text-100); color: var(--bg-000); }
 .next-step-reply.btn.primary:hover { background: color-mix(in srgb, var(--text-100) 88%, var(--bg-000)); }
 .next-step-keys { display: inline-flex; gap: 2px; margin-right: -2px; }

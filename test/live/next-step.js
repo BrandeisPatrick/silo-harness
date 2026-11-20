@@ -148,6 +148,19 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     const stored67 = await app.evaluate(`[...document.querySelectorAll('#messages .next-step')].slice(3).map((c) => { const r = c.closest('.msg.assistant'); return r ? r.querySelector('.md').innerText.trim().slice(0, 20) : null; })`);
     check('6, 7: stored, each card is under its turn\'s last reply', stored67[0] === 'Nothing lints the co' && stored67[1] === 'The build passes; no', stored67);
 
+    // 8. Long labels: up to 40 characters, a trailing "(Recommended)" dropped; two that do not fit side by side wrap
+    replies.push({ content: '', toolCalls: [{ id: 'n8', name: 'next_step', args: { recap: 'CI runs only the unit tests.', question: 'Which checks should CI add?', replies: ['ESLint, tsc and Prettier (Recommended)', 'Only tsc and the unit tests for now'] } }] });
+    replies.push({ content: 'CI runs only the unit tests today; linting and type checks would catch more before review.' });
+    await app.send('What else should CI run?');
+    await app.waitFor(nothingRuns, 30_000, 'the eighth run to end');
+    await sleep(500);
+    const long = await app.evaluate(`(() => { const c = [...document.querySelectorAll('#messages .next-step')].pop(); const b = [...c.querySelectorAll('.next-step-reply')]; return { labels: b.map((x) => x.dataset.reply), text: b.map((x) => x.querySelector('span').textContent) }; })()`);
+    check('8: a 35-character reply shows whole; "(Recommended)" is dropped from the first', JSON.stringify(long.labels) === JSON.stringify(['ESLint, tsc and Prettier', 'Only tsc and the unit tests for now']) && JSON.stringify(long.text) === JSON.stringify(long.labels), long);
+    const wrap = await app.evaluate(`(() => { const c = [...document.querySelectorAll('#messages .next-step')].pop(); c.style.width = '360px'; const cr = c.getBoundingClientRect(); const b = [...c.querySelectorAll('.next-step-reply')].map((x) => x.getBoundingClientRect()); const out = { rows: b.map((r) => Math.round(r.top)), inside: b.every((r) => r.right <= cr.right - 17 && r.left >= cr.left), scroll: c.scrollWidth <= c.clientWidth }; return out; })()`);
+    check('8: too narrow for both side by side, the second reply wraps to its own row, nothing overflows', wrap.rows[1] > wrap.rows[0] && wrap.inside && wrap.scroll, wrap);
+    await app.screenshot(path.join(shots, 'next-step-long-labels.png'));
+    await app.evaluate(`[...document.querySelectorAll('#messages .next-step')].pop().style.width = ''`);
+
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));
   } finally {
