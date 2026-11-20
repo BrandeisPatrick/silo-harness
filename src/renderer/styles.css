@@ -102,7 +102,8 @@
   /* Panels in the conversation (code blocks, tool output, the turn's activity card, the next-step card), as Claude
      Code draws its cards: in light mode the plain page gives them no fill at all, the hairline (--code-panel-line)
      alone draws them; over a background or a look they are a white veil (--panel-veil, about two thirds white),
-     frosted (--code-blur). In dark mode they are a faint lift, 4.5% white, on the page and over a picture alike.
+     frosted (--code-blur). In dark mode they are a faint lift, 4.5% white, on the plain page, and over a picture the
+     page's colour so lifted, about three quarters strong, so code stays readable on any picture.
      --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. Inline
      code keeps a faint tint of the text colour (--code-inline): it has no hairline to carry it. A look can set any
      of these on #messages. */
@@ -181,8 +182,8 @@
     --code-bg: #212121;
     --code-hover: #2e2e2e;
     --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
-    --panel-veil: rgba(255, 255, 255, 0.045);
-    --code-panel: var(--panel-veil);
+    --panel-veil: color-mix(in srgb, color-mix(in srgb, #ffffff 4.5%, var(--bg-100)) 72%, transparent);
+    --code-panel: rgba(255, 255, 255, 0.045);
     --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
     --diff-bg: var(--bg-000);
     --bubble: #242424;
@@ -241,8 +242,8 @@
   --code-bg: #212121;
   --code-hover: #2e2e2e;
   --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
-  --panel-veil: rgba(255, 255, 255, 0.045);
-  --code-panel: var(--panel-veil);
+  --panel-veil: color-mix(in srgb, color-mix(in srgb, #ffffff 4.5%, var(--bg-100)) 72%, transparent);
+  --code-panel: rgba(255, 255, 255, 0.045);
   --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
   --diff-bg: var(--bg-000);
   --bubble: #242424;
