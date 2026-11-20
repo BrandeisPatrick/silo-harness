@@ -97,7 +97,7 @@
   --code-panel: color-mix(in srgb, color-mix(in srgb, var(--text-100) 7%, var(--bg-100)) 50%, transparent);
   --code-panel-solid: color-mix(in srgb, var(--text-100) 3.5%, var(--bg-100));
   --code-panel-line: var(--border-subtle);
-  --code-inline: color-mix(in srgb, var(--text-100) 3%, transparent);
+  --code-inline: color-mix(in srgb, var(--text-100) 6%, transparent);
   --code-blur: 16px;
   --diff-bg: var(--bg-000);
   --bubble: #f3f3f3;
@@ -167,6 +167,7 @@
     --surface-hover: #262626;
     --code-bg: #212121;
     --code-hover: #2e2e2e;
+    --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
     --diff-bg: var(--bg-000);
     --bubble: #242424;
     --field-bg: var(--bg-300);
@@ -223,6 +224,7 @@
   --surface-hover: #262626;
   --code-bg: #212121;
   --code-hover: #2e2e2e;
+  --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
   --diff-bg: var(--bg-000);
   --bubble: #242424;
   --field-bg: var(--bg-300);
@@ -572,11 +574,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
-.md code {
-  font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 4px;
-  /* A faint tint and a hairline (drawn inside, so the words keep their place): a sentence with several stays even */
-  background: var(--code-inline); box-shadow: inset 0 0 0 1px var(--code-panel-line);
-}
+/* Inline code: the mono face on a soft patch of tint, no outline, so a sentence with several stays even */
+.md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }

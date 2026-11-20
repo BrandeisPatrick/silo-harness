@@ -130,7 +130,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
     check('reply text 15/21, bold 600', m.body.fs === '15px' && m.body.lh === '21px' && m.bold === '600', m.body);
     check('a heading in a reply is semibold and at most 17 px', m.h2.fs >= 15 && m.h2.fs <= 17 && Number(m.h2.fw) >= 600, m.h2);
     check('reading column: 736 px at most, running text inset 4 px', m.body.col <= 736 + 0.5 && m.body.inset === 4, m.body);
-    check('inline code: 0.9em mono (13.5 px), an 18 px chip, 4.5 px side padding, 4 px radius, no border', m.code.fs === '13.5px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '4px' && m.code.border === 'none', m.code);
+    check('inline code: 0.9em mono (13.5 px), an 18 px patch, 4.5 px side padding, 5 px radius, no border', m.code.fs === '13.5px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '5px' && m.code.border === 'none', m.code);
     check('code blocks 13/20 mono', m.pre.fs === '13px' && m.pre.lh === '20px', m.pre);
     check('list items about 4 px apart', m.liGap !== null && m.liGap >= 3 && m.liGap <= 5, m.liGap);
     check('tool lines: 15 px, muted, a 24 px row, no box; 8 px between two, 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '15px' && m.tool.h === 24 && m.tool.border === 'none' && m.tool.pitch === 32 && m.tool.gapAfter === 16, m.tool);
