@@ -123,7 +123,7 @@
   --r-composer: 12px;
   --r-card-lg: 10px;
   --sidebar-w: 256px;
-  --col: 736px;
+  --col: 728px;
   color-scheme: light;
 }
 
@@ -485,7 +485,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* ---------- Transcript ---------- */
 .transcript { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 32px 0 56px; display: flex; flex-direction: column; }
-/* One reading column, 736px at most, at least 24px from the pane's edges; cards take its full width and running
+/* One reading column, 728px at most (720px of text), at least 24px from the pane's edges; cards take its full width and running
    text (replies, tool lines, the user's bubble) sits 4px in from each side. 16px between blocks. */
 .transcript > * { width: min(var(--col), calc(100% - 48px)); margin-left: auto; margin-right: auto; flex: none; }
 /* Fill backwards, not both: a finished animation that still holds its end state keeps the message a backdrop root, and
@@ -511,12 +511,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .msg.user .bubble.rich .md h1, .msg.user .bubble.rich .md h2 { margin: 12px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); }
 .msg.user .bubble.rich .md > :first-child { margin-top: 0; }
 .msg.assistant { position: relative; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); }
+/* A message's actions (Copy; Rewind on the user's): a quiet row of icon buttons under it, never over its words. Under a
+   reply it is in the flow, left-aligned with the text (the buttons' glyphs line up with it), shown on hover and always
+   for the latest reply; under the user's bubble it sits in the bubble's bottom margin, at its right edge. */
 .msg-actions {
-  position: absolute; top: -14px; right: -4px; display: flex; gap: 2px; padding: 2px;
-  background: var(--bg-000); border: 1px solid var(--border-subtle); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
+  display: flex; gap: 2px;
   opacity: 0; pointer-events: none; transition: opacity 0.12s;
 }
-.msg.assistant:hover .msg-actions, .msg-actions:focus-within { opacity: 1; pointer-events: auto; }
+.msg.assistant > .msg-actions { margin: 4px 0 0 -5px; height: 24px; }
+/* An interim reply (a sentence between the run's lines) has no row: the space under it stays the space over it */
+.transcript > .msg.assistant:has(+ :is(.tool, .tool-group, .thinking, .auto-blocked, .session-msg.sent)) > .msg-actions { display: none; }
+.msg.assistant > .msg-actions .icon-btn { color: var(--text-400); }
+.msg.assistant > .msg-actions .icon-btn:hover { color: var(--text-100); }
+.msg.assistant:hover .msg-actions, .msg-actions:focus-within,
+.transcript > .msg.assistant:nth-last-child(1 of .msg.assistant:not(.turn-hidden)) > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions .icon-btn.copied { color: var(--success); }
 
 .msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); text-align: center; }
@@ -541,16 +549,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md { overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
-.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 16px; }
-.md h1, .md h2 { margin: 24px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
-.md h3, .md h4, .md h5, .md h6 { margin: 16px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
+.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 14px; }
+/* Headings read as text with weight, not as a form's sections: the top level a step larger, the rest the text size;
+   more room above than below, so each belongs to what follows it */
+.md h1 { margin: 28px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
+.md h2, .md h3, .md h4, .md h5, .md h6 { margin: 24px 0 6px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
 .md strong { font-weight: 600; }
-.md ul, .md ol { padding-left: 24px; }
-.md li { margin: 4px 0; }
+/* Lists: tight items, a modest indent, a muted marker */
+.md ul, .md ol { padding-left: 22px; }
+.md li { margin: 4px 0; padding-left: 2px; }
 .md li > p:last-child { margin-bottom: 0; }
 .md li::marker { color: var(--text-400); }
+.md ol > li::marker { font-variant-numeric: tabular-nums; }
 .md li > ul, .md li > ol { margin: 4px 0 0; }
-.md li > p { margin: 0 0 8px; }
+.md li > p { margin: 0 0 6px; }
 .md li > .code-block { margin: 8px 0; }
 .md ul.tasks { padding-left: 4px; list-style: none; }
 .md li.task { display: flex; align-items: flex-start; gap: 8px; }
@@ -1872,8 +1884,9 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 
 /* ---------- Tick 2: message actions on user bubbles, rewind, the task list ---------- */
 
-/* User bubbles: Copy and Rewind appear on hover or focus at the bubble's top-right, like a reply's Copy */
+/* User bubbles: Copy and Rewind appear on hover or focus under the bubble's right edge (.msg-actions above) */
 .msg.user { position: relative; }
+.msg.user > .msg-actions { position: absolute; top: 100%; right: 0; height: 24px; }
 .msg.user:hover .msg-actions { opacity: 1; pointer-events: auto; }
 .msg.user .msg-actions:empty { display: none; }
 /* Rewind needs an idle agent: hidden during a run, a compaction or another rewind */
