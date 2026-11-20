@@ -564,10 +564,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .next-step-reply.btn:hover { background: var(--button-fill-hover); }
 .next-step-reply.btn.primary { background: var(--text-100); color: var(--bg-000); }
 .next-step-reply.btn.primary:hover { background: color-mix(in srgb, var(--text-100) 88%, var(--bg-000)); }
-.next-step-reply .next-step-kbd { height: 16px; min-width: 0; margin: 0 -2px 0 0; padding: 0 4px; border-color: color-mix(in srgb, currentColor 35%, transparent); color: inherit; opacity: 0.85; letter-spacing: 0.08em; }
+.next-step-keys { display: inline-flex; gap: 2px; margin-right: -2px; }
+.next-step-reply.btn .next-step-keys kbd { height: 16px; min-width: 16px; margin: 0; padding: 0 3px; border-color: color-mix(in srgb, currentColor 35%, transparent); color: inherit; opacity: 0.85; }
 .next-step.quiet .next-step-reply:not(.chosen) { display: none; }
 .next-step.quiet .next-step-reply.chosen { opacity: 1; background: var(--button-fill); color: var(--text-400); }
-.next-step.quiet .next-step-kbd { display: none; }
+.next-step.quiet .next-step-keys { display: none; }
 .next-step.quiet .next-step-replies:not(:has(.chosen)) { display: none; }
 
 .msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); text-align: center; }

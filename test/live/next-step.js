@@ -38,7 +38,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
       recap: c.querySelector('.next-step-recap')?.textContent,
       question: c.querySelector('.next-step-question')?.textContent ?? '',
       markup: c.querySelectorAll('b, img, a').length,
-      buttons: [...c.querySelectorAll('.next-step-reply')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => ({ label: b.dataset.reply, primary: b.classList.contains('primary'), chosen: b.classList.contains('chosen'), kbd: b.querySelector('kbd')?.textContent ?? '', kbdShown: !!b.querySelector('kbd') && getComputedStyle(b.querySelector('kbd')).display !== 'none', disabled: b.disabled })),
+      buttons: [...c.querySelectorAll('.next-step-reply')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => ({ label: b.dataset.reply, primary: b.classList.contains('primary'), chosen: b.classList.contains('chosen'), kbd: [...b.querySelectorAll('kbd')].map((k) => k.textContent).join(''), kbdShown: !!b.querySelector('.next-step-keys') && getComputedStyle(b.querySelector('.next-step-keys')).display !== 'none', kbdVisible: !!b.querySelector('kbd') && getComputedStyle(b.querySelector('kbd')).color !== getComputedStyle(b).backgroundColor, disabled: b.disabled })),
       shown: c.getBoundingClientRect().height > 0,
     }))`);
   const userTexts = () => app.evaluate(`[...document.querySelectorAll('#messages > .msg.user .bubble')].map((b) => b.textContent.trim())`);
@@ -53,7 +53,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     await sleep(500);
     let c = await cards();
     check('1: one card, inside the answer, above its Copy row', c.length === 1 && c[0].inReply && c[0].beforeActions && c[0].shown, c);
-    check('1: recap, question, two replies; the first primary with ⌘↵', c[0].recap === CARD.recap && c[0].question === CARD.question && c[0].buttons.map((b) => b.label).join('|') === CARD.replies.join('|') && c[0].buttons[0].primary && c[0].buttons[0].kbd === '⌘↵' && !c[0].buttons[1].primary && !c[0].quiet, c[0]);
+    check('1: recap, question, two replies; the first primary with ⌘↵', c[0].recap === CARD.recap && c[0].question === CARD.question && c[0].buttons.map((b) => b.label).join('|') === CARD.replies.join('|') && c[0].buttons[0].primary && c[0].buttons[0].kbd === '⌘↵' && c[0].buttons[0].kbdVisible && !c[0].buttons[1].primary && !c[0].quiet, c[0]);
     const rows = await app.evaluate(`[...document.querySelectorAll('#messages .tool')].map((t) => t.dataset.tool)`);
     check('1: no tool row for next_step', !rows.includes('next_step'), rows);
     const fold = await app.evaluate(`(() => { const h = [...document.querySelectorAll('#messages > .turn-head .turn-head-btn')].pop(); const a = [...document.querySelectorAll('#messages > .msg.assistant')].pop(); return { head: h?.getAttribute('aria-expanded'), label: h?.innerText.replace(/\\s+/g, ' ').trim(), answerShown: a && !a.classList.contains('turn-hidden') && a.innerText.includes(${JSON.stringify(ANSWER)}) }; })()`);

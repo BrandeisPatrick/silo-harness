@@ -71,7 +71,7 @@ function cardEl(step: NextStep, interactive: boolean, chosen: string | undefined
     const row = h('div', { class: 'next-step-replies' });
     step.replies.forEach((label, i) => {
       const b = h('button', { type: 'button', class: `btn next-step-reply${i === 0 ? ' primary' : ''}`, 'data-reply': label }, h('span', {}, label));
-      if (i === 0) b.appendChild(h('kbd', { class: 'next-step-kbd', 'aria-hidden': 'true' }, '⌘↵'));
+      if (i === 0) b.appendChild(h('span', { class: 'next-step-keys', 'aria-hidden': 'true' }, h('kbd', {}, '⌘'), h('kbd', {}, '↵')));
       b.addEventListener('click', () => {
         if (card !== live) return;
         quiet(card, label);
