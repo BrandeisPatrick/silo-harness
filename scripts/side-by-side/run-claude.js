@@ -145,7 +145,7 @@ function parseEvents(events, origin) {
 }
 
 function runClaude(prompt, model, project, runDir, timeoutMs) {
-  const args = ['-p', prompt, '--model', model, '--permission-mode', 'auto', '--permission-prompts', 'none', '--safe-mode', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '1'];
+  const args = ['-p', prompt, '--model', model, '--permission-mode', 'auto', '--permission-prompts', 'none', '--safe-mode', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '3'];
   const out = fs.openSync(path.join(runDir, 'events.jsonl'), 'w');
   const err = fs.openSync(path.join(runDir, 'stderr.txt'), 'w');
   const startedAt = Date.now();
