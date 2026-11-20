@@ -51,6 +51,25 @@ async function shoot(app, id, name) {
   console.log(`  ${name}.png`);
 }
 
+/**
+ * The navigation with one page selected (General) and the pointer over another (Permissions): the hover tint must be
+ * clearly lighter than the selected pill. Pictures the dialog and notes both computed tints.
+ */
+async function hoverShot(app, name) {
+  await page(app, 'general');
+  await app.evaluate(`(() => { const s = document.querySelector('#sp-sec-general'); const h = Math.max(800, s.scrollHeight + 45 + 4 + 40 + 2); document.querySelector('#shots-style').textContent = '#settings { height: ' + h + 'px !important; max-height: none !important; }'; })()`);
+  await sleep(300);
+  const at = await app.evaluate(`(() => { const b = document.querySelector('#sp-nav-permissions').getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; })()`);
+  await app.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+  await sleep(300);
+  const tints = await app.evaluate(`({ hovered: document.querySelector('#sp-nav-permissions').matches(':hover'), hover: getComputedStyle(document.querySelector('#sp-nav-permissions')).backgroundColor, selected: getComputedStyle(document.querySelector('#sp-nav-general')).backgroundColor })`);
+  lines.push(`\n## ${name}: hover ${tints.hover}, selected ${tints.selected}${tints.hovered ? '' : ' (NOT HOVERED)'}`);
+  const box = await app.evaluate(`(() => { const d = document.querySelector('#settings').getBoundingClientRect(); return { x: d.x, y: d.y, width: d.width, height: d.height }; })()`);
+  await app.screenshot(path.join(out, `${name}.png`), box);
+  console.log(`  ${name}.png (${JSON.stringify(tints)})`);
+  await app.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+}
+
 /** Every visible row of a page, as words: title | description | controls. */
 async function words(app, id, label) {
   const rows = await app.evaluate(`(() => { const s = document.querySelector('#sp-sec-${id}'); if (!s) return []; const vis = (e) => e && e.offsetParent !== null; return [...s.querySelectorAll('h3, .sp-card-title, .sp-disclosure, .sp-row, .sp-note, .sp-tabs button')].filter(vis).map((e) => { if (!e.classList.contains('sp-row')) return { head: e.innerText.trim().replace(/\\s+/g, ' ').slice(0, 160), tag: e.tagName + '.' + e.className }; const c = e.querySelector(':scope > .sp-row-control'); const kinds = c ? [...c.querySelectorAll('select, input, textarea, button')].filter(vis).map((x) => x.tagName === 'INPUT' ? 'input:' + x.type : x.tagName === 'BUTTON' ? 'button:' + (x.innerText.trim() || x.getAttribute('aria-label') || '').slice(0, 28) : x.tagName.toLowerCase()) : []; return { row: e.dataset.row, title: (e.querySelector('.sp-row-title')?.innerText || '').trim(), desc: (e.querySelector(':scope > .sp-row-text > .sp-row-desc')?.innerText || '').trim().replace(/\\s+/g, ' '), kinds }; }); })()`);
@@ -93,9 +112,11 @@ async function setTheme(app, theme) {
       console.log('Every page, light');
       await openSettings(app);
       await allPages(app, '');
+      await hoverShot(app, 'nav-hover');
       console.log('Dark');
       await setTheme(app, 'dark');
       await allPages(app, '-dark', ['general', 'model', 'developer']);
+      await hoverShot(app, 'nav-hover-dark');
       await setTheme(app, 'light');
       console.log('Appearance over a background');
       await app.evaluate(`window.oc.rpc('mods.use', { background: 'hyperspace/starfield' }, { approve: true })`);
@@ -165,6 +186,11 @@ async function setTheme(app, theme) {
       await app.evaluate(`(() => { const s = document.querySelector('#provider-add-type'); s.value = 'openai-compatible'; s.dispatchEvent(new Event('change')); })()`);
       await sleep(200);
       await shoot(app, 'model', 'model-add-provider-compatible');
+      // Filled in: Add becomes the primary button
+      await app.fill('#provider-add-name', 'local');
+      await app.fill('#provider-add-url', 'http://127.0.0.1:1234/v1');
+      await sleep(200);
+      await shoot(app, 'model', 'model-add-provider-ready');
       await words(app, 'model', 'model (gateway, Add provider open)');
     } catch (err) {
       console.log(`FAILED: ${err.stack || err.message}`);
@@ -191,6 +217,31 @@ async function setTheme(app, theme) {
       await words(app, 'model', 'model (no key)');
       await setTheme(app, 'dark');
       await shoot(app, 'model', 'model-no-key-dark');
+    } catch (err) {
+      console.log(`FAILED: ${err.stack || err.message}`);
+      failed = true;
+    } finally {
+      await app.close();
+    }
+  }
+
+  {
+    // A key from the shell (read-only, with its lock) for a service that does not answer: nothing listens on port 9
+    // here, so nothing leaves this Mac
+    const app = await launch({
+      mock: true,
+      mode: 'ask',
+      size: { width: WIDTH, height: 3200 },
+      scale: 1,
+      config: { theme: 'light', provider: 'lab', providers: { lab: { type: 'openai-compatible', baseURL: 'http://127.0.0.1:9/v1', apiKeyEnv: 'LAB_KEY', model: 'lab-model-1' } } },
+      env: { LAB_KEY: 'made-up-key-for-pictures-7c1e' },
+    });
+    try {
+      await openSettings(app);
+      await page(app, 'model');
+      await app.waitFor(`/Not reachable/.test(document.querySelector('#sp-row-provider .sp-status')?.innerText || '')`, 15_000, 'the provider not reachable');
+      await shoot(app, 'model', 'model-shell-key');
+      await words(app, 'model', 'model (shell key, not reachable)');
     } catch (err) {
       console.log(`FAILED: ${err.stack || err.message}`);
       failed = true;
