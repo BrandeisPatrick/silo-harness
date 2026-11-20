@@ -409,9 +409,34 @@ export async function listOllamaModels(baseURL: string, signal?: AbortSignal): P
   return (data.models ?? []).map((m) => m.name).sort();
 }
 
+/** Pages of Anthropic's list of models followed at most: at its default of 20 a page, far more than it lists. */
+const ANTHROPIC_LIST_PAGES = 10;
+
+/**
+ * Anthropic's own list of models (GET /v1/models), asked through its SDK with the client the native path uses
+ * (anthropicClient): the SDK sends the anthropic-version header that endpoint requires, and the key as it does on the
+ * Messages API. The list comes in pages (has_more, after_id); this follows them, ANTHROPIC_LIST_PAGES at most.
+ */
+async function listAnthropicModels(r: ResolvedProvider, signal: AbortSignal): Promise<string[]> {
+  let page = await anthropicClient(r).models.list({}, { signal, maxRetries: 0 });
+  const ids = page.data.map((m) => m.id);
+  for (let n = 1; n < ANTHROPIC_LIST_PAGES && page.hasNextPage(); n++) {
+    page = await page.getNextPage();
+    ids.push(...page.data.map((m) => m.id));
+  }
+  return ids;
+}
+
+/** What a service lists, sorted: Anthropic's own API through its SDK, any other its OpenAI-compatible GET /models. */
+async function askModels(r: ResolvedProvider, signal: AbortSignal): Promise<string[]> {
+  const ids = isNativeAnthropic(r) ? await listAnthropicModels(r, signal) : (await clientFor(r).models.list({ signal, maxRetries: 0 })).data.map((m) => m.id);
+  return ids.filter((id) => typeof id === 'string' && id).sort();
+}
+
 /**
  * The models a provider offers: Ollama's local ones, or the service's GET /models (most OpenAI-compatible services
- * have it), with the entry's own list first. Rejects when the service cannot be asked and the entry lists none.
+ * have it, and Anthropic's own API), with the entry's own list first. Rejects when the service cannot be asked and the
+ * entry lists none.
  */
 export async function listModels(r: ResolvedProvider, timeoutMs = 8000): Promise<string[]> {
   const own = [...r.models];
@@ -420,8 +445,7 @@ export async function listModels(r: ResolvedProvider, timeoutMs = 8000): Promise
     if (r.type === 'ollama') asked = await listOllamaModels(r.baseURL);
     else {
       if (r.keyRequired && !r.apiKey) throw new Error(r.error ?? 'no key');
-      const page = await clientFor(r).models.list({ signal: AbortSignal.timeout(timeoutMs), maxRetries: 0 });
-      asked = page.data.map((m) => m.id).filter((id) => typeof id === 'string').sort();
+      asked = await askModels(r, AbortSignal.timeout(timeoutMs));
     }
   } catch (err) {
     if (!own.length) throw new Error(plainError(err, r));
@@ -440,13 +464,7 @@ export async function providerCatalog(r: ResolvedProvider, timeoutMs = 8000): Pr
   if (r.keyRequired && !r.apiKey) return { ...base, models: own, listed: false, noKey: true, error: scrubSecrets(r.error ?? `${r.label} needs a key.`) };
   try {
     const signal = AbortSignal.timeout(timeoutMs);
-    const asked =
-      r.type === 'ollama'
-        ? await listOllamaModels(r.baseURL, signal)
-        : (await clientFor(r).models.list({ signal, maxRetries: 0 })).data
-            .map((m) => m.id)
-            .filter((id) => typeof id === 'string' && id)
-            .sort();
+    const asked = r.type === 'ollama' ? await listOllamaModels(r.baseURL, signal) : await askModels(r, signal);
     return { ...base, models: [...new Set([...own, ...asked])], listed: true };
   } catch (err) {
     if (!isUnreachable(err)) {

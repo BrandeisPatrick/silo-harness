@@ -516,6 +516,41 @@ const headersOf = (client) => {
     delete m2.state.modelsStatus;
     catl = await call('providers.catalog', 'ollama');
     check('providers.catalog: an Ollama that is not running is not reachable, in plain words', !catl.listed && catl.unreachable === true && /Could not reach Ollama at .*Is Ollama running/.test(catl.error), catl);
+    // Anthropic's own API lists its models only with the anthropic-version header (HTTP 400 without it): the list
+    // goes through its SDK, as the native path calls it, page by page. Every other type's request is as it was.
+    {
+      const listReqs = (mock) => mock.state.requests.filter((q) => q.url.split('?')[0] === '/v1/models');
+      const plainList = listReqs(m2);
+      check('an OpenAI-compatible provider’s list request is unchanged: its bearer, no anthropic-version, no x-api-key', plainList.length > 0 && plainList.every((q) => !('anthropic-version' in q.headers) && !('x-api-key' in q.headers) && /^Bearer /.test(q.headers.authorization || '')), plainList.map((q) => q.headers));
+      const ma = await startMock();
+      const ANT_KEY = 'mock-ant-key-0123456789';
+      Object.assign(ma.state, { anthropicModels: true, apiKey: ANT_KEY, modelsPageSize: 10, models: Array.from({ length: 25 }, (_, i) => `claude-mock-${String(i).padStart(2, '0')}`) });
+      try {
+        const bare = await fetch(`http://127.0.0.1:${ma.port}/v1/models`, { headers: { authorization: `Bearer ${ANT_KEY}` } });
+        check('(the mock answers as Anthropic does: a list request without anthropic-version is HTTP 400)', bare.status === 400 && /anthropic-version: header is required/.test(await bare.text()));
+        const ant = P.resolveProvider(cfgWith({ provider: 'a', providers: { a: { type: 'anthropic', baseURL: `http://127.0.0.1:${ma.port}/v1/`, model: 'claude-own' } } }), undefined, { ANTHROPIC_API_KEY: ANT_KEY });
+        const n0 = listReqs(ma).length;
+        const c = await P.providerCatalog(ant);
+        const asked = listReqs(ma).slice(n0);
+        check('providers.catalog on the anthropic type: listed, every page followed (25 models in pages of 10, 3 requests)', c.listed && c.models.length === 26 && c.models[0] === 'claude-own' && c.models.includes('claude-mock-24') && asked.length === 3, { listed: c.listed, error: c.error, n: c.models.length, asked: asked.map((q) => q.url) });
+        // The header's value is the SDK's own (it sends it on every request of the native path), so it is not pinned here
+        const sdkVersion = asked[0]?.headers['anthropic-version'];
+        check('… each request with the anthropic-version header and the key, as the native path sends them', asked.length === 3 && /^\d{4}-\d{2}-\d{2}$/.test(sdkVersion || '') && asked.every((q) => q.headers['anthropic-version'] === sdkVersion && /^Anthropic\/JS /.test(q.headers['user-agent'] || '') && (q.headers.authorization === `Bearer ${ANT_KEY}` || q.headers['x-api-key'] === ANT_KEY)), asked.map((q) => ({ v: q.headers['anthropic-version'], ua: q.headers['user-agent'], auth: Boolean(q.headers.authorization || q.headers['x-api-key']) })));
+        check('… each next page asked after the last id of the one before', /after_id=claude-mock-09/.test(asked[1]?.url || '') && /after_id=claude-mock-19/.test(asked[2]?.url || ''), asked.map((q) => q.url));
+        const n1 = listReqs(ma).length;
+        const viaList = await P.listModels(ant);
+        check('listModels (the model menu) asks the anthropic type the same way', viaList.length === 25 && listReqs(ma).slice(n1).every((q) => q.headers['anthropic-version'] === sdkVersion), viaList.length);
+        Object.assign(ma.state, { modelsPageSize: 1, models: Array.from({ length: 12 }, (_, i) => `claude-one-${String(i).padStart(2, '0')}`) });
+        const n2 = listReqs(ma).length;
+        const capped = await P.providerCatalog(ant);
+        check('… at most 10 pages are followed: a longer list stops there and keeps what came', capped.listed && capped.models.length === 11 && listReqs(ma).length - n2 === 10, { n: capped.models.length, asked: listReqs(ma).length - n2 });
+        ma.state.apiKey = 'another-key-0123456789';
+        const refused = await P.providerCatalog(ant);
+        check('… a refused key comes back in plain words, without the key', !refused.listed && /401/.test(refused.error || '') && !refused.error.includes(ANT_KEY), refused);
+      } finally {
+        ma.close();
+      }
+    }
     {
       const app2 = createApp({ userData: tmp(), appRoot: projectDir, loadConfig: () => cfgWith({ provider: 'g', providers: { g: { type: 'groq', model: 'llama-x' } } }), saveConfig: () => {} });
       app2.push = () => {};
