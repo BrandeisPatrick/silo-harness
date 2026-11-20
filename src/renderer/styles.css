@@ -99,14 +99,16 @@
   --surface-hover: #f5f5f5;
   --code-bg: #f5f5f5;
   --code-hover: var(--bg-300);
-  /* Code in the conversation (code blocks, tool output, inline code) sits on translucent panels: a tint of the page
-     that a background or a look shows through, frosted (--code-blur) where there is one. They are mixed from
-     --text-100 and --bg-100, so the dark scheme needs no values of its own; a look can set any of them on #messages.
-     --code-panel: a veil of the page's colour, 7% of the text colour in it, at half strength (on the plain page it
-     reads as a 3.5% tint, the old grey's weight; over a picture it keeps code readable at any dim).
-     --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. */
-  --code-panel: color-mix(in srgb, color-mix(in srgb, var(--text-100) 7%, var(--bg-100)) 50%, transparent);
-  --code-panel-solid: color-mix(in srgb, var(--text-100) 3.5%, var(--bg-100));
+  /* Panels in the conversation (code blocks, tool output, the turn's activity card, the next-step card), as Claude
+     Code draws its cards: in light mode the plain page gives them no fill at all, the hairline (--code-panel-line)
+     alone draws them; over a background or a look they are a white veil (--panel-veil, about two thirds white),
+     frosted (--code-blur). In dark mode they are a faint lift, 4.5% white, on the page and over a picture alike.
+     --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. Inline
+     code keeps a faint tint of the text colour (--code-inline): it has no hairline to carry it. A look can set any
+     of these on #messages. */
+  --panel-veil: rgba(255, 255, 255, 0.68);
+  --code-panel: transparent;
+  --code-panel-solid: var(--bg-100);
   --code-panel-line: var(--border-subtle);
   --code-inline: color-mix(in srgb, var(--text-100) 6%, transparent);
   --code-blur: 16px;
@@ -179,6 +181,9 @@
     --code-bg: #212121;
     --code-hover: #2e2e2e;
     --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
+    --panel-veil: rgba(255, 255, 255, 0.045);
+    --code-panel: var(--panel-veil);
+    --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
     --diff-bg: var(--bg-000);
     --bubble: #242424;
     --field-bg: var(--bg-300);
@@ -236,6 +241,9 @@
   --code-bg: #212121;
   --code-hover: #2e2e2e;
   --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
+  --panel-veil: rgba(255, 255, 255, 0.045);
+  --code-panel: var(--panel-veil);
+  --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
   --diff-bg: var(--bg-000);
   --bubble: #242424;
   --field-bg: var(--bg-300);
@@ -631,6 +639,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md td + td, .md th + th { border-left: 1px solid var(--border-subtle); }
 .md tbody tr:last-child td { border-bottom: none; }
 
+/* Over a background or a look the panels are the veil (light: white; dark: the faint lift) */
+:root.mod-bg, #messages[data-look] { --code-panel: var(--panel-veil); }
 .code-block { background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 4px 0 12px; margin-bottom: -8px; }
 .code-lang { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
