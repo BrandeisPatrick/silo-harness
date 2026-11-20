@@ -545,6 +545,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .msg.assistant:hover .msg-actions, .msg-actions:focus-within,
 .transcript > .msg.assistant:nth-last-child(1 of .msg.assistant:not(.turn-hidden)) > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions .icon-btn.copied { color: var(--success); }
+/* When the reply was written, after Copy, in caption size (reply-time.ts) */
+.msg-actions .msg-time { align-self: center; margin-left: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
 
 /* The next-step card (next-step.ts): under the reply that closes a turn, above its Copy row. The recap in the activity
    tier's grey, the question a step up (15/22, the text colour), then one or two replies: the first a dark fill with its

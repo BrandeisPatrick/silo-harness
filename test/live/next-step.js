@@ -3,7 +3,7 @@
 // the recap, the question, two replies (the first the primary one with ⌘↵). The model's words are text, never markup.
 // A real click on a reply sends its label as the user's message and quiets the card (only the chosen reply stays);
 // ⌘↵ with an empty chat bar picks the first reply (with text typed it sends that, as always). After a reload the
-// stored cards are quiet with their chosen replies marked.
+// stored cards are quiet with their chosen replies marked. Under each reply, after Copy, the time it was written.
 // Run: npm run build && node test/live/next-step.js [screenshot-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -60,6 +60,8 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     check('1: the turn folds to its header with the answer and the card under it', fold.head === 'false' && /^Read a file, ran a command/.test(fold.label) && fold.answerShown, { fold, nodes: await app.evaluate(`[...document.querySelectorAll('#messages > *')].map((n) => n.className + (n.classList.contains('turn-hidden') ? '' : '*'))`) });
     const look = await app.evaluate(`(() => { const c = document.querySelector('.next-step'); const s = getComputedStyle(c); const q = getComputedStyle(c.querySelector('.next-step-question')); const r = getComputedStyle(c.querySelector('.next-step-recap')); const b = getComputedStyle(c.querySelector('.next-step-reply')); return { radius: s.borderTopLeftRadius, pad: s.padding, border: s.borderTopWidth, recap: r.fontSize + '/' + r.lineHeight, question: q.fontSize + '/' + q.lineHeight, btn: b.height + ' ' + b.borderTopLeftRadius }; })()`);
     check('1: the card per the mock-up: radius 14, padding 16 18 18, recap 14/20, question 15/22, buttons 32 px radius 9', look.radius === '14px' && look.pad === '16px 18px 18px' && look.border === '1px' && look.recap === '14px/20px' && look.question === '15px/22px' && look.btn === '32px 9px', look);
+    const foot = await app.evaluate(`(() => { const a = [...document.querySelectorAll('#messages > .msg.assistant')].pop().querySelector(':scope > .msg-actions'); const t = a.querySelector('.msg-time'); return { kids: [...a.children].map((k) => k.classList.contains('msg-copy') ? 'copy' : k.classList.contains('msg-time') ? 'time' : k.className), time: t?.textContent, size: t && getComputedStyle(t).fontSize, shown: getComputedStyle(a).opacity === '1', tip: t?.title }; })()`);
+    check('1: under the answer: Copy, then the time ("Just now", 13 px), shown for the latest reply', foot.kids.join() === 'copy,time' && foot.time === 'Just now' && foot.size === '13px' && foot.shown && /\d{4}, \d\d:\d\d$/.test(foot.tip), foot);
     await app.screenshot(path.join(shots, 'next-step-card.png'));
 
     // 2. A real click on the second reply sends its label; the card goes quiet with that reply marked
@@ -108,6 +110,8 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     await sleep(500);
     c = await cards();
     check('5: stored cards are quiet, in the replies, with the chosen replies', c.every((x) => x.quiet && x.inReply) && c[0].buttons.map((b) => b.label).join() === 'Not yet' && c[1].buttons.map((b) => b.label).join() === 'Ship it' && c[2].buttons.length === 0 && c[0].buttons[0].chosen, c);
+    const times = await app.evaluate(`[...document.querySelectorAll('#messages > .msg.assistant')].filter((a) => a.querySelector('.md').innerText.trim()).map((a) => ({ time: a.querySelector('.msg-time')?.textContent ?? '', shown: getComputedStyle(a.querySelector(':scope > .msg-actions')).opacity === '1' }))`);
+    check('5: stored replies keep their time; only the latest row shows without hover', times.length >= 4 && times.every((x) => x.time === 'Just now') && times.filter((x) => x.shown).length === 1 && times[times.length - 1].shown, times);
     await app.evaluate(`document.querySelector('#input').focus()`);
     await app.key('Enter', { meta: true });
     await sleep(400);

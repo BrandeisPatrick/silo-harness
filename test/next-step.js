@@ -114,6 +114,8 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   let card = items.find((i) => i.role === 'next_step');
   check('1: the stored transcript has the card, not a tool row', card && JSON.stringify(card.step) === JSON.stringify(CARD) && !card.chosen && !items.some((i) => i.role === 'tool' && i.name === 'next_step'), items);
   const at = items.indexOf(card);
+  const answerAt = items[at - 1]?.at;
+  check('1: the stored reply has the time it was written (its turn\'s end)', typeof answerAt === 'number' && Math.abs(Date.now() - answerAt) < 60_000 && items.filter((i) => i.role === 'user').every((u) => typeof u.at !== 'number'), answerAt);
   check('1: the card comes right after the reply it closes', items[at - 1]?.role === 'assistant' && items[at - 1].text === 'The importer now resumes.');
 
   // 2. The user's next message is a reply's label: the stored card marks it

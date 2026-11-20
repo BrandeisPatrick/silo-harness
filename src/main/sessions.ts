@@ -270,12 +270,17 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   const turnByAt = new Map<number, number>();
   (s.turns ?? []).forEach((t, i) => turnByAt.set(t.at, i));
   appendTranscript(s, s.messages, items, turnByAt, opts.running === true, shown);
-  // Each user message carries how long its turn worked, when that was recorded
+  // Each user message carries how long its turn worked, when that was recorded; each reply in a turn with a
+  // checkpoint, when it was written (the turn's start plus how long it worked: its end)
   let n = 0;
+  let replyAt: number | undefined;
   for (const it of items) {
+    if (it.role === 'assistant' && replyAt !== undefined) it.at = replyAt;
     if (it.role !== 'user') continue;
     const ms = s.turnTimes?.[n++];
     if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) it.worked = ms;
+    const started = it.turn !== undefined ? s.turns?.[it.turn]?.createdAt : undefined;
+    replyAt = typeof started === 'number' && started > 0 ? started + (it.worked ?? 0) : undefined;
   }
   return items;
 }

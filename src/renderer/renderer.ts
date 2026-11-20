@@ -49,6 +49,7 @@ import type { SettingsInfo } from '../shared/settings-info';
 import type { Schedule } from '../shared/schedules';
 import { bus } from './bus.js';
 import { onPush, rpc } from './rpc.js';
+import { stampReply } from './reply-time.js';
 import { appendTranscriptItem, setTranscriptSink, transcriptItemRenderer, type ExtraTranscriptItem } from './transcript-items.js';
 import { PROPOSAL_TOOLS, proposalEnded, setupDreamingView } from './dreaming.js';
 import { createModsHost } from './mods-host.js';
@@ -562,6 +563,7 @@ function renderTranscript(items: TranscriptItem[]): void {
       if (typeof item.worked === 'number') el.dataset.worked = String(item.worked);
     } else if (item.role === 'assistant') {
       appendAssistantText(item.text);
+      if (typeof item.at === 'number') stampReply(lastReply(), item.at);
       endAssistant();
     } else if (item.role === 'plan') {
       addPlanCard(item.plan, { interactive: i === lastPlan && i > lastUser && item.plan?.status === 'proposed' });
@@ -585,6 +587,11 @@ function renderTranscript(items: TranscriptItem[]): void {
   chatCards.flush();
   turnFold.rendering(false);
   scrollToBottom(true);
+}
+
+/** The newest reply in the transcript */
+function lastReply(): HTMLElement | undefined {
+  return [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.assistant')].pop();
 }
 
 /** A feature's transcript row: after the streaming reply and the thinking block are closed. */
@@ -1174,6 +1181,7 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
       appendAssistantText(ev.text);
       break;
     case 'text_done':
+      stampReply(lastReply(), Date.now());
       endAssistant();
       break;
     case 'tool_start': {
