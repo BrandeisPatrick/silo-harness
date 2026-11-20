@@ -53,7 +53,7 @@ const SENTENCE = /^The certificate for localhost is not valid \((net::ERR_CERT_[
       const css = (sel) => getComputedStyle(ix.querySelector(sel));
       return { covers: r.left === slot.left && r.top === slot.top && r.width === slot.width && r.height === slot.height, bg: getComputedStyle(ix).backgroundColor, page: getComputedStyle(document.body).backgroundColor, title: css('.ix-title').fontSize, text: css('.ix-text').fontSize, back: css('.ix-back').backgroundColor, ink: getComputedStyle(document.body).color, proceed: css('.ix-proceed').color, grey: getComputedStyle(document.querySelector('.url-pill')).color, triangle: !!ix.querySelector('.ix-icon svg') };
     })()`);
-    check('… drawn in the app\'s style: the page colour, the title 16 px, the text 14 px, Go back filled with the text colour, Proceed a grey link, an outlined triangle', look.covers && look.bg === look.page && look.title === '16px' && look.text === '14px' && look.back === look.ink && look.proceed === look.grey && look.triangle, look);
+    check('… drawn in the app\'s style: the page colour, the title 17 px, the text 16 px, Go back filled with the text colour, Proceed a grey link, an outlined triangle', look.covers && look.bg === look.page && look.title === '17px' && look.text === '16px' && look.back === look.ink && look.proceed === look.grey && look.triangle, look);
     await app.screenshotOf(path.join(shots, 'cert-interstitial.png'), '#side-pane');
 
     // ---------- Go back ----------

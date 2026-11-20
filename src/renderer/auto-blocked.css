@@ -8,7 +8,7 @@
 .auto-blocked > summary {
   list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0;
   height: 24px; padding: 0 4px; border-radius: var(--r-control);
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); cursor: pointer; user-select: none;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); cursor: pointer; user-select: none;
   transition: color 0.1s;
 }
 .auto-blocked > summary::-webkit-details-marker { display: none; }

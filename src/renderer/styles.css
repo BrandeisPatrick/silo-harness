@@ -1,11 +1,17 @@
 /* =====================================================================
    Silo Harness renderer styles
    Tokens follow docs/ui-audit.md (Claude desktop reference values).
-   Spacing is on a 4px grid. Type (the tokens below, Claude desktop's
-   measured sizes): what you read 14/20 (its "sm"), headings in a reply
-   16/24, rows and controls 14/20, secondary 13/18, captions and badges
-   12/16, code 12.5/20; display 28/34. Nothing under 12px but keyboard
-   glyphs.
+   Spacing is on a 4px grid. Type comes in two tiers, as in Claude Code:
+   what the assistant says (replies, the user's bubble, the chat bar) 16/24
+   (--fs-body), and what it did (the fold line, tool, group and blocked
+   rows, notices, the status line) 14/20 in the muted colour (--fs-act),
+   the thing acted on one step darker. Headings in a reply 17/24 (h1-h2),
+   16 below; inline code 14, code blocks 13/20 (--fs-code). Rows and
+   controls 14/20, secondary 13/18, captions and badges 12/16; display
+   28/34. Nothing under 12px but keyboard glyphs.
+   One step smaller (the other set the owner weighed): --fs-body 14px /
+   --lh-body 20px, --fs-act 13px / --lh-act 18px, --fs-head 15px /
+   --lh-head 22px, --fs-code 12.5px, --col 648px.
    ===================================================================== */
 
 /* ---------- Tokens ---------- */
@@ -16,9 +22,12 @@
 
   /* Type scale. body: replies, the user's bubble, tool and status lines, the chat bar's text. ui: rows, menus,
      buttons, inputs. small: rail headings, notes, hints, counts. micro: date groups, captions, badges. */
-  --fs-body: 14px;
-  --lh-body: 20px;
-  --fs-head: 16px;
+  --fs-body: 16px;
+  --lh-body: 24px;
+  /* What the agent did: the fold line, tool, group and blocked rows, notices, the status line */
+  --fs-act: 14px;
+  --lh-act: 20px;
+  --fs-head: 17px;
   --lh-head: 24px;
   --fs-title: 14px;
   --lh-title: 20px;
@@ -28,7 +37,7 @@
   --lh-small: 18px;
   --fs-micro: 12px;
   --lh-micro: 16px;
-  --fs-code: 12.5px;
+  --fs-code: 13px;
   --lh-code: 20px;
   --fs-kbd: 11px;
 
@@ -125,7 +134,7 @@
   --r-composer: 12px;
   --r-card-lg: 10px;
   --sidebar-w: 256px;
-  --col: 648px;
+  --col: 728px;
   color-scheme: light;
 }
 
@@ -495,7 +504,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* ---------- Transcript ---------- */
 .transcript { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 32px 0 56px; display: flex; flex-direction: column; }
-/* One reading column, 648px at most (640px of text: about 95 characters a line at 14px), at least 24px from the pane's edges; cards take its full width and running
+/* One reading column, 728px at most (720px of text: about 90 to 95 characters a line at 16px), at least 24px from the pane's edges; cards take its full width and running
    text (replies, tool lines, the user's bubble) sits 4px in from each side. 16px between blocks. */
 .transcript > * { width: min(var(--col), calc(100% - 48px)); margin-left: auto; margin-right: auto; flex: none; }
 /* Fill backwards, not both: a finished animation that still holds its end state keeps the message a backdrop root, and
@@ -509,9 +518,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .msg { margin-bottom: 16px; }
 .msg.user { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 24px; padding: 0 4px; }
 .msg.user .bubble {
-  max-width: 85%; padding: 12px 16px;
+  max-width: 85%; padding: 10px 16px;
   background: var(--bubble); color: var(--text-100);
-  border-radius: 12px;
+  border-radius: 18px 18px 4px 18px;
   font-size: var(--fs-body); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 /* A bubble holding another session's words (a report, a merged summary): Markdown, laid out like a reply */
@@ -537,7 +546,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .transcript > .msg.assistant:nth-last-child(1 of .msg.assistant:not(.turn-hidden)) > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions .icon-btn.copied { color: var(--success); }
 
-.msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); text-align: center; }
+.msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); text-align: center; }
 .msg.system .icon { flex: none; }
 .msg.system.error {
   justify-content: flex-start; align-items: flex-start; gap: 8px; text-align: left;
@@ -583,7 +592,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
 /* Inline code: the mono face on a soft patch of tint, no outline, so a sentence with several stays even */
-.md code { font-family: var(--mono); font-size: var(--fs-code); padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
+.md code { font-family: var(--mono); font-size: calc(var(--fs-body) - 2px); padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }
@@ -633,7 +642,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thinking > summary, .tool > summary, .tool-group > summary {
   list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0;
   height: 24px; padding: 0 4px; border-radius: var(--r-control);
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); cursor: pointer; user-select: none;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); cursor: pointer; user-select: none;
   transition: color 0.1s;
 }
 .thinking > summary::-webkit-details-marker, .tool > summary::-webkit-details-marker, .tool-group > summary::-webkit-details-marker { display: none; }
@@ -663,7 +672,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .group-icon.spin::after { content: ''; position: absolute; inset: 1px; border-radius: 50%; border: 1.5px solid var(--border); border-top-color: var(--spinner); transform: rotate(var(--spin, 0deg)); will-change: transform; }
 .group-icon.err { color: var(--danger); }
 .tool-verb { flex: none; white-space: nowrap; }
-.tool-arg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-arg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-200); }
 .tool-arg.mono { font-family: var(--mono); font-size: 0.9em; }
 .tool-meta { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tool-meta:empty { display: none; }
@@ -705,7 +714,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .transcript > .turn-head { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
 .turn-head-btn {
   display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: var(--r-control);
-  font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
 }
 .turn-head-btn:hover:not(:disabled) { color: var(--text-200); }
 .turn-head-btn:active:not(:disabled) { background: var(--pressed); }
@@ -845,7 +854,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 }
 /* A call without a row of its own keeps its answer as a line (in the run, like the row would be) */
 .approval.done { padding: 0; margin-top: 0; margin-bottom: 16px; background: none; border: none; border-radius: 0; box-shadow: none; overflow: visible; }
-.approval .decided { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 0; padding-left: 4px; margin-top: 0; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); }
+.approval .decided { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 0; padding-left: 4px; margin-top: 0; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); }
 .approval .decided .ok { color: var(--text-400); display: inline-flex; }
 .approval .decided .no { color: var(--danger); display: inline-flex; }
 .approval .decided code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 0.9em; color: var(--text-200); }
@@ -913,7 +922,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .plan-body { max-height: 480px; overflow-y: auto; padding: 12px 12px 16px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); }
 .plan-foot { }
 .plan-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
-.plan-status { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 12px 12px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); }
+.plan-status { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 12px 12px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); }
 .plan-status > span:first-child { display: inline-flex; flex: none; }
 .plan-status .ok { color: var(--success); }
 .plan-status .back, .plan-status .muted { color: var(--text-400); }
@@ -929,7 +938,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .status-line {
   position: absolute; left: 0; right: 0; bottom: 100%; height: 44px; padding: 0 21px 12px;
   display: flex; align-items: center; gap: 12px;
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); user-select: none;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); user-select: none;
   background: linear-gradient(to bottom, transparent, var(--bg-100) 35%);
 }
 .status-line .spinner { margin: 0 2px 0 1px; }

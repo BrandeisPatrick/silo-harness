@@ -127,22 +127,22 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
         },
       };
     })()`);
-    check('reply text 14/20, bold 600', m.body.fs === '14px' && m.body.lh === '20px' && m.bold === '600', m.body);
-    check('a heading in a reply is semibold, 16 px at the top two levels', m.h2.fs === 16 && Number(m.h2.fw) >= 600, m.h2);
-    check('reading column: 648 px at most, running text inset 4 px', m.body.col <= 648 + 0.5 && m.body.inset === 4, m.body);
-    check('inline code: 12.5 px mono, an 18 px patch, 4.5 px side padding, 5 px radius, no border', m.code.fs === '12.5px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '5px' && m.code.border === 'none', m.code);
-    check('code blocks 12.5/20 mono', m.pre.fs === '12.5px' && m.pre.lh === '20px', m.pre);
+    check('reply text 16/24, bold 600', m.body.fs === '16px' && m.body.lh === '24px' && m.bold === '600', m.body);
+    check('a heading in a reply is semibold, 17 px at the top two levels', m.h2.fs === 17 && Number(m.h2.fw) >= 600, m.h2);
+    check('reading column: 728 px at most, running text inset 4 px', m.body.col <= 728 + 0.5 && m.body.inset === 4, m.body);
+    check('inline code: 14 px mono, an 18 px patch, 4.5 px side padding, 5 px radius, no border', m.code.fs === '14px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '5px' && m.code.border === 'none', m.code);
+    check('code blocks 13/20 mono', m.pre.fs === '13px' && m.pre.lh === '20px', m.pre);
     check('list items about 4 px apart', m.liGap !== null && m.liGap >= 3 && m.liGap <= 5, m.liGap);
     check('tool lines: 14 px, muted, a 24 px row, no box; 8 px between two, 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '14px' && m.tool.h === 24 && m.tool.border === 'none' && m.tool.pitch === 32 && m.tool.gapAfter === 16, m.tool);
-    check('the user bubble: 14 px, 12/16 padding, 12 px radius', m.bubble.fs === '14px' && m.bubble.pad === '12px 16px' && m.bubble.radius === '12px', m.bubble);
-    check('the task card: the column width, 10 px radius, 12 px padding, 28 px rows at 14 px', m.task.w <= 648.5 && m.task.radius === '10px' && m.task.pad === '12px' && near(m.task.row, 28) && m.task.fs === '14px', m.task);
+    check('the user bubble: 16 px, 10/16 padding, 18 px radius (4 px at the bottom right)', m.bubble.fs === '16px' && m.bubble.pad === '10px 16px' && m.bubble.radius === '18px', m.bubble);
+    check('the task card: the column width, 10 px radius, 12 px padding, 28 px rows at 14 px', m.task.w <= 728.5 && m.task.radius === '10px' && m.task.pad === '12px' && near(m.task.row, 28) && m.task.fs === '14px', m.task);
     check('top bar 44 px plus its hairline; the title 14 px regular', m.topbar === 45 && m.titleFs === '14px' && m.titleFw === '400', { h: m.topbar, fs: m.titleFs, fw: m.titleFw });
     check('sidebar rows 14 px, 32 px tall on a 34 px pitch, 8 px radius; navigation rows the same', m.side.fs === '14px' && m.side.h === 32 && m.side.pitch === 34 && m.side.radius === '8px' && m.side.navFs === '14px' && m.side.navH === 32, m.side);
     check('date-group labels 12 px, 51 px below the row before and 35 px above the next', m.group && m.group.fs === '12px' && near(m.group.above, 51, 1) && near(m.group.below, 35, 1), m.group);
     check('rail headings 13 px, regular weight, not uppercase', m.rail.fs === '13px' && m.rail.fw === '400' && m.rail.tt === 'none', m.rail);
-    check('chat bar: 46 px tall, 12 px radius, at most 770 px wide', m.bar.h === 46 && m.bar.radius === '12px' && m.bar.w <= 770.5, m.bar);
+    check('chat bar: 49 px tall (one 24 px line), 12 px radius, at most 770 px wide', m.bar.h === 49 && m.bar.radius === '12px' && m.bar.w <= 770.5, m.bar);
     check('chat bar: the plus, the field and the action in one row, centred on one line', m.bar.oneRow && m.bar.cy.every((v) => near(v, m.bar.cy[1], 1)), m.bar.cy);
-    check('chat bar: a 14 px plus 16 px in, the text 45 px in at 14 px, the action glyph 15 px from the right edge', near(m.bar.plusIn, 16) && near(m.bar.plusW, 14, 0.5) && near(m.bar.textIn, 45) && m.bar.inputFs === '14px' && near(m.bar.sendOut, 15, 1.5), m.bar);
+    check('chat bar: a 14 px plus 16 px in, the text 45 px in at 16 px, the action glyph 15 px from the right edge', near(m.bar.plusIn, 16) && near(m.bar.plusW, 14, 0.5) && near(m.bar.textIn, 45) && m.bar.inputFs === '16px' && near(m.bar.sendOut, 15, 1.5), m.bar);
     check('chat bar: #composer-foot outside #composer, its row centred about 20 px below the bar, 12 px muted labels, a 12 px ring 14 px from the right edge', m.bar.footOutside && near(m.bar.footBelow, 20, 1) && m.bar.footFs === '12px' && m.bar.footColor === m.tool.muted && m.bar.ring === 12 && near(m.bar.ringOut, 14, 1), m.bar);
 
     // A mod page's row, through harness.css
@@ -191,7 +191,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
     await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'dark'; await window.oc.setConfig(c); })()`);
     await sleep(800);
     await app.screenshot(path.join(SHOTS, 'window-dark.png'));
-    check('dark: the same scale', (await app.evaluate(`getComputedStyle(document.querySelector('#messages > .msg.assistant p')).fontSize`)) === '14px');
+    check('dark: the same scale', (await app.evaluate(`getComputedStyle(document.querySelector('#messages > .msg.assistant p')).fontSize`)) === '16px');
   } catch (err) {
     check('the run finished', false, String(err && err.stack));
   } finally {

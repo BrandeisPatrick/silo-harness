@@ -366,13 +366,13 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
           await sleep(400);
           const g = await geo();
           const ok =
-            near(g.comp.h, 46) && g.radius === '12px' &&
+            near(g.comp.h, 49) && g.radius === '12px' &&
             g.attach.r <= g.input.x + 1 && g.send.x >= g.input.r - 1 &&
             near(g.attach.cy, g.input.cy, 2) && near(g.send.cy, g.input.cy, 2) &&
             g.foot.y >= g.comp.b && near(g.model.cy, g.mode.cy) && g.model.x < g.mode.x &&
             (!g.meter || (g.mode.r <= g.meter.x + 1 && near(g.meter.r, g.comp.r - 8, 3))) &&
             g.chipBorder === 'none' && g.modeBorder === 'none';
-          check(`chatbar (${tag}): one 46 px bar with the plus left, the field, the action right; model, mode, ring in a borderless row under it, right-aligned`, ok, g);
+          check(`chatbar (${tag}): one 49 px bar with the plus left, the field, the action right; model, mode, ring in a borderless row under it, right-aligned`, ok, g);
           await bar(`empty-${tag}`);
           await app.evaluate(`document.querySelector('#input').focus()`);
           await sleep(250);
@@ -381,7 +381,7 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
           await app.fill('#input', 'First line of a longer request\nsecond line with more detail\nthird line');
           await sleep(200);
           const g3 = await geo();
-          check(`chatbar (${tag}): three lines grow the bar upward, the plus and the action stay on the last line`, near(g3.input.h, 83) && near(g3.comp.b, g.comp.b) && near(g3.send.cy, g.send.cy) && near(g3.attach.cy, g.attach.cy), { input: g3.input, send: g3.send });
+          check(`chatbar (${tag}): three lines grow the bar upward, the plus and the action stay on the last line`, near(g3.input.h, 95) && near(g3.comp.b, g.comp.b) && near(g3.send.cy, g.send.cy) && near(g3.attach.cy, g.attach.cy), { input: g3.input, send: g3.send });
           await bar(`three-lines-${tag}`);
           await app.fill('#input', '');
         }
