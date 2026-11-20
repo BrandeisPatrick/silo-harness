@@ -371,7 +371,8 @@ export function modelSection(ctx: Ctx): Section {
     }
 
     const rows = shown.shown.map((m) => modelLine(p, m, inUse && m === p.model));
-    const empty = !ids.length ? h('div', { class: 'sp-model-empty' }, p.key === 'missing' ? 'Nothing to list without the key.' : busy ? 'Asking for the list…' : 'No models to show.') : view.query && !shown.matched ? h('div', { class: 'sp-model-empty' }, `No model matches “${view.query.trim()}”.`) : null;
+    // With nothing to list, the line under the head already says why (no key, not reachable, can't list)
+    const empty = !ids.length ? (busy ? h('div', { class: 'sp-model-empty' }, 'Asking for the list…') : state.detail ? null : h('div', { class: 'sp-model-empty' }, 'No models to show.')) : view.query && !shown.matched ? h('div', { class: 'sp-model-empty' }, `No model matches “${view.query.trim()}”.`) : null;
     let more: HTMLElement | null = null;
     if (shown.more > 0 || (view.all && ids.length > 8 && !view.query)) {
       const label = view.all ? 'Show fewer' : `Show all ${shown.matched.toLocaleString('en-US')}`;
