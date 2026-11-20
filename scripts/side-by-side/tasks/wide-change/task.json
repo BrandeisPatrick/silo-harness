@@ -1,0 +1,5 @@
+{
+  "title": "Make a storage layer asynchronous everywhere",
+  "probes": "A wide change through about 16 source files and 8 test files (about 25 to 60 tool calls): finding every caller, keeping behaviour the same, updating tests and docs, and checking the whole before finishing.",
+  "timeoutMinutes": 25
+}
