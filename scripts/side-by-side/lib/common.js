@@ -9,7 +9,7 @@ const HERE = path.join(__dirname, '..');
 const TASKS = path.join(HERE, 'tasks');
 
 /** The task ids, in the order compare.js prints them. */
-const TASK_IDS = ['fix-bug', 'add-feature', 'question', 'partly-blocked'];
+const TASK_IDS = ['fix-bug', 'add-feature', 'question', 'partly-blocked', 'build-app', 'wide-change'];
 
 function loadTask(id) {
   const dir = path.join(TASKS, String(id || ''));

@@ -204,7 +204,7 @@ async function main() {
   } else {
     ({ runDir, project } = c.prepareRun(task, outDir, 'claude'));
     console.log(`claude: ${task.id} with ${model} in ${project}`);
-    const timeoutMs = (Number(a.timeout) || DEFAULT_TIMEOUT_MIN) * 60_000;
+    const timeoutMs = (Number(a.timeout) || task.meta.timeoutMinutes || DEFAULT_TIMEOUT_MIN) * 60_000;
     run = await runClaude(task.prompt, model, project, runDir, timeoutMs);
     run.wallMs = run.endedAt - run.startedAt;
     fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ ...run, model, prompt: task.prompt }, null, 2) + '\n');

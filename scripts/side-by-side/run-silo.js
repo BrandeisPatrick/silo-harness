@@ -231,7 +231,7 @@ async function main() {
   }
   const sandbox = (a.sandbox || 'off') === 'on';
   if (a.sandbox && !['on', 'off'].includes(a.sandbox)) throw new Error('--sandbox takes on or off');
-  const timeoutMs = (Number(a.timeout) || DEFAULT_TIMEOUT_MIN) * 60_000;
+  const timeoutMs = (Number(a.timeout) || task.meta.timeoutMinutes || DEFAULT_TIMEOUT_MIN) * 60_000;
   if (!fs.existsSync(path.join(ROOT, 'dist', 'main', 'index.js'))) throw new Error('Build first: npm run build');
   const rig = require(path.join(ROOT, 'test', 'live', 'rig.js'));
   const mock = Boolean(a.mock);
