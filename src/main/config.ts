@@ -279,5 +279,11 @@ export function normalizeConfig(cfg: AppConfig): AppConfig {
 export function saveConfig(cfg: AppConfig): void {
   const stored = withoutSettings(cfg);
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify({ ...stored, schemaVersion: SCHEMA_VERSION }, null, 2));
+  // Owner-only: it may hold a key (the gateway's, a provider's) saved in Settings → Models
+  fs.writeFileSync(configPath(), JSON.stringify({ ...stored, schemaVersion: SCHEMA_VERSION }, null, 2), { mode: 0o600 });
+  try {
+    fs.chmodSync(configPath(), 0o600); // the mode applies only when the file is created
+  } catch {
+    /* a file system without modes */
+  }
 }

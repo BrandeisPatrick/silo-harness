@@ -5,7 +5,7 @@
 // key, the Add provider form, and a test that failed. Also writes every row's words to rows.txt, so a review can read
 // them all.
 //
-//   npm run build && node scripts/settings-shots.js [out dir, default ./shots]
+//   npm run build && node scripts/settings-shots.js [out dir, default ./shots] [--models]
 //
 // Nothing here touches your own profile, settings or keys: every launch uses a temp profile and config folder, and
 // the "key" pictured is made up.
@@ -13,7 +13,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { launch, sleep } = require(path.join(__dirname, '..', 'test', 'live', 'rig.js'));
 
-const out = path.resolve(process.argv[2] || path.join(__dirname, '..', 'shots'));
+const args = process.argv.slice(2);
+/** --models: only the Models states (part 2), for a quick look */
+const modelsOnly = args.includes('--models');
+const out = path.resolve(args.find((a) => !a.startsWith('--')) || path.join(__dirname, '..', 'shots'));
 const PAGES = ['general', 'model', 'permissions', 'appearance', 'browser', 'remote', 'mods', 'mcp', 'skills', 'history', 'developer'];
 const WIDTH = 1100;
 const lines = [];
@@ -84,7 +87,7 @@ async function setTheme(app, theme) {
   let failed = false;
 
   // 1. Every page, light; then dark for General, Models and Developer; then Appearance over a background
-  {
+  if (!modelsOnly) {
     const app = await launch({ mock: true, mode: 'ask', size: { width: WIDTH, height: 3200 }, scale: 1, config: { theme: 'light' } });
     try {
       console.log('Every page, light');
@@ -99,6 +102,95 @@ async function setTheme(app, theme) {
       await sleep(1200);
       await page(app, 'appearance');
       await shoot(app, 'appearance', 'appearance-background');
+    } catch (err) {
+      console.log(`FAILED: ${err.stack || err.message}`);
+      failed = true;
+    } finally {
+      await app.close();
+    }
+  }
+
+  // 2. Models: a gateway with a long list and a key saved in the app; a provider with no key; Add provider; a failed test
+  {
+    const longIds = [
+      ...Array.from({ length: 160 }, (_, i) => `vendor-${String(i % 9)}/model-family-${Math.floor(i / 9)}-instruct-${i}`),
+      'anthropic/claude-opus-5-5',
+      'anthropic/claude-haiku-5-5',
+      'some-provider/an-unusually-long-model-identifier-that-goes-on-2026-11-01-preview-with-tools',
+    ];
+    const app = await launch({
+      mock: true,
+      mode: 'ask',
+      size: { width: WIDTH, height: 3200 },
+      scale: 1,
+      // No key in the environment: a made-up one is saved through the page's own call, as Replace saves one
+      config: { theme: 'light' },
+      env: { PORTKEY_API_KEY: '' },
+    });
+    try {
+      app.mock.state.models = longIds;
+      await app.evaluate(`window.oc.rpc('providers.setKey', 'portkey', 'pk-made-up-for-pictures-3f2a')`);
+      await app.evaluate(`window.oc.rpc('providers.setModel', 'portkey', 'anthropic/claude-opus-5-5')`);
+      await openSettings(app);
+      await page(app, 'model');
+      await app.waitFor(`/Ready/.test(document.querySelector('#sp-row-provider .sp-status')?.innerText || '')`, 15_000, 'the gateway ready');
+      console.log('Models states');
+      await shoot(app, 'model', 'model-gateway-key');
+      // Advanced, with the safety check's test run once (the mock blocks every action: none let through)
+      app.mock.state.classifierDefault = { decision: 'block', reason: '[Pictures] blocks everything' };
+      await setAdvanced(app, 'model', true);
+      await app.click('#sp-row-autoMode-model .sp-row-control > .btn');
+      await app.waitFor(`!document.querySelector('#sp-row-autoMode-model .sp-row-result').hidden || !!document.querySelector('#sp-row-autoMode-model .sp-problem:not([hidden])')`, 60_000, 'the check test');
+      await shoot(app, 'model', 'model-advanced-gateway');
+      await setAdvanced(app, 'model', false);
+      await app.click('#provider-model');
+      await sleep(500);
+      await app.evaluate(`(() => { const i = document.querySelector('.sp-picker-search'); i.value = 'claude'; i.dispatchEvent(new Event('input')); })()`);
+      await sleep(300);
+      await shoot(app, 'model', 'model-picker-search');
+      await app.evaluate(`(() => { const i = document.querySelector('.sp-picker-search'); i.value = ''; i.dispatchEvent(new Event('input')); })()`);
+      await sleep(300);
+      await shoot(app, 'model', 'model-picker-long');
+      await app.key('Escape');
+      await sleep(200);
+      // A failed test: the service answers the test with an error
+      app.mock.state.replies.push({ nonStream: true, status: 404, error: 'The model does not exist or you do not have access to it.' });
+      await app.click('#sp-row-provider-model .sp-pair-side .btn');
+      await app.waitFor(`!document.querySelector('#sp-row-provider-model .sp-row-result').hidden`, 15_000, 'the test result');
+      await shoot(app, 'model', 'model-test-failed');
+      // Add provider
+      await app.click('#sp-row-provider-add button');
+      await sleep(400);
+      await shoot(app, 'model', 'model-add-provider');
+      await app.evaluate(`(() => { const s = document.querySelector('#provider-add-type'); s.value = 'openai-compatible'; s.dispatchEvent(new Event('change')); })()`);
+      await sleep(200);
+      await shoot(app, 'model', 'model-add-provider-compatible');
+      await words(app, 'model', 'model (gateway, Add provider open)');
+    } catch (err) {
+      console.log(`FAILED: ${err.stack || err.message}`);
+      failed = true;
+    } finally {
+      await app.close();
+    }
+  }
+  {
+    // A provider with no key: OpenRouter in use, its variable empty
+    const app = await launch({
+      mock: true,
+      mode: 'ask',
+      size: { width: WIDTH, height: 3200 },
+      scale: 1,
+      config: { theme: 'light', provider: 'openrouter', providers: { openrouter: { type: 'openrouter', model: 'anthropic/claude-haiku-5.5' } } },
+      env: { OPENROUTER_API_KEY: '' },
+    });
+    try {
+      await openSettings(app);
+      await page(app, 'model');
+      await sleep(800);
+      await shoot(app, 'model', 'model-no-key');
+      await words(app, 'model', 'model (no key)');
+      await setTheme(app, 'dark');
+      await shoot(app, 'model', 'model-no-key-dark');
     } catch (err) {
       console.log(`FAILED: ${err.stack || err.message}`);
       failed = true;

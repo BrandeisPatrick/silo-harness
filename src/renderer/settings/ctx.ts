@@ -45,6 +45,8 @@ export interface Ctx {
   adopt(next: AppConfig): void;
   /** A settings.json file sets this field (its row is read-only here) */
   isOwned(field: string): boolean;
+  /** Which settings.json sets this field (or one above it), or null */
+  ownerOf(field: string): 'user' | 'project' | null;
 
   /** A switch for a boolean field, or for a field of two values: `values` names the one stored when on and when off (only the off one reads as off) */
   switchField(opts: FieldOptions & { invert?: boolean; values?: { on: string; off: string } }): Row;

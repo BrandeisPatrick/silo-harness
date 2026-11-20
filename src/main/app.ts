@@ -317,7 +317,7 @@ export class AppHost implements App {
       }
     }
     // The window's copy: keys masked, the providers resolved (see providers.ts).
-    this.push('config:changed', windowConfig(next, settingsLayer.info().owned));
+    this.push('config:changed', windowConfig(next, settingsLayer.info().owned, settingsLayer.envOwners()));
     return next;
   }
 

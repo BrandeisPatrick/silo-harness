@@ -224,45 +224,71 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-inline-status.error { color: var(--danger); }
 .sp-inline-status .icon { flex: none; margin-top: 1px; }
 
-/* ---------- Models: every connected provider and the models it offers ---------- */
-.sp-group.sp-models > .sp-note.sp-models-intro { margin: 0 0 4px; padding: 0; border-top: none; max-width: 640px; }
-.sp-provider { margin-top: 24px; }
-.sp-provider-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-.sp-provider-title { margin: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
-.sp-provider-gap { flex: 1 1 auto; }
-.sp-provider-detail { margin-top: 2px; max-width: 640px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; }
-.sp-provider-detail.danger { color: var(--danger); }
-.sp-models-filter-row { position: relative; display: flex; align-items: center; max-width: 320px; margin-top: 12px; }
-.sp-models-filter-icon { position: absolute; left: 10px; top: 8px; display: inline-flex; color: var(--text-400); pointer-events: none; }
-.sp-input.sp-models-filter { padding-left: 32px; }
-.sp-model-list { margin-top: 8px; border-top: 1px solid var(--border-subtle); }
-.sp-model { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-.sp-model-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.sp-model-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.sp-model-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-code); line-height: var(--lh-ui); color: var(--text-100); }
-.sp-model-result { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; }
-.sp-model-result .icon { flex: none; margin-top: 3px; }
-.sp-model-result.ok .icon { color: var(--success); }
-.sp-model-result.error { color: var(--danger); }
-.sp-model-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-.sp-model-empty { padding: 14px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
-.sp-models-more { display: inline-flex; align-items: center; height: 26px; margin: 6px 0 0 -6px; padding: 0 6px; border-radius: var(--r-control); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); }
-.sp-models-more:hover { background: var(--sp-hover); color: var(--text-100); }
+/* ---------- Models: one card (Provider, Model, API key), Connection, Add provider ---------- */
+/* A control and what sits at its right (a status, Test, Replace), lined up across the card's rows */
+.sp-pair { display: flex; align-items: center; gap: 10px; }
+.sp-pair-side { display: flex; align-items: center; gap: 6px; width: 104px; }
+.sp-pair-side > [hidden] { display: none; }
+.sp-row-control.sp-pair-row > .btn { margin-left: 2px; }
+.sp-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); white-space: nowrap; }
+.sp-dot { flex: none; color: var(--text-400); }
+.sp-dot.ok { color: var(--success); }
+.sp-dot.warn { color: var(--warn); }
+.sp-dot.danger { color: var(--danger); }
+.sp-row-desc.danger { color: var(--danger); }
 
-/* The safety check's row: the eval line under what it runs on; a test's result under the test's row */
-.sp-row-desc.sp-check-note { font-size: var(--fs-small); line-height: var(--lh-small); }
-/* A row whose text grows below (a result): the control stays level with the title */
-.sp-row.sp-row-top { align-items: flex-start; }
-.sp-row.sp-row-top > .sp-row-control { margin-top: 4px; }
-.sp-check-result { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-100); max-width: 640px; }
-.sp-check-head { margin-bottom: 2px; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
-.sp-check-line { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); overflow-wrap: anywhere; }
-.sp-check-line .icon { flex: none; margin-top: 3px; color: var(--text-400); }
-.sp-check-line.ok .icon { color: var(--success); }
-.sp-check-line.danger { color: var(--danger); }
-.sp-check-line.danger .icon { color: var(--danger); }
-.sp-check-line.warn .icon { color: var(--warn); }
-.sp-check-on { margin-top: 4px; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); overflow-wrap: anywhere; }
+/* The picker: a button that looks like a select, and its list */
+.sp-picker { display: inline-flex; flex: none; max-width: 100%; }
+.sp-picker-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 30px 0 10px; position: relative;
+  background: var(--field-bg); color: var(--text-100); border: 1px solid var(--border); border-radius: var(--r-card);
+  font-size: var(--fs-ui); line-height: var(--lh-ui); text-align: left; cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.sp-picker-btn:hover { border-color: color-mix(in srgb, var(--text-400) 45%, transparent); }
+.sp-picker-btn:focus-visible, .sp-picker-btn[aria-expanded="true"] { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--field-ring); }
+.sp-picker-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sp-picker-dot { display: inline-flex; flex: none; }
+.sp-picker-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-picker-label.mono, .sp-picker-text.mono { font-family: var(--mono); font-size: var(--fs-code); }
+.sp-picker-label.placeholder { color: var(--text-400); font-family: var(--font); font-size: var(--fs-ui); }
+.sp-picker-chev { position: absolute; right: 10px; top: 7px; display: inline-flex; color: var(--text-400); pointer-events: none; }
+.sp-picker-pop {
+  position: absolute; z-index: 40; display: flex; flex-direction: column; max-height: 340px; padding: 4px;
+  background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-pop); box-shadow: var(--shadow-pop);
+}
+.sp-input.sp-picker-search { flex: none; margin-bottom: 4px; }
+.sp-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.sp-picker-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border-radius: var(--r-control); font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); cursor: pointer; }
+.sp-picker-item.active { background: var(--hover); }
+.sp-picker-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-picker-note { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+.sp-picker-empty, .sp-picker-foot { padding: 6px 10px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+
+/* The API key: dots and the last four, in a box like a field; the field itself while a key is typed */
+.sp-key-field { display: inline-flex; flex: none; max-width: 100%; }
+.sp-key-box { display: flex; align-items: center; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-100); font-family: var(--mono); font-size: var(--fs-code); color: var(--text-200); letter-spacing: 0.02em; overflow: hidden; white-space: nowrap; }
+.sp-key-box.none { font-family: var(--font); font-size: var(--fs-ui); color: var(--text-400); letter-spacing: 0; }
+.sp-key-field > [hidden] { display: none; }
+
+/* A test's result, under its row, across the row's whole width */
+.sp-row:has(> .sp-row-result:not([hidden])) { flex-wrap: wrap; row-gap: 2px; }
+.sp-row > .sp-row-result { flex: 1 0 100%; margin-top: -4px; }
+.sp-row-result { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); overflow-wrap: anywhere; }
+.sp-row-result[hidden] { display: none; }
+.sp-row-result .icon { flex: none; margin-top: 3px; }
+.sp-row-result.ok .icon { color: var(--success); }
+.sp-row-result.danger { color: var(--danger); }
+
+/* Add provider: a link-like button, then a short form in the card */
+.btn.sp-add-provider-btn { background: none; border-color: transparent; color: var(--text-200); padding-left: 4px; }
+.btn.sp-add-provider-btn:hover { background: var(--sp-hover); color: var(--text-100); }
+.sp-add-form { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: -1px; }
+.sp-add-form[hidden] { display: none; }
+.sp-form-line { display: flex; align-items: center; gap: 16px; }
+.sp-form-line[hidden] { display: none; }
+.sp-form-label { width: 96px; flex: none; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); }
+.sp-add-form > .sp-problem { margin: 0 0 0 112px; }
+.sp-form-actions { display: flex; gap: 8px; margin-left: 112px; }
 
 /* ---------- Mods ---------- */
 .sp-row.sp-mod { row-gap: 0; align-items: center; }

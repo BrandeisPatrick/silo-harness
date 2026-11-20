@@ -184,25 +184,48 @@ const { check, done } = require('./support/check.js');
     const view = (o = {}) => ({ name: 'gw', type: 'portkey', label: 'Gateway', builtIn: true, baseURL: 'http://gw.example/v1', model: 'claude-opus-5-5', models: [], contextWindow: 200000, key: 'set', keySource: 'PORTKEY_API_KEY', headers: [], ...o });
     const cat = (o = {}) => ({ name: 'gw', models: ['claude-opus-5-5', 'claude-haiku-5-5'], own: ['claude-opus-5-5'], listed: true, ...o });
 
-    // "Think before acting": what it does on Anthropic's own API, and what applies elsewhere
+    // "Think before acting": what it does on Anthropic's own API, else where it applies (one short line)
     const thinkLine = (o) => M.thinkingWords(view(o));
-    check('thinking: on Anthropic\'s own API, says what it does, as Claude Code does, and what off saves', thinkLine({ name: 'claude', type: 'anthropic', builtIn: false, native: true }) === 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.');
-    check('thinking: a provider with an effort pill: does not apply, the effort control does', /^Doesn't apply to this provider, only to Anthropic's own API: the effort control after the model under the chat bar does\.$/.test(thinkLine({ name: 'or', type: 'openrouter', builtIn: false, effort: { levels: ['low', 'medium', 'high'], chosen: null, default: null } })));
-    check('thinking: Ollama: its own Thinking setting does', thinkLine({ name: 'ollama', type: 'ollama' }) === "Doesn't apply to Ollama: its Thinking setting under Connection does." && /Thinking setting/.test(thinkLine({ name: 'local', type: 'ollama', builtIn: false })));
-    check('thinking: the built-in gateway (no effort pill): does not apply, and says so plainly', /^Doesn't apply to this provider, only to Anthropic's own API\. It takes no effort setting either\.$/.test(thinkLine({})));
+    check('thinking: on Anthropic\'s own API, says what it does, as Claude Code does', thinkLine({ name: 'claude', type: 'anthropic', builtIn: false, native: true }) === 'Reasons first, as Claude Code does.');
+    check('thinking: Ollama: its own Thinking under Connection', /Thinking is under Connection/.test(thinkLine({ name: 'ollama', type: 'ollama' })) && /Thinking/.test(thinkLine({ name: 'local', type: 'ollama', builtIn: false })));
+    check('thinking: elsewhere, where it applies', thinkLine({}) === "Only for Anthropic's own API." && thinkLine({ name: 'or', type: 'openrouter', builtIn: false, effort: { levels: ['low'], chosen: null, default: null } }) === "Only for Anthropic's own API.");
+    check('thinking: every line is one short sentence', [thinkLine({ native: true }), thinkLine({ name: 'ollama', type: 'ollama' }), thinkLine({})].every((l) => l.split(/\s+/).length <= 8));
 
-    // The state in plain words
-    let st = M.providerState(view(), cat(), true);
-    check('state: ready, with how many models', st.label === 'Ready' && st.tone === 'ok' && st.detail === '2 models offered.', st);
-    st = M.providerState(view({ key: 'missing' }), null, true);
-    check('state: no key found, naming the variable (the gateway: or under Connection)', st.label === 'No key found' && /Set PORTKEY_API_KEY, or enter the key under Connection/.test(st.detail) && st.tone === 'warn', st);
-    st = M.providerState(view({ name: 'groq', builtIn: false, key: 'missing', keySource: 'GROQ_API_KEY', label: 'Groq' }), cat({ noKey: true, listed: false }), false);
-    check('state: a named provider without its key names its variable; not in use, it is not in colour', st.label === 'No key found' && /Set GROQ_API_KEY in your environment or in settings\.json/.test(st.detail) && st.tone === 'neutral', st);
-    st = M.providerState(view({ name: 'ollama', type: 'ollama', label: 'Ollama', key: 'none' }), cat({ listed: false, unreachable: true, models: [], own: [], error: 'Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.' }), true);
-    check('state: not reachable, with the reason; red only for the provider in use', st.label === 'Not reachable' && st.tone === 'danger' && /Is Ollama running/.test(st.detail), st);
-    st = M.providerState(view(), cat({ listed: false, error: 'Gateway answered 404: no route.', models: ['claude-opus-5-5'] }), true);
-    check("state: can't list, says why, and that the configured model shows", st.label === "Can't list models" && /404/.test(st.detail) && /Showing the model in your settings/.test(st.detail), st);
-    check('state: checking while nothing came yet', M.providerState(view(), null).label === 'Checking…');
+    // The status beside the Provider picker: one word, the reason only when not ready
+    let st = M.providerStatus(view(), cat());
+    check('status: ready', st.word === 'Ready' && st.tone === 'ok' && st.reason === '', st);
+    st = M.providerStatus(view({ key: 'missing', keyEditable: true }), null);
+    check('status: no key, and where it goes', st.word === 'No key' && st.tone === 'warn' && st.reason === 'Paste its key under API key.', st);
+    st = M.providerStatus(view({ name: 'groq', builtIn: false, key: 'missing', keySource: 'GROQ_API_KEY', label: 'Groq' }), cat({ noKey: true, listed: false }));
+    check('status: no key that can be saved here names its variable', st.word === 'No key' && /Set GROQ_API_KEY in your environment/.test(st.reason), st);
+    st = M.providerStatus(view({ name: 'ollama', type: 'ollama', label: 'Ollama', key: 'none' }), cat({ listed: false, unreachable: true, models: [], own: [], error: 'Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.' }));
+    check('status: not reachable, with the reason', st.word === 'Not reachable' && st.tone === 'danger' && /Is Ollama running/.test(st.reason), st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway refused the key (HTTP 401): bad key' }));
+    check('status: a refused key', st.word === 'Key refused' && st.tone === 'danger', st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway has no list of models at http://x/v1/models (HTTP 404).' }));
+    check('status: a service without a list of models is still ready (the model is typed)', st.word === 'Ready' && !st.reason, st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway returned HTTP 500: boom' }));
+    check('status: any other error', st.word === 'Error' && /500/.test(st.reason), st);
+    check('status: checking while nothing came yet', M.providerStatus(view(), null).word === 'Checking…');
+
+    // Which providers the picker lists: set-up ones only (the one in use always)
+    const all = [view({ name: 'ollama', type: 'ollama', key: 'none' }), view({ name: 'portkey', key: 'missing' }), view({ name: 'or', builtIn: false, key: 'set' }), view({ name: 'gq', builtIn: false, key: 'missing' })];
+    let names = M.pickableProviders(all, new Map(), 'or').map((p) => p.name).join();
+    check('picker: a provider without its key and an Ollama not heard from are not listed', names === 'or', names);
+    names = M.pickableProviders(all, new Map([['ollama', cat({ name: 'ollama' })]]), 'gq').map((p) => p.name).join();
+    check('picker: Ollama once it answered; the one in use always, even without its key', names === 'ollama,or,gq', names);
+    names = M.pickableProviders(all, new Map([['ollama', cat({ name: 'ollama', unreachable: true, listed: false })]]), 'or').map((p) => p.name).join();
+    check('picker: an Ollama that is not running is not listed', names === 'or', names);
+
+    // The key as the row shows it, and where it comes from
+    check('key: dots and the last four', M.keyShown({ key: 'set', keyTail: '3f2a' }) === '••••••••3f2a' && M.keyShown({ key: 'set' }) === '••••••••' && M.keyShown({ key: 'missing' }) === 'None');
+    check('key: where from, as one phrase', M.keyFromWords({ key: 'set', keyFrom: 'app' }) === 'Saved in your settings' && M.keyFromWords({ key: 'set', keyFrom: 'shell' }) === 'From your shell' && M.keyFromWords({ key: 'set', keyFrom: 'settings' }) === 'Saved in your settings.json' && M.keyFromWords({ key: 'missing', keyFrom: 'app' }) === '');
+
+    // A long id keeps its end readable
+    const longId = 'some-provider/an-unusually-long-model-identifier-preview-with-tools';
+    const cut = M.cutId(longId, 30);
+    check('cutId: cut in the middle to the length asked, the end kept', cut.length === 30 && cut.includes('…') && cut.endsWith('with-tools') && cut.startsWith('some-') && M.cutId('short', 30) === 'short', cut);
+    check('suggestName: the type, then -2, never a built-in name', M.suggestName('openrouter', []) === 'openrouter' && M.suggestName('openrouter', ['openrouter']) === 'openrouter-2' && M.suggestName('portkey', []) === 'portkey-2' && M.suggestName('openai-compatible', []) === 'custom');
 
     // The list requests: only the latest request's answer counts, a change of key or address while one is out asks
     // again, and the provider is busy (the spinner turns) until the latest lands
@@ -236,27 +259,23 @@ const { check, done } = require('./support/check.js');
       check('requests: …and the older answer landing after it changes nothing', (await rc) === 'forced' && (await rd) === 'forced' && shown.join() === 'forced', { shown });
     }
 
-    // The list a group shows
+    // What a model picker shows
     const ids = M.modelIds(view({ model: 'b' }), cat({ models: ['a', 'b', 'c'] }), ['b']);
-    check('modelIds: the marked model first, no repeats', ids.join() === 'b,a,c', ids);
+    check('modelIds: the model in use first, no repeats', ids.join() === 'b,a,c', ids);
     check('modelIds: without a list, the configured model and the entry’s list', M.modelIds(view({ model: 'x', models: ['y', 'x'] }), null).join() === 'x,y');
     const many = Array.from({ length: 300 }, (_, i) => `vendor/model-${i}`);
-    let s = M.shownModels(many, '', false);
-    check('shownModels: the first eight of a long list, and how many more', s.shown.length === M.MODELS_SHOWN && s.more === 292 && s.matched === 300, s.more);
-    s = M.shownModels(many, '', true);
-    check('shownModels: Show all shows all', s.shown.length === 300 && s.more === 0);
-    s = M.shownModels(many, 'model-29', false);
-    check('shownModels: a filter shows the matches', s.matched === 11 && s.shown.length === 11 && s.shown.every((x) => x.includes('model-29')), s.shown);
-    s = M.shownModels(many, 'model', false);
-    check('shownModels: a broad filter shows fifty, then Show all', s.shown.length === M.MATCHES_SHOWN && s.more === 250);
-    s = M.shownModels(many, 'nothing-like-it', false, new Set(['vendor/model-299']));
-    check('shownModels: the model in use stays whatever the filter says', s.matched === 0 && s.shown.join() === 'vendor/model-299', s);
+    let pm = M.pickerMatches(many, '');
+    check('picker: the first fifty, and how many there are', pm.shown.length === M.MATCHES_SHOWN && M.MATCHES_SHOWN === 50 && pm.matched === 300 && pm.typed === '', pm.matched);
+    pm = M.pickerMatches(many, 'model-29');
+    check('picker: what was typed filters as it is typed, and is offered as it is when no id is that', pm.matched === 11 && pm.shown.every((x) => x.includes('model-29')) && pm.typed === 'model-29', pm);
+    pm = M.pickerMatches(many, 'vendor/model-7');
+    check('picker: an id typed in full is not offered twice', pm.typed === '' && pm.shown[0] === 'vendor/model-7', pm);
+    check('picker: words with spaces are a filter, not an id', M.pickerMatches(many, 'model 29').typed === '');
     check('matchesModel: every word, any case', M.matchesModel('anthropic/claude-OPUS-5.5', 'opus 5.5') && !M.matchesModel('claude-haiku-5-5', 'opus'));
 
     // A test's words
     check('testWords: "Answered in 840 ms", "Answered in 1.2 s"', M.testWords({ ok: true, ms: 840 }).text === 'Answered in 840 ms' && M.testWords({ ok: true, ms: 1234 }).text === 'Answered in 1.2 s' && M.testWords({ ok: true, ms: 840 }).ok);
     check('testWords: the plain error as it came', M.testWords({ ok: false, ms: 3, error: 'Gateway refused the key (HTTP 401): bad key' }).text === 'Gateway refused the key (HTTP 401): bad key' && !M.testWords({ ok: false, ms: 0 }).ok && M.testWords({ ok: false, ms: 0 }).text === 'It did not answer.');
-    check('rowKey: one per provider and model', M.rowKey('a', 'b:c') !== M.rowKey('a:b', 'c'));
     // The safety check's select: its values are what autoMode.model takes
     const groups = [
       { name: 'portkey', label: 'Gateway', usable: true, models: ['@anthropic/claude-opus-5-5', '@anthropic/claude-haiku-5-5', '@anthropic/claude-opus-5-5'] },
@@ -275,7 +294,8 @@ const { check, done } = require('./support/check.js');
     check('check words: the session’s own model', M.checkModelWords({ spec: '', none: false, automatic: false, providerLabel: 'Gateway', model: '@anthropic/claude-opus-5-5', testCount: 24 }) === "Runs on Claude Opus 5.5 through Gateway, the session's model.");
     check('check words: a chosen model', M.checkModelWords({ spec: 'ollama:qwen3:8b', none: false, automatic: false, providerLabel: 'Ollama', model: 'qwen3:8b', testCount: 24 }) === 'Runs on qwen3:8b through Ollama.');
     check('check words: none', /No model can run the check now: risky actions ask you instead/.test(M.checkModelWords({ spec: '', none: true, automatic: false, testCount: 24 })));
-    check('check words: the eval line names the one model that passed', /Only Claude Haiku 5\.5 on Anthropic's own API has passed the app's check eval\. Another model may judge worse\./.test(M.CHECK_EVAL_NOTE));
+    check('check words: the eval line names the one model that passed, in eight words', M.CHECK_EVAL_NOTE === 'Only Claude Haiku 5.5 has passed the eval.' && M.CHECK_EVAL_NOTE.split(' ').length <= 8);
+    check('check caution: for any model but Claude Haiku 5.5, none while no model can run the check', M.checkNeedsCaution('claude-opus-5-5') && M.checkNeedsCaution('qwen3:8b') && !M.checkNeedsCaution('claude-haiku-5-5') && !M.checkNeedsCaution('@anthropic/claude-haiku-5.5') && !M.checkNeedsCaution(undefined));
     check('check plan: says how many requests before it runs', M.checkTestPlan({ spec: '', none: false, automatic: false, model: 'claude-opus-5-5', testCount: 24 }) === 'Sends 24 made-up actions to Claude Opus 5.5, one request each, and scores how it judges them.' && /Needs a model/.test(M.checkTestPlan(null)));
     // A test's result in plain words
     const rep = { total: 24, done: 24, cancelled: false, right: 21, blockLabelled: 18, falseAllows: [{ id: 'a', action: 'git push --force origin main' }], falseBlocks: [{ id: 'b', action: 'npm run build' }], noAnswer: [{ id: 'c', action: 'cat ~/.aws/credentials', error: 'Gateway did not answer in time' }], medianMs: 1234 };
@@ -288,6 +308,11 @@ const { check, done } = require('./support/check.js');
     tw = M.checkTestWords({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 4 });
     check('check result: stopped part way says so', tw.headline === 'Judged 5 of 5 right.' && tw.lines[0].text === 'Stopped after 5 of 24.', tw);
     check('check result: stopped before any risky one was checked', M.checkTestWords({ ...rep, cancelled: true, done: 2, right: 2, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 0 }).lines[1].text === 'No risky action was among those checked.');
+    // The result in one line
+    check('check line: a clean run', M.checkLine({ ...rep, right: 23, falseAllows: [], falseBlocks: [{ id: 'b', action: 'x' }], noAnswer: [] }).text === '23 of 24 right, none let through' && M.checkLine({ ...rep, falseAllows: [], noAnswer: [] }).tone === 'ok');
+    check('check line: the failure that matters', M.checkLine(rep).text === '21 of 24 right, let 1 risky action through' && M.checkLine(rep).tone === 'danger');
+    check('check line: no answer at all says why', M.checkLine({ ...rep, done: 2, right: 0, falseAllows: [], falseBlocks: [], noAnswer: [{ id: 'a', action: 'x', error: 'Gateway did not answer in time' }, { id: 'b', action: 'y' }] }).text === 'No answer: Gateway did not answer in time');
+    check('check line: stopped part way', /^Stopped at 5 of 24: 5 of 5 right/.test(M.checkLine({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [] }).text));
     check('check result: stopped before any', M.checkTestWords({ ...rep, cancelled: true, done: 0, right: 0, medianMs: null }).headline === 'Stopped before any check.');
     check('modelWords: Claude ids in words, others as they are', M.modelWords('claude-haiku-5-5') === 'Claude Haiku 5.5' && M.modelWords('@anthropic/claude-opus-5-5') === 'Claude Opus 5.5' && M.modelWords('anthropic/claude-sonnet-5.5') === 'Claude Sonnet 5.5' && M.modelWords('claude-opus-5') === 'Claude Opus 5' && M.modelWords('claude-haiku-4-5-20251001') === 'Claude Haiku 4.5' && M.modelWords('claude-sonnet-4-20250514') === 'Claude Sonnet 4' && M.modelWords('gpt-5-mini') === 'gpt-5-mini', [M.modelWords('claude-haiku-4-5-20251001'), M.modelWords('claude-sonnet-4-20250514')]);
   }

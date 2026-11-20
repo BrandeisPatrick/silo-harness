@@ -243,6 +243,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     savePatch,
     adopt,
     isOwned: (field) => isOwned(field),
+    ownerOf: (field) => ownerOf(field),
     switchField(o) {
       // Two named values: off only when the field holds the `off` one (absent reads as on, the default)
       const isOn = (v: unknown) => (o.values ? v !== o.values.off : Boolean(v)) !== Boolean(o.invert);
@@ -490,11 +491,14 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   }
 
   /** Scrolls a row (or the row holding an element) into view, on its tab and with its Advanced open, and gives it a brief highlight. */
+  /** The row the page last brought on screen for a target or a search hit (the live tests read it) */
+  let lastRevealed = '';
   function reveal(el: HTMLElement | null): void {
     if (!el) return;
     const owner = el.closest<HTMLElement>('.sp-section')?.dataset.section;
     sections.find((s) => s.id === owner)?.uncover?.(el);
     const r = el.closest<HTMLElement>('.sp-row') ?? el;
+    lastRevealed = r.dataset.row ?? r.id;
     uncoverDisclosures(r);
     requestAnimationFrame(() => {
       r.scrollIntoView({ block: 'center' });
@@ -629,6 +633,9 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
         lock.setAttribute('aria-label', `Set in settings.json${path ? ` (${path})` : ''}`);
       } else lock?.remove();
     }
+    // Rows a section builds itself (Models) lock from the same facts
+    const cfg = deps.config();
+    if (cfg && built) for (const s of sections) s.sync?.(cfg);
   }
 
   // ---------- Opening and closing ----------
@@ -729,7 +736,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
         if (dialog.open) void loadAll();
       },
       calls: () => callLog.map((c) => ({ method: c.method, args: [...c.args] })),
-      state: () => ({ open: dialog.open, section: current, tab: sections.find((s) => s.id === current)?.tab?.() ?? null, query, hidden: [...hidden] }),
+      state: () => ({ open: dialog.open, section: current, tab: sections.find((s) => s.id === current)?.tab?.() ?? null, query, hidden: [...hidden], revealed: lastRevealed }),
       open: (target, opts) => open(target, opts),
     },
   };

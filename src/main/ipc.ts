@@ -84,7 +84,7 @@ export function registerCoreIpc(app: AppHost, deps: CoreIpcDeps): void {
   });
 
   // The window's copy of the config has its keys masked (windowConfig); acceptFromWindow keeps the real ones.
-  const forWindow = (c: AppConfig) => windowConfig(c, settingsLayer.info().owned);
+  const forWindow = (c: AppConfig) => windowConfig(c, settingsLayer.info().owned, settingsLayer.envOwners());
   ipcMain.handle('config:get', () => forWindow(cfg()));
   ipcMain.handle('config:set', (_e, sent: AppConfig) =>
     forWindow(app.updateConfig((current) => {

@@ -49,11 +49,56 @@ export interface CliStatus {
   onPath: boolean;
 }
 
+/** A type of provider the Add provider form offers (src/main/provider-presets.ts) */
+export interface ProviderPresetInfo {
+  type: string;
+  label: string;
+  /** The service refuses every request without a key */
+  keyRequired: boolean;
+  /** The variable its key is read from when the entry names none */
+  keyEnv?: string;
+  /** That variable is set already (in your shell or your settings.json), so the form may leave the key empty */
+  keyInEnv: boolean;
+  /** '' for OpenAI-compatible, which needs one */
+  baseURL: string;
+}
+
+/** What Add provider sends */
+export interface AddProviderInput {
+  type: string;
+  /** The entry's name (ignored for Ollama and for a gateway that fills the built-in block) */
+  name?: string;
+  apiKey?: string;
+  /** OpenAI-compatible only */
+  baseURL?: string;
+}
+
+export interface AddProviderResult {
+  /** The provider added (or the built-in block it filled) */
+  name: string;
+  /** It is now the one in use */
+  selected: boolean;
+  /** Why it was not put in use, when it was not */
+  note?: string;
+}
+
 export interface ProvidersRpc {
   /** The models a provider offers (its own list, then what the service lists); rejects with a plain reason */
   'providers.models': (name: string) => string[];
   /** Sets the model of a provider (any of them) and returns nothing; the window follows config:changed */
   'providers.setModel': (name: string, model: string) => void;
+  /** Puts a provider in use (in the file that chooses the provider: the app's settings, or your settings.json when it does) */
+  'providers.use': (name: string) => void;
+  /** Saves a key for a provider where it already resolves it from, in your own files only (provider-keys.ts) */
+  'providers.setKey': (name: string, key: string) => void;
+  /** Removes the key the app keeps for a provider (never one from your shell or a project) */
+  'providers.removeKey': (name: string) => void;
+  /** The types Add provider offers */
+  'providers.presets': () => ProviderPresetInfo[];
+  /** Adds a provider to your settings.json (with its key) and puts it in use */
+  'providers.add': (input: AddProviderInput) => AddProviderResult;
+  /** Removes a provider you added (from your settings.json or the app's settings); a project's stay */
+  'providers.remove': (name: string) => void;
   /** Sets the reasoning effort of a named provider (null: none, the model's default); the window follows config:changed */
   'providers.setEffort': (name: string, level: EffortLevel | null) => void;
   /** What a provider offers, with why it could not list; never rejects */

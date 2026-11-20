@@ -1,46 +1,94 @@
-// Settings → Models, its pure pieces: the state line of each provider, the list of models a group shows (the marked
-// ones first, a filter, the first few until "Show all"), the words of a test result and the safety check's choices.
-// Nothing here touches the DOM or imports at run time, so the headless suite (test/settings-page.js) loads the
-// compiled file directly.
+// Settings → Models, its pure pieces: a provider's status in one word, which providers the Provider picker lists, the
+// key as the API key row shows it, the models a picker shows for what was typed, the words of a test, and the safety
+// check's choices and its result in one line. Nothing here touches the DOM or imports at run time, so the headless
+// suite (test/settings-page.js) loads the compiled file directly.
 
 import type { ProviderView } from '../../shared/types';
 import type { ProviderCatalog, ProviderTestInfo } from '../../shared/providers';
 
-/** How many models a group shows before "Show all" */
-export const MODELS_SHOWN = 8;
-/** How many matches a filter shows before asking for a narrower one */
+/** How many matches a model picker shows; typing narrows the rest */
 export const MATCHES_SHOWN = 50;
 
 export type StateTone = 'ok' | 'warn' | 'danger' | 'neutral';
 
-export interface ProviderState {
+export interface ProviderStatus {
   tone: StateTone;
-  /** "Ready", "No key found", "Not reachable", "Checking…", "Can't list models" */
-  label: string;
-  /** One line under the head, in plain words ('' for none) */
-  detail: string;
+  /** One word or two: "Ready", "No key", "Not reachable", "Key refused", "Error", "Checking…" */
+  word: string;
+  /** Why, in plain words, when it is not Ready ('' when ready or still checking) */
+  reason: string;
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+/** A provider's status (the dot and the word beside the Provider picker), from its view and its list of models. */
+export function providerStatus(p: ProviderView, cat: ProviderCatalog | null | undefined): ProviderStatus {
+  if (p.key === 'missing' || cat?.noKey) {
+    const reason = p.keyEditable ? 'Paste its key under API key.' : `Set ${p.keySource || 'its key variable'} in your environment.`;
+    return { tone: 'warn', word: 'No key', reason };
+  }
+  if (!cat) return { tone: 'neutral', word: 'Checking…', reason: '' };
+  if (cat.unreachable) return { tone: 'danger', word: 'Not reachable', reason: cat.error ?? `Could not reach ${p.label} at ${p.baseURL}.` };
+  if (!cat.listed) {
+    const why = cat.error ?? 'It gave no list of models.';
+    if (/refused the key|HTTP 40[13]\b/.test(why)) return { tone: 'danger', word: 'Key refused', reason: why };
+    // A service without a list of models still answers: the model is typed
+    if (/no list of models|HTTP 404\b/.test(why)) return { tone: 'ok', word: 'Ready', reason: '' };
+    return { tone: 'danger', word: 'Error', reason: why };
+  }
+  return { tone: 'ok', word: 'Ready', reason: '' };
+}
 
 /**
- * A provider's state in plain words: ready; no key found, naming the variable; not reachable; or that it could not
- * list its models (its own are shown). A problem is in colour only for the provider in use (`inUse`): an Ollama that
- * is not running is no news to someone who never uses it.
+ * The providers the Provider picker lists: the one in use always; Ollama (the built-in one) once it answered; any
+ * other once it has its key. One not set up yet is reached through Add provider.
  */
-export function providerState(p: ProviderView, cat: ProviderCatalog | null | undefined, inUse = false): ProviderState {
-  const loud = (t: StateTone): StateTone => (inUse ? t : 'neutral');
-  if (p.key === 'missing' || cat?.noKey) {
-    const where = p.builtIn ? `Set ${p.keySource || 'PORTKEY_API_KEY'}, or enter the key under Connection.` : `Set ${p.keySource || 'its key variable'} in your environment or in settings.json.`;
-    return { tone: loud('warn'), label: 'No key found', detail: where };
+export function pickableProviders(all: ProviderView[], cats: ReadonlyMap<string, ProviderCatalog>, active: string): ProviderView[] {
+  return all.filter((p) => {
+    if (p.name === active) return true;
+    if (p.name === 'ollama') {
+      const c = cats.get('ollama');
+      return Boolean(c && !c.unreachable);
+    }
+    return p.key !== 'missing';
+  });
+}
+
+/** The key as the API key row shows it: dots and the last four characters, "None" for one not set. */
+export function keyShown(p: Pick<ProviderView, 'key' | 'keyTail'>): string {
+  if (p.key !== 'set') return 'None';
+  return `••••••••${p.keyTail ?? ''}`;
+}
+
+/** Where the key in effect comes from, as one muted phrase. */
+export function keyFromWords(p: Pick<ProviderView, 'key' | 'keyFrom'>): string {
+  if (p.key !== 'set') return '';
+  switch (p.keyFrom) {
+    case 'app':
+      return 'Saved in your settings';
+    case 'settings':
+      return 'Saved in your settings.json';
+    case 'shell':
+      return 'From your shell';
+    case 'project':
+      return "From this project's settings.json";
+    default:
+      return '';
   }
-  if (!cat) return { tone: 'neutral', label: 'Checking…', detail: '' };
-  if (cat.unreachable) return { tone: loud('danger'), label: 'Not reachable', detail: cat.error ?? `Could not reach ${p.label} at ${p.baseURL}.` };
-  if (!cat.listed) {
-    const own = cat.own.length ? ` Showing the ${cat.own.length === 1 ? 'model' : 'models'} in your settings.` : '';
-    return { tone: loud('warn'), label: "Can't list models", detail: `${cat.error ?? 'The service gave no list.'}${own}` };
-  }
-  return { tone: 'ok', label: 'Ready', detail: cat.models.length ? `${plural(cat.models.length, 'model')} offered.` : 'The service listed no models.' };
+}
+
+/** A long id cut so its end stays readable: "…/claude-opus-5-5"; whole ids up to `max` characters. */
+export function cutId(id: string, max = 40): string {
+  const s = String(id ?? '');
+  if (s.length <= max) return s;
+  const keepStart = Math.max(4, Math.floor((max - 1) * 0.3));
+  return `${s.slice(0, keepStart)}…${s.slice(s.length - (max - 1 - keepStart))}`;
+}
+
+/** A name for a new provider of `type` that no provider has yet: "openrouter", "openrouter-2", … (never a built-in's) */
+export function suggestName(type: string, taken: string[]): string {
+  const base = type === 'openai-compatible' ? 'custom' : String(type || 'provider');
+  const used = new Set(['ollama', 'portkey', ...taken.map((t) => t.toLowerCase())]);
+  if (!used.has(base)) return base;
+  for (let i = 2; ; i++) if (!used.has(`${base}-${i}`)) return `${base}-${i}`;
 }
 
 /** The models a group lists: the session's and the check's first (when they are this provider's), then the rest. */
@@ -57,26 +105,20 @@ export function matchesModel(id: string, query: string): boolean {
   return words.every((w) => hay.includes(w));
 }
 
-export interface ShownModels {
-  /** The ids on screen, in order */
+export interface PickerMatches {
+  /** The ids shown, in order (at most MATCHES_SHOWN) */
   shown: string[];
-  /** How many the filter matched (all of them without one) */
+  /** How many matched */
   matched: number;
-  /** How many of those are not on screen */
-  more: number;
+  /** What was typed, when it is no id listed: the picker offers it as it is */
+  typed: string;
 }
 
-/**
- * What a group shows: without a filter the first MODELS_SHOWN (all with `showAll`), with one the matches (up to
- * MATCHES_SHOWN unless `showAll`). The ids in `keep` (the session's and the check's) show whatever the filter says.
- */
-export function shownModels(ids: string[], query: string, showAll: boolean, keep: ReadonlySet<string> = new Set()): ShownModels {
+/** What a model picker shows for `query`: the matches (MATCHES_SHOWN at most), and what was typed when it is new. */
+export function pickerMatches(ids: string[], query: string): PickerMatches {
   const q = String(query ?? '').trim();
   const matched = q ? ids.filter((id) => matchesModel(id, q)) : ids;
-  const cap = showAll ? Infinity : q ? MATCHES_SHOWN : MODELS_SHOWN;
-  const shown = matched.slice(0, cap);
-  for (const id of ids) if (keep.has(id) && !shown.includes(id)) shown.unshift(id);
-  return { shown, matched: matched.length, more: Math.max(0, matched.length - Math.min(matched.length, cap)) };
+  return { shown: matched.slice(0, MATCHES_SHOWN), matched: matched.length, typed: q && !/\s/.test(q) && !ids.includes(q) ? q : '' };
 }
 
 /** "840 ms", "1.2 s", "14 s" */
@@ -91,9 +133,6 @@ export function testWords(r: Pick<ProviderTestInfo, 'ok' | 'ms' | 'error'>): { o
   if (r.ok) return { ok: true, text: `Answered in ${msWords(r.ms)}` };
   return { ok: false, text: String(r.error || 'It did not answer.') };
 }
-
-/** The key of a row's test result: one per provider and model */
-export const rowKey = (provider: string, model: string): string => `${provider}\u0000${model}`;
 
 /** "Claude Haiku 5.5" for claude-haiku-5-5 (and the gateway forms: anthropic/claude-haiku-5.5, @anthropic/…); else the id. */
 export function modelWords(id: string): string {
@@ -155,8 +194,13 @@ export function checkModelWords(info: CheckModelView | null): string {
   return info.spec ? `${on}.` : `${on}, the session's model.`;
 }
 
-/** The line under the select: which model passed the app's eval. */
-export const CHECK_EVAL_NOTE = "Only Claude Haiku 5.5 on Anthropic's own API has passed the app's check eval. Another model may judge worse.";
+/** The line under the select when the check runs on another model: the one model that passed the app's eval. */
+export const CHECK_EVAL_NOTE = 'Only Claude Haiku 5.5 has passed the eval.';
+
+/** The caution shows for any model but Claude Haiku 5.5 (and while no model can run the check, nothing shows). */
+export function checkNeedsCaution(model: string | undefined): boolean {
+  return Boolean(model) && modelWords(String(model)) !== 'Claude Haiku 5.5';
+}
 
 /** Before a run: what it sends. */
 export function checkTestPlan(info: CheckModelView | null): string {
@@ -195,6 +239,19 @@ export function checkTestWords(r: CheckTestView): { tone: 'ok' | 'danger' | 'neu
   if (r.medianMs !== null) lines.push({ tone: 'neutral', text: `Median answer time ${msWords(r.medianMs)}.` });
   if (r.cancelled) lines.unshift({ tone: 'neutral', text: `Stopped after ${r.done} of ${r.total}.` });
   return { tone: fa ? 'danger' : 'ok', headline: `Judged ${r.right} of ${r.done} right.`, lines };
+}
+
+/** A check test's result in one line: "23 of 24 right, none let through", or the failure that matters. */
+export function checkLine(r: CheckTestView): { tone: 'ok' | 'danger' | 'neutral'; text: string } {
+  if (!r.done) return { tone: 'neutral', text: r.cancelled ? 'Stopped before any check.' : 'Nothing was checked.' };
+  const fa = r.falseAllows.length;
+  const stopped = r.cancelled ? `Stopped at ${r.done} of ${r.total}: ` : '';
+  if (r.noAnswer.length === r.done) {
+    const why = r.noAnswer.find((x) => x.error)?.error;
+    return { tone: 'danger', text: `${stopped}No answer${why ? `: ${why}` : '.'}` };
+  }
+  if (fa) return { tone: 'danger', text: `${stopped}${r.right} of ${r.done} right, let ${fa} risky ${fa === 1 ? 'action' : 'actions'} through` };
+  return { tone: 'ok', text: `${stopped}${r.right} of ${r.done} right, none let through` };
 }
 
 /**
@@ -245,10 +302,9 @@ export class LatestRequests<T> {
   }
 }
 
-/** The line under "Think before acting": what it does on Anthropic's own API, and else what applies instead. */
+/** The line under "Think before acting": what it does on Anthropic's own API, else where it applies. */
 export function thinkingWords(p: Pick<ProviderView, 'name' | 'type' | 'native' | 'effort'>): string {
-  if (p.native) return 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.';
-  if (p.name === 'ollama' || p.type === 'ollama') return "Doesn't apply to Ollama: its Thinking setting under Connection does.";
-  if (p.effort) return "Doesn't apply to this provider, only to Anthropic's own API: the effort control after the model under the chat bar does.";
-  return "Doesn't apply to this provider, only to Anthropic's own API. It takes no effort setting either.";
+  if (p.native) return 'Reasons first, as Claude Code does.';
+  if (p.name === 'ollama' || p.type === 'ollama') return "Ollama's own Thinking is under Connection.";
+  return "Only for Anthropic's own API.";
 }

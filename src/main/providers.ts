@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { configDir } from './paths';
 import type { ProviderCatalog } from '../shared/providers';
+import { keyPlace, type KeyPlace } from './provider-keys';
 
 /** The user's settings.json as messages show it (~/… when it is under the home folder). */
 function shownSettingsPath(): string {
@@ -305,8 +306,17 @@ export function activeModel(cfg: AppConfig): string {
 
 // ---------- What the window may see ----------
 
-/** A resolved provider with the key reduced to set / not set. */
-export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): ProviderView {
+/** The last four characters of a key, for "••••3f2a": only of a key long enough (12 or more) that they give nothing away. */
+export function keyTail(key: string): string {
+  return key && key.length >= 12 ? key.slice(-4) : '';
+}
+
+/**
+ * A resolved provider with the key reduced to set / not set (and the last four characters of a long one), where it
+ * comes from and whether the window may save or remove one (`place`, provider-keys.ts).
+ */
+export function providerView(r: ResolvedProvider, owner?: 'user' | 'project', place?: KeyPlace): ProviderView {
+  const tail = keyTail(r.apiKey);
   return {
     name: r.name,
     type: r.type,
@@ -321,6 +331,11 @@ export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): P
     keySource: r.keySource,
     headers: Object.keys(r.headers).filter((h) => !/^x-portkey-api-key$/i.test(h)),
     ...(owner ? { owner } : {}),
+    ...(tail ? { keyTail: tail } : {}),
+    ...(place?.from ? { keyFrom: place.from } : {}),
+    ...(place ? { keyEditable: Boolean(place.save), keyRemovable: Boolean(place.remove) } : {}),
+    // An entry of your own (config.json or your settings.json); never a built-in block or a project's entry
+    ...(!r.builtIn && owner !== 'project' && !r.error?.startsWith('There is no provider') ? { removable: true } : {}),
     ...(r.error ? { error: scrubSecrets(r.error) } : {}),
     ...withEffort(r),
     ...(isNativeAnthropic(r) ? { native: true } : {}),
@@ -339,8 +354,9 @@ export function effortOf(cfg: AppConfig, name: string): EffortLevel | undefined 
   return resolveProvider(cfg, name).effort;
 }
 
-export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, env: NodeJS.ProcessEnv = process.env): ProvidersView {
-  const all = providerNames(cfg).map((n) => providerView(resolveProvider(cfg, n, env), owned[`providers.${n}`]));
+/** Every provider as the window sees it. `envBy`: which settings file set each variable (SettingsLayer.envOwners). */
+export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, env: NodeJS.ProcessEnv = process.env, envBy: Record<string, 'user' | 'project'> = {}): ProvidersView {
+  const all = providerNames(cfg).map((n) => providerView(resolveProvider(cfg, n, env), owned[`providers.${n}`], keyPlace(cfg, n, owned, envBy, env)));
   const name = cfg.provider || 'ollama';
   const active = all.find((p) => p.name === name) ?? providerView(resolveProvider(cfg, name, env));
   return { active, all };
@@ -350,7 +366,7 @@ export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'pr
  * The config as the window gets it: keys masked (KEY_MASK when set, '' when not), header values masked, and the
  * providers resolved in providerView. acceptFromWindow undoes the masks on the way back.
  */
-export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}): AppConfig {
+export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, envBy: Record<string, 'user' | 'project'> = {}): AppConfig {
   const mask = (v: string | undefined) => (v ? KEY_MASK : '');
   const providers: AppConfig['providers'] = {};
   for (const [name, e] of Object.entries(cfg.providers ?? {})) {
@@ -365,7 +381,7 @@ export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'pro
     portkey: { ...cfg.portkey, apiKey: mask(cfg.portkey?.apiKey), providerApiKey: mask(cfg.portkey?.providerApiKey) },
     ...(cfg.webSearch ? { webSearch: { ...cfg.webSearch, apiKey: mask(cfg.webSearch.apiKey) } } : {}),
     providers,
-    providerView: providersView(cfg, owned),
+    providerView: providersView(cfg, owned, process.env, envBy),
     // MCP env and header values stay in the main process (config:set keeps the current ones)
     mcpServers: Object.fromEntries(Object.entries(cfg.mcpServers ?? {}).map(([n, c]) => [n, maskedConfig(n, c)])),
     mcpProjectValues: {},
