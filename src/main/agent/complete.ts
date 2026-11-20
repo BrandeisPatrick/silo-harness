@@ -10,7 +10,7 @@ import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
 import { ollamaOf, resolveProvider } from '../providers';
 import type { Msg } from '../sessions';
-import { completeAnthropic, withoutNative, type ThinkingBlock } from './anthropic';
+import { completeAnthropic, withoutNative, type ThinkingBlock, type ThinkingMode } from './anthropic';
 import { compatEffortFields, effortRefused, effortRefusedNotice, isEffortRefusal } from './effort';
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
 import { errorMessage } from './errors';
@@ -38,6 +38,8 @@ export interface CompletionHost {
   activity?: StreamProgress;
   /** The reasoning effort chosen for a provider, read at each request (agent/effort.ts); undefined: send nothing */
   effort?(provider: string): EffortLevel | undefined;
+  /** The thinking setting for the run (AppConfig.thinking), on the native Anthropic path only; undefined: off */
+  thinkingMode?(): ThinkingMode;
 }
 
 /** The type of the provider a request goes to ('openai-compatible' when it cannot be resolved). */

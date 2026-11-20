@@ -214,6 +214,16 @@ The pill after the model under the chat bar sets the reasoning effort of the pro
 
 Changing the effort re-writes the cached prompt once, so the app never changes it on its own.
 
+### Thinking
+
+`thinking` (Settings → Models → **Think before acting**): `auto`, the default, or `off`. It applies on Anthropic's own API only (a provider of type `anthropic`, or a base URL on `api.anthropic.com`).
+
+- `auto`: every Claude model that has adaptive thinking (Opus 4.6 and later, Sonnet 4.6 and later, Haiku 5.5, Fable, Mythos) is asked for it, `thinking: {"type": "adaptive", "display": "summarized"}` (the 4.6 models show summaries by default and get `{"type": "adaptive"}`). The model decides when and how much to think, as in Claude Code, and the thinking shows in the conversation. The effort pill still sets how much.
+- `off`: the requests as before 0.20: thinking off where the model allows it (`disabled` on Haiku 5.5, Opus 5 and Sonnet 5, `between_tools` on Sonnet 5.5; at `xhigh` and `max` those models think anyway, since the API refuses off there), nothing sent to the 4.x models, and adaptive thinking on the models that always think (Opus 5.5, Fable, Mythos). Faster, and it costs less.
+- Models without adaptive thinking (Haiku 4.5, Sonnet 4.5, Opus 4.5 and older) are sent the same under both.
+- It holds for a whole run: a change applies from your next message. Sub-sessions follow it. Auto mode's check, titles and compaction summaries keep no thinking either way.
+- A trusted project's settings.json may set it. Other providers ignore it: the effort pill is what applies there (Ollama keeps its own Thinking setting).
+
 ### Keys
 
 - Keys never appear in the window (Settings shows "Set (OPENROUTER_API_KEY)" or "Not set"), in logs, in the transcript, in what mods can read, or in the command's output.
@@ -319,7 +329,7 @@ The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on 
 
 ### The other settings
 
-`permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
+`permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `thinking` (see [Thinking](#thinking)), `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
 
 `toolConcurrency` (1 to 10, default 4): how many read-only tool calls of one reply run at the same time; `1` runs every call one after another. See [latency.md](latency.md).
 

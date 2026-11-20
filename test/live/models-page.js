@@ -5,6 +5,8 @@
 //     (asked once when the page opens; nothing is tested on its own); a long list shows eight, a filter and Show all
 //   - Test on a row sends one small request to exactly that model through that provider and shows the result on the
 //     row ("Answered in … ms" or the plain error, never the key); Use makes a model of another provider the one in use
+//   - Think before acting: under the model, on by default, writes thinking auto/off, and its line says what it does on
+//     Anthropic's own API and what applies instead elsewhere
 //   - Safety check: says what the check runs on now; picking a connected model writes "<provider>:<model>"; "Test as
 //     safety check" says how many requests it sends, runs the 24 actions through the check (the mock answers each with
 //     its label, one flipped), shows its progress, the result in plain words, and stops on Cancel
@@ -74,6 +76,18 @@ const OR_KEY = 'mock-or-key-0123456789';
     const ids = ['provider', 'ollama-baseURL', 'ollama-model', 'ollama-numCtx', 'ollama-think', 'portkey-baseURL', 'portkey-apiKey', 'portkey-model', 'portkey-contextWindow', 'portkey-virtualKey', 'portkey-provider', 'portkey-providerApiKey', 'portkey-configId', 'provider-service', 'provider-key', 'provider-model', 'provider-contextWindow', 'provider-files'];
     const missing = await app.evaluate(`${JSON.stringify(ids)}.filter((id) => !document.querySelector('#sp-sec-model #sp-row-' + id))`);
     check('every row the section had is still there, under its id', missing.length === 0, missing);
+
+    // --- Think before acting: under the model in In use, a switch on the thinking setting ---
+    const thinkDesc = () => app.text('#sp-row-thinking .sp-row-desc');
+    const thinkOn = () => app.evaluate(`document.querySelector('#sp-row-thinking input[type=checkbox]')?.checked ?? null`);
+    check('Think before acting sits in In use, right after the model rows', inUseRows.indexOf('thinking') === inUseRows.indexOf('provider-model') + 1 && inUseRows.indexOf('thinking') < inUseRows.indexOf('autoMode-model'), inUseRows);
+    check('… on by default (the setting is auto)', (await thinkOn()) === true && (await cfg()).thinking === 'auto');
+    check('… on the gateway (not Anthropic\'s own API, no effort pill) the line says it does not apply', /^Doesn't apply to this provider, only to Anthropic's own API\. It takes no effort setting either\.$/.test((await thinkDesc()) || ''), await thinkDesc());
+    await app.click('#sp-row-thinking input[type=checkbox]');
+    check('switching it off writes thinking: "off"', Boolean(await until(async () => (await cfg()).thinking === 'off')) && (await thinkOn()) === false);
+    await app.click('#sp-row-thinking input[type=checkbox]');
+    check('… and on again writes "auto"', Boolean(await until(async () => (await cfg()).thinking === 'auto')) && (await thinkOn()) === true);
+    check('… and no model was called', chats(gw).length === 0 && chats(or).length === 0);
 
     // --- Connected: a group per provider, the one in use first ---
     await app.waitFor(`document.querySelectorAll('#sp-sec-model .sp-provider').length === 4 && !document.querySelector('#sp-sec-model').innerText.includes('Checking…')`, 15_000, 'the four groups');
@@ -190,6 +204,7 @@ const OR_KEY = 'mock-or-key-0123456789';
     check('… the In use mark moves, and that provider now leads the list', Boolean(moved) && first === 'openrouter', first);
     check('… the Provider select follows', (await app.evaluate(`document.querySelector('#provider').value`)) === 'openrouter');
     check('… and Use sent no model request', chats(or).length === orBeforeUse && chats(gw).length === gwBeforeUse);
+    check('Think before acting on OpenRouter names the effort control instead', /the effort control after the model under the chat bar does\.$/.test((await thinkDesc()) || ''), await thinkDesc());
 
     // --- List requests that overlap: only the latest one's answer shows, and the spinner follows it ---
     {
@@ -252,8 +267,19 @@ const OR_KEY = 'mock-or-key-0123456789';
     hits = await search('test');
     check('search "test" finds the provider rows', hits.includes('provider-service') && hits.includes('provider'), hits);
     check('… and the Connected list is out of the way while searching', await app.evaluate(`getComputedStyle(document.querySelector('#sp-sec-model .sp-models')).display === 'none'`));
+    hits = await search('reasoning');
+    check('search "reasoning" finds Think before acting', hits.includes('thinking'), hits);
     await app.fill('#settings-search', '');
     await sleep(150);
+
+    // On Anthropic's own API (a provider of type anthropic in your settings.json, here the gateway's mock): what it does
+    fs.writeFileSync(path.join(app.profile, 'home-config', 'settings.json'), JSON.stringify({ provider: 'claude', providers: { claude: { type: 'anthropic', baseURL: `http://127.0.0.1:${gw.port}/v1`, apiKey: 'sk-mock-thinking-0123456789', model: 'claude-haiku-5-5' } } }));
+    await app.evaluate(`window.oc.rpc('settings.reload')`);
+    const nativeLine = await until(async () => (await thinkDesc()) === 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.');
+    check('Think before acting on Anthropic\'s own API: the model reasons before it acts, as Claude Code does; off is faster and costs less', Boolean(nativeLine), await thinkDesc());
+    await app.evaluate(`document.querySelector('#sp-row-thinking').scrollIntoView({ block: 'center' })`);
+    await sleep(200);
+    await app.screenshot(path.join(shots, 'models-thinking.png'));
   } catch (err) {
     check(`no crash: ${err.message}`, false);
   } finally {

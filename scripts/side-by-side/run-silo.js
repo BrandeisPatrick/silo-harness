@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Runs one task in Silo Harness through the hidden-window live rig (test/live/rig.js) and writes the run's files and
 // summary.json:
-//   node scripts/side-by-side/run-silo.js <taskId> <outDir> [--model id] [--sandbox on|off] [--timeout minutes] [--mock [--mock-script ask]]
+//   node scripts/side-by-side/run-silo.js <taskId> <outDir> [--model id] [--thinking auto|off] [--sandbox on|off] [--timeout minutes] [--mock [--mock-script ask]]
 //   node scripts/side-by-side/run-silo.js <taskId> --parse-only <runDir>      (rebuilds summary.json from a saved run)
 // Needs a build first (npm run build). The model is the real API when ANTHROPIC_API_KEY is set (or
 // SILO_HARNESS_LIVE_ANT=1), as for the live tests; --mock forces the mock model, scripted for one tool call and a
 // closing line, to test the plumbing with no real call. The app runs in Auto mode with a throwaway profile (removed
-// at the end) on a fresh copy of the template at <outDir>/<taskId>/<runner>/project, runner `silo` or, with the shell
-// sandbox on, `silo-sandbox`. Saved next to it: transcript.json, history.jsonl (the session's history log),
+// at the end) on a fresh copy of the template at <outDir>/<taskId>/<runner>/project. --thinking sets the app's thinking
+// setting (default auto, the app's own default): the runner is `silo-think` with auto and `silo` with off, so both sit
+// in one round folder; with the shell sandbox on, `-sandbox` is added (`silo-think-sandbox`, `silo-sandbox`). Saved next to it: transcript.json, history.jsonl (the session's history log),
 // timing.jsonl (its runs from the timing log), report.txt (what /report shows), final.txt, run.json, app-log.txt,
 // verify.json and summary.json. A question card (ask_user) or an approval card ends the run at once: nobody is there
 // to answer it, so the summary records stoppedOn and the card's text. --mock-script ask makes the mock ask a question.
@@ -66,9 +67,12 @@ function parseLogs(history, timingRuns, transcript, origin) {
   const checkRecs = [];
   const runStarts = [];
   const runEndRecs = [];
+  // One thinking record per model call that showed thinking (the text kept on the reply, as the app showed it)
+  const thinkingRecs = [];
   for (const r of history) {
     const d = r.data || {};
-    if (r.type === 'run.start') runStarts.push(r);
+    if (r.type === 'thinking') thinkingRecs.push(d);
+    else if (r.type === 'run.start') runStarts.push(r);
     else if (r.type === 'run.end') runEndRecs.push(r);
     else if (r.type === 'usage') (d.for === undefined || d.for === 'turn' ? usage : otherCalls).push(r);
     else if (r.type === 'check') checkRecs.push(d);
@@ -147,10 +151,20 @@ function parseLogs(history, timingRuns, transcript, origin) {
   const results = runEndRecs.map((r) => r.data && r.data.result).filter(Boolean);
   const resultUsd = results.length && results.length === runEndRecs.length && results.every((x) => typeof x.usd === 'number') ? results.reduce((a, x) => a + x.usd, 0) : null;
   const callMs = usage.map((u) => u.data.ms).filter((v) => typeof v === 'number');
+  const modelCalls = turns.length || usage.length;
+  // The setting the runs ran with (run.start, on Anthropic's own API only)
+  const settings = [...new Set(runStarts.map((r) => r.data && r.data.thinking).filter(Boolean))];
   return {
     resultUsd,
     steps,
-    modelCalls: turns.length || usage.length,
+    modelCalls,
+    reasoning: {
+      calls: modelCalls,
+      reasonedFirst: thinkingRecs.length,
+      thinkingWords: thinkingRecs.reduce((a, d) => a + c.wordCount(d.text), 0),
+      from: 'thinking records in the history log',
+      ...(settings.length ? { setting: settings.join(',') } : {}),
+    },
     tokens,
     checks,
     log: {
@@ -173,6 +187,16 @@ function parseLogs(history, timingRuns, transcript, origin) {
       stepTimesFrom: 'the message being sent',
     },
   };
+}
+
+/**
+ * The thinking kept on the saved session's replies (the native Anthropic path's blocks, which a compaction drops from
+ * the replies it keeps): replies that carry some, and its words.
+ */
+function storedThinking(saved) {
+  const msgs = [...(saved.compactions || []).flatMap((x) => x.folded || []), ...(saved.messages || [])].filter((m) => m && m.role === 'assistant');
+  const kept = msgs.map((m) => m.anthropic_thinking).filter((t) => Array.isArray(t) && t.length);
+  return { replies: msgs.length, withThinking: kept.length, thinkingWords: kept.flat().reduce((a, b) => a + (b.type === 'thinking' ? c.wordCount(b.thinking) : 0), 0) };
 }
 
 /** The last assistant message of the turn: the transcript's last assistant item after the last user message. */
@@ -228,10 +252,12 @@ function summarise(task, runDir, project) {
     costUsd: parsed.resultUsd !== null ? parsed.resultUsd : run.costSummary && typeof run.costSummary.usd === 'number' ? run.costSummary.usd : null,
     steps: parsed.steps,
     checks: parsed.checks,
+    ...(run.thinking ? { thinking: run.thinking } : {}),
+    reasoning: run.stored ? { ...parsed.reasoning, stored: run.stored } : parsed.reasoning,
     finish: c.finishFields(final, parsed.steps, project, narration),
     stoppedOn: run.stoppedOn ?? null,
     stoppedText: run.stoppedText ?? null,
-    log: { ...parsed.log, costFrom: parsed.resultUsd !== null ? 'run.end result.usd' : 'session cost', wallFrom: 'send to idle', timedOut: run.timedOut, mock: run.mock, sandbox: run.sandbox },
+    log: { ...parsed.log, costFrom: parsed.resultUsd !== null ? 'run.end result.usd' : 'session cost', wallFrom: 'send to idle', timedOut: run.timedOut, mock: run.mock, sandbox: run.sandbox, ...(run.thinking ? { thinking: run.thinking, appThinking: run.appThinking ?? null } : {}) },
   });
 }
 
@@ -239,7 +265,7 @@ async function main() {
   const a = c.parseArgs(process.argv.slice(2), ['mock']);
   const [taskId, outDir] = a._;
   if (!taskId || (!outDir && !a['parse-only'])) {
-    console.error('Usage: node scripts/side-by-side/run-silo.js <taskId> <outDir> [--model id] [--sandbox on|off] [--timeout minutes] [--mock] | <taskId> --parse-only <runDir>');
+    console.error('Usage: node scripts/side-by-side/run-silo.js <taskId> <outDir> [--model id] [--thinking auto|off] [--sandbox on|off] [--timeout minutes] [--mock] | <taskId> --parse-only <runDir>');
     process.exit(2);
   }
   const task = c.loadTask(taskId);
@@ -252,27 +278,33 @@ async function main() {
   }
   const sandbox = (a.sandbox || 'off') === 'on';
   if (a.sandbox && !['on', 'off'].includes(a.sandbox)) throw new Error('--sandbox takes on or off');
+  const thinking = a.thinking || 'auto';
+  if (!['auto', 'off'].includes(thinking)) throw new Error('--thinking takes auto or off');
   const timeoutMs = (Number(a.timeout) || task.meta.timeoutMinutes || DEFAULT_TIMEOUT_MIN) * 60_000;
   if (!fs.existsSync(path.join(ROOT, 'dist', 'main', 'index.js'))) throw new Error('Build first: npm run build');
   const rig = require(path.join(ROOT, 'test', 'live', 'rig.js'));
   const mock = Boolean(a.mock);
   if (!mock && !rig.liveSource()) throw new Error('No model: set ANTHROPIC_API_KEY (or SILO_HARNESS_LIVE_ANT=1) for a real run, or pass --mock');
 
-  const runner = sandbox ? 'silo-sandbox' : 'silo';
+  const runner = `${thinking === 'auto' ? 'silo-think' : 'silo'}${sandbox ? '-sandbox' : ''}`;
   const { runDir, project } = c.prepareRun(task, outDir, runner);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sbs-silo-profile-'));
   const home = path.join(profile, 'home-config');
   fs.mkdirSync(home, { recursive: true });
   if (sandbox) fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ sandbox: { enabled: true } }, null, 2));
 
-  console.log(`${runner}: ${task.id} with ${mock ? 'the mock model' : a.model || rig.LIVE_MODEL} in ${project}`);
-  const app = await rig.launch({ mode: 'auto', profile, ownsProfile: true, project, model: a.model, mock, config: { timingLog: true } });
+  console.log(`${runner}: ${task.id} with ${mock ? 'the mock model' : a.model || rig.LIVE_MODEL}, thinking ${thinking}, in ${project}`);
+  // The setting goes in through the seeded config.json, as Settings → Models → Think before acting writes it
+  const app = await rig.launch({ mode: 'auto', profile, ownsProfile: true, project, model: a.model, mock, config: { timingLog: true, thinking } });
   const model = app.live ? a.model || rig.LIVE_MODEL : 'mock-model';
-  const run = { runner, task: task.id, model, mock: !app.live, sandbox, prompt: task.prompt };
+  const run = { runner, task: task.id, model, mock: !app.live, sandbox, thinking, prompt: task.prompt };
   try {
     if (app.mock) scriptMock(app, a['mock-script']);
     const sessionId = await app.evaluate(`oc.sessions.current().then((m) => m.id)`);
     run.sessionId = sessionId;
+    // What the app runs with, as it read the setting (not what was asked for)
+    run.appThinking = await app.evaluate(`window.oc.getConfig().then((c) => c.thinking ?? null)`).catch(() => null);
+    if (run.appThinking !== thinking) console.error(`the app runs with thinking ${run.appThinking}, not ${thinking}`);
     run.sentAt = Date.now();
     await app.send(task.prompt);
     await app.waitFor(BUSY, 15_000, 'the run to start').catch(() => undefined);
@@ -327,6 +359,7 @@ async function main() {
       const saved = JSON.parse(fs.readFileSync(path.join(profile, 'sessions', `${sessionId}.json`), 'utf8'));
       const cfg = JSON.parse(fs.readFileSync(path.join(profile, 'config.json'), 'utf8'));
       run.costSummary = dist('cost.js').summarize(saved.cost, cfg.prices);
+      run.stored = storedThinking(saved);
     } catch (err) {
       run.costError = err.message;
     }
@@ -337,7 +370,7 @@ async function main() {
     await app.close();
   }
   const summary = summarise(task, runDir, project);
-  console.log(`${summary.verify.ok ? 'PASS' : 'FAIL'} ${runner} ${task.id}: ${summary.modelCalls} model calls, ${summary.tools.total} tool calls, ${summary.wallMs} ms${summary.stoppedOn ? `, stopped on ${summary.stoppedOn}` : ''} -> ${path.join(runDir, 'summary.json')}`);
+  console.log(`${summary.verify.ok ? 'PASS' : 'FAIL'} ${runner} ${task.id}: ${summary.modelCalls} model calls (${summary.reasoning.reasonedFirst} reasoned first), ${summary.tools.total} tool calls, ${summary.wallMs} ms${summary.stoppedOn ? `, stopped on ${summary.stoppedOn}` : ''} -> ${path.join(runDir, 'summary.json')}`);
 }
 
 if (require.main === module) {

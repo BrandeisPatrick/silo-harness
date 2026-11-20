@@ -8,7 +8,7 @@ import type { CheckModelInfo, CheckTestReport } from '../../shared/auto-mode';
 import { escapeHtml, h } from '../dom.js';
 import { icon } from '../icons.js';
 import { parseInteger, parseText, parseUrl } from './model.js';
-import { CHECK_EVAL_NOTE, checkChoices, checkModelWords, checkTestPlan, checkTestWords, modelIds, providerState, rowKey, shownModels, testWords } from './models-model.js';
+import { CHECK_EVAL_NOTE, checkChoices, checkModelWords, checkTestPlan, checkTestWords, modelIds, providerState, rowKey, shownModels, testWords, thinkingWords } from './models-model.js';
 import { actions, button, chip, group, groupTitle, iconButton, note, row, sectionTitle, textControl, type Choice } from './ui.js';
 import { onPush } from '../rpc.js';
 import { activeProvider, allProviders } from '../provider-view.js';
@@ -449,6 +449,18 @@ export function modelSection(ctx: Ctx): Section {
     }
   }
 
+  // ---------- Thinking before acting (AppConfig.thinking; Anthropic's own API only) ----------
+
+  const thinkRow = ctx.switchField({
+    id: 'thinking',
+    title: 'Think before acting',
+    desc: '',
+    keywords: 'thinking reasoning reason adaptive claude code extended faster cheaper cost effort',
+    field: 'thinking',
+    values: { on: 'auto', off: 'off' },
+  });
+  const syncThinking = (cfg: AppConfig) => thinkRow.setDesc(thinkingWords(activeProvider(cfg)));
+
   // ---------- The safety check's model, and a test of it ----------
 
   /** What the check runs on now (auto.checkModel), null until asked or when this build has no check */
@@ -566,7 +578,7 @@ export function modelSection(ctx: Ctx): Section {
   }
 
   el.append(
-    group('In use', provider, ollamaModel, gatewayModel, modelRow, checkRow, testRow),
+    group('In use', provider, ollamaModel, gatewayModel, modelRow, thinkRow, checkRow, testRow),
     connected,
     group('Connection', ...ollamaRows, ...gatewayRows, advanced, service, keyRow, windowRow),
     group(null, files),
@@ -592,6 +604,7 @@ export function modelSection(ctx: Ctx): Section {
       setChoices(cfg);
       syncProvider(cfg.provider);
       syncNamed(cfg);
+      syncThinking(cfg);
       if (cfg.provider === 'ollama' && lastProvider !== 'ollama') void refreshModels();
       lastProvider = cfg.provider;
       renderAll();
@@ -609,6 +622,7 @@ export function modelSection(ctx: Ctx): Section {
       syncProvider(cfg.provider);
       lastNamed = '';
       syncNamed(cfg);
+      syncThinking(cfg);
       void refreshModels();
       renderAll();
       setCheckChoices();

@@ -110,6 +110,14 @@
       ],
       "description": "Fold each run of tool calls into one line, or show every call."
     },
+    "thinking": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "off"
+      ],
+      "description": "Think before acting, on Anthropic's own API: auto asks every Claude model that can reason adaptively to do so before it acts, as Claude Code does; off turns thinking off where the model allows, which is faster and costs less. Other providers ignore it: their effort setting is what applies there."
+    },
     "historyTrashDays": {
       "type": "number",
       "minimum": 0,

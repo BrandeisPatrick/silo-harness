@@ -241,11 +241,14 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     adopt,
     isOwned: (field) => isOwned(field),
     switchField(o) {
-      const read = () => Boolean(getPath(deps.config(), o.field)) !== Boolean(o.invert);
-      const input = switchControl(read(), (on) => void save(r, o.field, o.invert ? !on : on).then((ok) => !ok && (input.checked = read())));
+      // Two named values: off only when the field holds the `off` one (absent reads as on, the default)
+      const isOn = (v: unknown) => (o.values ? v !== o.values.off : Boolean(v)) !== Boolean(o.invert);
+      const read = () => isOn(getPath(deps.config(), o.field));
+      const value = (on: boolean) => (o.values ? (on !== Boolean(o.invert) ? o.values.on : o.values.off) : o.invert ? !on : on);
+      const input = switchControl(read(), (on) => void save(r, o.field, value(on)).then((ok) => !ok && (input.checked = read())));
       const r = row(o, input);
       r.el.classList.add('clickable');
-      bind(o.field, r, (v) => (input.checked = Boolean(v) !== Boolean(o.invert)));
+      bind(o.field, r, (v) => (input.checked = isOn(v)));
       return r;
     },
     textField(o) {
