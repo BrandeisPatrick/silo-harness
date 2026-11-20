@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs one task in Claude Code, headless, and writes the run's files and summary.json:
-//   node scripts/side-by-side/run-claude.js <taskId> <outDir> [--model id] [--parse-only <events.jsonl>]
+//   node scripts/side-by-side/run-claude.js <taskId> <outDir> [--model id] [--timeout minutes] [--parse-only <events.jsonl>]
 // The project is a fresh copy of the task's template at <outDir>/<taskId>/claude/project (a git repository with one
 // commit), and `claude -p` runs in it with Auto mode, no prompts, no customizations, no MCP servers and no saved
 // session. Saved next to it: events.jsonl (the stream-json output), stderr.txt, final.txt, run.json (times and exit),
@@ -13,7 +13,7 @@ const path = require('node:path');
 const c = require('./lib/common.js');
 
 const DEFAULT_MODEL = 'claude-haiku-5-5';
-const TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_TIMEOUT_MIN = 10;
 
 /** A path relative to the project when it is inside it. */
 const relTo = (dir, p) => (dir && p.startsWith(dir + path.sep) ? p.slice(dir.length + 1) : p);
@@ -47,6 +47,7 @@ function parseEvents(events, origin) {
   const toolSteps = new Map();
   const calls = new Map(); // message id -> { usage }
   let lastText = '';
+  const texts = []; // [message id, text] of main-thread assistant text, in order
   let classifierChecks = 0;
   const decisions = {};
   for (const e of events) {
@@ -58,10 +59,18 @@ function parseEvents(events, origin) {
         steps.push({ type: 'model', name: e.message.model || init.model || '', kind: 'model', atMs: Number.isNaN(ts(e)) ? null : ts(e) - t0, ...(sub ? { sub: true } : {}) });
       } else calls.get(id).usage = e.message.usage || calls.get(id).usage;
       for (const b of e.message.content || []) {
-        if (b.type === 'text' && !sub && b.text.trim()) lastText = b.text;
+        if (b.type === 'text' && !sub && b.text.trim()) {
+          lastText = b.text;
+          const prev = texts[texts.length - 1];
+          if (prev && prev[0] === id) prev[1] += `\n${b.text}`;
+          else texts.push([id, b.text]);
+        }
         if (b.type !== 'tool_use') continue;
         const step = { type: 'tool', name: b.name, kind: c.kindOf(b.name), atMs: Number.isNaN(ts(e)) ? null : ts(e) - t0, ms: null, ok: null, ...(sub ? { sub: true } : {}) };
-        if (step.kind === 'shell' && b.input && b.input.command) step.cmd = c.short(b.input.command);
+        if (step.kind === 'shell' && b.input && b.input.command) {
+          step.cmd = c.short(b.input.command);
+          step.shell = c.analyse(b.input.command);
+        }
         if (step.kind === 'edit' && b.input && (b.input.file_path || b.input.notebook_path)) step.file = relTo(init.cwd, String(b.input.file_path || b.input.notebook_path));
         steps.push(step);
         toolSteps.set(b.id, { step, at: ts(e) });
@@ -100,10 +109,17 @@ function parseEvents(events, origin) {
   }
   tokens.promptTotal = tokens.in + tokens.cacheRead + tokens.cacheWrite;
 
+  // Narration: the text messages before the final one (the final is the result, or the last text)
+  const final = result && typeof result.result === 'string' ? result.result : lastText;
+  const narration = texts.map((t) => t[1]);
+  if (narration.length && narration[narration.length - 1].trim() === String(final).trim()) narration.pop();
+  else if (narration.length && final && String(final).includes(narration[narration.length - 1].trim())) narration.pop();
+
   const denials = result && Array.isArray(result.permission_denials) ? result.permission_denials : [];
   return {
     model: init.model || (result && Object.keys(result.modelUsage || {})[0]) || null,
-    final: result && typeof result.result === 'string' ? result.result : lastText,
+    final,
+    narration,
     steps,
     modelCalls: [...calls.values()].filter((x) => !x.sub).length,
     tokens,
@@ -128,7 +144,7 @@ function parseEvents(events, origin) {
   };
 }
 
-function runClaude(prompt, model, project, runDir) {
+function runClaude(prompt, model, project, runDir, timeoutMs) {
   const args = ['-p', prompt, '--model', model, '--permission-mode', 'auto', '--permission-prompts', 'none', '--safe-mode', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '1'];
   const out = fs.openSync(path.join(runDir, 'events.jsonl'), 'w');
   const err = fs.openSync(path.join(runDir, 'stderr.txt'), 'w');
@@ -146,7 +162,7 @@ function runClaude(prompt, model, project, runDir) {
       timedOut = true;
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 5000).unref();
-    }, TIMEOUT_MS);
+    }, timeoutMs);
     const done = (exitCode, signal, error) => {
       clearTimeout(timer);
       fs.closeSync(out);
@@ -162,7 +178,7 @@ async function main() {
   const a = c.parseArgs(process.argv.slice(2));
   const [taskId, outDir] = a._;
   if (!taskId || (!outDir && !a['parse-only'])) {
-    console.error('Usage: node scripts/side-by-side/run-claude.js <taskId> <outDir> [--model id] [--parse-only <events.jsonl>]');
+    console.error('Usage: node scripts/side-by-side/run-claude.js <taskId> <outDir> [--model id] [--timeout minutes] [--parse-only <events.jsonl>]');
     process.exit(2);
   }
   const task = c.loadTask(taskId);
@@ -188,11 +204,12 @@ async function main() {
   } else {
     ({ runDir, project } = c.prepareRun(task, outDir, 'claude'));
     console.log(`claude: ${task.id} with ${model} in ${project}`);
-    run = await runClaude(task.prompt, model, project, runDir);
+    const timeoutMs = (Number(a.timeout) || DEFAULT_TIMEOUT_MIN) * 60_000;
+    run = await runClaude(task.prompt, model, project, runDir, timeoutMs);
     run.wallMs = run.endedAt - run.startedAt;
     fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ ...run, model, prompt: task.prompt }, null, 2) + '\n');
     if (run.error) console.error(`claude did not start: ${run.error}`);
-    if (run.timedOut) console.error(`claude ran past ${TIMEOUT_MS / 60_000} minutes and was stopped`);
+    if (run.timedOut) console.error(`claude ran past ${timeoutMs / 60_000} minutes and was stopped`);
   }
 
   const parsed = parseEvents(readEvents(path.join(runDir, 'events.jsonl')), run ? run.startedAt : undefined);
@@ -212,7 +229,7 @@ async function main() {
     costUsd: parsed.costUsd,
     steps: parsed.steps,
     checks: parsed.checks,
-    finish: c.finishFields(parsed.final, parsed.steps, project),
+    finish: c.finishFields(parsed.final, parsed.steps, project, parsed.narration),
     log: { ...parsed.log, wallFrom: run ? 'spawn to exit' : 'result.duration_ms (parse-only)', ...(run ? { exitCode: run.exitCode, timedOut: run.timedOut } : {}), parseOnly: Boolean(parseOnly) },
   });
   console.log(`${verify.ok ? 'PASS' : 'FAIL'} claude ${task.id}: ${summary.modelCalls} model calls, ${summary.tools.total} tool calls, ${summary.wallMs ?? '?'} ms -> ${path.join(runDir, 'summary.json')}`);

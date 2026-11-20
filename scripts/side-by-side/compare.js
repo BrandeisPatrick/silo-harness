@@ -50,7 +50,7 @@ const list = (a) => (Array.isArray(a) && a.length ? a.join(', ') : '-');
 
 /** [label, value(summary)] rows of the per-task table. */
 const ROWS = [
-  ['outcome', (s) => (s.verify && s.verify.ok ? 'PASS' : 'FAIL')],
+  ['outcome', (s) => (s.verify && s.verify.ok ? 'PASS' : 'FAIL') + (s.stoppedOn ? ` (stopped on ${s.stoppedOn})` : '')],
   ['hard checks', (s) => checkLine(s.verify && s.verify.hard)],
   ['soft checks', (s) => checkLine(s.verify && s.verify.soft)],
   ['model', (s) => s.model || '-'],
@@ -71,6 +71,10 @@ const ROWS = [
   ['sandbox blocks / reruns', (s) => (s.checks && typeof s.checks.sandboxBlocked === 'number' ? `${s.checks.sandboxBlocked} / ${s.checks.sandboxReruns}` : '-')],
   ['ran tests after last edit', (s) => yn(s.finish && s.finish.ranTestsAfterLastEdit)],
   ['ran tests at all', (s) => yn(s.finish && s.finish.ranTestsAtAll)],
+  ['shell calls that wrote files', (s) => num(s.finish && s.finish.shellWrites)],
+  ['shell calls that only read', (s) => num(s.finish && s.finish.shellReads)],
+  ['shell calls starting cd <path>', (s) => num(s.finish && s.finish.cdPrefixed)],
+  ['narration: messages / words', (s) => (s.finish && typeof s.finish.narrationMessages === 'number' ? `${s.finish.narrationMessages} / ${s.finish.narrationWords}` : '-')],
   ['final: words / lines', (s) => (s.finish ? `${s.finish.finalWords} / ${s.finish.finalLines}` : '-')],
   ['final: chars', (s) => num(s.finish && s.finish.finalChars)],
   ['final: heading', (s) => yn(s.finish && s.finish.hasHeading)],
@@ -258,7 +262,7 @@ function main() {
     text.push(`=== ${task} ===`, textTable(header, rows), '');
     md.push(`## ${task}`, '', mdTable(header, rows), '', '### Final messages', '');
     for (const r of runs) {
-      const fin = r._final.trim() || '(no final message)';
+      const fin = (r._final.trim() || '(no final message)') + (r.stoppedOn ? `\n\n[stopped on a ${r.stoppedOn} card: ${String(r.stoppedText || '').replace(/\s+/g, ' ').slice(0, 300)}]` : '');
       text.push(`--- ${task} / ${r.runner}: final message ---`, fin, '');
       md.push(`#### ${r.runner}`, '', fin.split('\n').map((l) => `> ${l}`).join('\n'), '');
     }
