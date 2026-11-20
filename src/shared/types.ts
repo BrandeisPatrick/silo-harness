@@ -96,6 +96,8 @@ export interface ProviderView {
   error?: string;
   /** The effort pill; absent where the model or the service takes no effort setting */
   effort?: EffortInfo;
+  /** True when its requests go to Anthropic's own Messages API, where the thinking setting applies */
+  native?: boolean;
 }
 
 export interface ProvidersView {
@@ -351,6 +353,12 @@ export interface AppConfig {
   toolSet: 'auto' | 'all' | 'essential';
   /** The tool calls in the conversation: summary folds each run of two or more into one line, all shows every call as its own row */
   toolActivity: 'summary' | 'all';
+  /**
+   * Thinking before acting, on Anthropic's own API: auto asks every Claude model that has adaptive thinking for it,
+   * with readable summaries, as Claude Code does; off turns it off where the model allows (faster, costs less). Other
+   * providers ignore it (the effort control is theirs). Absent in a config.json written before 0.20: auto.
+   */
+  thinking?: 'auto' | 'off';
   /** Days a deleted session stays in the trash before it is removed for good (0: at once) */
   historyTrashDays: number;
   /** Mods: which are on, their settings, and how the rail and background are arranged */

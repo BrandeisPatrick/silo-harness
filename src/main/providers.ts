@@ -316,6 +316,7 @@ export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): P
     ...(owner ? { owner } : {}),
     ...(r.error ? { error: scrubSecrets(r.error) } : {}),
     ...withEffort(r),
+    ...(isNativeAnthropic(r) ? { native: true } : {}),
   };
 }
 
