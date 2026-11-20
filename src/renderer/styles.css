@@ -1,9 +1,11 @@
 /* =====================================================================
    Silo Harness renderer styles
    Tokens follow docs/ui-audit.md (Claude desktop reference values).
-   Spacing is on a 4px grid. Type (the tokens below): what you read 15/21,
-   rows and controls 14/20, secondary 13/18, captions and badges 12/16,
-   code 13/20; display 28/34. Nothing under 12px but keyboard glyphs.
+   Spacing is on a 4px grid. Type (the tokens below, Claude desktop's
+   measured sizes): what you read 14/20 (its "sm"), headings in a reply
+   16/24, rows and controls 14/20, secondary 13/18, captions and badges
+   12/16, code 12.5/20; display 28/34. Nothing under 12px but keyboard
+   glyphs.
    ===================================================================== */
 
 /* ---------- Tokens ---------- */
@@ -14,11 +16,11 @@
 
   /* Type scale. body: replies, the user's bubble, tool and status lines, the chat bar's text. ui: rows, menus,
      buttons, inputs. small: rail headings, notes, hints, counts. micro: date groups, captions, badges. */
-  --fs-body: 15px;
-  --lh-body: 21px;
-  --fs-head: 17px;
+  --fs-body: 14px;
+  --lh-body: 20px;
+  --fs-head: 16px;
   --lh-head: 24px;
-  --fs-title: 15px;
+  --fs-title: 14px;
   --lh-title: 20px;
   --fs-ui: 14px;
   --lh-ui: 20px;
@@ -26,7 +28,7 @@
   --lh-small: 18px;
   --fs-micro: 12px;
   --lh-micro: 16px;
-  --fs-code: 13px;
+  --fs-code: 12.5px;
   --lh-code: 20px;
   --fs-kbd: 11px;
 
@@ -123,7 +125,7 @@
   --r-composer: 12px;
   --r-card-lg: 10px;
   --sidebar-w: 256px;
-  --col: 728px;
+  --col: 648px;
   color-scheme: light;
 }
 
@@ -493,7 +495,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* ---------- Transcript ---------- */
 .transcript { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 32px 0 56px; display: flex; flex-direction: column; }
-/* One reading column, 728px at most (720px of text), at least 24px from the pane's edges; cards take its full width and running
+/* One reading column, 648px at most (640px of text: about 95 characters a line at 14px), at least 24px from the pane's edges; cards take its full width and running
    text (replies, tool lines, the user's bubble) sits 4px in from each side. 16px between blocks. */
 .transcript > * { width: min(var(--col), calc(100% - 48px)); margin-left: auto; margin-right: auto; flex: none; }
 /* Fill backwards, not both: a finished animation that still holds its end state keeps the message a backdrop root, and
@@ -557,11 +559,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md { overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
-.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 14px; }
-/* Headings read as text with weight, not as a form's sections: the top level a step larger, the rest the text size;
-   more room above than below, so each belongs to what follows it */
-.md h1 { margin: 28px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
-.md h2, .md h3, .md h4, .md h5, .md h6 { margin: 24px 0 6px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
+.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 12px; }
+/* Headings read as text with weight, not as a form's sections: the top two levels a step larger (16/24), the rest
+   the text size; more room above than below, so each belongs to what follows it */
+.md h1, .md h2 { margin: 24px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
+.md h3, .md h4, .md h5, .md h6 { margin: 20px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
 .md strong { font-weight: 600; }
 /* Lists: tight items, a modest indent, a muted marker */
 .md ul, .md ol { padding-left: 22px; }
@@ -570,7 +572,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md li::marker { color: var(--text-400); }
 .md ol > li::marker { font-variant-numeric: tabular-nums; }
 .md li > ul, .md li > ol { margin: 4px 0 0; }
-.md li > p { margin: 0 0 6px; }
+.md li > p { margin: 0 0 4px; }
 .md li > .code-block { margin: 8px 0; }
 .md ul.tasks { padding-left: 4px; list-style: none; }
 .md li.task { display: flex; align-items: flex-start; gap: 8px; }
@@ -581,7 +583,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
 /* Inline code: the mono face on a soft patch of tint, no outline, so a sentence with several stays even */
-.md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
+.md code { font-family: var(--mono); font-size: var(--fs-code); padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }

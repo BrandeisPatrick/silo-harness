@@ -381,7 +381,7 @@ const BGS = ['aurora', 'constellation', 'grid', 'dusk'];
           await app.fill('#input', 'First line of a longer request\nsecond line with more detail\nthird line');
           await sleep(200);
           const g3 = await geo();
-          check(`chatbar (${tag}): three lines grow the bar upward, the plus and the action stay on the last line`, near(g3.input.h, 86) && near(g3.comp.b, g.comp.b) && near(g3.send.cy, g.send.cy) && near(g3.attach.cy, g.attach.cy), { input: g3.input, send: g3.send });
+          check(`chatbar (${tag}): three lines grow the bar upward, the plus and the action stay on the last line`, near(g3.input.h, 83) && near(g3.comp.b, g.comp.b) && near(g3.send.cy, g.send.cy) && near(g3.attach.cy, g.attach.cy), { input: g3.input, send: g3.send });
           await bar(`three-lines-${tag}`);
           await app.fill('#input', '');
         }

@@ -10,12 +10,12 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Type scale, the app's: rows 14/20 (--fs-ui), secondary text 13/18 (--fs-small), captions and badges 12/16
-     (--fs-micro), reading text 15/21 (--fs-body), code 13/20 (--fs-code) */
-  --fs-body: 15px;
-  --lh-body: 21px;
-  --fs-head: 17px;
+     (--fs-micro), reading text 14/20 (--fs-body), code 12.5/20 (--fs-code) */
+  --fs-body: 14px;
+  --lh-body: 20px;
+  --fs-head: 16px;
   --lh-head: 24px;
-  --fs-title: 15px;
+  --fs-title: 14px;
   --lh-title: 20px;
   --fs-ui: 14px;
   --lh-ui: 20px;
@@ -23,7 +23,7 @@
   --lh-small: 18px;
   --fs-micro: 12px;
   --lh-micro: 16px;
-  --fs-code: 13px;
+  --fs-code: 12.5px;
   --lh-code: 20px;
 
   --bg-000: #ffffff;
@@ -372,7 +372,7 @@ button.h-chip:hover { background: var(--hover); color: var(--text-100); }
 }
 .h-md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .h-md .task-text { min-width: 0; }
-.h-md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 4px; background: var(--code-bg); }
+.h-md code { font-family: var(--mono); font-size: var(--fs-code); padding: 1px 4.5px; border-radius: 4px; background: var(--code-bg); }
 .h-md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; cursor: pointer; }
 .h-md a:hover { color: var(--accent); text-decoration-color: currentColor; }
 .h-md a code { color: inherit; }
