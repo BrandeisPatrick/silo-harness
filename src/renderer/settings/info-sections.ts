@@ -98,6 +98,21 @@ export function historySection(ctx: Ctx): Section {
     ctx.refreshSearch();
   }
 
+  // Coming on screen again reads the numbers again: Developer → Reset can delete every session while Settings is open
+  let shown = false;
+  new MutationObserver(() => {
+    const now = el.classList.contains('current');
+    if (now && !shown) {
+      void refreshStats()
+        .then(async () => {
+          trash = await ctx.call('history.trash');
+          render();
+        })
+        .catch(() => undefined);
+    }
+    shown = now;
+  }).observe(el, { attributes: true, attributeFilter: ['class'] });
+
   return {
     id: 'history',
     el,

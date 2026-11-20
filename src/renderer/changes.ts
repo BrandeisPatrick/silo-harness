@@ -18,6 +18,10 @@ export interface ConfirmOptions {
    * in mono) or the message a rewind returns to
    */
   quote?: { text: string; label?: string; mono?: boolean };
+  /** What it acts on, as a short list under the description */
+  items?: string[];
+  /** A choice the confirmation offers; after a confirm, `checked` holds the answer */
+  checkbox?: { label: string; checked: boolean };
 }
 
 export interface ChangesPaneOptions {

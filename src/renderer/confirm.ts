@@ -41,6 +41,14 @@ export function createConfirmDialog({ dialog: confirmDialog, hideBrowser, afterC
     const desc = byId('confirm-desc');
     desc.textContent = opts.description ?? '';
     desc.hidden = !opts.description;
+    const list = byId('confirm-list');
+    list.replaceChildren(...(opts.items ?? []).map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+    list.hidden = !opts.items?.length;
+    const check = byId('confirm-check');
+    const box = byId<HTMLInputElement>('confirm-check-input');
+    byId('confirm-check-label').textContent = opts.checkbox?.label ?? '';
+    box.checked = Boolean(opts.checkbox?.checked);
+    check.hidden = !opts.checkbox;
     const ok = byId<HTMLButtonElement>('confirm-ok');
     const cancel = byId<HTMLButtonElement>('confirm-cancel');
     ok.textContent = opts.confirmLabel;
@@ -62,7 +70,10 @@ export function createConfirmDialog({ dialog: confirmDialog, hideBrowser, afterC
       const onClose = () => {
         if (!confirmDialog.open) finish(false);
       };
-      ok.onclick = () => finish(true);
+      ok.onclick = () => {
+        if (opts.checkbox) opts.checkbox.checked = box.checked;
+        finish(true);
+      };
       cancel.onclick = () => finish(false);
       confirmDialog.addEventListener('close', onClose);
     });

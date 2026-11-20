@@ -940,6 +940,12 @@ export interface SiloHarnessApi {
   homeDir: string;
   getConfig(): Promise<AppConfig>;
   setConfig(cfg: AppConfig): Promise<AppConfig>;
+  /**
+   * Full reset (the app back to its first launch; with settingsJson your settings.json too) or Reset settings (the
+   * app's saved settings back to defaults). Everything that goes is moved to the Trash and the app relaunches. Only the
+   * main window's own page may ask (Settings → Developer, after a confirmation).
+   */
+  reset(kind: 'full' | 'settings', opts?: { settingsJson?: boolean }): Promise<{ relaunching: boolean }>;
   chooseDirectory(): Promise<string | null>;
   listOllamaModels(): Promise<string[]>;
   /** Absolute path of a File dropped onto the window (Electron's webUtils) */

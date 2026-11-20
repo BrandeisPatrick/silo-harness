@@ -1371,6 +1371,11 @@ dialog.dialog.confirm-dialog { width: 440px; }
 .confirm-text { min-width: 0; padding-top: 6px; }
 .confirm-text h2 { margin: 0; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 600; overflow-wrap: anywhere; }
 .confirm-text p { margin: 4px 0 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); }
+/* What a confirmation acts on, as a short list; and a choice it offers (off unless ticked) */
+.confirm-list { margin: 8px 0 0; padding: 0 0 0 18px; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); }
+.confirm-list[hidden], .confirm-check[hidden] { display: none; }
+.confirm-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); cursor: pointer; }
+.confirm-check input { margin: 0; accent-color: var(--danger); }
 .confirm-dialog .dialog-foot { border-top: none; padding-top: 8px; padding-bottom: 16px; }
 
 /* ---------- Motion ---------- */

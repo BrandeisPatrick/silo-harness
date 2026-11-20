@@ -3,6 +3,7 @@
 // First: carry over the folders of the app's older names, before any other module reads them.
 import { setAppDataDir } from './guard';
 import './carry-over';
+import './reset-at-launch';
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
 import type { AgentEvent, BrowserState, McpServerInfo } from '../shared/types';
@@ -32,6 +33,7 @@ import { setupUpdates } from './updates';
 import { setupTiming } from './timing-service';
 import { setupCost } from './cost-service';
 import { setupReport } from './report-service';
+import { finishReset, setupReset } from './reset';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -319,6 +321,9 @@ app.whenReady().then(() => {
   setupTiming(a);
   setupCost(a);
   setupReport(a);
+  setupReset(a);
+  // What a reset moved aside at this launch (or one before that could not finish) goes to the Trash
+  void finishReset(app.getPath('userData'), (line) => console.log(line));
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
