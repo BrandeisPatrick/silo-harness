@@ -64,12 +64,42 @@ export function isNativeAnthropic(r: { type: string; baseURL: string }): boolean
 }
 
 /**
- * The thinking setting for a model: off where the model lets it be turned off (the agent has never asked for it),
- * else the model's adaptive thinking with readable summaries. Undefined: send nothing (the older models think only
- * when asked).
+ * The `thinking` setting (AppConfig.thinking): auto asks every Claude model that has adaptive thinking for it, with
+ * readable summaries, as Claude Code does; off turns it off where the model lets it be turned off (the agent's way
+ * before 0.20). Only the agent's own requests on this path read it: Auto mode's check has its own (classifier.ts
+ * checkReasoning), and titles, compaction and summaries go through the OpenAI-shaped client, which sends no thinking.
  */
-export function thinkingFor(model: string): Anthropic.ThinkingConfigParam | undefined {
+export type ThinkingMode = 'auto' | 'off';
+
+/** A config's thinking setting: off only when it says so (auto is the default). */
+export function thinkingModeOf(cfg: { thinking?: unknown }): ThinkingMode {
+  return cfg.thinking === 'off' ? 'off' : 'auto';
+}
+
+/**
+ * Whether a model has adaptive thinking (claude-api skill, shared/models.md and shared/model-migration.md): Opus 4.6,
+ * 4.7, 4.8, 5 and 5.5, Sonnet 4.6, 5 and 5.5, Haiku 5.5, every Fable and Mythos model, and what comes after them.
+ * Not Claude 3, Haiku 4.5, Sonnet 4.5, Opus 4.5 or older 4.x: they take only a fixed budget_tokens, which is not this.
+ */
+export function hasAdaptiveThinking(model: string): boolean {
+  const m = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d)(?!\d))?/.exec(model.toLowerCase());
+  if (!m) return !/claude-[34]-|claude-instant/.test(model.toLowerCase());
+  const [, family, major, minor] = m;
+  const v = Number(major) * 10 + (minor ? Number(minor) : 0);
+  if (family === 'fable' || family === 'mythos') return true;
+  if (family === 'haiku') return v >= 55;
+  return v >= 46;
+}
+
+/**
+ * The thinking setting for a model. off (the agent's way before 0.20): off where the model lets it be turned off,
+ * else the model's adaptive thinking with readable summaries; undefined: send nothing (the older models think only
+ * when asked). auto: adaptive thinking with readable summaries wherever the model has it (Opus 4.6 and Sonnet 4.6
+ * show summaries by default, so they get the plain form), and the same as off where it has not.
+ */
+export function thinkingFor(model: string, mode: ThinkingMode = 'off'): Anthropic.ThinkingConfigParam | undefined {
   const m = model.toLowerCase();
+  if (mode === 'auto' && hasAdaptiveThinking(m)) return /claude-(?:opus|sonnet)-4-6(?!\d)/.test(m) ? { type: 'adaptive' } : { type: 'adaptive', display: 'summarized' };
   // Claude 3 and 4 (up to 4.8): no thinking unless asked for
   if (/claude-(?:opus|sonnet|haiku)-[34](?:-|$)|claude-[34]-/.test(m)) return undefined;
   // Accept "disabled": Haiku 5.5, Opus 5 and Sonnet 5 (at the default effort)
@@ -359,6 +389,8 @@ export interface NativeHost {
   activity?: StreamProgress;
   /** The reasoning effort chosen, read at each request (agent/effort.ts); undefined: send nothing */
   effort?(): EffortLevel | undefined;
+  /** The thinking setting for this run (AppConfig.thinking); undefined: off, the request as before 0.20 */
+  thinkingMode?(): ThinkingMode;
 }
 
 export interface NativeReply {
@@ -384,7 +416,7 @@ export function nativeUsage(u: { input_tokens?: number | null; output_tokens?: n
 }
 
 /** The request for a history and tool specs, marks included. */
-export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], maxTokens: number, stripThinkingBefore = 0, chosenEffort?: EffortLevel): Anthropic.MessageCreateParamsStreaming {
+export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], maxTokens: number, stripThinkingBefore = 0, chosenEffort?: EffortLevel, thinkingMode: ThinkingMode = 'off'): Anthropic.MessageCreateParamsStreaming {
   const plan = deferPlan(model, history, specs);
   const { system, messages } = toAnthropic(history, stripThinkingBefore, plan.refs);
   const tools = toolsOf(plan.specs, plan.deferred);
@@ -393,7 +425,7 @@ export function nativeRequest(model: string, history: Msg[], specs: ToolSpec[], 
   if (system.length) req.system = system;
   if (tools.length) req.tools = tools;
   const effort = nativeEffortFor(model, chosenEffort);
-  const thinking = thinkingWithEffort(thinkingFor(model), effort);
+  const thinking = thinkingWithEffort(thinkingFor(model, thinkingMode), effort);
   if (thinking) req.thinking = thinking;
   if (effort) req.output_config = { effort };
   return req;
@@ -430,7 +462,8 @@ export async function completeAnthropic(host: NativeHost, client: Anthropic, mod
   const maxTokens = host.maxOutput() ?? defaultMaxTokens(model);
   const endpoint = `${client.baseURL}|${model}`;
   const effort = effortRefused.has(endpoint) ? undefined : nativeEffortFor(model, host.effort?.());
-  const attempt = (strip: number) => stream(host, client, nativeRequest(model, history, specs, maxTokens, strip, effort), signal, turn);
+  const mode = host.thinkingMode?.() ?? 'off';
+  const attempt = (strip: number) => stream(host, client, nativeRequest(model, history, specs, maxTokens, strip, effort, mode), signal, turn);
   const strip = host.thinking?.stripBefore ?? 0;
   try {
     return await attempt(strip);

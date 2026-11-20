@@ -151,6 +151,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     portkey: { baseURL: '', apiKey: '', model: '', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 200000 },
     workingDirectory: tmp, permissionMode: 'bypass', autoApprove: true, maxTurns: 10, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
     mcpServers: {}, mcpTrusted: {}, autoCompact: true, notifications: false, allowRules: {},
+    // Thinking off: Haiku 5.5's requests as before the setting (test/thinking.js covers auto)
+    thinking: 'off',
   };
   check('4: makeClient gives the native client for this provider', !!P.makeClient(config).native);
   const store = new SessionStore(path.join(tmp, 'sessions'));

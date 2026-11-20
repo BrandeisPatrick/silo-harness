@@ -16,7 +16,7 @@ import type { SessionMeta } from './types';
  * Everything else is context for people and tools:
  *   session.created { title, cwd, origin, parentId?, forkedFrom?, seedLength? } · session.renamed { title }
  *   session.deleted {} · session.restored {} · session.merged { from, title } · session.forked { from, seedLength }
- *   run.start { origin, from?, timing?, model?, provider?, mode?, sandbox?, app? } (RunInfo)
+ *   run.start { origin, from?, timing?, model?, provider?, mode?, sandbox?, thinking?, app? } (RunInfo)
  *   run.end { reason, text?, continued?, result? } (RunResult: times, counts, tokens, per model, dollars)
  *   thinking { text, ms } · tool.start { id, name, args, mcp? } · tool.end { id, name, ok, durationMs, chars }
  *   usage { promptTokens, completionTokens, cacheReadTokens?, cacheWriteTokens?, model?, for?, ms?, usd? } (CallRecord):
@@ -71,6 +71,8 @@ export interface RunInfo {
   mode?: string;
   /** The shell sandbox is on for this run */
   sandbox?: boolean;
+  /** The thinking setting (auto or off), on Anthropic's own API only, where it applies */
+  thinking?: 'auto' | 'off';
   /** The app's version */
   app?: string;
 }

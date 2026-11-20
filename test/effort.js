@@ -119,6 +119,8 @@ const ADAPTIVE = { type: 'adaptive', display: 'summarized' };
     providers: { claude: entry },
     workingDirectory: tmp, permissionMode: 'bypass', autoApprove: true, maxTurns: 10, sendScreenshotsToModel: false, systemPromptExtra: '', theme: 'system', autoTitles: false,
     mcpServers: {}, mcpTrusted: {}, autoCompact: true, notifications: false, allowRules: {},
+    // Thinking off: the requests as before the setting (test/thinking.js covers auto)
+    thinking: 'off',
   };
   const setEffort = (level) => {
     const { effort: _e, ...rest } = config.providers.claude;

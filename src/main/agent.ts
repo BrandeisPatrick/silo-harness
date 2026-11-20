@@ -64,7 +64,7 @@ import { complete, noToolsNotice, uniqueCallIds, usageOf, type CompletionHost, t
 import { callSource, chargeSession, runCost, startRunTally, takeRunTally, type CallInfo, type CallSource } from './cost';
 import { logModelId } from './calls';
 import type { RunInfo, RunResult } from '../shared/history';
-import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
+import { isNativeAnthropic, THINKING_KEY, thinkingModeOf, withoutNative, type ThinkingMode } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
@@ -1333,6 +1333,8 @@ export class Agent {
     this.runCwd = this.session.cwd;
     this.cacheState(); // before the run touches the session, so a reloaded one keeps its last activity time
     const cfg = this.sessionConfig();
+    // The thinking setting holds for the whole run, so one tool loop never switches between thinking and not
+    this.runThinking = thinkingModeOf(cfg);
     let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
     // Where the run's time goes (agent/perf.ts): always kept in memory, written to a file only when asked for
@@ -1367,6 +1369,7 @@ export class Agent {
         const next = this.takeSendingNow();
         this.abortController = null;
         this.runCwd = null;
+        this.runThinking = null;
         this.runTimer = null;
         if (!next) {
           this.running = false;
@@ -1687,6 +1690,7 @@ export class Agent {
       const next = this.takeSendingNow();
       this.abortController = null;
       this.runCwd = null;
+      this.runThinking = null;
       if (!next) {
         this.running = false;
         this.dropQueue();
@@ -1861,6 +1865,8 @@ export class Agent {
       ...(tt ? { timing: tt } : {}),
       // Read at each request, so a change during a run applies from the next one
       effort: (provider) => effortOf(this.getConfig(), provider),
+      // Read when the run starts (startRun): a change applies from the next message
+      thinkingMode: () => this.runThinking ?? thinkingModeOf(this.sessionConfig()),
     };
   }
 
@@ -1954,8 +1960,18 @@ export class Agent {
     }
     const sandbox = sandboxSettings(cfg.sandbox).enabled && process.platform === 'darwin' && sandboxHostNow() !== null && !this.sandboxOff.has(this.session.id) && sandboxableFolder(realish(cfg.workingDirectory));
     const app = appVersion();
-    return { ...(model ? { model: logModelId(model) } : {}), ...(provider ? { provider } : {}), mode: cfg.permissionMode, sandbox, ...(app ? { app } : {}) };
+    // The thinking setting, where it applies: the native Anthropic path (agent/anthropic.ts thinkingFor)
+    let native = false;
+    try {
+      native = isNativeAnthropic(resolveProvider(cfg));
+    } catch {
+      /* as above */
+    }
+    return { ...(model ? { model: logModelId(model) } : {}), ...(provider ? { provider } : {}), mode: cfg.permissionMode, sandbox, ...(native ? { thinking: thinkingModeOf(cfg) } : {}), ...(app ? { app } : {}) };
   }
+
+  /** The thinking setting of the run in progress (AppConfig.thinking, read when it started); null between runs */
+  private runThinking: ThinkingMode | null = null;
 
   /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
   private nativeThinking = new Map<string, { stripBefore: number }>();
@@ -2276,7 +2292,11 @@ export class Agent {
   private fold(cut: number, brief: string, summary: string, o: { reason: 'auto' | 'manual'; before: number; pruned: number; stage: 'summary' | 'dropped' }): CompactionInfo {
     const s = this.session;
     const folded = s.messages.slice(0, cut);
-    const kept = s.messages.slice(cut);
+    // Kept thinking blocks are bound to the conversation before them, which the brief replaces: the API would refuse
+    // them (or drop them), and a fold made here replays none, as the API reference asks of client-side compaction. So
+    // they go, and the native path's mark of where it stopped sending thinking starts over with the new history.
+    const kept = withoutNative(s.messages.slice(cut));
+    this.sessionThinking().stripBefore = 0;
     this.store.replaceAll(s, [{ role: 'user', content: brief }, ...kept], 'compaction');
     s.lastPrompt = undefined;
     // Checkpoints in the kept part move with it (the brief takes index 0); earlier ones cannot be rewound to any more.

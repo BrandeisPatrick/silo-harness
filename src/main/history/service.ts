@@ -31,7 +31,7 @@ const nonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Num
 /** A count or duration, rounded: a finite number of 0 or more, else 0 */
 const whole = (v: unknown): number => Math.round(nonNeg(v) ?? 0);
 
-/** run.start's info as the log keeps it: the model id, the provider's label, the mode, the sandbox, the app's version. */
+/** run.start's info as the log keeps it: the model id, the provider's label, the mode, the sandbox, the thinking setting, the app's version. */
 export function runInfo(v: unknown): RunInfo {
   if (!v || typeof v !== 'object') return {};
   const i = v as Record<string, unknown>;
@@ -44,6 +44,7 @@ export function runInfo(v: unknown): RunInfo {
   }
   if (typeof i.mode === 'string') out.mode = MODES.includes(i.mode) ? i.mode : 'other';
   if (typeof i.sandbox === 'boolean') out.sandbox = i.sandbox;
+  if (i.thinking === 'auto' || i.thinking === 'off') out.thinking = i.thinking;
   if (typeof i.app === 'string' && /^[0-9A-Za-z.+-]{1,40}$/.test(i.app)) out.app = i.app;
   return out;
 }
