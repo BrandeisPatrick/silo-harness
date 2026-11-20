@@ -180,6 +180,13 @@ const { check, done } = require('./support/check.js');
     const view = (o = {}) => ({ name: 'gw', type: 'portkey', label: 'Gateway', builtIn: true, baseURL: 'http://gw.example/v1', model: 'claude-opus-5-5', models: [], contextWindow: 200000, key: 'set', keySource: 'PORTKEY_API_KEY', headers: [], ...o });
     const cat = (o = {}) => ({ name: 'gw', models: ['claude-opus-5-5', 'claude-haiku-5-5'], own: ['claude-opus-5-5'], listed: true, ...o });
 
+    // "Think before acting": what it does on Anthropic's own API, and what applies elsewhere
+    const thinkLine = (o) => M.thinkingWords(view(o));
+    check('thinking: on Anthropic\'s own API, says what it does, as Claude Code does, and what off saves', thinkLine({ name: 'claude', type: 'anthropic', builtIn: false, native: true }) === 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.');
+    check('thinking: a provider with an effort pill: does not apply, the effort control does', /^Doesn't apply to this provider, only to Anthropic's own API: the effort control after the model under the chat bar does\.$/.test(thinkLine({ name: 'or', type: 'openrouter', builtIn: false, effort: { levels: ['low', 'medium', 'high'], chosen: null, default: null } })));
+    check('thinking: Ollama: its own Thinking setting does', thinkLine({ name: 'ollama', type: 'ollama' }) === "Doesn't apply to Ollama: its Thinking setting under Connection does." && /Thinking setting/.test(thinkLine({ name: 'local', type: 'ollama', builtIn: false })));
+    check('thinking: the built-in gateway (no effort pill): does not apply, and says so plainly', /^Doesn't apply to this provider, only to Anthropic's own API\. It takes no effort setting either\.$/.test(thinkLine({})));
+
     // The state in plain words
     let st = M.providerState(view(), cat(), true);
     check('state: ready, with how many models', st.label === 'Ready' && st.tone === 'ok' && st.detail === '2 models offered.', st);

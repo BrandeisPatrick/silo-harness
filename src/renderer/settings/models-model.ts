@@ -196,3 +196,11 @@ export function checkTestWords(r: CheckTestView): { tone: 'ok' | 'danger' | 'neu
   if (r.cancelled) lines.unshift({ tone: 'neutral', text: `Stopped after ${r.done} of ${r.total}.` });
   return { tone: fa ? 'danger' : 'ok', headline: `Judged ${r.right} of ${r.done} right.`, lines };
 }
+
+/** The line under "Think before acting": what it does on Anthropic's own API, and else what applies instead. */
+export function thinkingWords(p: Pick<ProviderView, 'name' | 'type' | 'native' | 'effort'>): string {
+  if (p.native) return 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.';
+  if (p.name === 'ollama' || p.type === 'ollama') return "Doesn't apply to Ollama: its Thinking setting under Connection does.";
+  if (p.effort) return "Doesn't apply to this provider, only to Anthropic's own API: the effort control after the model under the chat bar does.";
+  return "Doesn't apply to this provider, only to Anthropic's own API. It takes no effort setting either.";
+}
