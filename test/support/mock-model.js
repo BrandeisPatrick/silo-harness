@@ -301,7 +301,9 @@ function isClassifierRequest(payload) {
   // Anthropic's native requests carry the instructions as system blocks
   if (Array.isArray(payload?.system)) return String(payload.system[0]?.text ?? '').startsWith(CLASSIFIER_MARK);
   const sys = (payload?.messages ?? []).find((m) => m.role === 'system');
-  return typeof sys?.content === 'string' && sys.content.startsWith(CLASSIFIER_MARK);
+  // On a gateway with a Claude model the instructions come as content parts with a cache mark
+  const text = typeof sys?.content === 'string' ? sys.content : Array.isArray(sys?.content) ? sys.content.map((p) => String(p?.text ?? '')).join('') : '';
+  return text.startsWith(CLASSIFIER_MARK);
 }
 
 /**

@@ -131,6 +131,75 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('3: a 422 is handled the same way', r2.length === 2 && 'session_id' in r2[0].payload && !('session_id' in r2[1].payload) && events.find((e) => e.type === 'run_end')?.reason === 'done');
   state.rejectCacheFields = false;
   mock2.close();
+
+  // ---- 4: Auto mode's check on this path: marks on what stays the same from check to check, never on what changes ----
+  {
+    const C = dist('agent/classifier.js');
+    const { classifierReply, isClassifierRequest } = require('./support/mock-model.js');
+    const cm = await startMock();
+    const cbase = `http://127.0.0.1:${cm.port}/v1`;
+    const cfgCheck = (entry, notes = {}, url = cbase) => ({ ...config, provider: 'gw', providers: { gw: { apiKey: 'k', baseURL: url, ...entry } }, workingDirectory: tmp, autoMode: { environment: '', allow: [], model: '', ...notes } });
+    const session = { messages: [{ role: 'user', content: 'Run the tests' }] };
+    const act = { name: 'bash', args: { command: 'npm test' }, detail: 'npm test', callId: 'x' };
+    const FIVE = { type: 'ephemeral' };
+    const textOf = (content) => (typeof content === 'string' ? content : content.map((p) => p.text).join(''));
+    const runCheck = async (c, learned = [], mockOf = cm) => {
+      mockOf.state.requests.length = 0;
+      mockOf.state.replies.push(classifierReply('allow', '[Local Work] runs the tests'));
+      const msgs = C.classifierRequest(session, c, act, learned);
+      const raw = await C.runClassifier(C.classifierTarget(c, ''), msgs);
+      const reqs = mockOf.state.requests.filter((r) => r.url === '/v1/chat/completions');
+      return { raw, msgs, reqs, body: reqs[reqs.length - 1]?.payload };
+    };
+
+    // A LiteLLM-like gateway with Claude, nothing stable in the user message: the instructions alone are marked
+    let r = await runCheck(cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }));
+    check('4: check, LiteLLM-like with Claude: the instructions as one part with a mark', Array.isArray(r.body.messages[0].content) && r.body.messages[0].content.length === 1 && r.body.messages[0].content[0].text === C.CLASSIFIER_INSTRUCTIONS && same(r.body.messages[0].content[0].cache_control, FIVE), r.body.messages[0]);
+    check('4: …the user message as it was, unmarked (it changes on every check)', typeof r.body.messages[1].content === 'string' && r.body.messages[1].content === r.msgs[1].content && !JSON.stringify(r.body.messages[1]).includes('cache_control'));
+    check('4: …nothing at the top level, the request otherwise as before, one request, the verdict read as before', same(Object.keys(r.body).sort(), ['max_tokens', 'messages', 'model', 'stream']) && r.body.max_tokens === 400 && r.body.stream === false && r.reqs.length === 1 && C.parseVerdict(r.raw).decision === 'allow' && isClassifierRequest(r.body));
+
+    // With the user's notes and earlier answers: the user message in three parts, the first two marked, the same text
+    const learned = ['bash: rm -rf build → allowed (2 times)'];
+    r = await runCheck(cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }, { environment: 'NOTE: the staging cluster is disposable', allow: ['Deploys to staging'] }), learned);
+    const u = r.body.messages[1].content;
+    check('4: check with notes and earlier answers: the stable start marked at each end, the rest unmarked', Array.isArray(u) && u.length === 3 && same(u[0].cache_control, FIVE) && same(u[1].cache_control, FIVE) && !('cache_control' in u[2]) && /<\/user_notes>\n\n$/.test(u[0].text) && /<\/user_answers>\n\n$/.test(u[1].text) && u[2].text.startsWith('<user_messages>'), u.map((p) => p.text.slice(-20)));
+    check('4: …and the model reads the very same text', textOf(u) === r.msgs[1].content && textOf(r.body.messages[0].content) === r.msgs[0].content);
+    check('4: …no more than three marks in all (the API takes four)', (JSON.stringify(r.body).match(/cache_control/g) || []).length === 3);
+
+    // OpenRouter with Claude: the same content-part marks; not its automatic top-level mark (it follows the newest block)
+    r = await runCheck(cfgCheck({ type: 'openrouter', model: 'anthropic/claude-haiku-5.5' }, { environment: 'NOTE' }));
+    check('4: check, OpenRouter with Claude: content-part marks on the instructions and the notes, no automatic mark, no session id', same(r.body.messages[0].content[0].cache_control, FIVE) && same(r.body.messages[1].content[0].cache_control, FIVE) && !('cache_control' in r.body) && !('session_id' in r.body), Object.keys(r.body));
+    // OpenRouter with another model: the routing key only
+    r = await runCheck(cfgCheck({ type: 'openrouter', model: 'openai/gpt-5.6' }));
+    check('4: check, OpenRouter with another model: session_id for routing, no marks', r.body.session_id === 'silo-harness-safety-check' && !JSON.stringify(r.body).includes('cache_control') && typeof r.body.messages[0].content === 'string');
+    // OpenAI: prompt_cache_key
+    r = await runCheck(cfgCheck({ type: 'openai', model: 'gpt-5.6' }));
+    check('4: check, OpenAI: prompt_cache_key, no marks', r.body.prompt_cache_key === 'silo-harness-safety-check' && !JSON.stringify(r.body).includes('cache_control'));
+    // Another endpoint with another model: nothing extra at all
+    r = await runCheck(cfgCheck({ type: 'openai-compatible', model: 'qwen3:8b' }, { environment: 'NOTE' }));
+    check('4: check, another endpoint and model: the request exactly as before', same(Object.keys(r.body).sort(), ['max_tokens', 'messages', 'model', 'stream']) && r.body.messages.every((m) => typeof m.content === 'string') && !JSON.stringify(r.body).includes('cache_control'));
+    // Vercel's gateway takes marks on whole messages: the instructions (pure; its host cannot be the mock)
+    const vm = G.checkCacheFields('vercel', [{ role: 'system', content: 'S' }, { role: 'user', content: 'abcdef' }], [3]);
+    check('4: check, Vercel: a message-level mark on the instructions only', same(vm.messages[0].cache_control, FIVE) && vm.messages[1].content === 'abcdef' && !('cache_control' in vm.messages[1]));
+    check('4: checkCacheFields leaves the messages it was given alone', (() => { const m = [{ role: 'system', content: 'S' }, { role: 'user', content: 'abcdef' }]; G.checkCacheFields('parts', m, [3]); return m[0].content === 'S' && m[1].content === 'abcdef'; })());
+
+    // A gateway that refuses the fields: the same check again without them, and none from then on
+    const cr = await startMock();
+    cr.state.rejectCacheFields = 400;
+    const refusedCfg = cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }, { environment: 'NOTE' }, `http://127.0.0.1:${cr.port}/v1`);
+    r = await runCheck(refusedCfg, [], cr);
+    check('4: check, refused fields: sent again without them, and the verdict comes back', r.reqs.length === 2 && JSON.stringify(r.reqs[0].payload).includes('cache_control') && !JSON.stringify(r.reqs[1].payload).includes('cache_control') && C.parseVerdict(r.raw).decision === 'allow', r.reqs.length);
+    r = await runCheck(refusedCfg, [], cr);
+    check('4: …and that gateway gets none on the next check (one request)', r.reqs.length === 1 && !JSON.stringify(r.body).includes('cache_control'));
+    // Any other error is not taken for a refusal of the fields: it fails the check, as before (it blocks)
+    cm.state.requests.length = 0;
+    cm.state.replies.push(classifierReply('allow', '', { status: 500 }));
+    let failed = '';
+    await C.runClassifier(C.classifierTarget(cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }), ''), C.classifierRequest(session, cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }), act)).catch((e) => (failed = String(e.status ?? e.message)));
+    check('4: a server error is not retried without the fields: the check fails as before', failed === '500' && cm.state.requests.length === 1, failed);
+    cr.close();
+    cm.close();
+  }
   mock.close();
   done();
 })().catch((err) => {
