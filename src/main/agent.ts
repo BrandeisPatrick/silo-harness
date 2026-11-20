@@ -152,7 +152,6 @@ function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
   };
 }
 
-/** What a call stopped while it waited gets back. */
 let versionCache: string | null = null;
 /** The app's version (Electron's, else package.json's), for run.start: digits, letters, dots, + and - only. */
 function appVersion(): string {
@@ -176,6 +175,7 @@ function appVersion(): string {
   return versionCache;
 }
 
+/** What a call stopped while it waited gets back. */
 const INTERRUPTED = 'Tool call was interrupted before it produced a result.';
 
 /** Auto mode's state in one session (in memory: a new app session starts it afresh). */
