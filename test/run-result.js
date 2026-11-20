@@ -149,7 +149,7 @@ const sumOf = (list, f) => list.reduce((a, x) => a + f(x), 0);
     check(`3: the bash tool (${name}) says a call starts in the working directory, so no cd to it, and path starts it elsewhere`, /It starts in the working directory, so no need to cd there; path starts it in another folder\./.test(tool.description) && tool.parameters.properties.path, tool.description);
   }
   const base = P.systemPrompt(cfg, [], null);
-  check('3: the closing rule: run the tests after the last change, then a short close that leads with the result', base.includes("- Keep going until the task is complete, and after your last change run the project's tests or the command that shows it works. Then close with a short message: the result first, what changed and how you checked it, and anything not done or not checked; plain sentences and a few bullets, no headings unless it is long. Do not ask questions you can answer with a tool.") && !base.includes('finish with a short summary of what you did'), base.match(/- Keep going[^\n]*/)?.[0]);
+  check('3: the closing rule: run the tests after the last change, then a short close that leads with the result', base.includes("- Keep going until the task is done, and after your last change run the tests or the command that shows it works. Then close briefly: the result first, what changed and how you checked it, anything not done or not checked; plain sentences, a few bullets, headings only if long. Do not ask questions you can answer with a tool.") && !base.includes('finish with a short summary of what you did'), base.match(/- Keep going[^\n]*/)?.[0]);
 
   history.dispose();
   mock.server?.close?.();
