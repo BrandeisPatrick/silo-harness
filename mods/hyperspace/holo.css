@@ -86,7 +86,7 @@
 .code-block {
   --bracket: color-mix(in srgb, var(--holo) 60%, transparent);
   border-radius: 4px;
-  background-color: color-mix(in srgb, var(--holo) 4%, var(--code-bg));
+  background-color: color-mix(in srgb, var(--holo) 4%, var(--code-panel));
   background-image:
     linear-gradient(var(--bracket), var(--bracket)), linear-gradient(var(--bracket), var(--bracket)),
     linear-gradient(var(--bracket), var(--bracket)), linear-gradient(var(--bracket), var(--bracket)),

@@ -88,6 +88,17 @@
   --surface-hover: #f5f5f5;
   --code-bg: #f5f5f5;
   --code-hover: var(--bg-300);
+  /* Code in the conversation (code blocks, tool output, inline code) sits on translucent panels: a tint of the page
+     that a background or a look shows through, frosted (--code-blur) where there is one. They are mixed from
+     --text-100 and --bg-100, so the dark scheme needs no values of its own; a look can set any of them on #messages.
+     --code-panel: a veil of the page's colour, 7% of the text colour in it, at half strength (on the plain page it
+     reads as a 3.5% tint, the old grey's weight; over a picture it keeps code readable at any dim).
+     --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. */
+  --code-panel: color-mix(in srgb, color-mix(in srgb, var(--text-100) 7%, var(--bg-100)) 50%, transparent);
+  --code-panel-solid: color-mix(in srgb, var(--text-100) 3.5%, var(--bg-100));
+  --code-panel-line: var(--border-subtle);
+  --code-inline: color-mix(in srgb, var(--text-100) 3%, transparent);
+  --code-blur: 16px;
   --diff-bg: var(--bg-000);
   --bubble: #f3f3f3;
   --field-bg: var(--bg-000);
@@ -477,7 +488,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* One reading column, 736px at most, at least 24px from the pane's edges; cards take its full width and running
    text (replies, tool lines, the user's bubble) sits 4px in from each side. 16px between blocks. */
 .transcript > * { width: min(var(--col), calc(100% - 48px)); margin-left: auto; margin-right: auto; flex: none; }
-.fade-in { animation: fade-in 0.12s ease-out both; }
+/* Fill backwards, not both: a finished animation that still holds its end state keeps the message a backdrop root, and
+   the frosted code panels inside it would then stop blurring what is behind the transcript */
+.fade-in { animation: fade-in 0.12s ease-out backwards; }
 
 .empty { margin-top: auto; margin-bottom: auto; padding-bottom: 48px; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .empty-mark { margin-bottom: 20px; display: flex; }
@@ -547,7 +560,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
-.md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 4px; background: var(--code-bg); }
+.md code {
+  font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 4px;
+  /* A faint tint and a hairline (drawn inside, so the words keep their place): a sentence with several stays even */
+  background: var(--code-inline); box-shadow: inset 0 0 0 1px var(--code-panel-line);
+}
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }
@@ -561,7 +578,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md td + td, .md th + th { border-left: 1px solid var(--border-subtle); }
 .md tbody tr:last-child td { border-bottom: none; }
 
-.code-block { background: var(--code-bg); border-radius: var(--r-card); overflow: hidden; }
+.code-block { background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 4px 0 12px; margin-bottom: -8px; }
 .code-lang { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
 .code-copy {
@@ -571,7 +588,14 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .code-copy:hover { background: var(--code-hover); color: var(--text-100); }
 .code-copy.copied { color: var(--success); }
 .code-block pre { margin: 0; padding: 12px; overflow-x: auto; font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); tab-size: 4; }
-.md .code-block code { padding: 0; border: none; background: none; font-size: inherit; }
+.md .code-block code { padding: 0; border: none; background: none; box-shadow: none; font-size: inherit; }
+/* Frosted only where something shows through (a background, or a look on the conversation): on the plain page a blur
+   has nothing to blur and would cost paint time for every block on screen. The filter is on the panel itself, never
+   on its lines. */
+:is(:root.mod-bg, #messages[data-look]) :is(.code-block, .cmd, .out pre, pre.args, .out-more) {
+  -webkit-backdrop-filter: blur(var(--code-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--code-blur)) saturate(1.4);
+}
 
 /* Syntax tokens */
 .tok-kw { color: var(--tok-kw); }
@@ -682,7 +706,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 .cmd {
   display: flex; gap: 8px; padding: 8px 12px;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .cmd code { min-width: 0; }
@@ -691,10 +715,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* 746px: 40 lines of 18px (BODY_LINES in tools.ts cuts longer output) with padding, borders and a scrollbar; only wrapped lines scroll */
 .out pre {
   margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.out-copy { position: absolute; top: 4px; right: 4px; background: var(--code-bg); color: var(--text-400); opacity: 0; }
+/* Opaque: it sits on the output's text */
+.out-copy { position: absolute; top: 4px; right: 4px; background: var(--code-panel-solid); color: var(--text-400); opacity: 0; }
 .out-copy:hover { background: var(--code-hover); color: var(--text-100); }
 .out:hover .out-copy, .out-copy:focus-visible, .out-copy.copied { opacity: 1; }
 .out-copy.copied { color: var(--success); }
@@ -703,16 +728,18 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .tool-note { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: pre-wrap; }
 pre.args {
   margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* A file view stays opaque: its line numbers stick to the left while long lines scroll under them, and only a solid
+   gutter hides the text going by (it is the panel's colour on the plain page, so it reads as the same surface). */
 .code-view {
   display: flex; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel-solid); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono);
 }
 .code-view pre { margin: 0; padding: 8px 0; }
-.code-view .gutter { position: sticky; left: 0; flex: none; min-width: 40px; padding-left: 8px; padding-right: 8px; text-align: right; color: var(--text-400); background: var(--code-bg); border-right: 1px solid var(--border-subtle); user-select: none; }
+.code-view .gutter { position: sticky; left: 0; flex: none; min-width: 40px; padding-left: 8px; padding-right: 8px; text-align: right; color: var(--text-400); background: var(--code-panel-solid); border-right: 1px solid var(--code-panel-line); user-select: none; }
 .code-view .code { flex: 1; padding-left: 12px; padding-right: 12px; color: var(--text-100); white-space: pre; tab-size: 4; }
 .code-view.no-gutter .gutter { display: none; }
 img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border: 1px solid var(--border-subtle); }
@@ -1958,7 +1985,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .out-cut > .out > pre, .out-cut > .code-view, .out-cut > .cmd, .out-cut > pre.args, .out-cut > .diff { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .out-more {
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-top: none;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-top: none;
   border-radius: 0 0 var(--r-card) var(--r-card);
   font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text-400);
   transition: background-color 0.12s, color 0.12s;
@@ -1968,6 +1995,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .out-more:focus-visible { outline-offset: -2px; }
 .out-cut > .diff + .out-more { background: var(--diff-bg); }
 .out-cut > .diff + .out-more:hover { background: var(--code-hover); }
+.out-cut > .code-view + .out-more { background: var(--code-panel-solid); }
 .out-cut > .out.error + .out-more { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 .out-cut > .out.error + .out-more:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .tool-body .diff-body { max-height: 746px; }
