@@ -116,7 +116,10 @@ export function checkCacheFields(shape: CacheShape, messages: Msg[], stableEnds:
   return { messages: out, extra: {} };
 }
 
-/** Base URLs that refused a request with these fields, for the life of the process: they get none again. */
+/**
+ * Base URLs that refused a request with these fields, for the life of the process: they get none again. A URL goes in
+ * only when the same request without the fields was then answered, so the fields were the cause.
+ */
 export const refusedCacheFields = new Set<string>();
 
 /** A refusal that may be the cache fields' doing (a request the gateway does not accept as it is). */

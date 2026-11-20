@@ -425,9 +425,10 @@ export function isConnectionError(err: unknown): boolean {
 /**
  * One call of the check; resolves with the model's raw answer. Throws on a provider error or the timeout. `onUsage`
  * gets the tokens it used, when the provider reports them (the evals count them); `onCallUsage` gets them in the
- * agent's terms (the whole prompt, the cache counts of it), Ollama's included, for the session's cost.
+ * agent's terms (the whole prompt, the cache counts of it), Ollama's included, for the session's cost. `remember`
+ * (default true): whether a gateway's refusal of the cache fields is kept for the rest of the process.
  */
-export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal, onUsage?: (u: CheckUsage) => void, onCallUsage?: (u: Usage) => void): Promise<string> {
+export async function runClassifier(target: ClassifierTarget, messages: Msg[], signal?: AbortSignal, onUsage?: (u: CheckUsage) => void, onCallUsage?: (u: Usage) => void, { remember = true }: { remember?: boolean } = {}): Promise<string> {
   const timeout = signal ? AbortSignal.any([signal, AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS)]) : AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
   const cfg = target.cfg;
   if (isOllama(cfg)) {
@@ -481,7 +482,10 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
   }
   // A gateway with a Claude model (or OpenAI) caches what the request marks: the instructions and the start of the
   // user message that is the same on every check, under the conditions the agent's own requests use (gateway-cache.ts).
-  // A gateway that refuses the fields gets the same request without them, and none again while the app runs.
+  // A gateway that refuses the fields gets the same request without them; when that one is answered, the fields were
+  // the cause, and the gateway gets none again while the app runs. A request that fails without them too failed for
+  // another reason (a model that rejects max_tokens, a refusal, a context limit), and the next check sends them again.
+  // `remember: false` (Settings' test of the check) never changes what the app has learned.
   const shape = cacheShape(resolveProvider(cfg), model);
   const withFields = shape !== null && !refusedCacheFields.has(client.baseURL);
   const ask = (body: { messages: Msg[]; extra: Record<string, unknown> }) =>
@@ -496,8 +500,8 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
       res = await ask(checkCacheFields(shape, messages, ends, system.length >= CACHE_MIN_CHARS));
     } catch (err) {
       if (timeout.aborted || !isFieldRefusal(err)) throw err;
-      refusedCacheFields.add(client.baseURL);
       res = await ask({ messages, extra: {} });
+      if (remember) refusedCacheFields.add(client.baseURL);
     }
   } else res = await ask({ messages, extra: {} });
   if (res.usage) onUsage?.({ inputTokens: res.usage.prompt_tokens ?? 0, outputTokens: res.usage.completion_tokens ?? 0, ...(res.usage.prompt_tokens_details?.cached_tokens ? { cacheReadTokens: res.usage.prompt_tokens_details.cached_tokens } : {}) });

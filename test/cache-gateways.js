@@ -131,6 +131,24 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('3: a 422 is handled the same way', r2.length === 2 && 'session_id' in r2[0].payload && !('session_id' in r2[1].payload) && events.find((e) => e.type === 'run_end')?.reason === 'done');
   state.rejectCacheFields = false;
   mock2.close();
+  // A 400 with another cause (the request fails without the fields too) teaches nothing: the next request has them again
+  {
+    const mock3 = await startMock();
+    config = { ...config, providers: { gw: { type: 'openai-compatible', apiKey: 'k', baseURL: `http://127.0.0.1:${mock3.port}/v1`, model: 'claude-haiku-5-5' } } };
+    agent.session = store.create();
+    mock3.state.replies.push({ status: 400, error: 'max_tokens is not supported (mock)' }, { status: 400, error: 'max_tokens is not supported (mock)' });
+    events = [];
+    await agent.run('Hi [other 400]').catch(() => {});
+    const first = mock3.state.requests.filter((r) => r.url === '/v1/chat/completions');
+    check('3: a 400 that is not the fields\' doing: sent again without them, which fails too', first.length >= 2 && JSON.stringify(first[0].payload).includes('cache_control') && !JSON.stringify(first[1].payload).includes('cache_control'), first.length);
+    mock3.state.requests.length = 0;
+    mock3.state.replies.push({ content: 'fine' });
+    events = [];
+    await agent.run('Again [other 400]');
+    const next = mock3.state.requests.filter((r) => r.url === '/v1/chat/completions' && r.payload.stream);
+    check('3: …and the next request to that gateway has the cache fields again', next.length === 1 && JSON.stringify(next[0].payload).includes('cache_control'), next.length);
+    mock3.close();
+  }
 
   // ---- 4: Auto mode's check on this path: marks on what stays the same from check to check, never on what changes ----
   {
@@ -197,6 +215,32 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     let failed = '';
     await C.runClassifier(C.classifierTarget(cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }), ''), C.classifierRequest(session, cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }), act)).catch((e) => (failed = String(e.status ?? e.message)));
     check('4: a server error is not retried without the fields: the check fails as before', failed === '500' && cm.state.requests.length === 1, failed);
+    // A 400 with another cause: retried without the fields, which fails too; the check fails (blocks), and the gateway
+    // keeps getting the fields
+    {
+      const co = await startMock();
+      const otherCfg = cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }, { environment: 'NOTE' }, `http://127.0.0.1:${co.port}/v1`);
+      co.state.replies.push(classifierReply('allow', '', { status: 400, error: 'moderation refusal (mock)' }), classifierReply('allow', '', { status: 400, error: 'moderation refusal (mock)' }));
+      let why = '';
+      await C.runClassifier(C.classifierTarget(otherCfg, ''), C.classifierRequest(session, otherCfg, act)).catch((e) => (why = String(e.status ?? e.message)));
+      const tried = co.state.requests.filter((q) => q.url === '/v1/chat/completions');
+      check('4: check, a 400 not caused by the fields: tried again without them, then the check fails', why === '400' && tried.length === 2 && JSON.stringify(tried[0].payload).includes('cache_control') && !JSON.stringify(tried[1].payload).includes('cache_control'), why);
+      r = await runCheck(otherCfg, [], co);
+      check('4: …and the next check to that gateway has the fields again', r.reqs.length === 1 && JSON.stringify(r.body).includes('cache_control') && C.parseVerdict(r.raw).decision === 'allow', r.reqs.length);
+      co.close();
+    }
+    // Settings' test of the check never changes what the app has learned, even on a gateway that refuses the fields
+    {
+      const T = dist('agent/check-test.js');
+      const ct = await startMock();
+      ct.state.rejectCacheFields = 400;
+      ct.state.classifierDefault = { decision: 'allow' };
+      const testCfg = cfgCheck({ type: 'openai-compatible', model: 'claude-haiku-5-5' }, { environment: 'NOTE' }, `http://127.0.0.1:${ct.port}/v1`);
+      const report = await T.runCheckTest(C.classifierTarget(testCfg, ''), { items: T.checkTestItems().slice(0, 2) });
+      check('4: check test on a refusing gateway: every check answered (sent again without the fields)', report.noAnswer.length === 0 && ct.state.requests.filter((q) => q.url === '/v1/chat/completions').length === 4, JSON.stringify(report.noAnswer));
+      check('4: …and the gateway is not marked as refusing them', !G.refusedCacheFields.has(`http://127.0.0.1:${ct.port}/v1`));
+      ct.close();
+    }
     cr.close();
     cm.close();
   }

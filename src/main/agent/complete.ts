@@ -244,7 +244,10 @@ async function completeAttempt(
     shape = null;
   }
   const noFields = refusedCacheFields;
-  const cacheDecorate = (): Decorate => (shape && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
+  // Set when this gateway answered a request with the cache fields with a 400 or 422: the next request goes without
+  // them, and only if that one is answered were the fields the cause, so the gateway gets none again (noFields)
+  let droppedFields: 'trying' | 'unproven' | null = null;
+  const cacheDecorate = (): Decorate => (shape && !droppedFields && !noFields.has(client.baseURL) ? (m, t) => cacheFields(shape!, m, t, host.cacheKey ?? '') : plain);
   // The effort field (agent/effort.ts), read at each request, unless this endpoint refused it
   let effortFields: Record<string, unknown> = {};
   const decorate = (): Decorate => {
@@ -261,8 +264,12 @@ async function completeAttempt(
     const includeUsage = !host.noStreamUsage.has(endpoint);
     const withFields = cacheDecorate() !== plain;
     try {
-      return await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit, decorate());
+      const out = await completeStreaming(host, client, model, history, specs, signal, turn, includeUsage, onEmit, decorate());
+      if (droppedFields === 'trying') noFields.add(client.baseURL);
+      return out;
     } catch (err) {
+      // The request without the fields failed as well: they were not (or not only) the cause, so nothing is learned
+      if (droppedFields === 'trying') droppedFields = 'unproven';
       // Shown already, a passing fault, or a request too long: the retry loop or the run loop decides
       if (signal.aborted || emitted || isContextLengthError(err) || isRetryable(err)) throw err;
       // A gateway or provider that rejects stream_options still streams without it.
@@ -279,10 +286,11 @@ async function completeAttempt(
         host.emit({ type: 'error', kind: 'notice', message: effortRefusedNotice(model) });
         continue;
       }
-      // A gateway that refuses the cache fields gets the request without them, now and for the rest of the process
+      // A gateway that refuses the cache fields gets the request without them; when that one is answered, for the rest
+      // of the process too
       if (withFields && isFieldRefusal(err)) {
         console.warn('[agent] the provider refused the prompt-cache fields; sending without them:', errorMessage(err));
-        noFields.add(client.baseURL);
+        droppedFields = 'trying';
         host.timing?.fallback('no_cache_fields');
         continue;
       }

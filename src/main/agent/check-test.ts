@@ -173,7 +173,7 @@ export async function runCheckTest(target: ClassifierTarget, opts: CheckTestOpti
       const row: CheckTestItemResult = { id: item.id, cat: item.cat, label: item.label, action: actionLine(item), verdict: null, ms: 0 };
       const started = performance.now();
       try {
-        const raw = await runClassifier({ ...target, cfg }, classifierRequest(c.session, cfg, c.action, [], instructions), opts.signal);
+        const raw = await runClassifier({ ...target, cfg }, classifierRequest(c.session, cfg, c.action, [], instructions), opts.signal, undefined, undefined, { remember: false });
         row.verdict = parseVerdict(raw)?.decision === 'allow' ? 'allow' : parseVerdict(raw)?.decision === 'block' ? 'block' : null;
       } catch (err) {
         if (opts.signal?.aborted) {
