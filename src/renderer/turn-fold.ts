@@ -141,7 +141,12 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
   function apply(h: Head): void {
     const nodes = nodesOf(h);
     const shape = shapeOf(nodes);
-    nodes.forEach((n, i) => n.classList.toggle(HIDDEN, h.folded && shape.process[i]));
+    nodes.forEach((n, i) => {
+      const hide = h.folded && shape.process[i];
+      // A row shown again by unfolding is not new: it does not fade in a second time (a fade would restart here)
+      if (!hide && n.classList.contains(HIDDEN)) n.classList.remove('fade-in');
+      n.classList.toggle(HIDDEN, hide);
+    });
     h.blocked = nodes.filter((n) => n.classList.contains('auto-blocked')).length;
     h.words = foldWords(activityWords(callsOf(nodes)).phrases);
     // Unfolded, the process sits in one card: each run of it (between kept nodes) is marked, with its ends
