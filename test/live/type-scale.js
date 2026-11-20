@@ -180,8 +180,9 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
       };
     })()`);
     check('Settings: the title and the section heading 15 px / 500', st.title[0] === '15px' && st.title[1] === '500' && st.section[0] === '15px' && st.section[1] === '500', st);
-    check('Settings: row titles 14 px regular, descriptions 14 px, 24 px apart', st.rowTitle[0] === '14px' && st.rowTitle[1] === '400' && st.desc === '14px' && st.lines === 24, st);
-    check('Settings: about 69 px from row to row (one-line descriptions), navigation rows 32 px at 14 px', near(st.pitch, 69, 1) && st.nav[0] === '14px' && st.nav[1] === 32, st);
+    // Rows sit in cards: a 13 px description (--fs-small) under the 14 px title, 11 px of padding above and below
+    check('Settings: row titles 14 px regular, descriptions 13 px, 24 px apart', st.rowTitle[0] === '14px' && st.rowTitle[1] === '400' && st.desc === '13px' && st.lines === 24, st);
+    check('Settings: about 64 px from row to row in a card (one-line descriptions), navigation rows 32 px at 14 px', near(st.pitch, 64, 1) && st.nav[0] === '14px' && st.nav[1] === 32, st);
     const smallSettings = (await app.evaluate(SMALL_TEXT)).filter((e) => !allowed(e));
     check('no visible text in Settings under 12 px', smallSettings.length === 0, smallSettings.slice(0, 8));
     await app.click('#settings-close');

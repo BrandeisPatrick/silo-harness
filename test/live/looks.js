@@ -1,5 +1,5 @@
 // Live checks of looks in the real window: the bundled Hyperspace set, available without a switch, used on its tabs
-// of Settings → Mods (Conversation, Chat bar, and "Use the set" on Background); each look measured with computed styles (the conversation look changes the
+// of Settings → Appearance (Conversation, Chat bar, and "Use the set" on Background; on Mods before); each look measured with computed styles (the conversation look changes the
 // transcript and not the sidebar or the chat bar, and the other way round); a hostile look that tries to leave its
 // scope; the state attributes following a run, the theme and a setting; the background hearing `pointer`; and
 // Default putting everything back.
@@ -116,7 +116,7 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     const onNow = await probe();
     check('being available changes nothing until a look is used', (await lookStyles()).length === 0 && same(onNow, before), Object.keys(before).filter((k) => !same(before[k], onNow[k])).map((k) => [k, before[k], onNow[k]]));
 
-    // ---------- Settings → Mods: the Conversation, Chat bar and Background tabs ----------
+    // ---------- Settings → Appearance: the Conversation, Chat bar and Background tabs ----------
     const versions = (tab) => ev(`window.__oc_debug.looks.state(${js(tab)}).versions`);
     const convVersions = await versions('conversation');
     check('Conversation offers Holo terminal (and the escape look of yours), Chat bar Cockpit, Background Starfield, each after Default', convVersions[0] === null && convVersions[1] === 'hyperspace/holo' && convVersions.includes('escape-look/x') && (await versions('chat-bar')).join() === ',hyperspace/cockpit' && (await versions('backgrounds')).includes('hyperspace/starfield'), convVersions);
