@@ -8,7 +8,8 @@ import type { BrowserConfig } from '../shared/browser';
 import { DEFAULT_DREAMING } from './dreaming/names';
 import { applySettings, withoutSettings } from './settings';
 import { isRecord } from './json';
-import { defaultWorkDir } from './paths';
+import { SECRET_FIELDS, settableFields } from './settings';
+import { bundledDefaultsPath, defaultWorkDir } from './paths';
 
 /** Bumped when stored values change meaning: v2 renamed the old "auto" (run everything) to "bypass" and "readonly" to "plan". */
 const SCHEMA_VERSION = 2;
@@ -71,6 +72,157 @@ export function defaultConfig(): AppConfig {
     browser: { keepCookies: true, downloadsDir: '', openChatLinksInPane: false, alwaysAllowed: [], sensitive: [], exempt: [] },
     autoMode: { environment: '', allow: [], model: '', learn: true },
   };
+}
+
+/** Trust and approval records: they record what a person agreed to, so a bundle cannot carry them. */
+const CONSENT_FIELDS = ['settingsTrusted', 'mcpTrusted', 'mcpTrustedEntries', 'mcpProjectValues', 'allowRules', 'recentDirs'];
+
+/**
+ * The top-level keys a bundle may set: those defaultConfig() fills in plus those settings.ts validates (so optional
+ * fields like checkForUpdates count), without the settings-only ones that are not in config.json.
+ */
+function bundledKeys(): Set<string> {
+  const fromSettings = settableFields().map((f) => f.split('.')[0]);
+  const keys = new Set([...Object.keys(defaultConfig()), ...fromSettings]);
+  for (const k of ['hooks', 'disableAllHooks', 'permissions']) keys.delete(k);
+  return keys;
+}
+
+/** Keys of a bundled named provider that hold a secret. */
+const PROVIDER_SECRETS = ['apiKey', 'providerApiKey'];
+
+/**
+ * The defaults.json of a repackaged app, cleaned: only keys AppConfig has, and never a secret (an `env` block, the
+ * SECRET_FIELDS, a provider's keys), because a key must not be able to ship inside an app bundle. Unreadable or not
+ * an object counts as no bundle. Nothing here ever writes a file.
+ */
+export function readBundledDefaults(file: string | null = bundledDefaultsPath()): Partial<AppConfig> {
+  if (!file || !fs.existsSync(file)) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    console.warn(`[config] ignoring ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    return {};
+  }
+  if (!isRecord(parsed)) {
+    console.warn(`[config] ignoring ${file}: expected a JSON object`);
+    return {};
+  }
+  let stripped = false;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (k === 'env' || CONSENT_FIELDS.includes(k)) stripped = true;
+    else if (bundledKeys().has(k)) out[k] = structuredClone(v);
+  }
+  // A bundle sets defaults, not consent: no allow rules, no bypass mode, no pre-approved mods.
+  if (out.permissionMode === 'bypass') {
+    delete out.permissionMode;
+    stripped = true;
+  }
+  if (isRecord(out.autoMode) && 'allow' in out.autoMode) {
+    delete out.autoMode.allow;
+    stripped = true;
+  }
+  if (isRecord(out.mods) && 'approved' in out.mods) {
+    delete out.mods.approved;
+    stripped = true;
+  }
+  if (isRecord(out.mcpServers)) {
+    for (const entry of Object.values(out.mcpServers)) {
+      if (!isRecord(entry)) continue;
+      for (const f of ['env', 'headers']) {
+        if (f in entry) {
+          delete entry[f];
+          stripped = true;
+        }
+      }
+    }
+  }
+  for (const p of SECRET_FIELDS) {
+    const [a, b] = p.split('.');
+    const sec = out[a];
+    if (isRecord(sec) && b in sec) {
+      delete sec[b];
+      stripped = true;
+    }
+  }
+  if (isRecord(out.providers)) {
+    for (const entry of Object.values(out.providers)) {
+      if (!isRecord(entry)) continue;
+      for (const f of PROVIDER_SECRETS) {
+        if (f in entry) {
+          delete entry[f];
+          stripped = true;
+        }
+      }
+    }
+  }
+  if (stripped) console.warn(`[config] ${file}: removed keys and secrets; a bundled defaults file may not carry them`);
+  return out as Partial<AppConfig>;
+}
+
+// Read once per launch: saveConfig needs it on every save. A test that rewrites the file calls resetBundledDefaults().
+let bundled: Partial<AppConfig> | undefined;
+let bundledFrom: string | null | undefined;
+
+function bundledDefaults(): Partial<AppConfig> {
+  const file = bundledDefaultsPath();
+  if (bundled === undefined || bundledFrom !== file) {
+    bundled = readBundledDefaults(file);
+    bundledFrom = file;
+  }
+  return bundled;
+}
+
+export function resetBundledDefaults(): void {
+  bundled = undefined;
+}
+
+/** defaultConfig() with the bundled defaults merged over it, section by section the way a config.json is. */
+export function baseConfig(): AppConfig {
+  const d = defaultConfig();
+  const b = bundledDefaults() as Record<string, unknown>;
+  if (!Object.keys(b).length) return d;
+  const sec = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
+  return normalizeConfig({
+    ...d,
+    ...(b as Partial<AppConfig>),
+    ollama: { ...d.ollama, ...sec(b.ollama) },
+    portkey: { ...d.portkey, ...sec(b.portkey) },
+    mods: isRecord(b.mods) ? modsSection(d.mods, { approved: {}, ...b.mods }) : d.mods,
+    remote: { ...d.remote, ...sec(b.remote) },
+    dreaming: { ...d.dreaming, ...sec(b.dreaming) },
+    providers: sec(b.providers) as AppConfig['providers'],
+    browser: normalizeBrowser({ ...d.browser, ...sec(b.browser) }),
+    autoMode: normalizeAutoMode({ ...d.autoMode, ...sec(b.autoMode) }),
+  });
+}
+
+/**
+ * `stored` without the values the bundle defines and the user has not changed, so a later bundle reaches an existing
+ * install. A section the user changed keeps its changed fields; an entry with nothing of the user's left is dropped.
+ */
+function withoutBundled(stored: Record<string, unknown>, bundle: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...stored };
+  for (const [k, bv] of Object.entries(bundle)) {
+    if (!(k in out)) continue;
+    const sv = out[k];
+    if (isRecord(sv) && isRecord(bv)) {
+      const rest = withoutBundled(sv, bv);
+      if (Object.keys(rest).length) out[k] = rest;
+      else delete out[k];
+    } else if (JSON.stringify(sv) === JSON.stringify(bv)) delete out[k];
+  }
+  return out;
+}
+
+/** Named providers with config.json's entries over the bundled ones, field by field within an entry of the same name. */
+function mergeProviders(under: AppConfig['providers'], raw: unknown): AppConfig['providers'] {
+  if (!isRecord(raw)) return { ...under };
+  const out: Record<string, unknown> = { ...under };
+  for (const [name, entry] of Object.entries(raw)) out[name] = isRecord(entry) && isRecord(out[name]) ? { ...(out[name] as object), ...entry } : entry;
+  return out as AppConfig['providers'];
 }
 
 const MAX_RECENT = 8;
@@ -142,9 +294,9 @@ function storedConfig(): AppConfig {
   return readStoredConfig(configPath());
 }
 
-/** A config.json file over the defaults (the defaults alone when it is missing or unreadable). */
+/** A config.json file over the defaults and any bundled defaults (those alone when it is missing or unreadable). */
 export function readStoredConfig(file: string): AppConfig {
-  const d = defaultConfig();
+  const d = baseConfig();
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<AppConfig> & { schemaVersion?: number };
     const version = Number(raw.schemaVersion) || 1;
@@ -154,14 +306,15 @@ export function readStoredConfig(file: string): AppConfig {
     return normalizeConfig({
       ...d,
       ...raw,
-      permissionMode: migrateMode(raw.permissionMode, raw.autoApprove, version),
+      // A mode equal to the bundled one is not stored (see saveConfig): it falls back to the base, unless the old flag says bypass.
+      permissionMode: migrateMode(raw.permissionMode ?? (raw.autoApprove ? undefined : d.permissionMode), raw.autoApprove, version),
       // Settings files written before generated titles existed have no flag: on by default.
       autoTitles: raw.autoTitles ?? d.autoTitles,
       autoCompact: raw.autoCompact ?? d.autoCompact,
       notifications: raw.notifications ?? d.notifications,
       allowRules: normalizeAllowRules(raw.allowRules),
       recentDirs: Array.isArray(raw.recentDirs) ? raw.recentDirs.filter((d): d is string => typeof d === 'string') : [],
-      mcpServers: raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers) ? raw.mcpServers : {},
+      mcpServers: { ...d.mcpServers, ...(isRecord(raw.mcpServers) ? raw.mcpServers : {}) },
       mcpTrusted: raw.mcpTrusted && typeof raw.mcpTrusted === 'object' && !Array.isArray(raw.mcpTrusted) ? raw.mcpTrusted : {},
       mcpTrustedEntries: isRecord(raw.mcpTrustedEntries) ? (raw.mcpTrustedEntries as Record<string, Record<string, string>>) : {},
       mcpProjectValues: isRecord(raw.mcpProjectValues) ? (raw.mcpProjectValues as Record<string, Record<string, Record<string, string>>>) : {},
@@ -172,9 +325,11 @@ export function readStoredConfig(file: string): AppConfig {
       remote: { ...d.remote, ...(isRecord(raw.remote) ? raw.remote : {}) },
       settingsTrusted: isRecord(raw.settingsTrusted) ? (raw.settingsTrusted as Record<string, string>) : {},
       dreaming: { ...d.dreaming, ...(isRecord(raw.dreaming) ? raw.dreaming : {}) },
-      // Named providers are kept as written, even a broken one: resolving reports what is wrong with it.
-      providers: isRecord(raw.providers) ? (raw.providers as AppConfig['providers']) : {},
-      browser: normalizeBrowser(raw.browser),
+      // Named providers are kept as written, even a broken one: resolving reports what is wrong with it. A bundled
+      // entry stays underneath, so config.json's entry of the same name changes only the fields it sets.
+      providers: mergeProviders(d.providers, raw.providers),
+      browser: normalizeBrowser({ ...d.browser, ...(isRecord(raw.browser) ? raw.browser : {}) }),
+      autoMode: normalizeAutoMode({ ...d.autoMode, ...(isRecord(raw.autoMode) ? raw.autoMode : {}) }),
     });
   } catch {
     return d;
@@ -277,7 +432,10 @@ export function normalizeConfig(cfg: AppConfig): AppConfig {
 }
 
 export function saveConfig(cfg: AppConfig): void {
-  const stored = withoutSettings(cfg);
+  // Values the bundle defines and the user has not changed stay out of the file, or a later bundle could not reach this install.
+  const bundle = bundledDefaults();
+  const owned = withoutSettings(cfg);
+  const stored = Object.keys(bundle).length ? (withoutBundled(owned as unknown as Record<string, unknown>, bundle as Record<string, unknown>) as unknown as AppConfig) : owned;
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify({ ...stored, schemaVersion: SCHEMA_VERSION }, null, 2));
 }

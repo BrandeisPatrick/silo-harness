@@ -11,6 +11,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Inside the app this script is Resources/app.asar/bin/silo.js: a repackaged app's defaults.json sits in Resources, and
+// there is no Electron main process here to say so (the app finds it from process.resourcesPath).
+if (!process.env.SILO_HARNESS_DEFAULTS && path.basename(path.join(__dirname, '..')) === 'app.asar') {
+  process.env.SILO_HARNESS_DEFAULTS = path.join(__dirname, '..', '..', 'defaults.json');
+}
+
 const DIST = path.join(__dirname, '..', 'dist', 'main');
 function load(name) {
   try {

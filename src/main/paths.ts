@@ -65,6 +65,17 @@ export function tildeLabel(p: string, home: string = os.homedir()): string {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel}` : p;
 }
 
+/**
+ * The defaults.json a repackaged app ships in its Resources folder, or null when there is none to look for.
+ * SILO_HARNESS_DEFAULTS (an absolute path) wins, for tests and local trials. The file may be missing: the caller
+ * treats that as "no bundle". The command-line tool runs without Electron, so it sets the variable itself.
+ */
+export function bundledDefaultsPath(env: NodeJS.ProcessEnv = process.env, resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath): string | null {
+  const own = env.SILO_HARNESS_DEFAULTS?.trim();
+  if (own) return path.resolve(own);
+  return resourcesPath ? path.join(resourcesPath, 'defaults.json') : null;
+}
+
 /** An environment variable under its new name (SILO_HARNESS_…), else under its name before the rename (OPEN_HARNESS_…) */
 export function envVar(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const v = env[`SILO_HARNESS_${name}`]?.trim();
