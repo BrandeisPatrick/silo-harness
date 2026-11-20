@@ -1,0 +1,4 @@
+{
+  "title": "Fix the bug behind a failing test",
+  "probes": "Finding a real bug in src from a failing test, fixing it without touching the tests, and running the tests again before finishing."
+}

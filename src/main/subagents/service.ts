@@ -750,9 +750,10 @@ export class Subagents {
     let report: string;
     try {
       // The summary's tokens count toward the session it is merged into (which asked for it)
+      const sent = Date.now();
       report = await this.summarize(from.title, kind, messages, (usage) => {
         const s = this.app.store.get(into.id);
-        if (s) this.emit(s.id, chargeSession(s, callSource(this.app.config()), usage, this.app.config()));
+        if (s) this.emit(s.id, chargeSession(s, callSource(this.app.config()), usage, this.app.config(), { for: 'merge', ms: Date.now() - sent }));
       });
     } catch (err) {
       return { ok: false, error: `The merge summary could not be written: ${err instanceof Error ? err.message : String(err)}` };

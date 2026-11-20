@@ -73,7 +73,53 @@ export function cacheFields(shape: CacheShape, messages: Msg[], tools: ToolSpec[
   return { messages: out, tools: marked, extra: {} };
 }
 
-/** Base URLs that refused a request with these fields, for the life of the process: they get none again. */
+/** The routing key of Auto mode's check (OpenAI's prompt_cache_key, OpenRouter's session_id): its instructions are the same in every session. */
+export const CHECK_CACHE_KEY = 'silo-harness-safety-check';
+
+/** The message with its text split at `ends` (character offsets), a mark after each piece but the last: the same text. */
+function markAt(m: Msg, ends: number[], mark: Mark): Msg {
+  const text = String((m as { content?: unknown }).content ?? '');
+  const cuts = ends.filter((e) => e > 0 && e < text.length);
+  if (!cuts.length) return m;
+  const parts: { type: 'text'; text: string; cache_control?: Mark }[] = [];
+  let from = 0;
+  for (const e of cuts) {
+    parts.push({ type: 'text', text: text.slice(from, e), cache_control: mark });
+    from = e;
+  }
+  parts.push({ type: 'text', text: text.slice(from) });
+  return { ...m, content: parts } as unknown as Msg;
+}
+
+/**
+ * The fields Auto mode's check (classifier.ts) gets for caching on this path, for `shape` (cacheShape, the same
+ * conditions as the agent's own requests). Only the part that is the same from check to check is marked: the system
+ * prompt (the check's instructions, when `markSystem`) and the user message up to each of `stableEnds` (the user's
+ * notes and instruction files, then their earlier answers), as text parts split there, the way the native path sends
+ * them. Never the newest message: it changes on every check, so a mark there would write it all to the cache each
+ * time. OpenAI and OpenRouter's other models get the routing key instead. The model reads the same text either way.
+ */
+export function checkCacheFields(shape: CacheShape, messages: Msg[], stableEnds: number[], markSystem = true): { messages: Msg[]; extra: Record<string, unknown> } {
+  if (shape === 'openai') return { messages, extra: { prompt_cache_key: CHECK_CACHE_KEY } };
+  if (shape === 'sticky') return { messages, extra: { session_id: CHECK_CACHE_KEY } };
+  const out = [...messages];
+  const sys = out.findIndex((m) => m.role === 'system');
+  const user = out.findIndex((m) => m.role === 'user');
+  if (shape === 'vercel') {
+    // Marks on whole messages only: the instructions
+    if (sys >= 0 && markSystem) out[sys] = { ...out[sys], cache_control: FIVE } as unknown as Msg;
+    return { messages: out, extra: {} };
+  }
+  // OpenRouter, Portkey and the other gateways with a Claude model: marks on content parts
+  if (sys >= 0 && markSystem) out[sys] = markLastPart(out[sys], FIVE);
+  if (user >= 0 && stableEnds.length) out[user] = markAt(out[user], stableEnds, FIVE);
+  return { messages: out, extra: {} };
+}
+
+/**
+ * Base URLs that refused a request with these fields, for the life of the process: they get none again. A URL goes in
+ * only when the same request without the fields was then answered, so the fields were the cause.
+ */
 export const refusedCacheFields = new Set<string>();
 
 /** A refusal that may be the cache fields' doing (a request the gateway does not accept as it is). */

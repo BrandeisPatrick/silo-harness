@@ -25,7 +25,7 @@ export interface SectionInfo {
 
 export const SECTIONS: SectionInfo[] = [
   { id: 'general', title: 'General', icon: 'settings', group: 0 },
-  { id: 'model', title: 'Model', icon: 'server', group: 0 },
+  { id: 'model', title: 'Models', icon: 'server', group: 0 },
   { id: 'permissions', title: 'Permissions', icon: 'shield-check', group: 0 },
   { id: 'browser', title: 'Browser', icon: 'globe', group: 0 },
   { id: 'context', title: 'Context', icon: 'gauge', group: 0 },

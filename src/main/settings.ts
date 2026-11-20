@@ -75,6 +75,7 @@ const SCALARS: Record<string, Check> = {
   keepAwake: describe(oneOf('off', 'running', 'always'), 'Keep the Mac awake: never, while a session runs, or whenever the app is open.'),
   toolSet: describe(oneOf('auto', 'all', 'essential'), 'Which tools the model is offered: auto adds the browser, terminal and other groups when a task needs them; all sends every tool with every request; essential is auto without schedules, sub-sessions and mods.'),
   toolActivity: describe(oneOf('summary', 'all'), 'Fold each run of tool calls into one line, or show every call.'),
+  thinking: describe(oneOf('auto', 'off'), "Think before acting, on Anthropic's own API: auto asks every Claude model that can reason adaptively to do so before it acts, as Claude Code does; off turns thinking off where the model allows, which is faster and costs less. Other providers ignore it: their effort setting is what applies there."),
   historyTrashDays: describe(nonNegative, 'Days a deleted session stays in the trash.'),
   checkForUpdates: describe(bool, 'Look for a newer release on GitHub once a day and show a quiet line when there is one.'),
   toolConcurrency: describe(intBetween(1, 10), 'How many read-only tool calls of one reply run at the same time; 1 runs every call one after another. Default 4.'),

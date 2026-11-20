@@ -30,6 +30,7 @@ const SCRIPTS = [
   { name: 'settings-page' },
   { name: 'settings-delete' },
   { name: 'providers' },
+  { name: 'models-page' },
   { name: 'effort' },
   { name: 'model-menu' },
   { name: 'sidebar' },

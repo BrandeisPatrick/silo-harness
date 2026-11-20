@@ -1,0 +1,1 @@
+How does relaybox decide to give up on delivering an event? Walk me through the logic and point me to the code. Do not change any files.

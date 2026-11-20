@@ -120,7 +120,8 @@ function parseHistory(lines) {
   }
   const usage = { prompt: 0, completion: 0, cacheRead: 0, cacheWrite: 0, requests: 0 };
   for (const r of recs.filter((x) => x.type === 'usage')) {
-    usage.requests++;
+    // The agent's own requests only: the log also counts the checks, titles, compactions and merges (data.for)
+    if (r.data?.for === undefined || r.data.for === 'turn') usage.requests++;
     usage.prompt += r.data?.promptTokens ?? 0;
     usage.completion += r.data?.completionTokens ?? 0;
     usage.cacheRead += r.data?.cacheReadTokens ?? 0;

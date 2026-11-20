@@ -49,6 +49,7 @@ import { generateTitle, titlePrompt } from './titles';
 import { TerminalManager } from './terminal';
 import { ArtifactStore, type ArtifactInput } from './artifacts';
 import os from 'node:os';
+import fs from 'node:fs';
 import path from 'node:path';
 import { listChanges, snapshotBeforeChange } from './changes';
 import type { App } from './app';
@@ -60,8 +61,10 @@ import { contextNote, ESSENTIAL_NOTE, sessionContext, systemPrompt, systemPrompt
 import { batchMarks, CACHE_EXPECT_MIN_TOKENS, CACHE_MISSES_TO_FALLBACK, CACHE_TTL_MS, COLD_BATCH_FROM, modelMessages, PRUNE_BUDGET, pruneSaving, resultsToPrune } from './agent/context-view';
 import { errorMessage, providerErrorMessage } from './agent/errors';
 import { complete, noToolsNotice, uniqueCallIds, usageOf, type CompletionHost, type RawUsage, type Reply } from './agent/complete';
-import { callSource, chargeSession, type CallSource } from './cost';
-import { isNativeAnthropic, THINKING_KEY } from './agent/anthropic';
+import { callSource, chargeSession, runCost, startRunTally, takeRunTally, type CallInfo, type CallSource } from './cost';
+import { logModelId } from './calls';
+import type { RunInfo, RunResult } from '../shared/history';
+import { isNativeAnthropic, THINKING_KEY, thinkingModeOf, withoutNative, type ThinkingMode } from './agent/anthropic';
 import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSAL_NOTICE, REPEAT_STOP, REPEAT_STOP_NOTICE, REPEAT_WARN, REPEAT_WARNING, RepeatWatch } from './agent/turn-guards';
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
@@ -147,6 +150,29 @@ function browserFacts(detail: string, b: BrowserApproval): BrowserFacts {
     what: detail.split('\n')[0] ?? '',
     ...(b.check?.code !== undefined ? { code: b.check.code } : {}),
   };
+}
+
+let versionCache: string | null = null;
+/** The app's version (Electron's, else package.json's), for run.start: digits, letters, dots, + and - only. */
+function appVersion(): string {
+  if (versionCache !== null) return versionCache;
+  let v = '';
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const e = require('electron') as typeof import('electron') | string;
+    if (typeof e === 'object' && e?.app?.getVersion) v = e.app.getVersion();
+  } catch {
+    /* not in Electron */
+  }
+  if (!v) {
+    try {
+      v = String((JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { version?: unknown }).version ?? '');
+    } catch {
+      /* unknown */
+    }
+  }
+  versionCache = /^[0-9A-Za-z.+-]{1,40}$/.test(v) ? v : '';
+  return versionCache;
 }
 
 /** What a call stopped while it waited gets back. */
@@ -965,7 +991,10 @@ export class Agent {
     const checked = (said: CheckVerdictWord, timedOut = false) =>
       this.emit({ type: 'check_status', ...(callId ? { id: callId } : {}), running: false, ms: Math.max(0, Date.now() - checkAt), verdict: said, ...(timedOut ? { timedOut: true } : {}) });
     try {
-      const ask = (t: ClassifierTarget) => runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage));
+      const ask = (t: ClassifierTarget) => {
+        const sent = Date.now();
+        return runClassifier(t, classifierRequest(this.session, cfg, action, this.learnedLines(cfg)), signal, undefined, (usage) => this.charge(callSource(t.cfg), usage, { for: 'check', ms: Date.now() - sent }));
+      };
       let raw: string;
       try {
         raw = await ask(checker);
@@ -1304,6 +1333,8 @@ export class Agent {
     this.runCwd = this.session.cwd;
     this.cacheState(); // before the run touches the session, so a reloaded one keeps its last activity time
     const cfg = this.sessionConfig();
+    // The thinking setting holds for the whole run, so one tool loop never switches between thinking and not
+    this.runThinking = thinkingModeOf(cfg);
     let reason: 'done' | 'aborted' | 'max_turns' | 'error' | 'plan' | 'loop' = 'done';
     let lastText = '';
     // Where the run's time goes (agent/perf.ts): always kept in memory, written to a file only when asked for
@@ -1312,6 +1343,10 @@ export class Agent {
     const timer = new RunTimer({ session: this.timingId, mode: cfg.permissionMode, limit });
     this.runTimer = timer;
     this.turnTimer = null;
+    // Every counted call of the run, checks included, for run.end's result (cost.ts)
+    const runSession = this.session;
+    startRunTally(runSession);
+    const info = this.runInfo(cfg);
 
     const skills = this.getSkills(cfg.workingDirectory);
     const { content } = expandSlashCommand(expandMentions(userText, cfg.workingDirectory).content, skills);
@@ -1325,7 +1360,7 @@ export class Agent {
     this.runStartedAt = Date.now();
     this.turnClock = null;
     if (early) {
-      this.emit({ type: 'run_start', timing: timer.id });
+      this.emit({ type: 'run_start', timing: timer.id, info });
       await this.startSessionHooks();
       accepted = await this.promptHooks(userText, origin, opts.from);
       if (!accepted.ok || signal.aborted) {
@@ -1334,13 +1369,15 @@ export class Agent {
         const next = this.takeSendingNow();
         this.abortController = null;
         this.runCwd = null;
+        this.runThinking = null;
         this.runTimer = null;
         if (!next) {
           this.running = false;
           this.dropQueue();
         }
         const ended = signal.aborted ? 'aborted' : 'done';
-        this.emit(next ? { type: 'run_end', reason: ended, continued: true } : { type: 'run_end', reason: ended });
+        const result = this.runResult(timer.finish(ended), runSession);
+        this.emit(next ? { type: 'run_end', reason: ended, continued: true, ...result } : { type: 'run_end', reason: ended, ...result });
         if (next) this.continueWith(next);
         return;
       }
@@ -1353,7 +1390,7 @@ export class Agent {
     this.stuckAt = -1;
     // Auto mode's check gets another chance to reach its model with each run
     this.autoState().unavailable = false;
-    if (!early) this.emit({ type: 'run_start', timing: timer.id });
+    if (!early) this.emit({ type: 'run_start', timing: timer.id, info });
     // The queued row leaves the queue and becomes the message's bubble, as a delivered queued message does
     if (queuedId) this.emit({ type: 'queue_delivered', id: queuedId });
     this.emitUserMessage(userText, attachments.length, origin, opts.from);
@@ -1648,17 +1685,18 @@ export class Agent {
       this.shownArgs.clear();
       this.repairTail();
       this.store.save(this.session);
-      this.finishTiming(timer, reason);
+      const result = this.runResult(this.finishTiming(timer, reason), runSession);
       // "Send now": the session stays running (no other send can start a run, the queue stays) into the next run
       const next = this.takeSendingNow();
       this.abortController = null;
       this.runCwd = null;
+      this.runThinking = null;
       if (!next) {
         this.running = false;
         this.dropQueue();
       }
       this.emit({ type: 'session_changed', session: toMeta(this.session) });
-      const end: AgentEvent = { type: 'run_end', reason, ...(lastText ? { text: lastText } : {}), ...(next ? { continued: true } : {}) };
+      const end: AgentEvent = { type: 'run_end', reason, ...(lastText ? { text: lastText } : {}), ...(next ? { continued: true } : {}), ...result };
       this.emit(end);
       if (next) this.continueWith(next);
       else {
@@ -1796,17 +1834,17 @@ export class Agent {
     this.noteCache(usage);
     this.turnTimer?.usage(usage);
     this.emit({ type: 'usage', ...usage });
-    this.charge(this.costSource, usage);
+    this.charge(this.costSource, usage, { for: 'turn', ms: this.turnTimer?.sinceRequest() });
   }
 
   /**
    * Counts one model call toward the session's cost (cost.ts) and tells the window the new total. Every kind of call
    * the session makes comes here: its turns, Auto mode's checks, the title, a compaction summary.
    */
-  private charge(src: CallSource | null, usage: Usage): void {
+  private charge(src: CallSource | null, usage: Usage, info: CallInfo): void {
     if (!src) return;
     const s = this.session;
-    const ev = chargeSession(s, src, usage, this.getConfig());
+    const ev = chargeSession(s, src, usage, this.getConfig(), info);
     if (this.store.get(s.id) === s) this.emit(ev);
   }
 
@@ -1827,6 +1865,8 @@ export class Agent {
       ...(tt ? { timing: tt } : {}),
       // Read at each request, so a change during a run applies from the next one
       effort: (provider) => effortOf(this.getConfig(), provider),
+      // Read when the run starts (startRun): a change applies from the next message
+      thinkingMode: () => this.runThinking ?? thinkingModeOf(this.sessionConfig()),
     };
   }
 
@@ -1855,7 +1895,7 @@ export class Agent {
   }
 
   /** Sums the run up, keeps it for /timing and, when the log is on, appends it to the profile's timing log. */
-  private finishTiming(timer: RunTimer, reason: string): void {
+  private finishTiming(timer: RunTimer, reason: string): RunRecord | null {
     try {
       const record = timer.finish(reason);
       this.lastRun = record;
@@ -1866,13 +1906,75 @@ export class Agent {
         if (!log) Agent.timingLogs.set(at, (log = new TimingLog(at)));
         void log.append(record);
       }
+      return record;
     } catch (err) {
       console.warn('[timing] could not record the run:', errorMessage(err));
+      return null;
     } finally {
       if (this.runTimer === timer) this.runTimer = null;
       this.turnTimer = null;
     }
   }
+
+  /**
+   * run.end's result: the timing summary's times and counts (agent/perf.ts) and the run's counted calls (cost.ts),
+   * which ends the session's run tally. Nothing when the run could not be summed up.
+   */
+  private runResult(record: RunRecord | null, session: Session): { result: RunResult } | {} {
+    const tally = takeRunTally(session);
+    if (!record) return {};
+    try {
+      const s = record.summary;
+      const perms = record.tools.flatMap((t) => t.permission);
+      return {
+        result: {
+          wallMs: s.wallMs,
+          modelMs: s.modelMs,
+          toolMs: s.toolsMs,
+          checkMs: s.checksMs,
+          waitMs: s.approvalsMs + s.questionsMs,
+          modelCalls: s.turns,
+          toolCalls: s.calls,
+          checks: perms.filter((p) => p.checkMs !== undefined).length,
+          blocked: record.tools.filter((t) => t.outcome === 'blocked' || t.outcome === 'denied').length,
+          retries: s.retries,
+          ...runCost(tally, this.getConfig().prices),
+        },
+      };
+    } catch (err) {
+      console.warn('[timing] could not sum up the run:', errorMessage(err));
+      return {};
+    }
+  }
+
+  /** run.start's info: the model, the provider's label, the permission mode, the shell sandbox, the app's version. */
+  private runInfo(cfg: AppConfig): RunInfo {
+    let model = '';
+    let provider = '';
+    try {
+      const p = resolveProvider(cfg);
+      model = p.model;
+      provider = p.label;
+    } catch {
+      /* no usable provider: the run ends with its error */
+    }
+    // True only when this run's shell commands will run sandboxed (sandboxOn); while the probe has not answered and
+    // nothing else rules the sandbox out, that is not known yet, and the field is left out rather than guessed
+    const unknown = sandboxSettings(cfg.sandbox).enabled && process.platform === 'darwin' && sandboxHostNow() === undefined && !this.sandboxOff.has(this.session.id) && sandboxableFolder(realish(cfg.workingDirectory));
+    const sandbox = process.platform === 'darwin' && this.sandboxOn(cfg);
+    const app = appVersion();
+    // The thinking setting, where it applies: the native Anthropic path (agent/anthropic.ts thinkingFor)
+    let native = false;
+    try {
+      native = isNativeAnthropic(resolveProvider(cfg));
+    } catch {
+      /* as above */
+    }
+    return { ...(model ? { model: logModelId(model) } : {}), ...(provider ? { provider } : {}), mode: cfg.permissionMode, ...(unknown ? {} : { sandbox }), ...(native ? { thinking: thinkingModeOf(cfg) } : {}), ...(app ? { app } : {}) };
+  }
+
+  /** The thinking setting of the run in progress (AppConfig.thinking, read when it started); null between runs */
+  private runThinking: ThinkingMode | null = null;
 
   /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
   private nativeThinking = new Map<string, { stripBefore: number }>();
@@ -2193,7 +2295,11 @@ export class Agent {
   private fold(cut: number, brief: string, summary: string, o: { reason: 'auto' | 'manual'; before: number; pruned: number; stage: 'summary' | 'dropped' }): CompactionInfo {
     const s = this.session;
     const folded = s.messages.slice(0, cut);
-    const kept = s.messages.slice(cut);
+    // Kept thinking blocks are bound to the conversation before them, which the brief replaces: the API would refuse
+    // them (or drop them), and a fold made here replays none, as the API reference asks of client-side compaction. So
+    // they go, and the native path's mark of where it stopped sending thinking starts over with the new history.
+    const kept = withoutNative(s.messages.slice(cut));
+    this.sessionThinking().stripBefore = 0;
     this.store.replaceAll(s, [{ role: 'user', content: brief }, ...kept], 'compaction');
     s.lastPrompt = undefined;
     // Checkpoints in the kept part move with it (the brief takes index 0); earlier ones cannot be rewound to any more.
@@ -2236,6 +2342,8 @@ export class Agent {
     const timeout = AbortSignal.any([signal, AbortSignal.timeout(SUMMARY_TIMEOUT_MS)]);
     const ask = async (budget: number): Promise<string> => {
       const messages = summaryRequest(folded, extras, budget);
+      const sent = Date.now();
+      const counted = () => ({ for: 'compaction' as const, ms: Date.now() - sent });
       if (!client) {
         const call = (think: boolean | undefined) =>
           ollamaComplete({
@@ -2246,7 +2354,7 @@ export class Agent {
             // num_ctx matches the agent's requests so Ollama keeps the model loaded as it is.
             options: { num_ctx: contextSize(ollamaOf(cfg).numCtx), num_predict: maxTokens, temperature: 0.2 },
             signal: timeout,
-            onUsage: (usage) => this.charge(callSource(cfg, model), usage),
+            onUsage: (usage) => this.charge(callSource(cfg, model), usage, counted()),
           });
         try {
           return await call(false);
@@ -2257,7 +2365,7 @@ export class Agent {
         }
       }
       const res = await client.chat.completions.create({ model, messages, max_tokens: maxTokens, stream: false }, { signal: timeout, maxRetries: 1 });
-      if (res.usage) this.charge(callSource(cfg, model), usageOf(res.usage as RawUsage));
+      if (res.usage) this.charge(callSource(cfg, model), usageOf(res.usage as RawUsage), counted());
       return res.choices?.[0]?.message?.content ?? '';
     };
     const budget = summaryBudgetChars(limit);
@@ -2432,8 +2540,9 @@ export class Agent {
     const prompt = titlePrompt(session);
     if (!prompt) return;
     this.titleAttempts.add(session.id);
+    const sent = Date.now();
     const title = await generateTitle(cfg, prompt, (usage) => {
-      if (session === this.session) this.charge(callSource(cfg), usage);
+      if (session === this.session) this.charge(callSource(cfg), usage, { for: 'title', ms: Date.now() - sent });
     });
     // The user may have renamed or deleted the session, or turned the feature off, while the model answered.
     if (!title || title === session.title || session.titleLocked) return;

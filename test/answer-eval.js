@@ -45,6 +45,17 @@ const h = A.parseHistory(lines);
 check('history: wall time, turns, tool calls, per turn', h.wallMs === 3500 && h.turns === 2 && h.toolCalls === 3 && h.toolsPerTurn === 1.5, h);
 check('history: distinct records read, broad reads', h.recordsRead === 1 && h.broadReads === 1);
 check('history: tokens summed, the answer from run.end', h.usage.prompt === 11000 && h.usage.completion === 400 && h.usage.cacheRead === 9000 && h.usage.cacheWrite === 500 && h.answer === 'Final answer.' && h.endReason === 'done');
+check('history: requests: each usage record of a turn (or without for), as written before for existed', h.usage.requests === 2, h.usage);
+const withOthers = A.parseHistory([
+  ...lines.slice(0, 4),
+  rec(11, 2001, 'usage', { for: 'check', promptTokens: 300, completionTokens: 20 }),
+  rec(12, 2001, 'usage', { for: 'title', promptTokens: 100, completionTokens: 10 }),
+  rec(13, 2001, 'usage', { for: 'compaction', promptTokens: 100, completionTokens: 10 }),
+  rec(14, 2001, 'usage', { for: 'merge', promptTokens: 100, completionTokens: 10 }),
+  rec(15, 4001, 'usage', { for: 'turn', promptTokens: 6000, completionTokens: 300, cacheReadTokens: 5000, cacheWriteTokens: 500 }),
+  ...lines.slice(9),
+]);
+check('history: checks, titles, compactions and merges are not counted as requests', withOthers.usage.requests === 2, withOthers.usage);
 const noEnd = A.parseHistory(lines.slice(0, 8));
 check('history: no run.end: no wall time, the last assistant text', noEnd.wallMs === null && noEnd.answer === 'Final answer.');
 // Haiku 5.5: uncached 1500 at 0.10, reads 9000 at 0.01, writes 500 at 0.125, out 400 at 0.50 (per million)

@@ -5,9 +5,12 @@
 // to Anthropic's own API, the built-in table below. No network request is ever made for prices. When one call of the
 // session has no known price there is no figure at all: a partial sum would understate. Nothing here reaches a model.
 
-import type { AppConfig, ModelPrice } from '../shared/types';
+import type { AgentEvent, AppConfig, ModelPrice } from '../shared/types';
 import type { Usage } from './ollama';
 import { resolveProvider } from './providers';
+import { formatUsd, logModelId, type CallPurpose, type CallRecord } from './calls';
+
+export { formatUsd };
 
 /** Dollars per million tokens. cacheWrite: a five-minute cache write; cacheWrite1h: a one-hour one. */
 export interface Rates {
@@ -207,13 +210,6 @@ export function summarize(cost: SessionCost | undefined, prices: AppConfig['pric
   return out;
 }
 
-/** "$0.04", "<$0.01" under a cent, "$12.30", "$1,234.50"; "$0.00" for nothing at all (a model priced at zero). */
-export function formatUsd(usd: number): string {
-  if (!(usd > 0)) return '$0.00';
-  if (usd < 0.01) return '<$0.01';
-  return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 /** The `cost` event for a session's totals: the figure, or nothing when there is none. */
 export function costEvent(cost: SessionCost | undefined, prices: AppConfig['prices']): { type: 'cost'; usd?: number; label?: string } {
   const s = summarize(cost, prices);
@@ -227,16 +223,96 @@ export interface Costed {
   seedLength?: number;
 }
 
+/** What a call was for and how long it took, for its usage record in the history log. */
+export interface CallInfo {
+  for: CallPurpose;
+  ms?: number;
+}
+
+/** The `cost` event of a counted call: the session's new figure and, when the caller said what the call was, its record. */
+export type CostEvent = Extract<AgentEvent, { type: 'cost' }>;
+
+/** The calls of each session's open run (startRunTally to takeRunTally), kept beside the session, never saved with it. */
+const runTallies = new WeakMap<object, SessionCost>();
+
+/** A run of the session starts: its calls are summed from now until takeRunTally. */
+export function startRunTally(s: object): void {
+  runTallies.set(s, { since: Date.now(), buckets: [] });
+}
+
+/** The calls counted since startRunTally (none when no run was open); the tally ends. */
+export function takeRunTally(s: object): SessionCost {
+  const t = runTallies.get(s);
+  runTallies.delete(s);
+  return t ?? { since: Date.now(), buckets: [] };
+}
+
+/** One call as the history log's usage record keeps it. */
+export function callRecord(src: CallSource, u: Usage, info: CallInfo, prices?: AppConfig['prices']): CallRecord {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+  const usd = callCost(src, u, prices);
+  return {
+    promptTokens: n(u.promptTokens),
+    completionTokens: n(u.completionTokens),
+    ...(u.cacheReadTokens !== undefined ? { cacheReadTokens: n(u.cacheReadTokens) } : {}),
+    ...(u.cacheWriteTokens !== undefined ? { cacheWriteTokens: n(u.cacheWriteTokens) } : {}),
+    model: logModelId(src.model),
+    for: info.for,
+    ...(typeof info.ms === 'number' && Number.isFinite(info.ms) ? { ms: Math.max(0, Math.round(info.ms)) } : {}),
+    ...(usd !== null ? { usd } : {}),
+  };
+}
+
 /**
- * Counts one call for a session: adds it to the totals and returns the `cost` event to put on its stream. The totals
- * are written with the session's next save (each run, compaction, title and merge ends with one), not here: a save
- * of its own would add a snapshot to the history log for every call. A session older than this feature, which made
- * calls before, is marked partial.
+ * Counts one call for a session: adds it to the totals (and to its open run's tally) and returns the `cost` event to
+ * put on its stream, which carries the call's record when `info` says what it was (the history log writes it as a
+ * usage record). The totals are written with the session's next save (each run, compaction, title and merge ends
+ * with one), not here: a save of its own would add a snapshot to the history log for every call. A session older
+ * than this feature, which made calls before, is marked partial.
  */
-export function chargeSession(s: Costed, src: CallSource, u: Usage, cfg: Pick<AppConfig, 'prices'>): { type: 'cost'; usd?: number; label?: string } {
+export function chargeSession(s: Costed, src: CallSource, u: Usage, cfg: Pick<AppConfig, 'prices'>, info?: CallInfo): CostEvent {
   const before = !s.cost && s.messages.slice(s.seedLength ?? 0).some((m) => m.role === 'assistant');
   s.cost = addCall(s.cost, src, u, { before });
-  return costEvent(s.cost, cfg.prices);
+  const tally = runTallies.get(s);
+  if (tally) addCall(tally, src, u);
+  const ev: CostEvent = costEvent(s.cost, cfg.prices);
+  if (info) ev.call = callRecord(src, u, info, cfg.prices);
+  return ev;
+}
+
+/** A run's calls as run.end's result keeps them: the tokens of all of them, per model, and the dollars when known. */
+export interface RunCost {
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  byModel: Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; usd?: number }>;
+  /** Only when every call's price is known (as the window's figure) */
+  usd?: number;
+}
+
+/** A tally's tokens per model (input: uncached; cacheWrite: five-minute and one-hour writes) and dollars. */
+export function runCost(tally: SessionCost, prices: AppConfig['prices']): RunCost {
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const byModel: RunCost['byModel'] = {};
+  const unpriced = new Set<string>();
+  for (const b of tally.buckets) {
+    if (!b.calls) continue;
+    const id = logModelId(b.model);
+    const m = (byModel[id] ??= { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    m.calls += b.calls;
+    m.input += b.input;
+    m.output += b.output;
+    m.cacheRead += b.cacheRead;
+    m.cacheWrite += b.cacheWrite + b.cacheWrite1h;
+    tokens.input += b.input;
+    tokens.output += b.output;
+    tokens.cacheRead += b.cacheRead;
+    tokens.cacheWrite += b.cacheWrite + b.cacheWrite1h;
+    const p = ratesFor(b, prices);
+    if (!p) unpriced.add(id);
+    else if (!unpriced.has(id)) m.usd = (m.usd ?? 0) + dollars(b, p);
+  }
+  for (const id of unpriced) delete byModel[id].usd;
+  const s = summarize(tally, prices);
+  return { tokens, byModel, ...(s.usd !== undefined ? { usd: s.usd } : {}) };
 }
 
 /** What /cost says counts. */

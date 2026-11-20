@@ -1,0 +1,10 @@
+{
+  "name": "relaybox",
+  "version": "2.0.4",
+  "description": "Delivers queued webhook events to subscribers, with retries.",
+  "main": "src/index.js",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}

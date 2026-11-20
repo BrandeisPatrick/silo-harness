@@ -1,0 +1,5 @@
+{
+  "title": "Build a small CLI from a spec",
+  "probes": "A longer build from nothing (about 25 to 60 tool calls): planning across files, following twelve exact requirements, writing tests and running them, and how the run reports what it built.",
+  "timeoutMinutes": 25
+}

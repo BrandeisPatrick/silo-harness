@@ -24,10 +24,21 @@ function startMock() {
         return json(401, { error: { message: 'Invalid API key (mock)', type: 'authentication_error' } });
       }
       // The models list most OpenAI-compatible services have (GET /v1/models); `modelsDelayMs` holds it back and
-      // `modelsStatus` fails it with that HTTP status
-      if (req.url === '/v1/models' && req.method === 'GET') {
+      // `modelsStatus` fails it with that HTTP status. With `anthropicModels` it answers as Anthropic's own API does:
+      // HTTP 400 without the anthropic-version header, else pages of `modelsPageSize` (20) with has_more and after_id.
+      const [reqPath, reqQuery = ''] = req.url.split('?');
+      if (reqPath === '/v1/models' && req.method === 'GET') {
         return setTimeout(() => {
           if (state.modelsStatus) return json(state.modelsStatus, { error: { message: `mock error ${state.modelsStatus}` } });
+          if (state.anthropicModels) {
+            if (!req.headers['anthropic-version']) return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'anthropic-version: header is required' } });
+            const ids = state.models ?? ['mock-model'];
+            const after = new URLSearchParams(reqQuery).get('after_id');
+            const from = after ? ids.indexOf(after) + 1 : 0;
+            const size = state.modelsPageSize ?? 20;
+            const page = ids.slice(from, from + size);
+            return json(200, { data: page.map((id) => ({ type: 'model', id, display_name: id, created_at: '2026-01-01T00:00:00Z' })), has_more: from + size < ids.length, first_id: page[0] ?? null, last_id: page[page.length - 1] ?? null });
+          }
           json(200, { object: 'list', data: (state.models ?? ['mock-model']).map((id) => ({ id, object: 'model', created: 0, owned_by: 'mock' })) });
         }, state.modelsDelayMs ?? 0);
       }
@@ -301,7 +312,9 @@ function isClassifierRequest(payload) {
   // Anthropic's native requests carry the instructions as system blocks
   if (Array.isArray(payload?.system)) return String(payload.system[0]?.text ?? '').startsWith(CLASSIFIER_MARK);
   const sys = (payload?.messages ?? []).find((m) => m.role === 'system');
-  return typeof sys?.content === 'string' && sys.content.startsWith(CLASSIFIER_MARK);
+  // On a gateway with a Claude model the instructions come as content parts with a cache mark
+  const text = typeof sys?.content === 'string' ? sys.content : Array.isArray(sys?.content) ? sys.content.map((p) => String(p?.text ?? '')).join('') : '';
+  return text.startsWith(CLASSIFIER_MARK);
 }
 
 /**

@@ -54,6 +54,7 @@ export function defaultConfig(): AppConfig {
     pruneToolResults: true,
     toolSet: 'auto',
     toolActivity: 'summary',
+    thinking: 'auto',
     historyTrashDays: 30,
     mods: {
       enabled: {},
@@ -272,7 +273,7 @@ export function normalizeAllowRules(raw: unknown): Record<string, StoredRules> {
 /** Keeps the legacy autoApprove flag consistent with permissionMode, and autoTitles a boolean (default on). */
 export function normalizeConfig(cfg: AppConfig): AppConfig {
   const mode: PermissionMode = (MODES as string[]).includes(cfg.permissionMode) ? cfg.permissionMode : 'ask';
-  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {}, browser: normalizeBrowser(cfg.browser), autoMode: normalizeAutoMode(cfg.autoMode) };
+  return { ...cfg, permissionMode: mode, autoApprove: mode === 'bypass', autoTitles: cfg.autoTitles !== false, toolActivity: cfg.toolActivity === 'all' ? 'all' : 'summary', thinking: cfg.thinking === 'off' ? 'off' : 'auto', dreaming: normalizeDreaming(cfg.dreaming), providers: isRecord(cfg.providers) ? cfg.providers : {}, browser: normalizeBrowser(cfg.browser), autoMode: normalizeAutoMode(cfg.autoMode) };
 }
 
 export function saveConfig(cfg: AppConfig): void {

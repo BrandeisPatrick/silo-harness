@@ -43,8 +43,11 @@ export interface Ctx {
   savePatch(row: Row, patch: Partial<AppConfig>): Promise<boolean>;
   /** The window's config copy follows a config the main process returned */
   adopt(next: AppConfig): void;
+  /** A settings.json file sets this field (its row is read-only here) */
+  isOwned(field: string): boolean;
 
-  switchField(opts: FieldOptions & { invert?: boolean }): Row;
+  /** A switch for a boolean field, or for a field of two values: `values` names the one stored when on and when off (only the off one reads as off) */
+  switchField(opts: FieldOptions & { invert?: boolean; values?: { on: string; off: string } }): Row;
   textField(opts: FieldOptions & { parse: (text: string) => Parsed<unknown>; format?: (v: unknown) => string; placeholder?: string; type?: 'text' | 'password' | 'number'; width?: number; mono?: boolean; inputId?: string; multiline?: boolean }): Row;
   selectField<T extends string | number>(opts: FieldOptions & { choices: Choice<T>[]; width?: number; read?: (v: unknown) => T; inputId?: string; onSaved?: (v: T) => void }): Row;
   segField<T extends string | number>(opts: FieldOptions & { choices: Choice<T>[]; read?: (v: unknown) => T; onSaved?: (v: T) => void }): Row;

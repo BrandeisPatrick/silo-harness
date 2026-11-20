@@ -1,0 +1,10 @@
+{
+  "name": "csvpeek",
+  "version": "1.2.0",
+  "description": "Prints a short summary of a CSV file: rows, columns, and min / max / mean of the numeric ones.",
+  "private": true,
+  "bin": { "csvpeek": "bin/csvpeek.js" },
+  "scripts": {
+    "test": "node --test"
+  }
+}

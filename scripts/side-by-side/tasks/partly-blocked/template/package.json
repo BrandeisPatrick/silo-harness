@@ -1,0 +1,10 @@
+{
+  "name": "inkwell",
+  "version": "0.5.0",
+  "description": "Turns post titles into URL slugs and reading-time labels.",
+  "main": "src/index.js",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}

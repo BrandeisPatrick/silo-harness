@@ -58,12 +58,17 @@ Longest stretches with no record
 Tokens per model call 4 calls
 - input: 12k min, 14k median, 21k max, 60k total, 40% read from cache
 - output: 200 min, 600 median, 5.2k max, 6.6k total
+- safety checks: 1 call, 1.5k in, 40 out
+
+Cost $2.25, estimated from list prices
 
 Compactions 1
 - 150k → 20k tokens, 30s
 ```
 
-- **Model calls** are timed as the gap before each `usage` record: from the record before it (a retry inside the call aside) to the reply's token count. That includes the harness's work just before the request and any retries.
+- **Model calls** are timed as the gap before each `usage` record of the agent's turns: from the record before it (a retry inside the call aside) to the reply's token count. That includes the harness's work just before the request and any retries.
+- **Tokens per model call** are about the agent's turns; the safety checks' own calls (a newer log has a `usage` record for each) get one line of their own, and the title and summaries are left out.
+- **Cost** appears only when every counted call in the log has its dollars (its model's price was known), and is their sum: the same figure the window shows for those calls. A log from before the `usd` field, or with one call of an unpriced model, has no Cost line.
 - **Tool calls** count each tool's own work; the wait for a card or a safety check is left out. A tool that is not built in shows as `MCP tools` or `other tools`, never by its name.
 - **Longest stretches with no record** are the five longest gaps between two records inside a turn, with what came before and after in fixed words. A stretch "before retry" is a model call that failed and was tried again; one that ends "now (still running)" is the turn going on.
 - **Shell sandbox** appears only when a command ran in it: how many stayed inside, were blocked, and ran again outside after a check or your Allow.
@@ -71,7 +76,7 @@ Compactions 1
 
 In the window the report is a card; outside the app, `node scripts/session-report.js <history .jsonl>` prints the same report as Markdown for one session's log (`history/<session id>.jsonl` in the app's data folder; needs `npm run build`). A last line torn by a crash is skipped.
 
-What the report reads of the log: each record's type, time and sequence number; a tool's own time, whether it failed and the size of its result; token counts; a tool's name only when it is built in; a message's role; a turn's origin and end reason through a fixed list; and the newer records below. It never reads message text, arguments, commands, paths, URLs, titles, or provider and account names.
+What the report reads of the log: each record's type, time and sequence number; a tool's own time, whether it failed and the size of its result; token counts, and a usage record's purpose and dollars; a tool's name only when it is built in; a message's role; a turn's origin and end reason through a fixed list; and the newer records below. It never reads message text, arguments, commands, paths, URLs, titles, or provider and account names.
 
 ## While it runs
 
@@ -108,7 +113,7 @@ A line holds, per run: the provider's type, the model id's last part, the mode, 
 
 ### The newer history records
 
-Besides the timing log, the history log keeps these records, numbers and fixed words only (a log written by 0.17.0 has none of them):
+Besides the timing log, the history log keeps these records, numbers and fixed words only (a log written by 0.17.0 has none of them; the last three rows came after 0.19.0, and a log without them loads, replays and reports as before):
 
 | Record | Fields |
 | --- | --- |
@@ -119,6 +124,9 @@ Besides the timing log, the history log keeps these records, numbers and fixed w
 | `question.resolved` | `outcome`: `answered` or `skipped` |
 | `compaction.start` | `reason`: `auto` or `manual`; its end is the `compaction` record |
 | `tool.end` | gains `sandbox` for a command in the shell sandbox: `inside`, `blocked` or `rerun` |
+| `run.start` | also gains `model` (the model's id), `provider` (the provider's label as the window shows it), `mode` (the permission mode), `sandbox` (true when the shell sandbox is on for the run) and `app` (the app's version) |
+| `usage` | one per counted model call, not only the agent's turns; gains `model`, `for` (`turn`, `check`, `title`, `compaction`, `merge`), `ms` (how long the call took; a turn from its first attempt) and `usd` (its dollars, when its price is known). A record with no `for` is a turn |
+| `run.end` | gains `result`: `wallMs`, `modelMs`, `toolMs`, `checkMs`, `waitMs` (approval cards and questions), `modelCalls`, `toolCalls`, `checks`, `blocked` (tool calls not allowed to run), `retries`, `tokens` (`input` uncached, `output`, `cacheRead`, `cacheWrite`: every counted call of the run, checks included, so they are the sums of its `usage` records), `byModel` (per model id: `calls`, the four token counts, `usd` when its price is known) and `usd` (only when every call's price is known, the rule of the window's figure). The title is made after the run ends, so its call is not in it |
 
 **Never recorded**: prompts, arguments, commands, paths, URLs, output, session titles, account or profile names, base URLs, keys. A session is a short random id. Recording is always on in memory and costs well under a microsecond per streamed event.
 
