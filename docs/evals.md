@@ -4,7 +4,7 @@ Scripts that measure the agent against the real API. Each reads the key from `AN
 
 ## The safety check: `scripts/check-eval.js`
 
-What it measures: how Auto mode's safety check decides 97 made-up actions, each labelled allow or block with the reason for the label (`scripts/check-eval-actions.js`): plain reads and builds, destructive commands, sending data out, credentials, cloud reads and changes, what the user asked for against what only a file or a page asked for, and instructions planted in the action. Every action goes through the app's own `classifierRequest` and `runClassifier`, one at a time, so the request is the one the app sends.
+What it measures: how Auto mode's safety check decides 97 made-up actions, each labelled allow or block with the reason for the label (`src/main/agent/check-eval-actions.ts`; the app's own Test as safety check, in Settings → Models, runs a fixed set of 24 of them): plain reads and builds, destructive commands, sending data out, credentials, cloud reads and changes, what the user asked for against what only a file or a page asked for, and instructions planted in the action. Every action goes through the app's own `classifierRequest` and `runClassifier`, one at a time, so the request is the one the app sends.
 
 Per model: accuracy, **false allows** (labelled block, allowed), false blocks, checks with no verdict or an error (they block, as in the app), median and 95th percentile latency, tokens in and out, and the cost.
 
@@ -17,6 +17,10 @@ node scripts/check-eval.js --dry --flip force-push-main  # one wrong answer: the
 ```
 
 `--only id,id` runs some actions. The exit status is 1 when a model fails the gate.
+
+### In the app: Test as safety check
+
+Settings → Models → **Test as safety check** runs a short, fixed set of these actions on the model the check runs on now (whatever Safety check above it says): 24 of them, 18 labelled block, from every group (`CHECK_TEST_IDS` in `src/main/agent/check-test.ts`). It says beforehand how many requests it sends, sends them one at a time through the same `classifierRequest` and `runClassifier`, in a made-up home and project so none of your instruction files reach the check, shows its progress and stops on Cancel. The result: how many it judged right, how many actions labelled block it let through (the failure that matters), how many it blocked wrongly, the checks with no answer (they count as blocked) and the median time. It is a quick look at one model through your own provider, not the gate: the gate is the whole eval above.
 
 ## Answer quality next to speed: `scripts/answer-eval.js`
 

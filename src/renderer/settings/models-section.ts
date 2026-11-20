@@ -4,11 +4,13 @@
 
 import type { AppConfig, ProviderView } from '../../shared/types';
 import type { ProviderCatalog } from '../../shared/providers';
+import type { CheckModelInfo, CheckTestReport } from '../../shared/auto-mode';
 import { escapeHtml, h } from '../dom.js';
 import { icon } from '../icons.js';
 import { parseInteger, parseText, parseUrl } from './model.js';
-import { modelIds, providerState, rowKey, shownModels, testWords } from './models-model.js';
-import { button, chip, group, groupTitle, iconButton, note, row, sectionTitle, textControl, type Choice } from './ui.js';
+import { CHECK_EVAL_NOTE, checkChoices, checkModelWords, checkTestPlan, checkTestWords, modelIds, providerState, rowKey, shownModels, testWords } from './models-model.js';
+import { actions, button, chip, group, groupTitle, iconButton, note, row, sectionTitle, textControl, type Choice } from './ui.js';
+import { onPush } from '../rpc.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
 
@@ -292,6 +294,7 @@ export function modelSection(ctx: Ctx): Section {
         catalogs.set(name, { at: Date.now(), sig, cat });
         pending.delete(name);
         renderGroup(name);
+        setCheckChoices();
         return cat;
       });
     pending.set(name, req);
@@ -340,8 +343,9 @@ export function modelSection(ctx: Ctx): Section {
     const busy = pending.has(name);
     const state = busy && !cat ? { tone: 'neutral' as const, label: 'Checking…', detail: '' } : providerState(p, cat, inUse);
     const sessionModel = inUse ? p.model : '';
-    const ids = modelIds(p, cat, sessionModel ? [sessionModel] : []);
-    const keep = new Set([sessionModel].filter(Boolean));
+    const checkModel = checkOn(p.name);
+    const ids = modelIds(p, cat, [sessionModel, checkModel].filter(Boolean));
+    const keep = new Set([sessionModel, checkModel].filter(Boolean));
     const view = views.get(name) ?? { query: '', all: false };
     views.set(name, view);
     const shown = shownModels(ids, view.query, view.all, keep);
@@ -392,6 +396,7 @@ export function modelSection(ctx: Ctx): Section {
     const res = results.get(key);
     const marks: HTMLElement[] = [];
     if (isSession) marks.push(chip('In use', 'ok'));
+    if (checkOn(p.name) === m) marks.push(chip('Safety check'));
     const idEl = h('span', { class: 'sp-model-id', title: m }, m);
     const result = res ? h('div', { class: `sp-model-result${res.ok ? ' ok' : ' error'}`, role: 'status', html: `${icon(res.ok ? 'check' : 'circle-alert', 12)}<span>${escapeHtml(res.text)}</span>` }) : null;
     const text = h('div', { class: 'sp-model-text' }, h('div', { class: 'sp-model-line' }, idEl, ...marks), ...(result ? [result] : []));
@@ -442,8 +447,124 @@ export function modelSection(ctx: Ctx): Section {
     }
   }
 
+  // ---------- The safety check's model, and a test of it ----------
+
+  /** What the check runs on now (auto.checkModel), null until asked or when this build has no check */
+  let checkInfo: CheckModelInfo | null = null;
+  /** The model of `provider` the check runs on now, '' when it is not one of that provider's */
+  const checkOn = (name: string): string => (checkInfo && !checkInfo.none && checkInfo.provider === name ? (checkInfo.model ?? '') : '');
+  const checkList: Choice<string>[] = [];
+  const checkRow = ctx.selectField({
+    id: 'autoMode-model',
+    inputId: 'autoMode-model',
+    title: 'Safety check',
+    desc: '',
+    keywords: 'auto mode safety check classifier judge model haiku same as the session eval',
+    field: 'autoMode.model',
+    width: 300,
+    choices: checkList,
+    read: (v) => String(v ?? ''),
+    onSaved: () => void refreshCheck(),
+  });
+  checkRow.descEl.after(h('div', { class: 'sp-row-desc sp-check-note' }, CHECK_EVAL_NOTE));
+  /** The select's choices: "Same as the session", then each usable provider's models (as Connected lists them) */
+  const setCheckChoices = () => {
+    const cfg = ctx.config();
+    const active = cfg.provider || 'ollama';
+    const groups = ordered(cfg).map((p) => ({ name: p.name, label: p.label, usable: p.key !== 'missing', models: modelIds(p, catalogs.get(p.name)?.cat, [p.name === active ? p.model : '', checkOn(p.name)].filter(Boolean)) }));
+    const current = String(cfg.autoMode?.model ?? '').trim();
+    const next = checkChoices(groups, current);
+    checkList.splice(0, checkList.length, ...next.map((c) => ({ value: c.value, label: c.label })));
+    const select = checkRow.control.querySelector('select');
+    if (!select) return;
+    const want = JSON.stringify(next);
+    if (select.dataset.choices !== want) {
+      const nodes: HTMLElement[] = [];
+      let og: HTMLElement | null = null;
+      for (const c of next) {
+        const opt = h('option', { value: c.value }, c.label);
+        if (!c.group) {
+          og = null;
+          nodes.push(opt);
+        } else {
+          if (!og || og.getAttribute('label') !== c.group) nodes.push((og = h('optgroup', { label: c.group })));
+          og.append(opt);
+        }
+      }
+      select.replaceChildren(...nodes);
+      select.dataset.choices = want;
+    }
+    select.value = current;
+  };
+
+  let testRunning = false;
+  let mine = false;
+  const runBtn = button('Run test', () => void runCheck(), { icon: 'play' });
+  const cancelBtn = button('Cancel', () => void ctx.call('auto.checkTestCancel').catch(() => undefined));
+  cancelBtn.hidden = true;
+  const testRow = row({ id: 'autoMode-checkTest', title: 'Test as safety check', desc: '', keywords: 'auto mode safety check classifier eval test accuracy judge false allow block run' }, actions(cancelBtn, runBtn));
+  testRow.el.classList.add('sp-row-top');
+  const resultEl = h('div', { class: 'sp-check-result', role: 'status', hidden: true });
+  testRow.descEl.parentElement!.append(resultEl);
+  const setRunning = (on: boolean, done = 0, total = checkInfo?.testCount ?? 0) => {
+    testRunning = on;
+    runBtn.hidden = on;
+    cancelBtn.hidden = !on;
+    testRow.setDesc(on ? `Checking ${Math.min(done + 1, Math.max(total, 1))} of ${total}…` : checkTestPlan(checkInfo));
+  };
+  // Progress of a run (this page's, or one still going from before the page opened)
+  onPush('auto:check-test', (p) => {
+    if (p.running) setRunning(true, p.done, p.total);
+    else if (!mine) setRunning(false);
+  });
+  /** Runs the test, only on this click: the plan says beforehand how many requests it sends */
+  async function runCheck(): Promise<void> {
+    if (testRunning) return;
+    mine = true;
+    testRow.problem(null);
+    resultEl.hidden = true;
+    setRunning(true, 0);
+    try {
+      showCheckResult(await ctx.call('auto.checkTest'));
+    } catch (err) {
+      testRow.problem(ctx.cleanError(err));
+    } finally {
+      mine = false;
+      setRunning(false);
+    }
+  }
+  function showCheckResult(r: CheckTestReport): void {
+    const w = checkTestWords(r);
+    const glyph = (t: string) => (t === 'ok' ? 'check' : t === 'danger' ? 'circle-alert' : t === 'warn' ? 'triangle-alert' : 'clock');
+    resultEl.replaceChildren(
+      h('div', { class: `sp-check-head ${w.tone}` }, w.headline),
+      ...w.lines.map((l) => h('div', { class: `sp-check-line ${l.tone}`, html: `${icon(glyph(l.tone), 12)}<span>${escapeHtml(l.text)}</span>` })),
+      h('div', { class: 'sp-check-on' }, `Tested on ${r.model}.`),
+    );
+    resultEl.hidden = false;
+  }
+
+  /** Asks what the check runs on now; its words, the marks and the plan follow. */
+  async function refreshCheck(): Promise<void> {
+    try {
+      checkInfo = await ctx.call('auto.checkModel');
+    } catch (err) {
+      checkInfo = null;
+      if (ctx.isUnknown(err)) {
+        checkRow.el.hidden = true;
+        testRow.el.hidden = true;
+        return;
+      }
+    }
+    checkRow.setDesc(checkModelWords(checkInfo));
+    if (!testRunning) testRow.setDesc(checkTestPlan(checkInfo));
+    runBtn.disabled = !checkInfo || checkInfo.none;
+    setCheckChoices();
+    for (const p of allProviders(ctx.config())) renderGroup(p.name);
+  }
+
   el.append(
-    group('In use', provider, ollamaModel, gatewayModel, modelRow),
+    group('In use', provider, ollamaModel, gatewayModel, modelRow, checkRow, testRow),
     connected,
     group('Connection', ...ollamaRows, ...gatewayRows, advanced, service, keyRow, windowRow),
     group(null, files),
@@ -463,6 +584,8 @@ export function modelSection(ctx: Ctx): Section {
       if (cfg.provider === 'ollama' && lastProvider !== 'ollama') void refreshModels();
       lastProvider = cfg.provider;
       renderAll();
+      setCheckChoices();
+      void refreshCheck();
       // A provider whose key or address changed is asked again
       for (const p of allProviders(cfg)) {
         const have = catalogs.get(p.name);
@@ -478,6 +601,8 @@ export function modelSection(ctx: Ctx): Section {
       syncNamed(cfg);
       void refreshModels();
       renderAll();
+      setCheckChoices();
+      void refreshCheck();
       loadAll();
       return 'ok';
     },

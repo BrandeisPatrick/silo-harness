@@ -9,7 +9,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { AppConfig } from '../../shared/types';
 import { isSyntheticUser } from '../compact';
-import { loadInstructions } from '../instructions';
+import { loadInstructions, type InstructionFile } from '../instructions';
 import { contextSize, ollamaComplete, type Usage } from '../ollama';
 import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider, withModel } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
@@ -271,9 +271,9 @@ const stableChars = new WeakMap<Msg, number[]>();
 /**
  * The check's request: its instructions, then everything it reads, in one user message: what stays the same first
  * (notes, instruction files, the user's earlier answers `learned`, one line each), then the session's messages, the
- * agent's calls and the action.
+ * agent's calls and the action. `instructions` reads the instruction files (the check test reads a made-up home's).
  */
-export function classifierRequest(s: Session, cfg: AppConfig, action: ClassifiedAction, learned: readonly string[] = []): Msg[] {
+export function classifierRequest(s: Session, cfg: AppConfig, action: ClassifiedAction, learned: readonly string[] = [], instructions: (cwd: string) => InstructionFile[] = loadInstructions): Msg[] {
   const cwd = cfg.workingDirectory;
   const parts: string[] = [];
   const env = cfg.autoMode?.environment?.trim();
@@ -286,7 +286,7 @@ export function classifierRequest(s: Session, cfg: AppConfig, action: Classified
   }
   let budget = MAX_INSTRUCTIONS_CHARS;
   const files: string[] = [];
-  for (const f of loadInstructions(cwd)) {
+  for (const f of instructions(cwd)) {
     if (budget <= 0) break;
     const text = clip(f.text, budget);
     budget -= text.length;

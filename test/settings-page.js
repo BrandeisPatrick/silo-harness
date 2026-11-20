@@ -214,6 +214,37 @@ const { check, done } = require('./support/check.js');
     check('testWords: "Answered in 840 ms", "Answered in 1.2 s"', M.testWords({ ok: true, ms: 840 }).text === 'Answered in 840 ms' && M.testWords({ ok: true, ms: 1234 }).text === 'Answered in 1.2 s' && M.testWords({ ok: true, ms: 840 }).ok);
     check('testWords: the plain error as it came', M.testWords({ ok: false, ms: 3, error: 'Gateway refused the key (HTTP 401): bad key' }).text === 'Gateway refused the key (HTTP 401): bad key' && !M.testWords({ ok: false, ms: 0 }).ok && M.testWords({ ok: false, ms: 0 }).text === 'It did not answer.');
     check('rowKey: one per provider and model', M.rowKey('a', 'b:c') !== M.rowKey('a:b', 'c'));
+    // The safety check's select: its values are what autoMode.model takes
+    const groups = [
+      { name: 'portkey', label: 'Gateway', usable: true, models: ['@anthropic/claude-opus-5-5', '@anthropic/claude-haiku-5-5', '@anthropic/claude-opus-5-5'] },
+      { name: 'groq', label: 'Groq', usable: false, models: ['llama-x'] },
+      { name: 'ollama', label: 'Ollama', usable: true, models: ['qwen3:8b'] },
+    ];
+    let cc = M.checkChoices(groups, '');
+    check('check choices: "Same as the session" writes \'\', first', cc[0].value === '' && cc[0].label === 'Same as the session' && !cc[0].group);
+    check('check choices: every model of every usable provider, as "<provider>:<model>", grouped "Through …", no repeats', JSON.stringify(cc.slice(1).map((c) => c.value)) === JSON.stringify(['portkey:@anthropic/claude-opus-5-5', 'portkey:@anthropic/claude-haiku-5-5', 'ollama:qwen3:8b']) && cc[1].group === 'Through Gateway' && cc[1].label === '@anthropic/claude-opus-5-5' && cc[3].group === 'Through Ollama', cc);
+    check('check choices: a provider without its key offers none', !cc.some((c) => c.value.startsWith('groq:')));
+    cc = M.checkChoices(groups, 'claude-haiku-5-5');
+    check('check choices: a value set by hand that is none of them stays, as it is', cc.at(-1).value === 'claude-haiku-5-5' && /your setting/.test(cc.at(-1).label) && cc.filter((c) => c.value === 'claude-haiku-5-5').length === 1);
+    check('check choices: a chosen model that is listed is not added twice', M.checkChoices(groups, 'ollama:qwen3:8b').filter((c) => c.value === 'ollama:qwen3:8b').length === 1);
+    // What the check runs on, in words
+    check('check words: automatic', M.checkModelWords({ spec: '', none: false, automatic: true, providerLabel: 'Anthropic', model: 'claude-haiku-5-5', testCount: 24 }) === 'Runs on Claude Haiku 5.5 through Anthropic, automatic.');
+    check('check words: the session’s own model', M.checkModelWords({ spec: '', none: false, automatic: false, providerLabel: 'Gateway', model: '@anthropic/claude-opus-5-5', testCount: 24 }) === "Runs on Claude Opus 5.5 through Gateway, the session's model.");
+    check('check words: a chosen model', M.checkModelWords({ spec: 'ollama:qwen3:8b', none: false, automatic: false, providerLabel: 'Ollama', model: 'qwen3:8b', testCount: 24 }) === 'Runs on qwen3:8b through Ollama.');
+    check('check words: none', /No model can run the check now: risky actions ask you instead/.test(M.checkModelWords({ spec: '', none: true, automatic: false, testCount: 24 })));
+    check('check words: the eval line names the one model that passed', /Only Claude Haiku 5\.5 on Anthropic's own API has passed the app's check eval\. Another model may judge worse\./.test(M.CHECK_EVAL_NOTE));
+    check('check plan: says how many requests before it runs', M.checkTestPlan({ spec: '', none: false, automatic: false, model: 'claude-opus-5-5', testCount: 24 }) === 'Sends 24 made-up actions to Claude Opus 5.5, one request each, and scores how it judges them.' && /Needs a model/.test(M.checkTestPlan(null)));
+    // A test's result in plain words
+    const rep = { total: 24, done: 24, cancelled: false, right: 21, blockLabelled: 18, falseAllows: [{ id: 'a', action: 'git push --force origin main' }], falseBlocks: [{ id: 'b', action: 'npm run build' }], noAnswer: [{ id: 'c', action: 'cat ~/.aws/credentials', error: 'Gateway did not answer in time' }], medianMs: 1234 };
+    let tw = M.checkTestWords(rep);
+    check('check result: the headline, in red when anything risky got through', tw.headline === 'Judged 21 of 24 right.' && tw.tone === 'danger', tw);
+    check('check result: what it let through first, named, and that this is the failure that matters', tw.lines[0].tone === 'danger' && /^Let 1 of 18 risky actions through: git push --force origin main\. This is the failure that matters/.test(tw.lines[0].text), tw.lines[0]);
+    check('check result: wrongly blocked, no answer with why, the median', /^Blocked 1 safe action: npm run build\. It would have asked you\./.test(tw.lines[1].text) && /^1 check gave no answer \(Gateway did not answer in time\); it counts as blocked\./.test(tw.lines[2].text) && tw.lines[3].text === 'Median answer time 1.2 s.', tw.lines);
+    tw = M.checkTestWords({ ...rep, right: 24, falseAllows: [], falseBlocks: [], noAnswer: [] });
+    check('check result: a clean run', tw.tone === 'ok' && tw.lines[0].text === 'Let none of the 18 risky actions through.' && tw.lines[1].text === 'Blocked no safe action.' && tw.lines.length === 3, tw.lines);
+    tw = M.checkTestWords({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 4 });
+    check('check result: stopped part way says so', tw.headline === 'Judged 5 of 5 right.' && tw.lines[0].text === 'Stopped after 5 of 24.', tw);
+    check('check result: stopped before any', M.checkTestWords({ ...rep, cancelled: true, done: 0, right: 0, medianMs: null }).headline === 'Stopped before any check.');
     check('modelWords: Claude ids in words, others as they are', M.modelWords('claude-haiku-5-5') === 'Claude Haiku 5.5' && M.modelWords('@anthropic/claude-opus-5-5') === 'Claude Opus 5.5' && M.modelWords('anthropic/claude-sonnet-5.5') === 'Claude Sonnet 5.5' && M.modelWords('claude-opus-5') === 'Claude Opus 5' && M.modelWords('claude-haiku-4-5-20251001') === 'Claude Haiku 4.5' && M.modelWords('claude-sonnet-4-20250514') === 'Claude Sonnet 4' && M.modelWords('gpt-5-mini') === 'gpt-5-mini', [M.modelWords('claude-haiku-4-5-20251001'), M.modelWords('claude-sonnet-4-20250514')]);
   }
   done();

@@ -255,7 +255,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | --- | --- | --- |
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
-| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Models or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. |
+| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Models or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. Settings → Models → Safety check sets it from a list of the connected models ("Same as the session" is empty) and says what the check runs on now; **Test as safety check** under it sends 24 of the eval's labelled actions to that model and scores how it judges them. |
 | `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
 
 ```json

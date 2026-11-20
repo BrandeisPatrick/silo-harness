@@ -102,3 +102,97 @@ export function modelWords(id: string): string {
   const family = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
   return `Claude ${family} ${m[2]}${m[3] && m[3].length === 1 ? `.${m[3]}` : ''}`;
 }
+
+// ---------- The safety check's model ----------
+
+export interface CheckChoice {
+  /** '' (same as the session) or "<provider>:<model>" */
+  value: string;
+  label: string;
+  /** The optgroup: "Through Gateway" */
+  group?: string;
+}
+
+/** A provider as the check's select lists it: its models, and whether it can be used (it has its key). */
+export interface CheckGroup {
+  name: string;
+  label: string;
+  models: string[];
+  usable: boolean;
+}
+
+/**
+ * The safety check's choices: "Same as the session" (autoMode.model '') and every model of every usable provider
+ * ("<provider>:<model>"). A value set in settings.json that is none of them stays, as it is, at the end.
+ */
+export function checkChoices(groups: CheckGroup[], current: string): CheckChoice[] {
+  const out: CheckChoice[] = [{ value: '', label: 'Same as the session' }];
+  for (const g of groups) {
+    if (!g.usable) continue;
+    for (const m of [...new Set(g.models.map((x) => String(x ?? '').trim()).filter(Boolean))]) out.push({ value: `${g.name}:${m}`, label: m, group: `Through ${g.label}` });
+  }
+  const cur = String(current ?? '').trim();
+  if (cur && !out.some((c) => c.value === cur)) out.push({ value: cur, label: `${cur} (your setting)` });
+  return out;
+}
+
+/** What the check runs on now (CheckModelInfo), as the row says it. */
+export interface CheckModelView {
+  spec: string;
+  none: boolean;
+  automatic: boolean;
+  providerLabel?: string;
+  model?: string;
+  testCount: number;
+}
+
+/** "Runs on Claude Haiku 5.5 through Anthropic, automatic." and the like */
+export function checkModelWords(info: CheckModelView | null): string {
+  if (!info) return '';
+  if (info.none || !info.model) return 'No model can run the check now: risky actions ask you instead.';
+  const on = `Runs on ${modelWords(info.model)}${info.providerLabel ? ` through ${info.providerLabel}` : ''}`;
+  if (info.automatic) return `${on}, automatic.`;
+  return info.spec ? `${on}.` : `${on}, the session's model.`;
+}
+
+/** The line under the select: which model passed the app's eval. */
+export const CHECK_EVAL_NOTE = "Only Claude Haiku 5.5 on Anthropic's own API has passed the app's check eval. Another model may judge worse.";
+
+/** Before a run: what it sends. */
+export function checkTestPlan(info: CheckModelView | null): string {
+  if (!info || info.none || !info.model) return 'Needs a model that can run the check.';
+  return `Sends ${info.testCount} made-up actions to ${modelWords(info.model)}, one request each, and scores how it judges them.`;
+}
+
+/** A check test's result (CheckTestReport), in plain words. */
+export interface CheckTestView {
+  total: number;
+  done: number;
+  cancelled: boolean;
+  right: number;
+  blockLabelled: number;
+  falseAllows: { id: string; action: string }[];
+  falseBlocks: { id: string; action: string }[];
+  noAnswer: { id: string; action: string; error?: string }[];
+  medianMs: number | null;
+}
+
+/** The headline and its lines: let-through first (the failure that matters), then wrong blocks, no answer, time. */
+export function checkTestWords(r: CheckTestView): { tone: 'ok' | 'danger' | 'neutral'; headline: string; lines: { tone: 'ok' | 'danger' | 'warn' | 'neutral'; text: string }[] } {
+  const lines: { tone: 'ok' | 'danger' | 'warn' | 'neutral'; text: string }[] = [];
+  const list = (xs: { action: string }[]) => xs.slice(0, 3).map((x) => x.action).join('; ') + (xs.length > 3 ? `; and ${xs.length - 3} more` : '');
+  if (!r.done) return { tone: 'neutral', headline: r.cancelled ? 'Stopped before any check.' : 'Nothing was checked.', lines };
+  const fa = r.falseAllows.length;
+  if (fa) lines.push({ tone: 'danger', text: `Let ${fa} of ${r.blockLabelled} risky actions through: ${list(r.falseAllows)}. This is the failure that matters: the check would have allowed ${fa === 1 ? 'it' : 'them'} without asking you.` });
+  else lines.push({ tone: 'ok', text: `Let none of the ${r.blockLabelled} risky actions through.` });
+  const fb = r.falseBlocks.length;
+  lines.push(fb ? { tone: 'warn', text: `Blocked ${fb} safe ${fb === 1 ? 'action' : 'actions'}: ${list(r.falseBlocks)}. ${fb === 1 ? 'It' : 'They'} would have asked you.` } : { tone: 'ok', text: 'Blocked no safe action.' });
+  const na = r.noAnswer.length;
+  if (na) {
+    const why = r.noAnswer.find((x) => x.error)?.error;
+    lines.push({ tone: 'warn', text: `${na} ${na === 1 ? 'check' : 'checks'} gave no answer${why ? ` (${why})` : ''}; ${na === 1 ? 'it counts' : 'they count'} as blocked.` });
+  }
+  if (r.medianMs !== null) lines.push({ tone: 'neutral', text: `Median answer time ${msWords(r.medianMs)}.` });
+  if (r.cancelled) lines.unshift({ tone: 'neutral', text: `Stopped after ${r.done} of ${r.total}.` });
+  return { tone: fa ? 'danger' : 'ok', headline: `Judged ${r.right} of ${r.done} right.`, lines };
+}

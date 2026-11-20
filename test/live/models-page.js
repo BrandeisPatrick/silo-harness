@@ -5,6 +5,9 @@
 //     (asked once when the page opens; nothing is tested on its own); a long list shows eight, a filter and Show all
 //   - Test on a row sends one small request to exactly that model through that provider and shows the result on the
 //     row ("Answered in … ms" or the plain error, never the key); Use makes a model of another provider the one in use
+//   - Safety check: says what the check runs on now; picking a connected model writes "<provider>:<model>"; "Test as
+//     safety check" says how many requests it sends, runs the 24 actions through the check (the mock answers each with
+//     its label, one flipped), shows its progress, the result in plain words, and stops on Cancel
 // Never a real model: both services are the mock model. Run: npm run build && node test/live/models-page.js [shots-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -116,7 +119,60 @@ const OR_KEY = 'mock-or-key-0123456789';
     check('a refused test shows the plain error on its row', Boolean(refused), await rowText('openrouter', 'anthropic/claude-haiku-5.5'));
     check('… with the key as bearer, and the key nowhere in the window', chats(or).pop()?.headers.authorization === `Bearer ${OR_KEY}` && !(await app.evaluate('document.documentElement.outerHTML')).includes(OR_KEY));
 
+    // --- The safety check's model ---
+    const checkDesc = () => app.text('#sp-row-autoMode-model .sp-row-desc');
+    check('Safety check sits under In use, and says what the check runs on now', (await app.evaluate(`Boolean(document.querySelector('#sp-sec-model .sp-group #sp-row-autoMode-model'))`)) && (await checkDesc()) === "Runs on Claude Opus 5.5 through Gateway, the session's model.", await checkDesc());
+    check('… with the line on which model passed the eval', /Only Claude Haiku 5\.5 on Anthropic's own API has passed the app's check eval\. Another model may judge worse\./.test((await app.text('#sp-row-autoMode-model')) || ''));
+    const opts = await app.evaluate(`[...document.querySelector('#autoMode-model').options].map((o) => ({ v: o.value, l: o.textContent, g: o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : '' }))`);
+    check('the select: "Same as the session", then every connected model as <provider>:<model>, under "Through …"', opts[0].v === '' && opts[0].l === 'Same as the session' && opts.some((o) => o.v === 'portkey:claude-haiku-5-5' && o.g === 'Through Gateway') && opts.some((o) => o.v === 'openrouter:anthropic/claude-haiku-5.5' && o.g === 'Through OpenRouter') && opts.filter((o) => o.g === 'Through OpenRouter').length === 42 && !opts.some((o) => o.v.startsWith('groq:')), opts.slice(0, 6));
+    check('… set to Same as the session, as autoMode.model is empty', (await app.evaluate(`document.querySelector('#autoMode-model').value`)) === '' && (await cfg()).autoMode.model === '');
+    await app.fill('#autoMode-model', 'portkey:claude-haiku-5-5');
+    const picked = await until(async () => (await cfg()).autoMode.model === 'portkey:claude-haiku-5-5' && (await checkDesc()) === 'Runs on Claude Haiku 5.5 through Gateway.');
+    check('picking a model writes "<provider>:<model>" and the line follows', Boolean(picked), await checkDesc());
+    const marked = await until(async () => (await rowText('portkey', 'claude-haiku-5-5')).includes('Safety check') && !(await rowText('portkey', 'claude-opus-5-5')).includes('Safety check'));
+    check('… and that model’s row carries the Safety check mark', Boolean(marked), await rowText('portkey', 'claude-haiku-5-5'));
+    await app.evaluate(`document.querySelector('#sp-row-autoMode-model').scrollIntoView({ block: 'center' })`);
+    await sleep(200);
+    await app.screenshot(path.join(shots, 'models-check-select.png'));
+
+    // --- Test as safety check: says what it sends, then the mock answers each action with its label, one flipped ---
+    const { checkTestItems } = require(path.join(app.root, 'dist', 'main', 'agent', 'check-test.js'));
+    const set = checkTestItems();
+    const plan = await app.text('#sp-row-autoMode-checkTest .sp-row-desc');
+    const checksBefore = chats(gw).length;
+    check('the test says beforehand how many requests it sends, and to which model', plan === 'Sends 24 made-up actions to Claude Haiku 5.5, one request each, and scores how it judges them.', plan);
+    check('… and sends nothing until clicked', chats(gw).length === checksBefore);
+    const { classifierReply } = require('../support/mock-model.js');
+    for (const it of set) gw.state.replies.push(classifierReply(it.id === 'force-push-main' ? 'allow' : it.label, `[Eval] ${it.id}`, { delayMs: 60 }));
+    check('Run test: a click', await clickIn('#sp-row-autoMode-checkTest', 'Run test'));
+    const progress = await until(async () => /^Checking \d+ of 24…$/.test((await app.text('#sp-row-autoMode-checkTest .sp-row-desc')) || ''), 4000);
+    check('… shows its progress, with a Cancel', Boolean(progress) && (await app.evaluate(`[...document.querySelectorAll('#sp-row-autoMode-checkTest button')].some((b) => !b.hidden && b.innerText.trim() === 'Cancel')`)));
+    const finished = await until(async () => /Judged/.test((await app.text('#sp-row-autoMode-checkTest .sp-check-result')) || ''), 20_000);
+    const result = (await app.text('#sp-row-autoMode-checkTest .sp-check-result')) || '';
+    check('… then the result in plain words: judged right, what it let through and that it matters, wrong blocks, the time', Boolean(finished) && /Judged 23 of 24 right\./.test(result) && /Let 1 of 18 risky actions through: git push --force origin main\. This is the failure that matters/.test(result) && /Blocked no safe action\./.test(result) && /Median answer time \d+ ms\./.test(result) && /Tested on Gateway · claude-haiku-5-5\./.test(result), result);
+    const sentChecks = chats(gw).slice(checksBefore);
+    check('… after exactly 24 checks through the gateway, to the chosen model', sentChecks.length === 24 && sentChecks.every((q) => q.payload.model === 'claude-haiku-5-5' && /safety check of Auto mode/.test(JSON.stringify(q.payload.messages[0]))), sentChecks.length);
+    check('… and the plan is back, the button too', /^Sends 24/.test((await app.text('#sp-row-autoMode-checkTest .sp-row-desc')) || '') && (await app.evaluate(`[...document.querySelectorAll('#sp-row-autoMode-checkTest button')].some((b) => !b.hidden && b.innerText.trim() === 'Run test')`)));
+    await app.evaluate(`document.querySelector('#sp-row-autoMode-checkTest').scrollIntoView({ block: 'center' })`);
+    await sleep(200);
+    await app.screenshot(path.join(shots, 'models-check-test.png'));
+
+    // Cancel part way
+    for (const it of set) gw.state.replies.push(classifierReply(it.label, '', { delayMs: 150 }));
+    const beforeCancel = chats(gw).length;
+    await clickIn('#sp-row-autoMode-checkTest', 'Run test');
+    await until(async () => /^Checking [3-9] of 24…$/.test((await app.text('#sp-row-autoMode-checkTest .sp-row-desc')) || ''), 6000);
+    await clickIn('#sp-row-autoMode-checkTest', 'Cancel');
+    const stopped = await until(async () => /Stopped after \d+ of 24\./.test((await app.text('#sp-row-autoMode-checkTest .sp-check-result')) || ''), 8000);
+    await sleep(500);
+    const ran = chats(gw).length - beforeCancel;
+    check('Cancel stops it after the check in flight, and says how far it got', Boolean(stopped) && ran < 24 && ran >= 2, { ran, result: await app.text('#sp-row-autoMode-checkTest .sp-check-result') });
+    gw.state.replies.length = 0;
+    await app.fill('#autoMode-model', '');
+    check('back to Same as the session', Boolean(await until(async () => (await cfg()).autoMode.model === '' && /the session's model\.$/.test((await checkDesc()) || ''))));
+
     // --- Use: a model of another provider becomes the one in use ---
+    const [gwBeforeUse, orBeforeUse] = [chats(gw).length, chats(or).length];
     check('Use: a click', await clickIn(rowSel('openrouter', 'anthropic/claude-haiku-5.5'), 'Use'));
     const used = await until(async () => {
       const c = await cfg();
@@ -127,7 +183,7 @@ const OR_KEY = 'mock-or-key-0123456789';
     const first = await app.evaluate(`document.querySelector('#sp-sec-model .sp-provider')?.dataset.providerName`);
     check('… the In use mark moves, and that provider now leads the list', Boolean(moved) && first === 'openrouter', first);
     check('… the Provider select follows', (await app.evaluate(`document.querySelector('#provider').value`)) === 'openrouter');
-    check('… and Use sent no model request', chats(or).length === 1 && chats(gw).length === 1);
+    check('… and Use sent no model request', chats(or).length === orBeforeUse && chats(gw).length === gwBeforeUse);
 
     // --- Search still finds the rows (Connected hides while searching) ---
     const search = async (q) => {
