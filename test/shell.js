@@ -199,7 +199,7 @@ const alive = (pid) => {
     seen.length = 0;
     r = await bash.run({ command: 'cat id_rsa', path: '~/.ssh' }, at(false));
     check('path: ~ is the home folder (the call is only approved here, never run)', seen[0]?.[1] === `cd '${path.join(os.homedir(), '.ssh')}' && cat id_rsa` && r.content === 'Not permitted: test', seen);
-    check('path: in the schema, said in the description', bash.parameters.properties.path?.type === 'string' && /starts? in the working directory; path picks another folder/.test(bash.description) && /edit_file or write_file, not scripts/.test(bash.description), bash.description);
+    check('path: in the schema, said in the description', bash.parameters.properties.path?.type === 'string' && /starts in the working directory, so no need to cd there; path starts it in another folder/.test(bash.description) && /edit_file or write_file, not scripts/.test(bash.description), bash.description);
   }
 
   fs.rmSync(cwd, { recursive: true, force: true });

@@ -167,7 +167,7 @@ export function rerunNote(line: string): string {
 }
 
 const BASE_DESCRIPTION =
-  'Run a shell command (zsh) and return stdout, stderr and the exit code. Calls start in the working directory; path picks another folder. Edit files with edit_file or write_file, not scripts. Non-interactive only: never run commands that wait for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac use mdfind -name <name>, not find ~.';
+  'Run a zsh command; returns stdout, stderr, exit code. It starts in the working directory, so no need to cd there; path starts it in another folder. Edit files with edit_file or write_file, not scripts. Non-interactive only: nothing that waits for input; a sign-in (aws sso login, gh auth login) needs terminal_run. Default timeout 120 s, max 600 s. To find a file anywhere on this Mac: mdfind -name <name>, not find ~.';
 
 const BASE_PROPERTIES = {
   command: { type: 'string', description: 'The command line to execute' },
