@@ -9,7 +9,8 @@ import { escapeHtml, h } from '../dom.js';
 import { icon } from '../icons.js';
 import { parseInteger, parseText, parseUrl } from './model.js';
 import { CHECK_EVAL_NOTE, checkChoices, checkModelWords, checkTestPlan, checkTestWords, modelIds, providerState, rowKey, shownModels, testWords, thinkingWords } from './models-model.js';
-import { actions, button, chip, group, groupTitle, iconButton, note, row, sectionTitle, textControl, type Choice } from './ui.js';
+import { actions, advanced as pageAdvanced, button, card, chip, group, groupTitle, iconButton, note, row, sectionTitle, textControl, type Choice } from './ui.js';
+import { contextRows } from './config-sections.js';
 import { onPush } from '../rpc.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
@@ -582,6 +583,7 @@ export function modelSection(ctx: Ctx): Section {
     connected,
     group('Connection', ...ollamaRows, ...gatewayRows, advanced, service, keyRow, windowRow),
     group(null, files),
+    pageAdvanced('model', card(null, ...contextRows(ctx))),
   );
 
   let lastProvider = '';

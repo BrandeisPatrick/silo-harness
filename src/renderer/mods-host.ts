@@ -15,7 +15,7 @@ import { closeMenu, openMenu, type MenuSection } from './popover.js';
 import { appendTranscriptItem, registerTranscriptItem } from './transcript-items.js';
 import { homeDir } from './home.js';
 import { modeOf } from './modes.js';
-import { LOOK_TABS, MOD_TABS, isLookOnly, isSectionId, lookSetPatch, lookSets, modTabs, type ModTab } from './settings/model.js';
+import { LOOK_TABS, MOD_TABS, isLookOnly, landingFor, lookSetPatch, lookSets, modTabs, type ModTab } from './settings/model.js';
 import {
   ERR,
   HELLO_TIMEOUT_MS,
@@ -612,7 +612,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
           deps.openPage(section);
           return null;
         }
-        if (!isSectionId(section)) throw bad(`section: no Settings section "${section}"`);
+        // A page that is gone (context, files, hooks, about) lands where its settings are now
+        if (!landingFor(section)) throw bad(`section: no Settings section "${section}"`);
         deps.openSettings(section);
         return null;
       }

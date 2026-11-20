@@ -11,7 +11,7 @@ import type { IconName } from '../icons.js';
 
 // ---------- Sections ----------
 
-export type SectionId = 'general' | 'model' | 'permissions' | 'browser' | 'context' | 'mods' | 'mcp' | 'skills' | 'remote' | 'history' | 'appearance' | 'files' | 'hooks' | 'about' | 'pages';
+export type SectionId = 'general' | 'model' | 'permissions' | 'appearance' | 'browser' | 'remote' | 'mods' | 'mcp' | 'skills' | 'history' | 'developer' | 'pages';
 
 export interface SectionInfo {
   id: SectionId;
@@ -27,19 +27,16 @@ export const SECTIONS: SectionInfo[] = [
   { id: 'general', title: 'General', icon: 'settings', group: 0 },
   { id: 'model', title: 'Models', icon: 'server', group: 0 },
   { id: 'permissions', title: 'Permissions', icon: 'shield-check', group: 0 },
-  { id: 'browser', title: 'Browser', icon: 'globe', group: 0 },
-  { id: 'context', title: 'Context', icon: 'gauge', group: 0 },
+  { id: 'appearance', title: 'Appearance', icon: 'palette', group: 0 },
+  { id: 'browser', title: 'Browser', icon: 'globe', group: 1 },
+  { id: 'remote', title: 'Remote control', icon: 'smartphone', group: 1 },
   { id: 'mods', title: 'Mods', icon: 'puzzle', group: 1 },
   { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 1 },
   { id: 'skills', title: 'Skills', icon: 'sparkles', group: 1 },
-  { id: 'remote', title: 'Remote control', icon: 'smartphone', group: 1 },
   { id: 'history', title: 'History', icon: 'archive', group: 2 },
-  { id: 'appearance', title: 'Appearance', icon: 'palette', group: 2 },
-  { id: 'files', title: 'Configuration files', icon: 'file-text', group: 2 },
-  { id: 'hooks', title: 'Hooks', icon: 'zap', group: 2 },
-  { id: 'about', title: 'About', icon: 'info', group: 3 },
+  { id: 'developer', title: 'Developer', icon: 'code', group: 2 },
   // Scheduled tasks and Dreaming have pages of their own; a search for them finds rows that open those pages
-  { id: 'pages', title: 'Pages', icon: 'list', group: 4, searchOnly: true },
+  { id: 'pages', title: 'Pages', icon: 'list', group: 3, searchOnly: true },
 ];
 
 /** The sections that were in Settings and are pages now: openSettings('scheduled') opens the page */
@@ -49,25 +46,81 @@ export function isSectionId(s: unknown): s is SectionId {
   return typeof s === 'string' && SECTIONS.some((x) => x.id === s && !x.searchOnly);
 }
 
-/** Older callers name an element of the old form; these ids stand for a whole section. */
-export const LEGACY_SECTIONS: Record<string, SectionId> = {
-  'mcp-section': 'mcp',
-  'rules-section': 'permissions',
-  'ollama-fields': 'model',
-  'portkey-fields': 'model',
+/** Where a target lands: a section, and a row of it to bring on screen (opening Advanced when it is inside) */
+export interface Landing {
+  section: SectionId;
+  row?: string;
+  tab?: string;
+}
+
+/**
+ * Pages that are gone and the ids older callers used for a whole section: each lands where its settings live now.
+ * Context's rows are under Models → Advanced; Configuration files, Hooks and About are cards of Developer.
+ */
+export const LEGACY_SECTIONS: Record<string, Landing> = {
+  context: { section: 'model', row: 'autoCompact' },
+  files: { section: 'developer', row: 'file-user' },
+  hooks: { section: 'developer', row: 'hooks-open' },
+  about: { section: 'developer', row: 'cli' },
+  'mcp-section': { section: 'mcp' },
+  'rules-section': { section: 'permissions', row: 'rules' },
+  'ollama-fields': { section: 'model', row: 'provider' },
+  'portkey-fields': { section: 'model', row: 'provider' },
 };
 
-/** The section an openSettings(target) call means, when the target names one (else null: look for an element). */
-export function sectionForTarget(target: string): SectionId | null {
-  if (isSectionId(target)) return target;
-  if (/^mods[:/]/.test(target) && isModTab(target.slice(5))) return 'mods';
+/**
+ * Rows that moved or were folded into another: the old row id (also the old id of its control, where it had one)
+ * and the row that holds the setting now. A target that is still on the page is used as it is.
+ */
+export const ROW_MOVES: Record<string, string> = {
+  // General
+  'about-app': 'checkForUpdates',
+  // Models: one card for the provider, the model and the key
+  'provider-service': 'provider',
+  'provider-key': 'provider-apiKey',
+  'portkey-apiKey': 'provider-apiKey',
+  'provider-files': 'provider-add',
+  'ollama-model': 'provider-model',
+  'portkey-model': 'provider-model',
+  'autoMode-checkTest': 'autoMode-model',
+  // Appearance: the looks are chosen on its tabs
+  'appearance-background': 'background',
+  'appearance-composer': 'look-composer',
+  'appearance-conversation': 'look-conversation',
+  // Developer
+  'files-reload': 'file-user',
+  'file-user-keys': 'file-user',
+  'file-project-keys': 'file-project',
+  'hooks-none': 'hooks-open',
+  'hooks-runs': 'hooks-open',
+  'history-delete-all': 'reset-sessions',
+  'mods-remove-all': 'reset-mods',
+};
+
+/** The landing an openSettings(target) call means when the target names a section (else null: look for an element). */
+export function landingFor(target: string): Landing | null {
+  if (isSectionId(target)) return { section: target };
+  // The look tabs were Mods tabs: "mods:backgrounds" lands on Appearance's Background tab
+  const tab = tabForTarget(target);
+  if (tab) return tab === 'mods' ? { section: 'mods' } : { section: 'appearance', tab };
   return LEGACY_SECTIONS[target] ?? null;
 }
 
-/** The tab of the Mods page a target names: "mods:backgrounds" (or "mods/backgrounds"), else null. */
+/** The section an openSettings(target) call means, when the target names one (else null: look for an element). */
+export function sectionForTarget(target: string): SectionId | null {
+  return landingFor(target)?.section ?? null;
+}
+
+/** The tab a target names: "mods:backgrounds" (or "mods/backgrounds", "appearance:chat-bar"), else null. */
 export function tabForTarget(target: string): ModTab | null {
-  const m = /^mods[:/](.+)$/.exec(target);
+  const m = /^(?:mods|appearance)[:/](.+)$/.exec(target);
   return m && isModTab(m[1]) ? m[1] : null;
+}
+
+/** The row a moved target stands for now ('' when it did not move). */
+export function movedRow(target: string): string {
+  const id = target.replace(/^sp-row-/, '');
+  return ROW_MOVES[id] ?? '';
 }
 
 // ---------- Search ----------
@@ -87,6 +140,18 @@ export function matchesQuery(fields: (string | undefined)[], query: string): boo
   if (!words.length) return true;
   const hay = ` ${normalizeText(fields.filter(Boolean).join(' '))}`;
   return words.every((w) => hay.includes(` ${w}`));
+}
+
+/**
+ * `text` cut in the middle to at most `max` characters, so both ends stay readable ("~/Documents/…/my-project");
+ * `keepEnd` is how many of the last characters always stay (default: half).
+ */
+export function cutMiddle(text: string, max: number, keepEnd?: number): string {
+  const t = String(text ?? '');
+  if (t.length <= max || max < 5) return t;
+  const end = Math.min(keepEnd ?? Math.floor((max - 1) / 2), max - 2);
+  const start = max - 1 - end;
+  return `${t.slice(0, start)}…${t.slice(t.length - end)}`;
 }
 
 // ---------- Validators ----------

@@ -9,7 +9,7 @@ import { escapeHtml, h } from './dom.js';
 import { icon } from './icons.js';
 import { rpc } from './rpc.js';
 import type { Ctx } from './settings/ctx.js';
-import { button, note, row } from './settings/ui.js';
+import { button, row } from './settings/ui.js';
 import { appendTranscriptItem, registerTranscriptItem } from './transcript-items.js';
 
 /** The transcript (#messages): where the call's row is found and hidden. */
@@ -99,7 +99,7 @@ function setEnd(el: HTMLElement, state: 'allow' | 'allowed' | null): void {
 // ---------- Settings → Permissions → Recently blocked ----------
 
 /** The list of the latest blocks of every session, each with Allow; refreshed when Settings opens and as blocks come. */
-export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise<void> } {
+export function recentlyBlocked(ctx: Ctx, onCount?: (n: number) => void): { el: HTMLElement; refresh(): Promise<void> } {
   const el = h('div', { class: 'sp-rows auto-blocked-list' });
   let seq = 0;
   async function refresh(): Promise<void> {
@@ -139,7 +139,8 @@ export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise
       r.el.querySelector('.sp-row-name')?.classList.add('auto-blocked-what');
       el.append(r.el);
     });
-    if (!list.length) el.append(note('Nothing blocked.'));
+    // An empty list shows nothing: the page hides its card
+    onCount?.(list.length);
     ctx.refreshSearch();
   }
   bus.on('agent-event', (ev) => {
@@ -151,7 +152,7 @@ export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise
 // ---------- Settings → Permissions → Auto mode: what it learned from your answers ----------
 
 /** The answers Auto mode learned from, newest first, each with Remove; Forget all on `forgetAll`. */
-export function learnedAnswers(ctx: Ctx): { el: HTMLElement; forgetAll: HTMLButtonElement; refresh(): Promise<void> } {
+export function learnedAnswers(ctx: Ctx, onCount?: (n: number) => void): { el: HTMLElement; forgetAll: HTMLButtonElement; refresh(): Promise<void> } {
   const el = h('div', { class: 'sp-rows auto-learned-list' });
   let seq = 0;
   let count = 0;
@@ -187,7 +188,7 @@ export function learnedAnswers(ctx: Ctx): { el: HTMLElement; forgetAll: HTMLButt
       r.el.querySelector('.sp-row-name')?.classList.add('auto-blocked-what');
       el.append(r.el);
     });
-    if (!list.length) el.append(note('Nothing learned yet.'));
+    onCount?.(list.length);
     ctx.refreshSearch();
   }
   const forgetAll = button('Forget all', async (btn) => {

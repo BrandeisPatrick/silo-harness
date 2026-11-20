@@ -18,12 +18,16 @@ const { check, done } = require('./support/check.js');
 
   // --- sections ---------------------------------------------------------------
   const nav = m.SECTIONS.filter((s) => !s.searchOnly);
-  check('fourteen sections in four groups in the navigation', nav.length === 14 && new Set(nav.map((s) => s.group)).size === 4, nav.map((s) => s.id));
+  const groups = [0, 1, 2].map((g) => nav.filter((s) => s.group === g).map((s) => s.id).join());
+  check('eleven pages in three groups in the navigation', nav.length === 11 && groups.join(' | ') === 'general,model,permissions,appearance | browser,remote,mods,mcp,skills | history,developer', groups);
   check('Scheduled and Dreaming are pages now, not sections; a search-only Pages section stands for them', !m.SECTIONS.some((s) => s.id === 'scheduled' || s.id === 'dreaming') && m.SECTIONS.filter((s) => s.searchOnly).map((s) => s.id).join() === 'pages' && !m.isSectionId('pages') && !m.isSectionId('scheduled') && JSON.stringify(m.PAGE_SECTIONS) === JSON.stringify(['scheduled', 'dreaming']));
-  check('Hooks sits after Configuration files', m.SECTIONS.findIndex((s) => s.id === 'hooks') === m.SECTIONS.findIndex((s) => s.id === 'files') + 1);
-  check('section ids are recognised', m.isSectionId('mods') && !m.isSectionId('nope'));
+  check('Context, Configuration files, Hooks and About are pages no more', ['context', 'files', 'hooks', 'about'].every((id) => !m.isSectionId(id)));
+  check('… and each lands where its rows are now', JSON.stringify(['context', 'files', 'hooks', 'about'].map((t) => m.landingFor(t))) === JSON.stringify([{ section: 'model', row: 'autoCompact' }, { section: 'developer', row: 'file-user' }, { section: 'developer', row: 'hooks-open' }, { section: 'developer', row: 'cli' }]), ['context', 'files', 'hooks', 'about'].map((t) => m.landingFor(t)));
+  check('section ids are recognised', m.isSectionId('mods') && m.isSectionId('developer') && !m.isSectionId('nope'));
   check('old targets map to sections', m.sectionForTarget('mcp-section') === 'mcp' && m.sectionForTarget('rules-section') === 'permissions' && m.sectionForTarget('mods') === 'mods');
   check('a field id is not a section (the page looks it up)', m.sectionForTarget('ollama-baseURL') === null);
+  check('moved rows name where they are now', m.movedRow('history-delete-all') === 'reset-sessions' && m.movedRow('sp-row-mods-remove-all') === 'reset-mods' && m.movedRow('appearance-background') === 'background' && m.movedRow('portkey-apiKey') === 'provider-apiKey' && m.movedRow('keepAwake') === '');
+  check('cutMiddle keeps both ends', m.cutMiddle('/Users/me/Documents/projects/a-very-long-folder-name/app', 30) === '/Users/me/Docum…older-name/app' && m.cutMiddle('short', 30) === 'short' && m.cutMiddle('abcdefghij', 6, 3).endsWith('hij'), m.cutMiddle('/Users/me/Documents/projects/a-very-long-folder-name/app', 30));
 
   // --- search -----------------------------------------------------------------
   check('every word must start a word of the haystack', m.matchesQuery(['API key', 'Your gateway key'], 'api k') && !m.matchesQuery(['API key'], 'pi'));
@@ -166,7 +170,7 @@ const { check, done } = require('./support/check.js');
     const L = { looks: { conversation: null, composer: 'hyperspace/cockpit' }, background: 'backgrounds/aurora', backgroundImage: null, theme: 'paper' };
     check('choiceWords: what Appearance shows for each kind', m.choiceWords(list, L, 'background') === 'Backgrounds: Aurora' && m.choiceWords(list, L, 'composer') === 'Hyperspace: Cockpit' && m.choiceWords(list, L, 'conversation') === 'Default', [m.choiceWords(list, L, 'background'), m.choiceWords(list, L, 'composer')]);
     check('choiceWords: your picture, Default, a choice whose mod is gone', m.choiceWords(list, { ...L, background: null, backgroundImage: '/p.png' }, 'background') === 'Your picture' && m.choiceWords(list, { ...L, background: null }, 'background') === 'Default' && m.choiceWords(list, { ...L, background: 'gone/x' }, 'background') === 'gone/x (not installed)' && m.choiceWords([], null, 'background') === 'Default');
-    check('a section and a tab as one target', m.sectionForTarget('mods:backgrounds') === 'mods' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null);
+    check('a look tab as one target lands on Appearance (it was a tab of Mods)', m.sectionForTarget('mods:backgrounds') === 'appearance' && m.sectionForTarget('appearance:chat-bar') === 'appearance' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null && m.sectionForTarget('mods:mods') === 'mods');
     check('refMod', m.refMod('hyperspace/holo') === 'hyperspace' && m.refMod('a@/x/y/holo') === 'a@/x/y');
   }
 

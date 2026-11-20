@@ -259,7 +259,8 @@ export function createRulesPanel(opts: RulesPanelOptions): RulesPanel {
       fillList(els.reasons, 'reason', current.reasons.map((text) => ({ text })), true);
       const none = ruleCount(current) === 0;
       els.list.hidden = none;
-      els.empty.hidden = !none;
+      // An empty list shows nothing but its add row; only a list that could not be read says so
+      els.empty.hidden = !none || !unavailable;
       els.empty.innerHTML = unavailable
         ? `${icon('shield-check', 16)}<p>Restart Silo Harness to see saved rules.</p>`
         : `${icon('shield-check', 16)}<p>No rules for this project.</p>`;

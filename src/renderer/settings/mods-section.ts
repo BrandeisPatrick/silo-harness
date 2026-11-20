@@ -1,9 +1,10 @@
-// Settings → Mods: a tab strip (Mods, Background, Chat bar, Conversation). The Mods tab lists the mods that add
-// something (panels, side-pane tabs, composer strips, workers, slash commands), Built-in / Yours / This project, each
-// with its switch, what it asks for, what it adds, its problems and its own settings, and safe mode, New ⌄ (From a
-// template…, Install…) and Reload. The other three are the looks (look-tab.ts): no switches, a preview of what is in
-// use or of the version tried, Use, and every version as a card. While searching, every card and every tab's rows are
-// searched. Follows mods:changed live.
+// Settings → Mods and the looks of Settings → Appearance, which share the list of mods. Mods: safe mode, New ⌄ (From a
+// template…, Install…) and Reload, then the mods that add something (panels, side-pane tabs, composer strips, workers,
+// slash commands), Built-in / Yours / This project, one line each (icon, name, switch); opening one shows its
+// description, version, what it asks for, what it adds, its problems and its own settings. The looks (look-tab.ts) are
+// Appearance's tabs (Background, Chat bar, Conversation): no switches, a preview of what is in use or of the version
+// tried, Use, and every version as a card. While searching, every card and every tab's rows are searched. Follows
+// mods:changed live. Deleting every mod of yours is Settings → Developer → Reset.
 
 import type { LookKind, ModInfo, ModLookTarget, ModPermission, ModSettingField } from '../../shared/mods';
 import { dirname, escapeHtml, h } from '../dom.js';
@@ -31,20 +32,35 @@ import {
   type NewModKind,
 } from './model.js';
 import { lookTab, type LookTab } from './look-tab.js';
-import { actions, button, chip, group, newMenu, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
+import { actions, button, card, chip, newMenu, row, sectionTitle, segmented, selectControl, switchControl, textControl, tildePath, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
+
+/** The look tabs, which Settings → Appearance shows: its tab strip and panel, and the Section-like hooks for them */
+export interface LooksPart {
+  el: HTMLElement;
+  tab(): ModTab;
+  showTab(tab: string, opts?: { preview?: string }): void;
+  /** Brings the tab holding `el` on screen; false when `el` is not on a look tab */
+  uncover(el: HTMLElement): boolean;
+  sync(): void;
+  /** Settings → Appearance came on screen or went (the live previews run only while it shows) */
+  visible(on: boolean): void;
+  closed(): void;
+}
 
 const NEW_TITLE: Record<NewModKind, string> = { rail: 'New mod', tab: 'New mod', composer: 'New mod', worker: 'New mod', background: 'New background', 'look:composer': 'New chat bar look', 'look:conversation': 'New conversation look' };
 const safeKey = (key: string) => key.replace(/[^a-z0-9-]+/gi, '_');
 
-export function modsSection(ctx: Ctx): Section {
+export function modsSection(ctx: Ctx): { section: Section; looks: LooksPart } {
   const el = h('section', {}, sectionTitle('Mods'));
 
   let mods: ModInfo[] = [];
   const expanded = new Set<string>();
   let pendingRender = false;
-  /** The tab on screen; kept while the app runs, so Settings reopens at it */
-  let tab: ModTab = 'mods';
+  /** The look tab on screen in Appearance; kept while the app runs, so Settings reopens at it */
+  let tab: ModTab = 'backgrounds';
+  /** Whether Appearance is the page on screen */
+  let looksOnScreen = false;
 
   // ---------- Toolbar: New ⌄ (From a template…, Install…), Reload ----------
 
@@ -97,6 +113,7 @@ export function modsSection(ctx: Ctx): Section {
         const t = LOOK_TABS.find((x) => modTabs(made).includes(x.tab));
         if (t) {
           const set = lookSets([made], 1)[0];
+          ctx.show('appearance', { tab: t.tab });
           showTab(t.tab, { preview: set?.[t.kind] ?? undefined });
         }
         lookStatus(`Installed ${made.manifest?.name ?? made.id}.`);
@@ -181,8 +198,11 @@ export function modsSection(ctx: Ctx): Section {
         lookStatus(`Created ${name} in ${tildePath(made.dir)}.`);
         return;
       }
-      const madeTabs = modTabs(made);
-      if (!madeTabs.includes(tab)) showTab(madeTabs[0]);
+      const madeTab = modTabs(made)[0];
+      if (madeTab && madeTab !== 'mods') {
+        ctx.show('appearance', { tab: madeTab });
+        showTab(madeTab);
+      }
       renderAll();
       showStatus(isLookOnly(fresh.manifest) ? `Created ${name} in ${tildePath(made.dir)}.` : `Created ${name} in ${tildePath(made.dir)}. Turn it on to use it.`);
       void ctx.call('mods.reveal', made.key).catch(() => {});
@@ -218,10 +238,10 @@ export function modsSection(ctx: Ctx): Section {
   }
   /** Opens a form under the toolbar (one at a time); picking the open one again closes it */
   function toggleForm(form: HTMLElement): void {
-    const show = Boolean(form.hidden) || form.parentElement !== panel;
+    const show = Boolean(form.hidden) || form.parentElement !== modsPanel;
     closeForms();
     if (show && form === createForm) {
-      seat = MOD_TABS.find((t) => t.id === tab)!.newKind;
+      seat = MOD_TABS.find((t) => t.id === 'mods')!.newKind;
       seatSel.set(seat);
       createTitle.textContent = NEW_TITLE[seat];
     }
@@ -260,63 +280,24 @@ export function modsSection(ctx: Ctx): Section {
       safe.problem(`Couldn't change safe mode: ${ctx.cleanError(err)}`);
     }
   });
-  const safe = row({ id: 'mods-safe', title: 'Safe mode', desc: 'Turn off every mod that is not built in.', keywords: 'disable all off trouble' }, safeInput);
+  const safe = row({ id: 'mods-safe', title: 'Safe mode', desc: 'Turns off mods that aren’t built in.', keywords: 'disable all off trouble turn off every mod that is not built in' }, safeInput);
   safe.el.classList.add('clickable');
 
   const listEl = h('div', { class: 'sp-mod-list' });
 
-  // ---------- Delete all custom mods: every folder in the user mods folder goes to the Trash (mods.removeAll) ----------
-
-  const removeAllBtn = button('Delete all custom mods', async (b) => {
-    const mine = mods.filter((m) => m.scope === 'user');
-    if (!mine.length) return;
-    const names = mine.map((m) => m.manifest?.name ?? m.id);
-    const listed = names.length > 6 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-    const one = mine.length === 1;
-    const inUse = mine.some((m) => m.inUse?.length);
-    const ok = await ctx.confirm({
-      title: 'Delete all custom mods?',
-      description: `${one ? listed : `Your ${mine.length} mods, ${listed},`} move${one ? 's' : ''} to the Trash and ${one ? 'its' : 'their'} settings and permissions are forgotten${inUse ? `; looks in use go back to Default` : ''}.`,
-      confirmLabel: 'Move to Trash',
-      danger: true,
-    });
-    if (!ok) return;
-    b.disabled = true;
-    try {
-      const r = await ctx.call('mods.removeAll');
-      mods = r.mods;
-      for (const key of r.removed) expanded.delete(key);
-      removeAllRow.problem(null);
-      renderAll();
-      showStatus(r.removed.length ? `Moved ${r.removed.length === 1 ? 'one mod' : `${r.removed.length} mods`} to the Trash.` : 'No mods to delete.');
-    } catch (err) {
-      removeAllRow.problem(`Couldn't delete them: ${ctx.cleanError(err)}`);
-      b.disabled = false;
-    }
-  }, { icon: 'trash', danger: true });
-  removeAllBtn.disabled = true;
-  const removeAllRow = row({ id: 'mods-remove-all', title: 'Delete all custom mods', desc: '', keywords: 'remove everything clear wipe reset erase uninstall yours user mods folder trash' }, removeAllBtn);
-  const removeAllGroup = group(null, removeAllRow);
-
-  /** The row follows the list: how many mods of yours there are and where their folders live */
-  function renderRemoveAll(): void {
-    const mine = mods.filter((m) => m.scope === 'user');
-    removeAllRow.setDesc(mine.length ? `Moves your ${mine.length === 1 ? 'mod' : `${mine.length} mods`} in ${tildePath(dirname(mine[0].dir).replace(/\/$/, ''))} to the Trash.` : 'Moves your mods to the Trash.');
-    removeAllBtn.disabled = !mine.length;
-  }
-
   // ---------- The tab strip ----------
 
-  const tabsEl = h('div', { class: 'sp-tabs sp-only-browse', role: 'tablist', 'aria-label': 'Kinds of mod' });
+  const LOOK_IDS = MOD_TABS.filter((t) => t.id !== 'mods');
+  const tabsEl = h('div', { class: 'sp-tabs sp-only-browse', role: 'tablist', 'aria-label': 'Looks' });
   const tabBtns = new Map<ModTab, HTMLButtonElement>();
-  for (const t of MOD_TABS) {
+  for (const t of LOOK_IDS) {
     const b = h('button', { type: 'button', class: 'sp-nav-item sp-tab', id: `sp-modtab-${t.id}`, role: 'tab', 'aria-controls': 'sp-modpanel', 'data-tab': t.id }, h('span', {}, t.title));
     b.addEventListener('click', () => showTab(t.id));
     tabBtns.set(t.id, b);
     tabsEl.append(b);
   }
   tabsEl.addEventListener('keydown', (e) => {
-    const ids = MOD_TABS.map((t) => t.id);
+    const ids = LOOK_IDS.map((t) => t.id);
     const i = ids.indexOf((document.activeElement as HTMLElement | null)?.dataset.tab as ModTab);
     if (i < 0) return;
     let next = -1;
@@ -330,7 +311,7 @@ export function modsSection(ctx: Ctx): Section {
     tabBtns.get(ids[next])!.focus();
   });
 
-  // ---------- Each tab's head: safe mode on the Mods tab, a look tab on the others ----------
+  // ---------- Each look tab ----------
 
   /** The picture of yours last chosen, kept while the app runs (Default forgets it in the layout) */
   let lastImage: string | null = null;
@@ -402,8 +383,7 @@ export function modsSection(ctx: Ctx): Section {
     );
   }
 
-  const heads: Record<ModTab, HTMLElement> = {
-    mods: group(null, safe),
+  const heads: Partial<Record<ModTab, HTMLElement>> = {
     backgrounds: lookTabs.get('backgrounds')!.el,
     'chat-bar': lookTabs.get('chat-bar')!.el,
     conversation: lookTabs.get('conversation')!.el,
@@ -419,11 +399,14 @@ export function modsSection(ctx: Ctx): Section {
   };
 
   let dialogOpen = false;
-  const panel = h('div', { id: 'sp-modpanel', role: 'tabpanel' }, ...Object.values(heads), toolbar, installForm, createForm, status, listEl, removeAllGroup);
-  el.append(tabsEl, panel);
+  // Appearance's tab strip and panel; the Mods page: safe mode, the toolbar, its forms and the list
+  const panel = h('div', { id: 'sp-modpanel', role: 'tabpanel' }, ...Object.values(heads));
+  const looksEl = h('div', { class: 'sp-looks' }, tabsEl, panel);
+  const modsPanel = h('div', { class: 'sp-mods' }, card(null, safe), toolbar, installForm, createForm, status, listEl);
+  el.append(modsPanel);
 
   function showTab(next: ModTab, opts?: { preview?: string }): void {
-    if (!isModTab(next)) return;
+    if (!isModTab(next) || next === 'mods') return;
     if (next !== tab) {
       closeForms();
       lookStatus('');
@@ -436,28 +419,10 @@ export function modsSection(ctx: Ctx): Section {
       b.tabIndex = on ? 0 : -1;
     }
     panel.setAttribute('aria-labelledby', `sp-modtab-${tab}`);
-    for (const [id, head] of Object.entries(heads)) head.classList.toggle('current', id === tab);
-    // The Mods tab's toolbar and list belong to it alone (the search still finds the cards from any tab)
-    toolbar.classList.toggle('sp-tab-out', tab !== 'mods');
-    listEl.classList.toggle('sp-tab-out', tab !== 'mods');
-    status.classList.toggle('sp-tab-out', tab !== 'mods');
-    removeAllGroup.classList.toggle('sp-tab-out', tab !== 'mods');
+    for (const [id, head] of Object.entries(heads)) head!.classList.toggle('current', id === tab);
     placeLookStatus();
-    for (const [t, lt] of lookTabs) lt.shown(dialogOpen && t === tab);
+    for (const [t, lt] of lookTabs) lt.shown(dialogOpen && looksOnScreen && t === tab);
     if (opts?.preview !== undefined) lookTabs.get(tab)?.preview(opts.preview);
-    applyTab();
-  }
-
-  /** Each group's empty note on the Mods tab. */
-  function applyTab(): void {
-    for (const grp of listEl.querySelectorAll<HTMLElement>('.sp-group')) {
-      const shown = grp.querySelectorAll('.sp-mod').length;
-      const emptyNote = grp.querySelector<HTMLElement>('.sp-empty-group');
-      if (emptyNote) {
-        emptyNote.hidden = shown > 0;
-        emptyNote.textContent = 'None yet.';
-      }
-    }
   }
 
   // ---------- The list ----------
@@ -471,17 +436,11 @@ export function modsSection(ctx: Ctx): Section {
     pendingRender = false;
     listEl.innerHTML = '';
     for (const g of MOD_GROUPS) {
-      // A mod that is only looks has no card here: its looks are on their tabs
+      // A mod that is only looks has no row here: its looks are on Appearance's tabs. An empty group shows nothing.
       const items = mods.filter((m) => m.scope === g.scope && !isLookOnly(m.manifest));
-      if (!items.length && g.scope !== 'user') continue;
-      const grp = group(g.title);
-      // Yours always has its group, with a note while none of its mods are of the tab's kind
-      if (g.scope === 'user') grp.append(h('p', { class: 'sp-note sp-empty-group' }));
-      for (const m of items) grp.append(modRow(m));
-      listEl.append(grp);
+      if (!items.length) continue;
+      listEl.append(card(g.title, ...items.map((m) => modRow(m))));
     }
-    renderRemoveAll();
-    applyTab();
     ctx.refreshSearch();
     if (active instanceof HTMLElement && active.dataset.focusKey) listEl.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(active.dataset.focusKey)}"]`)?.focus();
   }
@@ -553,24 +512,27 @@ export function modsSection(ctx: Ctx): Section {
     return icon('puzzle');
   }
 
+  /** One line: the mod's icon, its name (and a chip when something is wrong) and its switch; opening it shows the rest. */
   function modRow(m: ModInfo): HTMLElement {
     const name = m.manifest?.name ?? m.id;
     const open = expanded.has(m.key);
     const tabs = modTabs(m);
-    const r = row({ id: `mod-${safeKey(m.key)}`, title: name, desc: m.manifest?.description ?? (m.problems[0]?.message || ''), keywords: `${m.id} mod ${m.manifest?.author ?? ''} ${tabs.map((t) => MOD_TABS.find((x) => x.id === t)!.title).join(' ')}` });
+    const description = m.manifest?.description ?? (m.problems[0]?.message || '');
+    // The description is not on the line, but the search still finds the mod by it
+    const r = row({ id: `mod-${safeKey(m.key)}`, title: name, keywords: `${m.id} mod ${m.manifest?.author ?? ''} ${description} ${tabs.map((t) => MOD_TABS.find((x) => x.id === t)!.title).join(' ')}` });
     r.el.classList.add('sp-mod');
     r.el.dataset.tabs = 'mods';
     r.el.classList.toggle('open', open);
     const titleEl = r.el.querySelector('.sp-row-title')!;
-    if (m.manifest?.version) titleEl.append(h('span', { class: 'sp-mod-version' }, m.manifest.version));
     if (m.overrides) titleEl.append(h('span', { class: 'sp-pill' }, 'Customised'));
     const c = modChip(m);
-    if (c) titleEl.append(chip(c.label, c.tone));
+    // Off is what the switch says; a problem or a pause is worth a word
+    if (c && c.label !== 'Off') titleEl.append(chip(c.label, c.tone));
 
-    const expand = h('button', { type: 'button', class: 'sp-mod-expand', 'aria-expanded': String(open), 'aria-label': `Details of ${name}`, 'data-focus-key': `${m.key}|expand`, html: icon('chevron-right', 14) });
-    const iconEl = h('span', { class: 'sp-mod-icon', html: modIcon(m) });
+    // The icon opens the row (as a click on the name does)
+    const expand = h('button', { type: 'button', class: 'sp-mod-expand sp-mod-icon', 'aria-expanded': String(open), 'aria-label': `Details of ${name}`, 'data-focus-key': `${m.key}|expand`, html: modIcon(m) });
     const text = r.el.querySelector<HTMLElement>('.sp-row-text')!;
-    text.before(expand, iconEl);
+    text.before(expand);
 
     const sw = switchControl(m.state === 'on', (on) => void setEnabled(m, on, sw));
     sw.setAttribute('aria-label', `${name}: ${m.state === 'on' ? 'on' : 'off'}`);
@@ -595,11 +557,9 @@ export function modsSection(ctx: Ctx): Section {
       if ((e.target as HTMLElement).closest('button, a, input')) return;
       toggle();
     });
-    iconEl.addEventListener('click', toggle);
     r.el.append(detail);
     return r.el;
   }
-
 
   async function setEnabled(m: ModInfo, on: boolean, sw: HTMLInputElement): Promise<void> {
     const r = { problem: (msg: string | null) => setRowProblem(sw, msg) };
@@ -637,6 +597,10 @@ export function modsSection(ctx: Ctx): Section {
   function fillDetail(d: HTMLElement, m: ModInfo, r: Row): void {
     d.innerHTML = '';
     const block = (title: string, ...children: (Node | string)[]) => h('div', { class: 'sp-detail-block' }, h('div', { class: 'sp-detail-title' }, title), ...children);
+
+    // What it is: its description and its version
+    const about = [m.manifest?.description, m.manifest?.version && `Version ${m.manifest.version}`].filter(Boolean).join(' · ');
+    if (about) d.append(h('p', { class: 'sp-detail-muted sp-mod-about' }, about));
 
     // Where it lives
     d.append(
@@ -789,23 +753,12 @@ export function modsSection(ctx: Ctx): Section {
     };
   }
 
-  return {
+  const section: Section = {
     id: 'mods',
     el,
     sync(cfg) {
       safeInput.checked = Boolean(cfg.mods?.safeMode);
       renderLooks();
-    },
-    tab: () => tab,
-    showTab: (t, opts) => {
-      if (isModTab(t)) showTab(t, opts);
-    },
-    uncover(target) {
-      const head = target.closest<HTMLElement>('[data-subtab]');
-      if (head && isModTab(head.dataset.subtab)) return showTab(head.dataset.subtab);
-      const card = target.closest<HTMLElement>('.sp-mod[data-tabs]');
-      const tabs = (card?.dataset.tabs ?? '').split(' ').filter(isModTab);
-      if (tabs.length && !tabs.includes(tab)) showTab(tabs[0]);
     },
     async load() {
       dialogOpen = true;
@@ -817,7 +770,7 @@ export function modsSection(ctx: Ctx): Section {
         return 'ok';
       }
       renderAll();
-      for (const [t, lt] of lookTabs) lt.shown(t === tab);
+      for (const [t, lt] of lookTabs) lt.shown(looksOnScreen && t === tab);
       return 'ok';
     },
     closed() {
@@ -828,4 +781,26 @@ export function modsSection(ctx: Ctx): Section {
       for (const lt of lookTabs.values()) lt.closed();
     },
   };
+
+  const looks: LooksPart = {
+    el: looksEl,
+    tab: () => tab,
+    showTab: (t, opts) => {
+      if (isModTab(t)) showTab(t, opts);
+    },
+    uncover(target) {
+      const head = target.closest<HTMLElement>('[data-subtab]');
+      if (!head || !isModTab(head.dataset.subtab)) return false;
+      showTab(head.dataset.subtab);
+      return true;
+    },
+    sync: () => renderLooks(),
+    visible(on) {
+      looksOnScreen = on;
+      for (const [t, lt] of lookTabs) lt.shown(dialogOpen && on && t === tab);
+    },
+    closed() {},
+  };
+
+  return { section, looks };
 }

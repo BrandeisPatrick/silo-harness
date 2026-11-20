@@ -15,15 +15,15 @@ import { h } from './dom.js';
 import { icon } from './icons.js';
 import { onPush, rpc } from './rpc.js';
 import { bus } from './bus.js';
-import { getPath, matchesQuery, patchFor, SECTIONS, sectionForTarget, tabForTarget, isSectionId, type SectionId } from './settings/model.js';
-import { row, segmented, selectControl, switchControl, textControl, type Row } from './settings/ui.js';
+import { getPath, landingFor, matchesQuery, movedRow, patchFor, SECTIONS, type SectionId } from './settings/model.js';
+import { lockButton, row, segmented, selectControl, switchControl, textControl, uncoverDisclosures, type Row } from './settings/ui.js';
 import type { Call, Ctx, Section } from './settings/ctx.js';
-import { contextSection, generalSection, permissionsSection } from './settings/config-sections.js';
+import { generalSection, permissionsSection } from './settings/config-sections.js';
 import { modelSection } from './settings/models-section.js';
 import { modsSection } from './settings/mods-section.js';
 import { pagesSection, remoteSection, skillsSection } from './settings/feature-sections.js';
-import { aboutSection, appearanceSection, filesSection, historySection, mcpSection } from './settings/info-sections.js';
-import { hooksSection } from './settings/hooks-section.js';
+import { appearanceSection, historySection, mcpSection } from './settings/info-sections.js';
+import { developerSection } from './settings/developer-section.js';
 import { browserSection } from './settings/browser-section.js';
 
 export interface SettingsPageDeps {
@@ -75,16 +75,17 @@ export interface SettingsDebug {
 }
 
 export interface OpenOptions {
-  /** A tab of the section: Mods has mods, backgrounds, chat-bar and conversation */
+  /** A tab of the section: Appearance has backgrounds, chat-bar and conversation (Mods had them before) */
   tab?: string;
-  /** On a look tab of Mods: the version to show in its preview ("<mod key>/<id>") */
+  /** On a look tab: the version to show in its preview ("<mod key>/<id>") */
   preview?: string;
 }
 
 export interface SettingsPage {
   /**
-   * Opens at the section last open, or at `target`: a section id ("mods"), a section and a tab ("mods:backgrounds",
-   * or "mods" with { tab: 'backgrounds' }), or the id of an element on the page (its tab comes on screen with it)
+   * Opens at the section last open, or at `target`: a section id ("mods"), a tab ("appearance:backgrounds", or the
+   * older "mods:backgrounds", or "mods" with { tab: 'backgrounds' }), a page that is gone ("context", "files"), or the
+   * id of an element or a row on the page, also one that moved (its tab and its Advanced come on screen with it)
    */
   open(target?: string, opts?: OpenOptions): void;
   close(): void;
@@ -112,7 +113,9 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   let current: SectionId = 'general';
   try {
     const saved = localStorage.getItem(LAST_SECTION_KEY);
-    if (isSectionId(saved)) current = saved;
+    // A page that is gone (Context, About…) reopens where its rows are now
+    const land = saved ? landingFor(saved) : null;
+    if (land) current = land.section;
   } catch {
     /* no storage: start at General */
   }
@@ -310,7 +313,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       clearSearch(false);
       showSection(id);
       if (opts?.tab) sections.find((s) => s.id === id)?.showTab?.(opts.tab);
-      if (opts?.row) reveal(document.getElementById(`sp-row-${opts.row}`));
+      if (opts?.row) reveal(rowElement(opts.row));
     },
     refreshSearch: () => {
       if (query) applySearch();
@@ -338,21 +341,20 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   function build(): void {
     if (built) return;
     built = true;
+    // Mods and Appearance share the mods: the look tabs (Background, Chat bar, Conversation) are Appearance's
+    const mods = modsSection(ctx);
     sections = [
       generalSection(ctx),
       modelSection(ctx),
       permissionsSection(ctx, document.getElementById('rules-section')!),
+      appearanceSection(ctx, mods.looks),
       browserSection(ctx),
-      contextSection(ctx),
-      modsSection(ctx),
+      remoteSection(ctx),
+      mods.section,
       mcpSection(ctx, document.getElementById('mcp-section')!),
       skillsSection(ctx),
-      remoteSection(ctx),
       historySection(ctx),
-      appearanceSection(ctx),
-      filesSection(ctx, (info) => applyOwned(info)),
-      hooksSection(ctx),
-      aboutSection(ctx),
+      developerSection(ctx, { onInfo: (info) => applyOwned(info), onVersion: (v) => (footer.textContent = v ? `Silo Harness ${v}` : 'Silo Harness') }),
     ];
     // First in the page, so a search for Scheduled or Dreaming lists the page above rows that only mention it
     sections.unshift(
@@ -381,6 +383,10 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       }
     }).observe(body, { childList: true, subtree: true });
   }
+
+  // A quiet line under the navigation: the app and its version
+  const footer = h('div', { class: 'sp-side-foot', id: 'settings-version' }, 'Silo Harness');
+  navEl.after(footer);
 
   function buildNav(): void {
     navEl.innerHTML = '';
@@ -478,13 +484,18 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     if (query) applySearch();
   }
 
-  /** Scrolls a row (or the row holding an element) into view, on its tab, and gives it a brief highlight. */
+  /** A row on the page by its id, or the row a moved one became (null when neither is there). */
+  function rowElement(id: string): HTMLElement | null {
+    return document.getElementById(`sp-row-${id}`) ?? (movedRow(id) ? document.getElementById(`sp-row-${movedRow(id)}`) : null);
+  }
+
+  /** Scrolls a row (or the row holding an element) into view, on its tab and with its Advanced open, and gives it a brief highlight. */
   function reveal(el: HTMLElement | null): void {
     if (!el) return;
     const owner = el.closest<HTMLElement>('.sp-section')?.dataset.section;
     sections.find((s) => s.id === owner)?.uncover?.(el);
     const r = el.closest<HTMLElement>('.sp-row') ?? el;
-    r.closest('.sp-advanced')?.classList.add('open');
+    uncoverDisclosures(r);
     requestAnimationFrame(() => {
       r.scrollIntoView({ block: 'center' });
       r.classList.remove('flash');
@@ -511,6 +522,12 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
           if (hit) hits++;
         }
         for (const g of s.el.querySelectorAll<HTMLElement>('.sp-group')) g.classList.toggle('has-hit', Boolean(g.querySelector('.sp-row.hit')));
+        // Inside a card the first match shows no hairline above it
+        for (const c of s.el.querySelectorAll<HTMLElement>('.sp-card')) {
+          const first = searching ? c.querySelector<HTMLElement>('.sp-row.hit') : null;
+          for (const r of c.querySelectorAll<HTMLElement>('.sp-row.first-hit')) if (r !== first) r.classList.remove('first-hit');
+          first?.classList.add('first-hit');
+        }
       }
       s.el.classList.toggle('has-hit', hits > 0);
       navItems.get(s.id)?.classList.toggle('dim', searching && hits === 0);
@@ -600,17 +617,17 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       const owner = ownerOf(b.field);
       for (const c of b.controls()) c.disabled = Boolean(owner);
       b.row.el.classList.toggle('owned', Boolean(owner));
-      let pill = b.row.el.querySelector<HTMLButtonElement>('.sp-owned');
+      let lock = b.row.control.querySelector<HTMLButtonElement>(':scope > .sp-lock');
       if (owner) {
-        if (!pill) {
-          pill = h('button', { type: 'button', class: 'sp-owned' }, 'Set in settings.json');
-          pill.addEventListener('click', () => ctx.show('files'));
-          b.row.el.querySelector('.sp-row-title')!.append(pill);
-        }
         const path = ownedFiles[owner] ?? '';
-        pill.title = path ? `${path} · open Configuration files` : 'Open Configuration files';
-        pill.setAttribute('aria-label', `Set in settings.json${path ? ` (${path})` : ''}: open Configuration files`);
-      } else pill?.remove();
+        // A small lock on the control; its tooltip says why, a click opens the file's row in Developer
+        if (!lock) {
+          lock = lockButton(path, () => ctx.show('developer', { row: (lock?.dataset.owner ?? 'user') === 'project' ? 'file-project' : 'file-user' }));
+          b.row.control.querySelector('.sp-saved')!.after(lock);
+        }
+        lock.dataset.owner = owner;
+        lock.setAttribute('aria-label', `Set in settings.json${path ? ` (${path})` : ''}`);
+      } else lock?.remove();
     }
   }
 
@@ -658,16 +675,22 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
       if (!t) searchInput.focus({ preventScroll: true });
     }
     if (!t) return;
-    const sec = sectionForTarget(t);
-    if (sec) {
+    const land = landingFor(t);
+    if (land) {
+      // A look tab named with Mods ("mods" with { tab: 'backgrounds' }) is Appearance's now
+      const tabOpt = opts && typeof opts.tab === 'string' ? opts.tab : null;
+      const look = tabOpt ? landingFor(`appearance:${tabOpt}`) : null;
+      const sec = look && land.section === 'mods' ? look.section : land.section;
+      const tab = tabOpt ?? land.tab ?? null;
       clearSearch(false);
       showSection(sec);
-      const tab = (opts && typeof opts.tab === 'string' ? opts.tab : null) ?? tabForTarget(t);
       if (tab) sections.find((s) => s.id === sec)?.showTab?.(tab, typeof opts?.preview === 'string' ? { preview: opts.preview } : undefined);
-      navItems.get(sec)?.focus({ preventScroll: true });
+      if (land.row) reveal(rowElement(land.row));
+      else navItems.get(sec)?.focus({ preventScroll: true });
       return;
     }
-    const el = document.getElementById(t);
+    // An element of the page (a control's id, a row's sp-row-… id), or a row by its id, or where a moved row lives now
+    const el = [document.getElementById(t), document.getElementById(`sp-row-${t}`), movedRow(t) ? document.getElementById(`sp-row-${movedRow(t)}`) : null].find((x) => x?.closest('.sp-section')) ?? null;
     const owner = el?.closest<HTMLElement>('.sp-section');
     if (!el || !owner) return;
     clearSearch(false);

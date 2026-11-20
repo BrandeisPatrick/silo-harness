@@ -53,7 +53,7 @@ export interface SettingsRpc {
   'settings.open': (scope: 'user' | 'project') => void;
   'app.info': () => AppInfo;
   /** Shows a folder in Finder */
-  'app.reveal': (which: 'userData' | 'configDir' | 'project') => void;
+  'app.reveal': (which: 'userData' | 'configDir' | 'project' | 'skills') => void;
 }
 
 export interface SettingsEvents {

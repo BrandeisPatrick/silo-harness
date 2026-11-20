@@ -150,7 +150,8 @@ export function setupSettings(app: App, opts: SettingsServiceOptions = {}): Sett
     }),
     app.rpc.handle('app.info', () => appInfo(app)),
     app.rpc.handle('app.reveal', async (which) => {
-      const dir = which === 'userData' ? app.userData : which === 'project' ? app.config().workingDirectory : configDir();
+      // skills: your own skills folder (made when it is not there yet, so the button always opens something)
+      const dir = which === 'userData' ? app.userData : which === 'project' ? app.config().workingDirectory : which === 'skills' ? path.join(configDir(), 'skills') : configDir();
       fs.mkdirSync(dir, { recursive: true });
       const err = await openPath(dir);
       if (err) throw new Error(`Could not open ${dir}: ${err}`);
