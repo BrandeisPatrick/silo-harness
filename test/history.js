@@ -133,6 +133,29 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('1: the service is provided', h.app.service('history') === h.history);
   close(h);
 
+  // ---- 1b: run.start's sandbox says true only when the run's commands really run sandboxed ----
+  {
+    const sb = require(path.join(projectDir, 'dist/main/sandbox/index.js'));
+    const hs = open(path.join(tmp, 'ud-sandbox'), { config: { sandbox: { enabled: true } } });
+    const S = hs.rt.foregroundId();
+    const sandboxOf = async (probe) => {
+      sb.setProbeForTests(probe);
+      state.replies.push({ content: 'ok' });
+      hs.rt.send(S, 'hi');
+      await waitFor(() => !hs.rt.isRunning(S), 5000, 'the run');
+      return recordsOf(hs, S).filter((r) => r.type === 'run.start').pop().data;
+    };
+    let d = await sandboxOf(null);
+    check('1b: setting on, the probe found no sandbox: sandbox false', d.sandbox === false, d);
+    d = await sandboxOf({ temp: ['/private/tmp'] });
+    check('1b: setting on, the probe found one, the folder can be sandboxed: sandbox true (on macOS)', d.sandbox === (process.platform === 'darwin'), d);
+    d = await sandboxOf(undefined);
+    check('1b: setting on, the probe has not answered yet: the field is left out, not guessed', process.platform !== 'darwin' ? d.sandbox === false : !('sandbox' in d), d);
+    await sb.probeSandbox();
+    sb.setProbeForTests(null);
+    close(hs);
+  }
+
   // ---- 2: a rewind and a compaction leave every message in the log; replay reproduces the session ----
   const ud2 = path.join(tmp, 'ud2');
   h = open(ud2, { config: { permissionMode: 'bypass' } });

@@ -69,7 +69,7 @@ export interface RunInfo {
   provider?: string;
   /** The permission mode */
   mode?: string;
-  /** The shell sandbox is on for this run */
+  /** The shell sandbox is on for this run (left out when that was not known yet: the probe had not answered) */
   sandbox?: boolean;
   /** The app's version */
   app?: string;

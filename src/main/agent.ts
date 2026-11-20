@@ -1952,9 +1952,12 @@ export class Agent {
     } catch {
       /* no usable provider: the run ends with its error */
     }
-    const sandbox = sandboxSettings(cfg.sandbox).enabled && process.platform === 'darwin' && sandboxHostNow() !== null && !this.sandboxOff.has(this.session.id) && sandboxableFolder(realish(cfg.workingDirectory));
+    // True only when this run's shell commands will run sandboxed (sandboxOn); while the probe has not answered and
+    // nothing else rules the sandbox out, that is not known yet, and the field is left out rather than guessed
+    const unknown = sandboxSettings(cfg.sandbox).enabled && process.platform === 'darwin' && sandboxHostNow() === undefined && !this.sandboxOff.has(this.session.id) && sandboxableFolder(realish(cfg.workingDirectory));
+    const sandbox = process.platform === 'darwin' && this.sandboxOn(cfg);
     const app = appVersion();
-    return { ...(model ? { model: logModelId(model) } : {}), ...(provider ? { provider } : {}), mode: cfg.permissionMode, sandbox, ...(app ? { app } : {}) };
+    return { ...(model ? { model: logModelId(model) } : {}), ...(provider ? { provider } : {}), mode: cfg.permissionMode, ...(unknown ? {} : { sandbox }), ...(app ? { app } : {}) };
   }
 
   /** Per session: where the native path stopped sending kept thinking (agent/anthropic.ts completeAnthropic). */
