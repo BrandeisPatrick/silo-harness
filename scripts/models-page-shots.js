@@ -118,9 +118,9 @@ async function main() {
     await app.evaluate(`[...document.querySelectorAll('.sp-provider[data-provider-name="portkey"] .sp-model[data-model="@anthropic/claude-haiku-5-5"] button')].find((b) => b.innerText.trim() === 'Test').click()`);
     await app.waitFor(`/Answered in/.test(document.querySelector('.sp-provider[data-provider-name="portkey"] .sp-model[data-model="@anthropic/claude-haiku-5-5"]').innerText)`, 10_000, 'the answered test');
     or.state.replies.push({ nonStream: true, status: 429, error: 'Rate limit exceeded: free-models-per-day. Add credits to unlock more requests.' });
-    await app.evaluate(`[...document.querySelectorAll('.sp-provider[data-provider-name="openrouter"] .sp-model[data-model="openai/gpt-5.6"] button')].find((b) => b.innerText.trim() === 'Test').click()`);
-    await app.waitFor(`/HTTP 429/.test(document.querySelector('.sp-provider[data-provider-name="openrouter"] .sp-model[data-model="openai/gpt-5.6"]').innerText)`, 10_000, 'the refused test');
-    await scrollTo('#sp-sec-model .sp-models');
+    await app.evaluate(`[...document.querySelectorAll('.sp-provider[data-provider-name="openrouter"] .sp-model[data-model="anthropic/claude-haiku-5.5"] button')].find((b) => b.innerText.trim() === 'Test').click()`);
+    await app.waitFor(`/HTTP 429/.test(document.querySelector('.sp-provider[data-provider-name="openrouter"] .sp-model[data-model="anthropic/claude-haiku-5.5"]').innerText)`, 10_000, 'the refused test');
+    await scrollTo('.sp-provider[data-provider-name="portkey"]');
     await sleep(800);
     await capture(s, await dialogBox(app), path.join(OUT, 'models-row-tested.png'));
 
