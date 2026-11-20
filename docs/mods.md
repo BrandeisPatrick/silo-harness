@@ -59,25 +59,25 @@ Save the two files, turn the mod on in Settings → Mods (or on the card that ap
 
 A user mod with the id of a bundled one replaces it, which is how you customise a built-in panel: Settings → Mods → Customise copies it into your folder, and you edit the copy.
 
-The app watches these folders. A new folder with a valid `mod.json` shows up in Settings → Mods right away, and as a card in the chat when a session is open. Nothing behind a switch loads until the mod is on, and no look applies until it is used.
+The app watches these folders. A new folder with a valid `mod.json` shows up in Settings → Mods (a look on Settings → Appearance) right away, and as a card in the chat when a session is open. Nothing behind a switch loads until the mod is on, and no look applies until it is used.
 
 Turning a mod on grants the permissions its manifest lists at that moment. Later edits to its pages reload it without asking again. An edit that adds a permission pauses the mod until you approve the change.
 
 ### Mods and looks
 
-Settings → Mods has a tab for each kind, by what the manifest contributes: **Mods**, **Background**, **Chat bar** and **Conversation**.
+What the manifest contributes decides where a mod shows: what adds something is on Settings → Mods, and looks are on Settings → Appearance, with a tab for each kind under the colour scheme (**Background**, **Chat bar**, **Conversation**).
 
-- **Mods** lists what adds something to the window: views in the rail, the side pane, above the composer or in the `worker` seat, and slash commands. Each has its switch.
-- The other three are **looks**: a view in the `background` seat, a look for `composer` and a look for `conversation`. A look has no switch. It is available as soon as it is installed, and its tab decides which one is in use: one per kind, with Default (none) first.
+- **Settings → Mods** lists what adds something to the window: views in the rail, the side pane, above the composer or in the `worker` seat, and slash commands. Each is one line under Built-in, Yours or This project, with its switch; open it for what it does, what it asks for and its own settings. Above the list are Safe mode, **New ⌄** (From a template…, Install…) and Reload.
+- The tabs of **Settings → Appearance** are the **looks**: a view in the `background` seat, a look for `composer` and a look for `conversation`. A look has no switch. It is available as soon as it is installed, and its tab decides which one is in use: one per kind, with Default (none) first.
   - At the top of a look tab is a preview of the look in use: the background behind a miniature window (with Dim under it), a sample chat bar or a sample exchange, always in the app's own look. Under it are the look's name and source, and its mod's settings.
   - Under those is every version of the kind as a card: Default, then the built-in ones, yours and the project's. A click on a card shows that version in the preview, and the window stays as it is. **Use** applies it to the window; **Back to current** shows the one in use again. Using a look puts away the one of its kind that was in use.
   - **New ⌄** asks the agent for one (Settings closes and the composer starts the request), writes a starter from a template (it shows in the preview, not applied), or installs one (Install…).
   - The first Use of a look of yours or of a project's asks for your approval, once per mod: what its pages may do, and that its stylesheet restyles the app. That approval is the only gate a look has. A bundled look needs none.
-- A mod with both kinds keeps its switch in the Mods tab for its views and commands; its looks are on their tabs, and do not depend on the switch.
+- A mod with both kinds keeps its row and switch on Settings → Mods for its views and commands; its looks are on Appearance's tabs, and do not depend on the switch. A mod that is only looks has no row on Mods.
 
-`openSettings('mods', { tab: 'backgrounds' })` opens a tab, and `{ tab, preview: '<mod key>/<look id>' }` opens it with that version previewed; the tab ids are `mods`, `backgrounds`, `chat-bar` and `conversation`.
+`openSettings('appearance', { tab: 'backgrounds' })` opens a look tab, and `{ tab, preview: '<mod key>/<look id>' }` opens it with that version previewed; the tab ids are `backgrounds`, `chat-bar` and `conversation` (`openSettings('mods', { tab })`, from before the looks moved, lands there too).
 
-`Settings → Mods → Safe mode` (on the Mods tab) turns every user and project mod off at once, their looks included.
+`Settings → Mods → Safe mode` turns every user and project mod off at once, their looks included.
 
 ## mod.json
 
@@ -114,7 +114,7 @@ A view is one HTML page in one seat.
 | `tab` | a tab in the side pane's strip, beside the page tabs, Diff and Terminal | fills the pane; it is not sized to its content, so make the page `height: 100%` and scroll inside it (the `--h-inset-*` padding is for rail sections); the tab is in the strip only once opened (from the New tab page, the ⋯ menu, a command or `harness.ui.open`); its × (or Delete) takes it out of the strip and the page keeps running hidden |
 | `composer` | a strip directly above the composer | one row, sized to its content up to 120 px |
 | `worker` | nowhere: a hidden page, loaded whenever the mod is on | for a mod that handles hooks (or listens to events) without a panel; it is never visible, takes no input and does not report a size. *Added in 0.8.0.* |
-| `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); a look: one background is in use, chosen in Settings → Mods → Background (with your own picture and Dim); the app's surfaces turn translucent over it |
+| `background` | behind the whole window | takes no clicks, but can follow the pointer (the `pointer` event); a look: one background is in use, chosen in Settings → Appearance → Background (with your own picture and Dim); the app's surfaces turn translucent over it |
 
 View fields: `id` (unique in the mod), `title`, `entry` (a file in the mod), `seat`, and optionally `order`, `maxHeight`, `icon`, and for a background `preview` (a PNG, JPEG, WebP, GIF or SVG in the mod: its card's picture in Settings; without one the card shows the background itself, drawn for a moment and then held still).
 
@@ -124,7 +124,7 @@ Reserved for later protocol versions: `transcript` (cards after a turn), `status
 
 *Added in 0.3 (the release after 0.2.0). An older app ignores `contributes.looks`, so the protocol version stays 1.*
 
-A look is a stylesheet for one region of the window. It is contained: the app wraps it so that its selectors reach only its region, and only one look per region is in use at a time, chosen in Settings → Mods → Chat bar or Settings → Mods → Conversation.
+A look is a stylesheet for one region of the window. It is contained: the app wraps it so that its selectors reach only its region, and only one look per region is in use at a time, chosen in Settings → Appearance → Chat bar or Settings → Appearance → Conversation.
 
 ```json
 "looks": [
@@ -155,7 +155,7 @@ Look fields: `id` (unique among the mod's looks), `title` (shown in Settings), `
 | `data-mode` | the permission mode: `ask`, `acceptEdits`, `auto`, `plan` or `bypass` |
 | `data-set-<key>` | one per setting of the mod (`contributes.settings`), with the key in lower case and anything but letters, digits, `_`, `.` and `-` as `-`; the value as text (`"true"`, `"12"`, `"green"`) |
 
-They are removed when the look goes away. A setting is how a look offers a choice: a `select` setting `glow` with options `blue` and `green` is changed in Settings → Mods, and the look branches on `:scope[data-set-glow="green"]`.
+They are removed when the look goes away. A setting is how a look offers a choice: a `select` setting `glow` with options `blue` and `green` is changed on the look's tab in Settings → Appearance, and the look branches on `:scope[data-set-glow="green"]`.
 
 **Stable hooks.** A look may rely on the roots, the attributes above, the design tokens listed under The page (and `--font`, `--mono`, `--r-control`, `--r-card`, `--r-composer`), and these class names and ids, which the app keeps from release to release:
 
@@ -271,7 +271,7 @@ Rail and composer views are sized to their content automatically. Use the app's 
 | `harness.ui.copy(text)` | copy to the clipboard |
 | `harness.ui.openExternal(url)` | open an http(s) link in the default browser |
 | `harness.ui.markdown(text)` | `{ html }` rendered the way the chat renders Markdown |
-| `harness.ui.openSettings(section?)` | open Settings at a section (`general` when left out; `model`, `permissions`, `context`, `mods`, …); `scheduled` and `dreaming` open their pages |
+| `harness.ui.openSettings(section?)` | open Settings at a section (`general` when left out; `model`, `permissions`, `appearance`, `mods`, `developer`, …; a page that is gone, such as `context`, opens where its settings are now); `scheduled` and `dreaming` open their pages |
 | `harness.ui.openPage(page, { form }?)` | open the Scheduled tasks (`scheduled`) or the Dreaming (`dreaming`) page in the main column; `{ form: 'new' }` with `scheduled` opens the New task form there |
 | `harness.storage.get(key, fallback)`, `.set(key, value)`, `.remove(key)`, `.keys()` | this mod's own JSON storage, kept across sessions; `get` resolves with the value (or `fallback` when nothing is stored), `keys` with an array; `harness.storage.session` is the same per session. A value may be up to 256 KB, a mod's storage 5 MB |
 | `harness.settings.get()` | the values of the mod's settings; event `settings.changed` |
@@ -349,9 +349,9 @@ harness.hooks.on('PreToolUse', (input) => {
 }); // returns an off function; harness.hooks.off('PreToolUse') does the same
 ```
 
-`handler(input)` receives the object a command hook reads on stdin (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`, … ) and returns, or resolves to, the object a command hook would print, or nothing (no decision). A handler that throws is a non-blocking error. The answers merge with the settings hooks' by the same rule (deny over ask over allow, any block blocks), and Settings → Hooks lists the mod's hooks with its name as their source, and their runs.
+`handler(input)` receives the object a command hook reads on stdin (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`, … ) and returns, or resolves to, the object a command hook would print, or nothing (no decision). A handler that throws is a non-blocking error. The answers merge with the settings hooks' by the same rule (deny over ask over allow, any block blocks), and Settings → Developer lists the mod's hooks under Hooks with its name as their source, and their runs under Recent hook runs.
 
-The host sends each request to every view of the mod that registered a handler for the event, in the order `contributes.views` lists them, and takes the first answer that is not empty. It waits at most 10 seconds in all (or the entry's `timeout`, up to 600); a mod that does not answer in time is skipped, with a log line and a "skipped" run in Settings → Hooks, and decides nothing. A view only receives requests while it is loaded: a `worker` view always is while the mod is on, a rail section is, a tab only once it was opened. Without the window (the app has no window) mods' hooks are skipped.
+The host sends each request to every view of the mod that registered a handler for the event, in the order `contributes.views` lists them, and takes the first answer that is not empty. It waits at most 10 seconds in all (or the entry's `timeout`, up to 600); a mod that does not answer in time is skipped, with a log line and a "skipped" run in Settings → Developer → Recent hook runs, and decides nothing. A view only receives requests while it is loaded: a `worker` view always is while the mod is on, a rail section is, a tab only once it was opened. Without the window (the app has no window) mods' hooks are skipped.
 
 ## Permissions
 
@@ -403,7 +403,7 @@ Method names are the call names above (`ui.setBadge`, `storage.get`, `session.tr
 
 Ask for it: "make a mod that shows the git branch and how many files changed". The agent loads the `create-mod` skill, writes the folder, and checks it with the `mod_check` tool, which reports manifest problems and any errors the page threw. A card in the chat offers to turn the new mod on; after that the agent's edits reload it as they land, and `mod_check` gives it the page's errors to fix. For a look the card offers **Preview** (its tab in Settings, with it in the preview) and **Use** (the card says what it may do, so using it there is the approval), and the agent's edits show in the preview as they land.
 
-By hand: Settings → Mods → New → From a template… writes a starter folder (a view in the seat you pick, or a conversation or chat bar look) and opens it; on a look tab, New ⌄ → From a template writes one of that kind and shows it previewed. `mod_check` is also what the Settings page shows under a mod's Problems.
+By hand: Settings → Mods → New → From a template… writes a starter folder (a view in the seat you pick, or a conversation or chat bar look) and opens it; on a look tab of Settings → Appearance, New ⌄ → From a template writes one of that kind and shows it previewed. `mod_check` is also what the Settings page shows under a mod's Problems.
 
 ## Installing and sharing
 

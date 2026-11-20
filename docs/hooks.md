@@ -12,14 +12,14 @@ Hooks run a shell command, call an HTTP endpoint or ask a mod at fixed points of
 }
 ```
 
-Settings → Hooks lists the hooks in effect, grouped by event (with each one's matcher, type, command and the file or mod it comes from) and the runs of this app session (the event, the tool, the exit code or decision, the time it took and the first line of stderr). The app has no `/hooks` editor: edit the file, and the next event uses it.
+Settings → Developer → Hooks lists the hooks in effect, grouped by event (with each one's matcher, type, command and the file or mod it comes from); Recent hook runs, under it, lists the runs of this app session (the event, the tool, the exit code or decision, the time it took and the first line of stderr). The app has no `/hooks` editor: edit the file (Edit hooks opens your settings.json), and the next event uses it.
 
 ## Where hooks come from
 
 | Source | When it runs |
 | --- | --- |
 | `~/.silo-harness/settings.json` | always |
-| `<project>/.silo-harness/settings.json` | only once you trust the file in Settings → Configuration files (the page and the chat notice say the file defines hooks that run commands); an edit withdraws the trust |
+| `<project>/.silo-harness/settings.json` | only once you trust the file in Settings → Developer → Configuration files (Settings and the chat notice say the file defines hooks that run commands); an edit withdraws the trust |
 | a mod with the `hooks` permission | while the mod is on (see [mods.md](mods.md#hooks)) |
 
 Hooks from several places all run; the same handler defined in both files runs once. `"disableAllHooks": true` in a file turns off every hook from the settings files (a mod's still run; turn the mod off for that). Hooks of a project are those of the session's own folder.

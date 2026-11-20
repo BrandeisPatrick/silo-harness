@@ -20,8 +20,8 @@ agent/         prompt.ts (the system prompt and its parts), complete.ts (one mod
                progress.ts (what the window hears while a request streams: a tool call's input being written, a long silence)
 timing-service.ts  /timing, the last run's breakdown as a local note
 report-service.ts  /report, the session's report (history/report.ts: numbers and fixed words from its history log) as a card
-auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Recently blocked, the auto.* RPCs;
-               the learned answers' store (auto-learned.json) and Settings → Permissions → Auto mode
+auto-blocks.ts the blocks of this app session: Allow, Settings → Permissions → Advanced → Recently blocked, the auto.* RPCs;
+               the learned answers' store (auto-learned.json) and Settings → Permissions → Advanced → What it learned
 context-window.ts  contextLimit, essentialToolsOnly, allGroupsUpFront, FULL_TOOLS_WINDOW: facts about the provider and the config (agent.ts re-exports some)
 sessions.ts    Session, SessionStore (the only place messages change), toMeta, toTranscript, rewindSession, the Msg alias
 json.ts        isRecord, the guard config.ts, settings.ts and provider-presets.ts share (no dependencies, like env.ts)

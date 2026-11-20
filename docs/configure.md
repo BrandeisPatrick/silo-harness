@@ -50,7 +50,7 @@ Each block is a whole `~/.silo-harness/settings.json`. `provider` chooses the pr
 }
 ```
 
-The built-in `portkey` block (Settings → Models → the gateway fields) keeps working as before; a named entry is the way to have several Portkey setups side by side.
+The built-in `portkey` block (Settings → Models → Connection, with the gateway as the provider) keeps working as before; a named entry is the way to have several Portkey setups side by side.
 
 ### Anthropic
 
@@ -123,7 +123,7 @@ Ollama on this Mac needs nothing: it is the default. For another machine, or a s
 
 ## The command line
 
-`silo` is inside the app: `/Applications/Silo Harness.app/Contents/Resources/bin/silo`. It runs with the app's own Electron, so nothing else has to be installed, and it does not need the app to be running. Settings → General → Command line tool → Install links it as `~/.local/bin/silo` (no administrator password). Before the app was renamed the command was `open-harness`; Install takes away the old link the app made. From a checkout: `node bin/silo.js` (after `npm run build`).
+`silo` is inside the app: `/Applications/Silo Harness.app/Contents/Resources/bin/silo`. It runs with the app's own Electron, so nothing else has to be installed, and it does not need the app to be running. Settings → Developer → This Mac → Command line tool → Install links it as `~/.local/bin/silo` (no administrator password). Before the app was renamed the command was `open-harness`; Install takes away the old link the app made. From a checkout: `node bin/silo.js` (after `npm run build`).
 
 ```bash
 silo provider add openrouter --type openrouter --model anthropic/claude-sonnet-4.5
@@ -157,11 +157,11 @@ The command writes only your settings.json, atomically, keeping every key it doe
 
 | File | What it is |
 | --- | --- |
-| `~/.silo-harness/settings.json` | Yours. Always applied. The command line writes here. |
-| `<project>/.silo-harness/settings.json` | A project's. Applied only once you trust it in Settings → Configuration files; an edit withdraws the approval. Wins over yours. |
+| `~/.silo-harness/settings.json` | Yours. Always applied. The command line writes here, and so does Settings → Models → Add provider. |
+| `<project>/.silo-harness/settings.json` | A project's. Applied only once you trust it in Settings → Developer → Configuration files; an edit withdraws the approval. Wins over yours. |
 | `~/Library/Application Support/Silo Harness/config.json` | What the window's Settings write. It also keeps the MCP servers' trust (`mcpTrusted`, `mcpTrustedEntries`) and the values typed for a project's servers (`mcpProjectValues`), which only Settings → MCP servers changes. |
 
-Precedence: defaults < config.json < your settings.json < the project's. A field a file sets is read-only in Settings and is never written into config.json. A value of the wrong type, or an unknown key, is skipped and reported (in Settings → Configuration files, in `silo doctor`); the rest of the file still applies. `${VAR}` and `${VAR:-default}` are expanded in every string. The schema, for editors and agents: [settings.schema.json](https://brandeispatrick.github.io/silo-harness/settings.schema.json) (put it in `"$schema"`).
+Precedence: defaults < config.json < your settings.json < the project's. A field a file sets is read-only in Settings (a lock on its control says so) and is never written into config.json. A value of the wrong type, or an unknown key, is skipped and reported (in Settings → Developer → Configuration files, in `silo doctor`); the rest of the file still applies. `${VAR}` and `${VAR:-default}` are expanded in every string. The schema, for editors and agents: [settings.schema.json](https://brandeispatrick.github.io/silo-harness/settings.schema.json) (put it in `"$schema"`).
 
 ### Providers
 
@@ -216,7 +216,7 @@ Changing the effort re-writes the cached prompt once, so the app never changes i
 
 ### Thinking
 
-`thinking` (Settings → Models → **Think before acting**): `auto`, the default, or `off`. It applies on Anthropic's own API only (a provider of type `anthropic`, or a base URL on `api.anthropic.com`).
+`thinking` (Settings → Models → Advanced → **Think before acting**): `auto`, the default, or `off`. It applies on Anthropic's own API only (a provider of type `anthropic`, or a base URL on `api.anthropic.com`).
 
 - `auto`: every Claude model that has adaptive thinking (Opus 4.6 and later, Sonnet 4.6 and later, Haiku 5.5, Fable, Mythos) is asked for it, `thinking: {"type": "adaptive", "display": "summarized"}` (the 4.6 models show summaries by default and get `{"type": "adaptive"}`). The model decides when and how much to think, as in Claude Code, and the thinking shows in the conversation. The effort pill still sets how much.
 - `off`: the requests as before 0.20: thinking off where the model allows it (`disabled` on Haiku 5.5, Opus 5 and Sonnet 5, `between_tools` on Sonnet 5.5; at `xhigh` and `max` those models think anyway, since the API refuses off there), nothing sent to the 4.x models, and adaptive thinking on the models that always think (Opus 5.5, Fable, Mythos). Faster, and it costs less.
@@ -226,7 +226,8 @@ Changing the effort re-writes the cached prompt once, so the app never changes i
 
 ### Keys
 
-- Keys never appear in the window (Settings shows "Set (OPENROUTER_API_KEY)" or "Not set"), in logs, in the transcript, in what mods can read, or in the command's output.
+- Keys never appear whole in the window (Settings → Models shows dots and the last four characters, and where the key comes from), in logs, in the transcript, in what mods can read, or in the command's output.
+- A key typed in Settings → Models (under API key, or in Add provider) is saved where the app reads it from, in your own files only: in the provider's entry, or in the `env` block of your settings.json when the entry names an `apiKeyEnv`; for the built-in gateway, in the `portkey` block. A file that holds a key is readable by you only (mode 600); there is no keychain. A key from your shell's environment or from a project's settings.json is shown read-only, with where it comes from: change it there.
 - A key in the `env` block is in the app's environment, so the commands the agent runs see it too. A key stored as `apiKey` (what `--key-stdin` does) is not.
 - A project's settings.json (applied only once you trust it) can define providers and choose one, but a repository must not carry, override or redirect a secret. In a project's file:
   - a key is never accepted: `apiKey`, `portkey.apiKey`, `portkey.providerApiKey`, and `env` variables whose names end in `KEY`, `TOKEN`, `SECRET` or `PASSWORD` are ignored with a problem line;
@@ -265,8 +266,8 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | --- | --- | --- |
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
-| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Models or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. Settings → Models → Safety check sets it from a list of the connected models ("Same as the session" is empty) and says what the check runs on now; **Test as safety check** under it sends 24 of the eval's labelled actions to that model and scores how it judges them. |
-| `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
+| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Models or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. Settings → Models → Advanced → Safety check model sets it from a list of your providers' models ("Same as the session" is empty) and says what the check runs on now; **Test** beside it sends 24 of the eval's labelled actions to that model and scores how it judges them. |
+| `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Advanced → Learn from my answers). |
 
 ```json
 {
@@ -282,7 +283,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 
 ### Shell sandbox
 
-The `sandbox` block turns on the shell sandbox (see [The shell sandbox](reference.md#the-shell-sandbox)). Settings → Permissions → Auto mode has the same three settings.
+The `sandbox` block turns on the shell sandbox (see [The shell sandbox](reference.md#the-shell-sandbox)). Settings → Permissions has the same three settings (Run commands in a sandbox, Local ports, Extra writable folders).
 
 | Field | Default | What it is |
 | --- | --- | --- |
