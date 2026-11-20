@@ -7,7 +7,7 @@
 
 import type { AppConfig } from '../shared/types';
 import { icon } from './icons.js';
-import { foldsWhenDone, headText, nodeKind, turnShape, type TurnShape } from './turn-fold-model.js';
+import { blockedText, foldsWhenDone, headText, nodeKind, turnShape, type TurnShape } from './turn-fold-model.js';
 
 export interface TurnFoldDeps {
   messages: HTMLElement;
@@ -18,6 +18,8 @@ interface Head {
   el: HTMLElement;
   btn: HTMLButtonElement;
   label: HTMLElement;
+  /** " · 4 blocked": the calls Auto mode blocked in the turn (their rows fold with the rest) */
+  blocked: HTMLElement;
   /** Counting: when the turn began (the header ticks) */
   liveSince?: number;
   /** How long the turn worked, once it is over (undefined: not known, "Worked") */
@@ -66,6 +68,7 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
   function draw(h: Head): void {
     const live = h.liveSince !== undefined;
     h.label.textContent = headText(live, live ? Date.now() - h.liveSince! : h.workedMs);
+    h.blocked.textContent = blockedText(Number(h.el.dataset.blocked) || 0);
     h.el.classList.toggle('live', live);
     h.btn.disabled = live;
     h.btn.setAttribute('aria-expanded', String(!h.folded));
@@ -77,6 +80,7 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
     const nodes = nodesOf(h);
     const shape = shapeOf(nodes);
     nodes.forEach((n, i) => n.classList.toggle(HIDDEN, h.folded && shape.process[i]));
+    h.el.dataset.blocked = String(nodes.filter((n) => n.classList.contains('auto-blocked')).length);
     draw(h);
   }
 
@@ -96,9 +100,9 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
   function createHead(after: Element | null, before: Element): Head {
     const el = document.createElement('div');
     el.className = 'turn-head';
-    el.innerHTML = `<button type="button" class="turn-head-btn" aria-expanded="true"><span class="turn-head-label"></span><span class="turn-head-chevron">${icon('chevron-right')}</span></button>`;
+    el.innerHTML = `<button type="button" class="turn-head-btn" aria-expanded="true"><span class="turn-head-label"></span><span class="turn-head-blocked"></span><span class="turn-head-chevron">${icon('chevron-right')}</span></button>`;
     const btn = el.querySelector<HTMLButtonElement>('button')!;
-    const h: Head = { el, btn, label: el.querySelector<HTMLElement>('.turn-head-label')!, folded: false };
+    const h: Head = { el, btn, label: el.querySelector<HTMLElement>('.turn-head-label')!, blocked: el.querySelector<HTMLElement>('.turn-head-blocked')!, folded: false };
     heads.set(el, h);
     btn.addEventListener('click', () => {
       if (h.liveSince !== undefined) return;
@@ -148,7 +152,7 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
       if (kind === 'keep' || isUser(el)) return;
       const { head, after } = locate(el);
       if (head) {
-        if (head.folded) apply(head);
+        if (head.folded || el.classList.contains('auto-blocked')) apply(head);
         return;
       }
       if (kind !== 'call' || el.hidden) return;

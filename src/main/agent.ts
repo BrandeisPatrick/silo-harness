@@ -69,7 +69,7 @@ import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSA
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
 import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
-import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
+import { actionDetails, actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCall, isReadOnlyCommand, judgedCommand } from './guard';
 import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
@@ -1069,7 +1069,7 @@ export class Agent {
     st.inARow++;
     st.total++;
     const id = action.callId || `block_${randomUUID()}`;
-    const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
+    const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), ...actionDetails(action.name, action.args), reason, at: Date.now() };
     this.sessionMap(this.autoBlocks).set(id, { block, key, learn: { tool: action.name, key: action.browser ? action.browser.siteKey ?? action.browser.site : '', line: block.what } });
     this.emit({ type: 'auto_blocked', block: { ...block } });
     if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {

@@ -12,7 +12,7 @@ const { check, done } = require('./support/check.js');
 (async () => {
   // ---------- The pure part (turn-fold-model.js imports nothing, so it loads as a data: module) ----------
   const src = fs.readFileSync(path.join(projectDir, 'dist/renderer/turn-fold-model.js'), 'utf8');
-  const { elapsedText, headText, nodeKind, turnShape, foldsWhenDone } = await import('data:text/javascript,' + encodeURIComponent(src));
+  const { elapsedText, headText, blockedText, nodeKind, turnShape, foldsWhenDone } = await import('data:text/javascript,' + encodeURIComponent(src));
 
   check('time: seconds', elapsedText(0) === '0s' && elapsedText(18_400) === '18s' && elapsedText(59_999) === '59s');
   check('time: minutes as the status line writes them', elapsedText(60_000) === '1m 00s' && elapsedText(65_000) === '1m 05s' && elapsedText(3_725_000) === '62m 05s', elapsedText(65_000));
@@ -22,7 +22,8 @@ const { check, done } = require('./support/check.js');
 
   const k = (cls) => nodeKind(cls.split(' '));
   check('calls: rows, groups, sent messages', k('tool') === 'call' && k('tool groupable mcp') === 'call' && k('tool-group live') === 'call' && k('session-msg sent') === 'call', [k('tool'), k('tool-group'), k('session-msg sent')]);
-  check('a call Auto mode blocked stays in sight (its Allow waits for the user)', k('auto-blocked') === 'keep');
+  check('a call Auto mode blocked is one of the turn\'s rows: it folds with them', k('auto-blocked') === 'call');
+  check('the header counts blocked calls', blockedText(4) === ' · 4 blocked' && blockedText(1) === ' · 1 blocked' && blockedText(0) === '');
   check('replies are text', k('msg assistant') === 'text' && k('msg assistant fade-in') === 'text');
   check('thinking and decided approvals are process', k('thinking') === 'process' && k('approval done') === 'process');
   check('never process: a waiting approval or question, notices, errors, cards, images, plans, compaction, received messages', ['approval', 'question-card prompt-card', 'msg system', 'msg system error', 'msg system notice', 'chat-cards', 'reply-images', 'plan-card', 'compaction', 'session-msg received msg user', 'mod-offer'].every((c) => k(c) === 'keep'), ['approval', 'msg system', 'chat-cards', 'compaction'].map(k));

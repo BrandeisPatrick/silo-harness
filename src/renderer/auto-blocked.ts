@@ -1,11 +1,12 @@
-// Auto mode's blocked actions in the window: the quiet line that stands for a call the safety check blocked ("Auto mode
-// blocked git push --force · Allow"), and Settings → Permissions → Recently blocked. Allow lets the action run once when
+// Auto mode's blocked actions in the window: the row that stands for a call the safety check blocked, one of its turn's
+// tool rows ("Blocked Push the release branch", opened: the command, the reason and Allow), and Settings → Permissions → Recently blocked. Allow lets the action run once when
 // the agent tries it again (the agent is told it may). Wired from renderer.ts (setupAutoBlocked) and
 // settings/config-sections.ts (recentlyBlocked, learnedAnswers); the rest arrives through the bus and the transcript item registry.
 
 import type { AutoBlock, LearnedAnswer, RecentBlock } from '../shared/auto-mode';
 import { bus } from './bus.js';
 import { escapeHtml, h } from './dom.js';
+import { highlight } from './highlight.js';
 import { icon } from './icons.js';
 import { rpc } from './rpc.js';
 import type { Ctx } from './settings/ctx.js';
@@ -58,34 +59,54 @@ function linesOf(sessionId: string, id: string): HTMLElement[] {
   return [...messages.querySelectorAll<HTMLElement>(`.auto-blocked[data-block-id="${CSS.escape(id)}"]`)].filter((el) => el.dataset.sessionId === sessionId);
 }
 
+/**
+ * The row of a blocked call, one of the turn's tool rows (it folds with them, turn-fold-model.ts): the shield, "Blocked",
+ * then the call's own description when it gave one, else the command on one line. Opened, it shows the whole command,
+ * the check's reason and Allow.
+ */
 function lineEl(b: AutoBlock): HTMLElement {
-  const el = document.createElement('div');
+  const el = document.createElement('details');
   el.className = 'auto-blocked';
   el.dataset.blockId = b.id;
   el.dataset.sessionId = b.sessionId;
+  const desc = typeof b.desc === 'string' ? b.desc.trim() : '';
+  const full = typeof b.full === 'string' && b.full.trim() ? b.full : b.what;
+  const shell = b.name === 'bash' || b.name === 'terminal_run';
   el.innerHTML =
-    `<span class="auto-blocked-icon">${icon('shield-off', 16)}</span>` +
-    `<span class="auto-blocked-words" data-tip="${escapeHtml(b.reason)}">Auto mode blocked <span class="auto-blocked-what">${escapeHtml(b.what)}</span></span>` +
-    `<span class="auto-blocked-end"></span>`;
-  el.setAttribute('aria-label', `Auto mode blocked ${b.what}: ${b.reason}`);
+    `<summary aria-label="${escapeHtml(`Auto mode blocked ${desc || b.what}`)}">` +
+    `<span class="tool-chevron">${icon('chevron-right')}</span>` +
+    `<span class="tool-status auto-blocked-icon">${icon('shield-off', 16)}</span>` +
+    '<span class="tool-verb">Blocked</span>' +
+    `<span class="tool-arg${desc ? '' : ' mono'} auto-blocked-what" title="${escapeHtml(b.what)}">${escapeHtml(desc || b.what)}</span>` +
+    '<span class="tool-meta auto-blocked-state"></span>' +
+    '</summary>' +
+    '<div class="tool-body">' +
+    (shell
+      ? `<div class="cmd"><span class="cmd-prompt">$</span><code>${highlight(full, 'sh')}</code></div>`
+      : `<div class="cmd"><code>${escapeHtml(full)}</code></div>`) +
+    `<div class="auto-blocked-reason">${escapeHtml(b.reason)}</div>` +
+    '<div class="auto-blocked-end"></div>' +
+    '</div>';
   return el;
 }
 
-/** What follows the words: Allow, Allowed, or nothing. */
+/** Whether the action may run once more: Allow (in the opened row), Allowed (also on the row's line), or neither. */
 function setEnd(el: HTMLElement, state: 'allow' | 'allowed' | null): void {
   const end = el.querySelector<HTMLElement>('.auto-blocked-end')!;
+  const meta = el.querySelector<HTMLElement>('.auto-blocked-state');
   end.replaceChildren();
   el.classList.toggle('allowed', state === 'allowed');
+  if (meta) meta.textContent = state === 'allowed' ? 'Allowed' : '';
   if (!state) return;
-  end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-sep" aria-hidden="true">·</span>');
   if (state === 'allowed') {
-    end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-done">Allowed</span>');
+    end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-done">Allowed: it runs once when the agent tries it again</span>');
     return;
   }
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'auto-blocked-allow';
+  btn.className = 'btn sm auto-blocked-allow';
   btn.textContent = 'Allow';
+  btn.setAttribute('aria-label', 'Allow it once');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     const r = await rpc('auto.allow', el.dataset.sessionId ?? '', el.dataset.blockId ?? '').catch(() => null);
@@ -93,7 +114,7 @@ function setEnd(el: HTMLElement, state: 'allow' | 'allowed' | null): void {
     else if (r) setEnd(el, null);
     else btn.disabled = false;
   });
-  end.append(btn);
+  end.append(btn, Object.assign(document.createElement('span'), { className: 'auto-blocked-hint', textContent: 'lets it run once when the agent tries it again' }));
 }
 
 // ---------- Settings → Permissions → Recently blocked ----------

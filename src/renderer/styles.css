@@ -693,6 +693,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .turn-head-chevron { display: inline-flex; flex: none; opacity: 0.8; transition: transform 0.12s ease; }
 .turn-head-chevron .icon { width: 12px; height: 12px; }
 .turn-head.live .turn-head-chevron { display: none; }
+/* " · 4 blocked": calls Auto mode blocked in the turn, in a quiet warning tint (their rows are in the fold) */
+.turn-head-blocked { color: color-mix(in srgb, var(--warn) 70%, var(--text-400)); }
+.turn-head-blocked:empty { display: none; }
 .turn-head-btn[aria-expanded="true"] .turn-head-chevron { transform: rotate(90deg); }
 .transcript > .turn-hidden { display: none !important; }
 /* A folded run: the summary takes the room and is cut last; the diff total, failed and denied sit on its right */
