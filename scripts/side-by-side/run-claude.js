@@ -36,6 +36,16 @@ function readEvents(file) {
  * The summary's numbers from Claude Code's event stream. `origin` (epoch ms) is when the run started; without it the
  * first timestamp in the stream stands in.
  */
+/** The main thread's model calls that began with a thinking block, and the words of the thinking they returned. */
+function reasoningOf(calls) {
+  return {
+    calls: calls.length,
+    reasonedFirst: calls.filter((x) => x.first === 'thinking' || x.first === 'redacted_thinking').length,
+    thinkingWords: calls.reduce((a, x) => a + (x.thinkingWords || 0), 0),
+    from: 'thinking blocks in the event stream',
+  };
+}
+
 function parseEvents(events, origin) {
   const ts = (e) => (e.timestamp ? Date.parse(e.timestamp) : NaN);
   const first = events.map(ts).find((t) => !Number.isNaN(t));
@@ -58,7 +68,11 @@ function parseEvents(events, origin) {
         calls.set(id, { usage: e.message.usage, sub });
         steps.push({ type: 'model', name: e.message.model || init.model || '', kind: 'model', atMs: Number.isNaN(ts(e)) ? null : ts(e) - t0, ...(sub ? { sub: true } : {}) });
       } else calls.get(id).usage = e.message.usage || calls.get(id).usage;
+      const cl = calls.get(id);
       for (const b of e.message.content || []) {
+        // Reasoning: a call reasoned first when its first block is thinking; the words of every thinking block
+        if (cl.first === undefined) cl.first = b.type;
+        if (b.type === 'thinking') cl.thinkingWords = (cl.thinkingWords || 0) + c.wordCount(b.thinking);
         if (b.type === 'text' && !sub && b.text.trim()) {
           lastText = b.text;
           const prev = texts[texts.length - 1];
@@ -122,6 +136,7 @@ function parseEvents(events, origin) {
     narration,
     steps,
     modelCalls: [...calls.values()].filter((x) => !x.sub).length,
+    reasoning: reasoningOf([...calls.values()].filter((x) => !x.sub)),
     tokens,
     costUsd: result ? result.total_cost_usd ?? null : null,
     // Claude Code has no separate check record: these are the permission decisions it attached to tool results
@@ -229,6 +244,7 @@ async function main() {
     costUsd: parsed.costUsd,
     steps: parsed.steps,
     checks: parsed.checks,
+    reasoning: parsed.reasoning,
     finish: c.finishFields(parsed.final, parsed.steps, project, parsed.narration),
     log: { ...parsed.log, wallFrom: run ? 'spawn to exit' : 'result.duration_ms (parse-only)', ...(run ? { exitCode: run.exitCode, timedOut: run.timedOut } : {}), parseOnly: Boolean(parseOnly) },
   });

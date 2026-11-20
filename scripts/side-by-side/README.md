@@ -10,8 +10,15 @@ calls; their time limit defaults to the 25 minutes in task.json, otherwise 10, a
 one commit, under the output folder you give. Never point it at a folder inside the repository.
 
     node scripts/side-by-side/run-claude.js <task> <outDir> [--model id]                    # claude -p, Auto mode
-    npm run build && node scripts/side-by-side/run-silo.js <task> <outDir> [--model id] [--sandbox on|off]
+    npm run build && node scripts/side-by-side/run-silo.js <task> <outDir> [--model id] [--thinking auto|off] [--sandbox on|off]
     node scripts/side-by-side/compare.js <outDir>                                            # tables, compare.md, compare.json, log-fields.md
+
+`--thinking` sets Silo's thinking setting (Settings → Models → Think before acting) through the launch config:
+`auto`, the default and the app's own, asks the Claude models for adaptive thinking as Claude Code does, and runs in
+the runner folder `silo-think`; `off` (the app before 0.20) runs in `silo`. So both can sit in one round folder, and
+compare.js shows each as its own column, with two rows on reasoning: the model calls that reasoned first (Claude Code:
+the calls whose first block is thinking; Silo: the thinking records of its history log, one per call that showed
+thinking) and the thinking words stored. `--sandbox on` adds `-sandbox` to either name.
 
 `run-silo.js` needs `ANTHROPIC_API_KEY` (or `SILO_HARNESS_LIVE_ANT=1`) for a real model, as the live tests do;
 `--mock` runs the mock model instead. `run-claude.js --parse-only <events.jsonl>` rebuilds a summary from a saved

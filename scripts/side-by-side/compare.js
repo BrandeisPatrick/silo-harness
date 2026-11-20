@@ -10,7 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { TASK_IDS, KIND_NAMES } = require('./lib/common.js');
 
-const RUNNER_ORDER = ['claude', 'silo', 'silo-sandbox'];
+// Silo's runners: thinking off (silo) and auto (silo-think, run-silo.js --thinking auto), each with the sandbox or not
+const RUNNER_ORDER = ['claude', 'silo-think', 'silo', 'silo-think-sandbox', 'silo-sandbox'];
 
 function findFiles(dir, name, depth = 3, out = []) {
   let entries;
@@ -54,9 +55,12 @@ const ROWS = [
   ['hard checks', (s) => checkLine(s.verify && s.verify.hard)],
   ['soft checks', (s) => checkLine(s.verify && s.verify.soft)],
   ['model', (s) => s.model || '-'],
+  ['thinking setting', (s) => s.thinking || (s.runner === 'claude' ? 'Claude Code' : '-')],
   ['wall time', (s) => secs(s.wallMs)],
   ['wall time in its log', (s) => secs(s.log && s.log.logWallMs)],
   ['model calls', (s) => num(s.modelCalls)],
+  ['model calls that reasoned first', (s) => (s.reasoning && typeof s.reasoning.reasonedFirst === 'number' ? `${num(s.reasoning.reasonedFirst)} of ${num(s.reasoning.calls ?? s.modelCalls)}` : '-')],
+  ['thinking words stored', (s) => num(s.reasoning && s.reasoning.thinkingWords)],
   ['tool calls', (s) => num(s.tools && s.tools.total)],
   ...KIND_NAMES.map((k) => [`  ${k}`, (s) => num(s.tools && s.tools.byKind[k])]),
   ['tools by name', (s) => Object.entries((s.tools && s.tools.byName) || {}).map(([n, c]) => `${n} ${c}`).join(', ') || '-'],
@@ -102,6 +106,35 @@ function textTable(header, rows) {
 const mdCell = (v) => String(v).replace(/\|/g, '\\|');
 function mdTable(header, rows) {
   return [`| ${header.map(mdCell).join(' | ')} |`, `|${header.map(() => '---').join('|')}|`, ...rows.map((r) => `| ${r.map(mdCell).join(' | ')} |`)].join('\n');
+}
+
+/**
+ * Reasoning counts for a summary.json written before they were (an older round): from the run folder's own logs, as
+ * the runners count them now (Claude Code: thinking blocks in events.jsonl; Silo: thinking records in history.jsonl).
+ */
+function reasoningFromFiles(s, dir) {
+  const words = (t) => (String(t ?? '').match(/\S+/g) || []).length;
+  try {
+    if (s.runner === 'claude') {
+      const calls = new Map();
+      for (const e of readJsonl(path.join(dir, 'events.jsonl'))) {
+        if (e.type !== 'assistant' || !e.message || e.parent_tool_use_id) continue;
+        const id = e.message.id || `anon-${calls.size}`;
+        if (!calls.has(id)) calls.set(id, { first: undefined, words: 0 });
+        const cl = calls.get(id);
+        for (const b of e.message.content || []) {
+          if (cl.first === undefined) cl.first = b.type;
+          if (b.type === 'thinking') cl.words += words(b.thinking);
+        }
+      }
+      const all = [...calls.values()];
+      return { calls: all.length, reasonedFirst: all.filter((x) => x.first === 'thinking' || x.first === 'redacted_thinking').length, thinkingWords: all.reduce((a, x) => a + x.words, 0), from: 'events.jsonl (re-read)' };
+    }
+    const recs = readJsonl(path.join(dir, 'history.jsonl')).filter((r) => r.type === 'thinking');
+    return { calls: s.modelCalls, reasonedFirst: recs.length, thinkingWords: recs.reduce((a, r) => a + words(r.data && r.data.text), 0), from: 'history.jsonl (re-read)' };
+  } catch {
+    return null;
+  }
 }
 
 // ---------- Log fields ----------
@@ -187,6 +220,8 @@ const QUESTIONS = [
   ['cost in dollars', { claude: ['total_cost_usd'], history: ['run.end:data.result.usd', 'usage:data.usd'], timing: [] }],
   ['tool calls not allowed to run', { claude: ['permission_denials'], history: ['run.end:data.result.blocked'], timing: ['outcome'] }],
   ['the text of messages', { claude: ['message.content[].text'], history: ['data.message.content'], timing: [] }],
+  ['thinking before a model call acts', { claude: ['message.content[].thinking'], history: ['thinking:data.text'], timing: [] }],
+  ['the thinking setting of a run', { claude: [], history: ['run.start:data.thinking'], timing: [] }],
 ];
 
 function logFields(outDir) {
@@ -258,6 +293,7 @@ function main() {
   const byTask = new Map();
   for (const f of files) {
     const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (!s.reasoning) s.reasoning = reasoningFromFiles(s, path.dirname(f));
     s._final = (() => {
       try {
         return fs.readFileSync(path.join(path.dirname(f), 'final.txt'), 'utf8');

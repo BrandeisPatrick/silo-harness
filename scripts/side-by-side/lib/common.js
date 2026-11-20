@@ -192,6 +192,8 @@ function writeSummary(runDir, s) {
     tools: toolCounts(s.steps),
     steps: s.steps,
     checks: s.checks ?? null,
+    ...(s.thinking !== undefined ? { thinking: s.thinking } : {}),
+    reasoning: s.reasoning ?? null,
     ...(s.stoppedOn !== undefined ? { stoppedOn: s.stoppedOn, stoppedText: s.stoppedText ?? null } : {}),
     finish: s.finish,
     log: s.log ?? {},
@@ -205,4 +207,4 @@ const short = (s, n = 200) => {
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
 
-module.exports = { HERE, TASKS, TASK_IDS, loadTask, parseArgs, prepareRun, gitChanges, kindOf, KIND_NAMES, looksLikeTestRun, analyse, toolCounts, finishFields, runVerify, writeSummary, short };
+module.exports = { HERE, TASKS, TASK_IDS, loadTask, parseArgs, prepareRun, gitChanges, kindOf, KIND_NAMES, looksLikeTestRun, analyse, toolCounts, finishFields, runVerify, writeSummary, short, wordCount };
