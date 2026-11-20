@@ -1084,7 +1084,7 @@ const resetHome = () => {
     }
     check('mods.create refuses an unknown region', /region must be one of conversation, composer/.test(createErr), createErr);
     const starterText = (await tool.run({ id: 'look-starter' })).content;
-    check('mod_check of a new look: no switch, previewed and used from the card or its tab', /only looks, so no switch/.test(starterText) && /approved for use: not yet/.test(starterText) && /previews it and uses it from the card in the chat \(Preview, Use\) or in Settings → Mods → Conversation/.test(starterText), starterText);
+    check('mod_check of a new look: no switch, previewed and used from the card or its tab', /only looks, so no switch/.test(starterText) && /approved for use: not yet/.test(starterText) && /previews it and uses it from the card in the chat \(Preview, Use\) or in Settings → Appearance → Conversation/.test(starterText), starterText);
 
     // Previews: a look not in use yet (even one never approved) is compiled for the preview's root and served
     const pv = rpc(g, 'mods.previewCss', { kind: 'conversation', ref: 'look-starter/main' }).css;

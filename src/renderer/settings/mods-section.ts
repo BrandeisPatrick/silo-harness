@@ -422,7 +422,22 @@ export function modsSection(ctx: Ctx): { section: Section; looks: LooksPart } {
     for (const [id, head] of Object.entries(heads)) head!.classList.toggle('current', id === tab);
     placeLookStatus();
     for (const [t, lt] of lookTabs) lt.shown(dialogOpen && looksOnScreen && t === tab);
-    if (opts?.preview !== undefined) lookTabs.get(tab)?.preview(opts.preview);
+    if (opts?.preview !== undefined) {
+      const lt = lookTabs.get(tab);
+      const ref = opts.preview;
+      lt?.preview(ref);
+      // A mod that arrived a moment ago (its card in the chat links here) may not be in the list yet: read it again
+      if (ref && lt && !lt.state().versions.includes(ref)) {
+        void ctx
+          .call('mods.list')
+          .then((list) => {
+            mods = list;
+            renderAll();
+            lt.preview(ref);
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   // ---------- The list ----------

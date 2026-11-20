@@ -1,6 +1,6 @@
 // Feature: providers. What the window asks about providers beyond the config itself (which already carries them
 // resolved, see windowConfig in providers.ts): the models one offers, choosing a model, a quick test; and the
-// command-line tool's row in Settings → General, which links the bundled `silo` into ~/.local/bin.
+// command-line tool's row in Settings → Developer → This Mac, which links the bundled `silo` into ~/.local/bin.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

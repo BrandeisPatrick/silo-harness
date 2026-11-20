@@ -77,7 +77,7 @@ export function applyPublicPatch(cfg: AppConfig, patch: unknown, mods: ModInfo[]
       next.mods.layout.background = null;
       next.mods.layout.backgroundImage = null;
     } else if (b === 'image') {
-      if (!cfg.mods.layout.backgroundImage) throw new PatchError('patch.background: "image" needs a picture; the user chooses one in Settings → Mods');
+      if (!cfg.mods.layout.backgroundImage) throw new PatchError('patch.background: "image" needs a picture; the user chooses one in Settings → Appearance → Background');
       next.mods.layout.background = null;
     } else if (typeof b === 'string' && isBackgroundView(b, mods)) {
       next.mods.layout.background = b;

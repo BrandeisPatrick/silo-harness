@@ -717,6 +717,9 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     if (e.target === dialog) dialog.close();
   });
   dialog.addEventListener('close', () => {
+    // The event comes a moment after close(); when the page was opened again in between (closed, then a link in the
+    // chat opened it), it is old news: running it would stop the page that is on screen now
+    if (dialog.open) return;
     for (const s of sections) s.closed?.();
     deps.afterClose();
   });

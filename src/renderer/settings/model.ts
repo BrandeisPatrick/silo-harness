@@ -315,7 +315,7 @@ export const LOOK_WORDS: Record<ModLookTarget, string> = {
   composer: 'a look for the chat bar',
 };
 
-// ---------- Kinds of mod and the tabs of Settings → Mods ----------
+// ---------- Kinds of mod, and the look tabs of Settings → Appearance ----------
 
 /**
  * What a mod is, from what its manifest contributes. general: views in the rail, the side pane or above the composer,
@@ -390,7 +390,7 @@ export function refMod(ref: string): string {
   return ref.slice(0, Math.max(0, ref.lastIndexOf('/')));
 }
 
-// ---------- Looks: Settings → Mods → Background, Chat bar, Conversation ----------
+// ---------- Looks: Settings → Appearance → Background, Chat bar, Conversation ----------
 
 export interface LookTabInfo {
   tab: ModTab;
