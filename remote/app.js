@@ -798,25 +798,68 @@
   }
 
   /**
-   * A call Auto mode's safety check blocked: one quiet line, as on the desktop ("Auto mode blocked git push --force ·
-   * Allow"); `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed).
+   * A call Auto mode's safety check blocked: one of the turn's tool rows, as on the desktop ("Blocked Push the release
+   * branch", the call's own description, else its command); opened, the whole command, the check's reason and Allow.
+   * `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed). The turn's line
+   * counts the blocks (countBlocked).
    */
   function blockedEl(block, state) {
-    const n = h('div', 'note blocked');
+    const n = h('details', 'tool blocked');
     n.dataset.id = block.id;
-    n.title = block.reason || '';
-    n.innerHTML = `${icon('shield', 14)}<span class="blocked-words">Auto mode blocked <code>${esc(block.what || block.name)}</code></span><span class="blocked-end"></span>`;
+    const desc = typeof block.desc === 'string' ? block.desc.trim() : '';
+    const what = block.what || block.name;
+    const sum = h('summary');
+    sum.innerHTML =
+      `<span class="chev">${icon('chevron', 14)}</span>` +
+      `<span class="tool-status warn">${icon('shield', 14)}</span>` +
+      '<span class="tool-verb">Blocked</span>' +
+      `<span class="tool-arg${desc ? '' : ' mono'}">${esc(desc || what)}</span>` +
+      '<span class="tool-meta"></span>';
+    const body = h('div', 'tool-body');
+    body.append(h('pre', 'out', `<span class="label">Command</span>${esc(block.full || what)}`));
+    body.append(h('div', 'blocked-reason', esc(block.reason || '')));
+    body.append(h('div', 'blocked-end'));
+    n.append(sum, body);
     setBlocked(n, state);
     return n;
   }
 
+  /**
+   * The count of blocked calls on each turn's line, as on the desktop ("· 4 blocked" after "Worked for …"): the
+   * phone has no fold, so the line is a quiet note right under the turn's message, there only while a block is.
+   */
+  function countBlocked() {
+    const t = el.transcript;
+    let line = null;
+    let count = 0;
+    const settle = () => {
+      if (!line) return;
+      if (count) line.querySelector('.turn-blocked-count').textContent = `${count} blocked`;
+      line.hidden = !count;
+    };
+    for (const n of [...t.children]) {
+      if (n.classList.contains('msg') && n.classList.contains('user')) {
+        settle();
+        line = n.nextElementSibling && n.nextElementSibling.classList.contains('turn-line') ? n.nextElementSibling : null;
+        count = 0;
+        if (!line) {
+          line = h('div', 'note turn-line', `${icon('shield', 14)}<span class="turn-blocked-count"></span>`);
+          line.hidden = true;
+          n.after(line);
+        }
+      } else if (n.classList.contains('blocked')) count++;
+    }
+    settle();
+  }
+
   function setBlocked(n, state) {
     const end = n.querySelector('.blocked-end');
+    const meta = n.querySelector('.tool-meta');
     end.textContent = '';
+    meta.textContent = state === 'allowed' ? 'Allowed' : '';
     if (!state) return;
-    end.append(document.createTextNode(' · '));
     if (state === 'allowed') {
-      end.append(document.createTextNode('Allowed'));
+      end.append(document.createTextNode('Allowed: it runs once when the agent tries it again'));
       return;
     }
     const b = h('button', 'link', 'Allow');
@@ -1007,6 +1050,7 @@
       V.questions.set(q.id, card);
       t.append(card);
     }
+    countBlocked();
     if (!t.childElementCount) t.append(emptyEl());
     S.queue = live.queue.map((q) => ({ id: q.id, text: q.text }));
     renderQueue();
@@ -1178,10 +1222,11 @@
           V.tools.delete(ev.block.id);
         }
         append(blockedEl(ev.block, 'allow'));
+        countBlocked();
         break;
       }
       case 'auto_allowed':
-        for (const n of el.transcript.querySelectorAll('.note.blocked')) if (n.dataset.id === ev.id) setBlocked(n, 'allowed');
+        for (const n of el.transcript.querySelectorAll('.tool.blocked')) if (n.dataset.id === ev.id) setBlocked(n, 'allowed');
         break;
       case 'approval_request': {
         endStreaming();
