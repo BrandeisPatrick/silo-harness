@@ -453,6 +453,22 @@ async function main() {
   await sleep(200);
   await shot(win, '6b-blocked');
 
+  // 6c. The next-step card (next_step): recap and question as text, the replies as buttons; a tap sends the label as
+  // a typed message would; the user's message quiets the card, the chosen reply kept. The call has no row.
+  f.emit(A, { type: 'tool_start', id: 'ns1', name: 'next_step', args: { recap: 'The login test passes; nothing is pushed.', question: 'Open a <b>pull request</b>?', replies: ['Yes, open it', 'Not yet'] } });
+  f.emit(A, { type: 'tool_end', id: 'ns1', name: 'next_step', result: 'The card is shown under your reply. End your turn now; the user answers with their next message.', ok: true });
+  check('next step: the card shows', await waitFor(win, `Boolean(document.querySelector('#transcript .next-step'))`));
+  const step = await js(win, `(() => { const c = document.querySelector('#transcript .next-step'); return { recap: c.querySelector('.next-step-recap').textContent, question: c.querySelector('.next-step-question').textContent, markup: c.querySelectorAll('b').length, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent + (b.classList.contains('primary') ? '*' : '')), row: [...document.querySelectorAll('#transcript .tool')].some((t) => /next_step|Next step/.test(t.textContent)) }; })()`);
+  check('next step: recap, question as text, two replies (the first primary), no tool row', step.recap === 'The login test passes; nothing is pushed.' && step.question === 'Open a <b>pull request</b>?' && step.markup === 0 && JSON.stringify(step.buttons) === JSON.stringify(['Yes, open it*', 'Not yet']) && !step.row, step);
+  await js(win, `document.querySelector('#transcript .next-step').scrollIntoView({ block: 'center' })`);
+  await sleep(200);
+  await shot(win, '6c-next-step');
+  const sendsBefore = f.calls.filter((c) => c[0] === 'send').length;
+  await js(win, `[...document.querySelectorAll('#transcript .next-step button')].find((b) => b.textContent === 'Not yet').click()`);
+  check('next step: a tap sends the label', await waitFor(win, `true`) && (await (async () => { for (let i = 0; i < 40 && f.calls.filter((c) => c[0] === 'send').length === sendsBefore; i++) await sleep(50); const last = f.calls.filter((c) => c[0] === 'send').pop(); return last && last[2] === 'Not yet'; })()), f.calls.filter((c) => c[0] === 'send').pop());
+  f.emit(A, { type: 'user_message', text: 'Not yet', images: 0, origin: 'remote' });
+  check('next step: the message quiets the card, "Not yet" kept', await waitFor(win, `(() => { const c = document.querySelector('#transcript .next-step'); const b = [...c.querySelectorAll('button')]; return !c.classList.contains('live') && b.length === 1 && b[0].textContent === 'Not yet' && b[0].disabled && b[0].classList.contains('chosen'); })()`));
+
   // 7. Desktop width.
   win.setSize(1100, 800);
   await sleep(300);

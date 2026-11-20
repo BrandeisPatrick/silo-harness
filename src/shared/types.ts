@@ -5,6 +5,7 @@ import type { ModsConfig } from './mods';
 import type { ImageInfo } from './images';
 import type { DreamingConfig } from './dreaming';
 import type { AutoBlock } from './auto-mode';
+import type { NextStep } from './next-step';
 import type { CallRecord, RunInfo, RunResult } from './history';
 
 import type { RpcEvents, RpcMethods } from './rpc';
@@ -1066,7 +1067,12 @@ export type TranscriptItem =
   /** A dream's propose_* call is shown as its proposal's card (the window has the proposal from dreaming.list) */
   | { role: 'proposal'; proposalId: string; name: string; args: string; result: string }
   /** A call Auto mode's safety check blocked is shown as one quiet line instead of a tool row */
-  | { role: 'auto_blocked'; block: AutoBlock };
+  | { role: 'auto_blocked'; block: AutoBlock }
+  /**
+   * A next_step call is shown as its card, quiet (no buttons): `chosen` is the reply the user's next message was,
+   * when it was one of them
+   */
+  | { role: 'next_step'; step: NextStep; chosen?: string };
 
 export interface SessionsApi {
   list(): Promise<SessionMeta[]>;

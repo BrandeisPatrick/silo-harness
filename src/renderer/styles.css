@@ -546,6 +546,28 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .transcript > .msg.assistant:nth-last-child(1 of .msg.assistant:not(.turn-hidden)) > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions .icon-btn.copied { color: var(--success); }
 
+/* The next-step card (next-step.ts): under the reply that closes a turn, above its Copy row. The recap in the activity
+   tier's grey, the question a step up (15/22, the text colour), then one or two replies: the first a dark fill with its
+   ⌘↵ hint, the other a grey one. Quiet once the user answered: no buttons, only the chosen reply, as a grey pill. */
+.next-step {
+  margin: 18px 0 6px; padding: 16px 18px 18px;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: 14px;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400);
+}
+:root.mod-bg .next-step, #messages[data-look] .next-step { -webkit-backdrop-filter: blur(var(--code-blur)); backdrop-filter: blur(var(--code-blur)); }
+.next-step p { margin: 0; overflow-wrap: anywhere; }
+.next-step-question { margin-top: 12px !important; font-size: calc(var(--fs-act) + 1px); line-height: calc(var(--lh-act) + 2px); color: var(--text-100); }
+.next-step-replies { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.next-step-reply.btn { height: 32px; padding: 0 12px; gap: 8px; border: 0; border-radius: 9px; box-shadow: none; background: var(--button-fill); color: var(--text-100); }
+.next-step-reply.btn:hover { background: var(--button-fill-hover); }
+.next-step-reply.btn.primary { background: var(--text-100); color: var(--bg-000); }
+.next-step-reply.btn.primary:hover { background: color-mix(in srgb, var(--text-100) 88%, var(--bg-000)); }
+.next-step-reply .next-step-kbd { height: 16px; min-width: 0; margin: 0 -2px 0 0; padding: 0 4px; border-color: color-mix(in srgb, currentColor 35%, transparent); color: inherit; opacity: 0.85; letter-spacing: 0.08em; }
+.next-step.quiet .next-step-reply:not(.chosen) { display: none; }
+.next-step.quiet .next-step-reply.chosen { opacity: 1; background: var(--button-fill); color: var(--text-400); }
+.next-step.quiet .next-step-kbd { display: none; }
+.next-step.quiet .next-step-replies:not(:has(.chosen)) { display: none; }
+
 .msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); text-align: center; }
 .msg.system .icon { flex: none; }
 .msg.system.error {

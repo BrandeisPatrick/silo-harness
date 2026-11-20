@@ -36,6 +36,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
+import { SHOWN as SHOWN_NEXT_STEP } from './tools/next-step';
 import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type SandboxPlan, type Tool, type ToolContext, type ToolResult } from './tools';
 import { runShell } from './tools/shell';
 import { deniedPorts, outputLines, probeSandbox, profileFor, realish, sandboxableFolder, sandboxHostNow, sandboxSettings } from './sandbox';
@@ -497,7 +498,22 @@ export class Agent {
     const plan = cfg.permissionMode === 'plan';
     const essential = essentialToolsOnly(cfg);
     const extraTools = registered.filter((t) => !t.scoped && !(essential && t.optional));
-    return [...allTools(cfg.permissionMode, this.sandboxOffered(cfg)), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+    // next_step's card ends a turn the user reads; a sub-session's turns end in its parent instead
+    const builtIn = allTools(cfg.permissionMode, this.sandboxOffered(cfg)).filter((t) => !(this.session.parentId && t.name === 'next_step'));
+    return [...builtIn, ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+  }
+
+  /** The last thing in the conversation is the result of a next_step call that showed its card. */
+  private endedWithNextStep(): boolean {
+    const msgs = this.session.messages;
+    const last = msgs[msgs.length - 1] as { role?: string; tool_call_id?: string; content?: unknown } | undefined;
+    if (last?.role !== 'tool' || last.content !== SHOWN_NEXT_STEP) return false;
+    for (let i = msgs.length - 2; i >= 0; i--) {
+      const m = msgs[i] as { role?: string; tool_calls?: { id: string; function?: { name?: string } }[] };
+      if (m.role !== 'assistant') continue;
+      return (m.tool_calls ?? []).some((c) => c.id === last.tool_call_id && c.function?.name === 'next_step');
+    }
+    return false;
   }
 
   /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
@@ -1547,8 +1563,9 @@ export class Agent {
         }
 
         if (!text.trim() && !toolCalls.length && !reply.cut) {
-          // Small models sometimes return nothing after a tool result. Nudge once, then give up.
-          if (!nudged) {
+          // Small models sometimes return nothing after a tool result. Nudge once, then give up. Nothing after a
+          // next_step card is the turn ending as asked (the card closes it), not an empty response.
+          if (!nudged && !this.endedWithNextStep()) {
             nudged = true;
             this.store.append(this.session, { role: 'user', content: 'You returned an empty response. If the task is complete, summarize the result. If a tool failed, fix the problem and continue.' });
             continue;

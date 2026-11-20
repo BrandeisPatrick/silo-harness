@@ -12,6 +12,7 @@ import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
 import { actionDetails, actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
 import { LOAD_TOOLS } from './tools/groups';
+import { nextStepOrNull } from './tools/next-step';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -388,6 +389,12 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
           items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), ...actionDetails(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
           continue;
         }
+        // A next_step call is its card (one the tool refused stays a tool row with the reason)
+        const step = call.function.name === 'next_step' && ok ? nextStepOrNull(call.function.arguments) : null;
+        if (step) {
+          items.push({ role: 'next_step', step });
+          continue;
+        }
         // A show_image call is the image itself (a failed one stays a tool row with its error)
         const image = call.function.name === 'show_image' && ok ? shown?.get(call.id) : undefined;
         if (image) {
@@ -398,6 +405,19 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         items.push({ role: 'tool', name: call.function.name, args: call.function.arguments, result, ok, ...(sandbox ? { sandbox } : {}) });
       }
     }
+  });
+  markChosenReplies(items);
+}
+
+/** A next_step card's chosen reply: the user's next message, when it was one of the card's replies. */
+function markChosenReplies(items: TranscriptItem[]): void {
+  items.forEach((item, i) => {
+    if (item.role !== 'next_step' || !item.step.replies.length) return;
+    const next = items.slice(i + 1).find((x) => x.role === 'user');
+    const said = next?.role === 'user' ? next.text.trim().toLowerCase() : '';
+    const chosen = said ? item.step.replies.find((r) => r.toLowerCase() === said) : undefined;
+    if (chosen) item.chosen = chosen;
+    else delete item.chosen;
   });
 }
 

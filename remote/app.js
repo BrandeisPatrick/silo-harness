@@ -53,7 +53,7 @@
   function freshView() {
     // attempt: the reply and thinking nodes of the model call in flight (a failed attempt's go); retry: the status text
     // while a failed call waits to be tried again
-    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', attempt: [], retry: null, tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
+    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', attempt: [], retry: null, tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), steps: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -982,6 +982,72 @@
     card.querySelector('.card-actions').hidden = status !== 'proposed' || !card._plan.id;
   }
 
+  // The next-step card that ends a turn (the next_step tool): the recap in grey and the question, as text. A live card
+  // keeps its replies as buttons (a tap sends the label, as typed); once anything is sent it goes quiet, the chosen
+  // reply kept as a grey pill. A stored card is quiet.
+  function stepText(v, max) {
+    return typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '';
+  }
+
+  function nextStepEl(step, chosen, live) {
+    if (typeof step === 'string') {
+      try {
+        step = JSON.parse(step);
+      } catch {
+        return null;
+      }
+    }
+    if (!step || typeof step !== 'object') return null;
+    const recap = stepText(step.recap, 300);
+    if (!recap) return null;
+    const question = stepText(step.question, 100);
+    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(r, 24)).filter(Boolean).slice(0, 2) : [];
+    const card = h('div', 'next-step' + (live ? ' live' : ''));
+    const p = h('p', 'next-step-recap');
+    p.textContent = recap;
+    card.append(p);
+    if (question) {
+      const q = h('p', 'next-step-question');
+      q.textContent = question;
+      card.append(q);
+    }
+    const shown = live ? replies : replies.filter((r) => typeof chosen === 'string' && r.toLowerCase() === chosen.trim().toLowerCase());
+    if (shown.length) {
+      const row = h('div', 'next-step-replies');
+      shown.forEach((label, i) => {
+        const b = h('button', 'btn' + (live && i === 0 ? ' primary' : '') + (live ? '' : ' chosen'));
+        b.type = 'button';
+        b.textContent = label;
+        b.dataset.reply = label;
+        b.disabled = !live;
+        b.onclick = () => {
+          if (!card.classList.contains('live')) return;
+          setInput(label);
+          void send();
+        };
+        row.append(b);
+      });
+      card.append(row);
+    }
+    return card;
+  }
+
+  /** Anything the user sent quiets the live cards: only the reply they sent stays, as a grey pill. */
+  function quietNextSteps(text) {
+    const said = typeof text === 'string' ? text.trim().toLowerCase() : '';
+    for (const card of el.transcript.querySelectorAll('.next-step.live')) {
+      card.classList.remove('live');
+      for (const b of card.querySelectorAll('button')) {
+        b.disabled = true;
+        b.classList.remove('primary');
+        if (said && b.dataset.reply.toLowerCase() === said) b.classList.add('chosen');
+        else b.remove();
+      }
+      const row = card.querySelector('.next-step-replies');
+      if (row && !row.children.length) row.remove();
+    }
+  }
+
   function itemEl(item) {
     switch (item.role) {
       case 'user': return userEl(item.text, item.images, item.origin, item.from);
@@ -996,6 +1062,7 @@
       case 'image': return note(`Image: ${item.image.caption || item.image.name} (on your Mac)`);
       case 'compaction': return h('div', 'divider', 'Earlier messages summarised');
       case 'auto_blocked': return blockedEl(item.block, item.block.allowed ? 'allowed' : item.allowable ? 'allow' : null);
+      case 'next_step': return nextStepEl(item.step, item.chosen, false);
       default: return null;
     }
   }
@@ -1035,7 +1102,7 @@
       t.append(V.assistant);
     }
     for (const tool of live.tools) {
-      if (tool.name === 'submit_plan') continue; // the plan card stands for it, as with tool_start
+      if (tool.name === 'submit_plan' || tool.name === 'next_step') continue; // the plan card stands for it, as with tool_start
       const row = toolEl(tool.name, tool.args, undefined, undefined);
       V.tools.set(tool.id, row);
       t.append(row);
@@ -1136,6 +1203,7 @@
       case 'user_message':
         endStreaming();
         V.assistant = null;
+        quietNextSteps(ev.text);
         append(userEl(ev.text, ev.images, ev.origin, ev.from));
         break;
       case 'thinking_delta':
@@ -1200,12 +1268,29 @@
         endStreaming();
         V.assistant = null;
         if (ev.name === 'submit_plan') break; // the plan card stands for it
+        // The next-step card stands for it once the call is done
+        if (ev.name === 'next_step') {
+          V.steps.set(ev.id, ev.args);
+          break;
+        }
         const row = toolEl(ev.name, ev.args, undefined, undefined);
         V.tools.set(ev.id, row);
         append(row);
         break;
       }
       case 'tool_end': {
+        if (ev.name === 'next_step' && V.steps.has(ev.id)) {
+          const args = V.steps.get(ev.id);
+          V.steps.delete(ev.id);
+          const card = ev.ok ? nextStepEl(args, undefined, true) : null;
+          if (card) {
+            quietNextSteps('');
+            append(card);
+            break;
+          }
+          append(toolEl(ev.name, args, ev.result, ev.ok));
+          break;
+        }
         const row = V.tools.get(ev.id);
         if (row) {
           setToolState(row, ev.result, ev.ok);

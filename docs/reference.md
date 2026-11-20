@@ -98,6 +98,10 @@ Tell the check about your setup in your own settings.json: `autoMode.environment
 
 When a choice is genuinely yours (a preference, an unclear requirement, which of several approaches), the agent asks with `ask_user`, in every mode, Plan included, without an approval. The run waits on a card in the approval card's frame: the question as its title with its short header as a chip ("1 of 3" when there are several, shown one at a time with Next and Back), the 2–4 options as rows with a radio button, or a checkbox when more than one can apply, and **Other**, a field for your own words. Click anywhere on a row, or press `1`–`4`; `↑` `↓` move between rows; **Submit ⌘↵** sends the answers, **Skip** or `Esc` tells the agent "The user skipped the question." The status line says "Waiting for your answer", and the sidebar, the Dock badge and a notification say a session waits for you. The agent reads each question's header with the option you picked or what you typed. Answered, the card folds to one line, "Asked a question", with the answers inside. On the phone page a question with one answer per question is a set of buttons; anything more says to answer in the app.
 
+## Next step
+
+When a turn leaves you a decision or a step, the agent ends it with a small card under its last reply (`next_step`, like Claude Code's): a recap in grey of where things stand, one question, and one or two replies, the recommended one first. Click a reply to send its label as your next message, or press `⌘↵` with an empty chat bar for the first one; typing anything else works too. Once you send something the card goes quiet: the buttons go and the reply you picked stays as a grey pill. Stored sessions show their cards quiet. The card needs no approval and does nothing else; the agent's words on it are plain text. Sub-sessions are not offered the tool. On the phone page the card shows its recap and question, and its replies as buttons while it is live.
+
 ## Keyboard
 
 `⌘N` new session · `⌘[` back a page (Scheduled tasks, Dreaming) · `⌘B` sidebar · `⌘⇧E` mods rail · `⌘⇧B` browser · `⌘⇧D` diff · `⌘⇧T` terminal · `⌘T` terminal tab · `⌘K` focus composer · `⌘F` search sessions · `⌘,` settings · `F2` rename · `Esc` stop · `Esc Esc` rewind to your last message · `⌘↑` `⌘↓` previous prompts · `⌘⇧C` copy last reply · `⇧Tab` cycle mode · `⌘/` shortcuts. While a card waits: `⌘↵` allow once or submit, `Esc` deny or skip, `A` `P` the wider scopes, `1`–`4` pick an answer. With the Browser pane focused (its URL bar, its tabs or the page): `⌘⇧N` new tab · `⌘W` close the tab · `⌘L` URL bar · `⌘F` find in page · `⌘+` `⌘−` `⌘0` zoom · `⌥⌘I` the page's DevTools.
@@ -137,6 +141,7 @@ A message starting with `#` is added to the project's instructions file after a 
 | `create_artifact` | HTML, SVG, Markdown or code shown in the browser pane; an HTML artifact runs its own code and scripts from cdnjs, jsDelivr or unpkg, and sends nothing anywhere (a CSP blocks every request out; it never leaves the artifact or opens a window by itself, the blocked-popup strip offers the address instead) |
 | `update_tasks` | The task list card |
 | `ask_user` | Ask you one to four multiple-choice questions and wait for the answers (see Questions) |
+| `next_step` | End a turn that leaves you a decision or a step with a card under the reply (see Next step); top-level sessions only |
 | `skill` | Load a skill |
 | `submit_plan` | Plan mode: hand the plan to you |
 | `load_tools` | Load tool groups (`browser`, `terminal`, `sessions`, `schedules`, `mods`, `web`, and `mcp:<server>` for an MCP server) for the rest of the session; no row in the conversation |

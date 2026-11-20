@@ -49,7 +49,7 @@ import type { SettingsInfo } from '../shared/settings-info';
 import type { Schedule } from '../shared/schedules';
 import { bus } from './bus.js';
 import { onPush, rpc } from './rpc.js';
-import { setTranscriptSink, transcriptItemRenderer, type ExtraTranscriptItem } from './transcript-items.js';
+import { appendTranscriptItem, setTranscriptSink, transcriptItemRenderer, type ExtraTranscriptItem } from './transcript-items.js';
 import { PROPOSAL_TOOLS, proposalEnded, setupDreamingView } from './dreaming.js';
 import { createModsHost } from './mods-host.js';
 import { createSettingsPage } from './settings-page.js';
@@ -1090,7 +1090,7 @@ function clearBrowsing(): void {
 const hiddenTools = new Map<string, unknown>();
 /** The arguments of the calls in flight, by id: a finished call's pull request or document card reads them */
 const callArgs = new Map<string, unknown>();
-const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', ...PROPOSAL_TOOLS]);
+const CARD_TOOLS = new Set(['submit_plan', 'create_artifact', 'next_step', ...PROPOSAL_TOOLS]);
 /** Events that mean the model is not silent (or the request is over): a silence on the status line ends */
 const ENDS_SILENCE = new Set<AgentEvent['type']>(['text_delta', 'thinking_delta', 'input_progress', 'thinking_done', 'reply_discarded', 'retry_status', 'tool_start', 'run_end']);
 /** The status line shows a tool call's input being written (input_progress) */
@@ -1212,6 +1212,8 @@ function handleEvent(ev: AgentEvent, synthetic = false): void {
         // A plan or artifact that could not be made is shown as a failed row, so the error is visible.
         const failed = !ev.ok || (ev.name === 'create_artifact' && /^\s*Error\b/.test(String(ev.result ?? '')));
         if (failed) finishToolCard({ ...ev, ok: false, id: undefined }, addToolCard(ev.name, args));
+        // The next-step card under the reply (next-step.ts)
+        else if (ev.name === 'next_step') appendTranscriptItem({ role: 'next_step', args, live: true });
         // A dream's proposal is its card (dreaming.ts)
         else if (PROPOSAL_TOOLS.includes(ev.name) && !proposalEnded(ev.name, String(ev.result ?? ''), true)) finishToolCard({ ...ev, id: undefined }, addToolCard(ev.name, args));
         if (ev.name !== 'submit_plan') setStatusText(baseVerb());
@@ -2325,6 +2327,26 @@ setupImageView({ messages: messagesEl, openLightbox, showError: showInlineError 
 // [feature:auto-blocked]
 import { setupAutoBlocked } from './auto-blocked.js';
 setupAutoBlocked({ messages: messagesEl });
+
+// [feature:next-step]
+import { setupNextStep } from './next-step.js';
+setupNextStep({
+  messages: messagesEl,
+  // A reply's label goes as the user's message by the chat bar's path; what was typed meanwhile stays in the chat bar
+  send: (label) => {
+    const draft = inputEl.value;
+    inputEl.value = label;
+    void send().finally(() => {
+      if (draft && !inputEl.value) restoreComposerText(draft);
+    });
+  },
+  canPick: (e) => {
+    if (dialogOpen() || isMenuOpen() || !slashMenu.hidden || titleEditing() || approvals.pending() || rewinding) return false;
+    const t = e.target as HTMLElement;
+    if (isTextField(t) && t !== inputEl) return false;
+    return composerEmpty();
+  },
+});
 
 // [feature:updates]
 import { setupUpdateLine } from './update-line.js';
