@@ -83,6 +83,42 @@ export function cutId(id: string, max = 40): string {
   return `${s.slice(0, keepStart)}…${s.slice(s.length - (max - 1 - keepStart))}`;
 }
 
+
+/** What the Add provider form holds, for addFormReady */
+export interface AddFormState {
+  type: string;
+  /** The Name line shows (not when the type fills a built-in block) */
+  askName: boolean;
+  name: string;
+  /** The names in use already */
+  taken: string[];
+  /** The type's service refuses requests without a key, and none is set where it would be read */
+  keyNeeded: boolean;
+  key: string;
+  /** The Base URL line shows (OpenAI-compatible) */
+  askUrl: boolean;
+  url: string;
+}
+
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$/;
+
+/** Whether Add can be clicked: a type; a free, well-formed name when one is asked; the key it needs; a base URL. */
+export function addFormReady(f: AddFormState): boolean {
+  if (!f.type) return false;
+  if (f.askName) {
+    const n = f.name.trim();
+    if (!NAME_RE.test(n) || n === 'ollama' || n === 'portkey' || f.taken.includes(n)) return false;
+  }
+  if (f.keyNeeded && !f.key.trim()) return false;
+  if (f.askUrl) {
+    try {
+      if (!/^https?:$/.test(new URL(f.url.trim()).protocol)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
 /** A name for a new provider of `type` that no provider has yet: "openrouter", "openrouter-2", … (never a built-in's) */
 export function suggestName(type: string, taken: string[]): string {
   const base = type === 'openai-compatible' ? 'custom' : String(type || 'provider');
@@ -200,6 +236,55 @@ export const CHECK_EVAL_NOTE = 'Only Claude Haiku 5.5 has passed the eval.';
 /** The caution shows for any model but Claude Haiku 5.5 (and while no model can run the check, nothing shows). */
 export function checkNeedsCaution(model: string | undefined): boolean {
   return Boolean(model) && modelWords(String(model)) !== 'Claude Haiku 5.5';
+}
+
+/** The line under the select while no model can run the check */
+export const CHECK_NONE_NOTE = 'No model can run it; you approve instead.';
+
+/**
+ * The line under the safety check's select. A model you picked: the eval caution, unless it is Claude Haiku 5.5.
+ * "Same as the session": a line only when the check runs elsewhere ("Runs on Claude Haiku 5.5, automatic."); on the
+ * session's own model, none. No model at all: says so.
+ */
+export function checkDesc(info: CheckModelView | null): string {
+  if (!info) return '';
+  if (info.none || !info.model) return CHECK_NONE_NOTE;
+  if (info.spec) return checkNeedsCaution(info.model) ? CHECK_EVAL_NOTE : '';
+  return info.automatic ? `Runs on ${modelWords(info.model)}, automatic.` : '';
+}
+
+/** What an HTTP status from a provider means, in a few plain words */
+const STATUS_WORDS: Record<string, string> = {
+  '400': 'the service refused the request.',
+  '401': 'the key was refused.',
+  '403': 'the key was refused.',
+  '404': 'this model does not exist or your key cannot use it.',
+  '408': 'it did not answer in time.',
+  '413': 'the request was too large.',
+  '429': 'rate limited or out of credit.',
+  '500': 'the service had a problem. Try again.',
+  '502': 'the service had a problem. Try again.',
+  '503': 'the service is unavailable. Try again shortly.',
+  '529': 'the service is overloaded. Try again shortly.',
+};
+/** At most this many words in a reason's line; the whole text is its tooltip */
+export const REASON_WORDS = 12;
+
+/**
+ * A provider's error as one short line, at most about twelve plain words: the HTTP status and what it means, or that
+ * it could not be reached, or the first sentence cut. The model id and the address it carries stay in the tooltip.
+ */
+export function shortReason(text: string): string {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const code = /\b(?:HTTP|answered) (\d{3})\b/.exec(t)?.[1];
+  if (code) return `${code}: ${STATUS_WORDS[code] ?? (code.startsWith('5') ? 'the service had a problem. Try again.' : 'the service refused the request.')}`;
+  if (/did not answer in time|timed? ?out/i.test(t)) return 'It did not answer in time.';
+  // The provider is named on the row already; Ollama's own hint is the useful part
+  if (/^Could not reach /.test(t)) return /Is Ollama running/.test(t) ? 'Could not reach it. Is Ollama running?' : 'Could not reach it. Check its address.';
+  const first = t.split(/(?<=[.!?])\s/)[0];
+  const words = first.split(' ');
+  return words.length <= REASON_WORDS ? first : `${words.slice(0, REASON_WORDS).join(' ').replace(/[,:;(]+$/, '')}…`;
 }
 
 /** Before a run: what it sends. */

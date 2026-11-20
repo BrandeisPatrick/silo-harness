@@ -17,7 +17,7 @@ import type { CheckModelInfo } from '../../shared/auto-mode';
 import { escapeHtml, h } from '../dom.js';
 import { icon } from '../icons.js';
 import { parseInteger, parseText, parseUrl } from './model.js';
-import { CHECK_EVAL_NOTE, checkChoices, checkLine, checkModelWords, checkNeedsCaution, checkTestPlan, checkTestWords, cutId, keyFromWords, keyShown, LatestRequests, modelIds, pickableProviders, pickerMatches, providerStatus, suggestName, testWords, thinkingWords } from './models-model.js';
+import { addFormReady, checkChoices, checkDesc, checkLine, checkModelWords, checkTestPlan, checkTestWords, cutId, keyFromWords, keyShown, LatestRequests, modelIds, pickableProviders, pickerMatches, providerStatus, shortReason, suggestName, testWords, thinkingWords } from './models-model.js';
 import { advanced as pageAdvanced, button, card, disclosure, iconButton, lockButton, row, sectionTitle, selectControl, type Choice, type Row } from './ui.js';
 import { contextRows } from './config-sections.js';
 import { onPush } from '../rpc.js';
@@ -130,7 +130,9 @@ export function modelSection(ctx: Ctx): Section {
     providerPicker.show(providerName(p), { dot: st.tone });
     statusEl.innerHTML = `${dot(st.tone)}<span>${escapeHtml(st.word)}</span>`;
     statusEl.title = st.reason;
-    providerRow.setDesc(st.reason);
+    // One short line; the whole reason (the address, the service's own words) is its tooltip
+    providerRow.setDesc(shortReason(st.reason));
+    providerRow.descEl.title = st.reason !== shortReason(st.reason) ? st.reason : '';
     providerRow.descEl.classList.toggle('danger', st.tone === 'danger');
     const owner = ctx.ownerOf('provider');
     setLock(providerRow, owner);
@@ -205,8 +207,10 @@ export function modelSection(ctx: Ctx): Section {
     }
   }
   function showResult(r: { ok: boolean; text: string }): void {
+    // A failure in one short line; the whole text (the model id, the address) is its tooltip
+    const line = r.ok ? r.text : shortReason(r.text);
     modelResult.className = `sp-row-result ${r.ok ? 'ok' : 'danger'}`;
-    modelResult.innerHTML = `${icon(r.ok ? 'check' : 'circle-alert', 12)}<span>${escapeHtml(r.text)}</span>`;
+    modelResult.innerHTML = `${icon(r.ok ? 'check' : 'circle-alert', 12)}<span>${escapeHtml(line)}</span>`;
     modelResult.title = r.text;
     modelResult.hidden = false;
   }
@@ -232,7 +236,8 @@ export function modelSection(ctx: Ctx): Section {
 
   // ---------- API key ----------
 
-  const keyBox = h('span', { class: 'sp-key-box' });
+  const keyText = h('span', { class: 'sp-key-text' });
+  const keyBox = h('span', { class: 'sp-key-box' }, keyText);
   const keyInput = h('input', { type: 'password', class: 'sp-input mono sp-key-input', id: 'provider-apiKey-input', placeholder: 'Paste the key', autocomplete: 'off', spellcheck: 'false', hidden: true });
   const keyField = h('span', { class: 'sp-key-field', style: `width:${FIELD}px` }, keyBox, keyInput);
   const replaceBtn = button('Replace', () => editKey(true));
@@ -307,9 +312,21 @@ export function modelSection(ctx: Ctx): Section {
     const open = editing || (p.key === 'missing' && Boolean(p.keyEditable));
     keyBox.hidden = open;
     keyInput.hidden = !open;
-    keyBox.textContent = keyShown(p);
+    keyText.textContent = keyShown(p);
     keyBox.classList.toggle('none', p.key !== 'set');
     keyBox.title = p.key === 'set' ? (p.keyFrom === 'shell' || p.keyFrom === 'project' ? `${keyFromWords(p)} (${p.keySource})` : keyFromWords(p)) : '';
+    // A key from your shell or a project's settings.json is read-only here: the lock says where it comes from
+    const readOnly = p.key === 'set' && !p.keyEditable && (p.keyFrom === 'shell' || p.keyFrom === 'project');
+    keyBox.classList.toggle('locked', readOnly);
+    keyBox.querySelector('.sp-lock')?.remove();
+    if (readOnly) {
+      const where = p.keyFrom === 'shell' ? `Set in your shell${p.keySource ? ` (${p.keySource})` : ''}` : `Set in this project's settings.json${p.keySource ? ` (${p.keySource})` : ''}`;
+      const lock: HTMLElement =
+        p.keyFrom === 'project' ? lockButton('', () => ctx.show('developer', { row: 'file-project' })) : h('span', { class: 'sp-lock', role: 'img', html: icon('lock', 13) });
+      lock.title = where;
+      lock.setAttribute('aria-label', where);
+      keyBox.append(lock);
+    }
     replaceBtn.hidden = open || !p.keyEditable;
     replaceBtn.textContent = p.key === 'set' ? 'Replace' : 'Add';
     removeBtn.hidden = open || !p.keyRemovable;
@@ -484,11 +501,35 @@ export function modelSection(ctx: Ctx): Section {
     addKeyInput.placeholder = !pre?.keyRequired ? 'Optional' : pre.keyInEnv ? `Optional: ${pre.keyEnv} is set` : 'Paste the key';
     urlLine.hidden = t !== 'openai-compatible';
     submitBtn.textContent = t === 'ollama' ? 'Use Ollama' : 'Add';
+    syncAddReady();
   }
 
+  /** Add is the form's main action: the primary style once the form can be sent, plainly disabled until then */
+  let adding = false;
+  function syncAddReady(): void {
+    const pre = presetOf();
+    const t = pre?.type ?? '';
+    const block = fillsBlock(t);
+    const ready = addFormReady({
+      type: t,
+      askName: !block,
+      name: nameInput.value,
+      taken: allProviders(cfgNow()).map((p) => p.name),
+      keyNeeded: !keyLine.hidden && (block ? t === 'portkey' : Boolean(pre?.keyRequired) && !pre?.keyInEnv),
+      key: addKeyInput.value,
+      askUrl: !urlLine.hidden,
+      url: urlInput.value,
+    });
+    submitBtn.disabled = adding || !ready;
+    submitBtn.classList.toggle('primary', ready);
+  }
+  for (const input of [nameInput, addKeyInput, urlInput]) input.addEventListener('input', () => syncAddReady());
+
   async function submitAdd(): Promise<void> {
+    if (submitBtn.disabled) return;
     const t = typeSelect.select.value;
     addError.hidden = true;
+    adding = true;
     submitBtn.disabled = true;
     try {
       const res = await ctx.call('providers.add', { type: t, name: nameInput.value.trim(), apiKey: addKeyInput.value, baseURL: urlInput.value.trim() });
@@ -501,7 +542,8 @@ export function modelSection(ctx: Ctx): Section {
       addError.innerHTML = `${icon('circle-alert', 14)}<span>${escapeHtml(ctx.cleanError(err))}</span>`;
       addError.hidden = false;
     } finally {
-      submitBtn.disabled = false;
+      adding = false;
+      syncAddReady();
     }
   }
 
@@ -608,8 +650,7 @@ export function modelSection(ctx: Ctx): Section {
   }
   function renderCheck(): void {
     if (checkRunning) return;
-    const model = checkInfo && !checkInfo.none ? checkInfo.model : undefined;
-    checkRow.setDesc(checkNeedsCaution(model) ? CHECK_EVAL_NOTE : '');
+    checkRow.setDesc(checkDesc(checkInfo));
     const select = checkRow.control.querySelector('select');
     if (select) select.title = checkModelWords(checkInfo);
     checkBtn.disabled = !checkInfo || checkInfo.none;

@@ -267,6 +267,9 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 /* The API key: dots and the last four, in a box like a field; the field itself while a key is typed */
 .sp-key-field { display: inline-flex; flex: none; max-width: 100%; }
 .sp-key-box { display: flex; align-items: center; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-100); font-family: var(--mono); font-size: var(--fs-code); color: var(--text-200); letter-spacing: 0.02em; overflow: hidden; white-space: nowrap; }
+.sp-key-box.locked { background: transparent; border-style: dashed; color: var(--text-400); }
+.sp-key-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sp-key-box > .sp-lock { margin-left: auto; margin-right: -6px; }
 .sp-key-box.none { font-family: var(--font); font-size: var(--fs-ui); color: var(--text-400); letter-spacing: 0; }
 .sp-key-field > [hidden] { display: none; }
 
