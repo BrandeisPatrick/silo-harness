@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.20.0 — 2026-11-20
+
+A Models page with a live test for every model, a choice of model for the safety check, reasoning before acting, and a session log that records cost.
+
+### Highlights
+
+- **Models page.** Settings → Models lists the models each provider offers, with "Test" to send one live request and "Use" to switch to it.
+  ![Settings, Models: the model in use, Think before acting, the safety check's model, and a provider's models with Test and Use](docs/releases/0.20.0/models-page.png)
+- **Safety check model.** Choose the model Auto mode's safety check runs on, and "Test as safety check" scores it on 24 made-up actions first.
+  ![Test as safety check: judged 23 of 24 right, none of the 18 risky actions let through, one safe action blocked](docs/releases/0.20.0/check-test.png)
+- **Think before acting.** On Anthropic's API, Claude models reason before they act, as in Claude Code; a switch in Settings → Models turns it off ([details](docs/configure.md#thinking)).
+
+### New
+
+- **Cost in the report.** `/report` shows what the session cost when every call's price is known, and the tokens its safety checks used.
+- **Run totals.** The history log closes each run with its times, calls, tokens by model and cost ([details](docs/latency.md#the-newer-history-records)).
+
+### Improved
+
+- **Cheaper checks on gateways.** On a gateway, the safety check's instructions are marked for the prompt cache, as the agent's own requests are.
+- **Closing message.** The agent is told to re-run the tests after its last change and close with the result, what changed and what it did not check.
+
+### Fixed
+
+- **Model list on Anthropic.** The list of models loads for a provider on Anthropic's own API.
+- **Prompt caching kept.** A request refused for another reason no longer turns off prompt caching for that gateway until restart.
+- **Reasoning after compaction.** A compacted session no longer replays earlier reasoning that the API would refuse.
+
+### Security
+
+- **Keys in addresses.** A key written into a provider's address is hidden in the error messages Settings shows.
+
+### For developers
+
+- **Log records.** `run.start` names the model, provider, mode, sandbox and version; each `usage` record says what the call was for, its model, time and cost.
+- **Thinking setting.** `thinking` in `settings.json` is `auto` or `off`; a trusted project's file may set it.
+- **Side-by-side rig.** `scripts/side-by-side` runs one task in Claude Code and in Silo, then compares the result, the steps, the reasoning and the logs.
+
+### Upgrade notes
+
+- **Reasoning is on.** Claude models on Anthropic's API take a few seconds longer on short tasks; turn "Think before acting" off under Settings → Models to go back.
+
+### Known issues
+
+- **Reasoning through gateways.** "Think before acting" applies on Anthropic's API only; through a gateway the effort control and the model's own default decide.
+- **Gateway caching untested.** The check's cache marks are tested against a stand-in service, not yet against a real gateway.
+- **Files written by commands.** Outside a Git repository, files the agent writes through shell commands do not appear in Changes or Rewind.
+
 ## 0.19.0 — 2026-11-12
 
 A shell sandbox for Auto mode, off by default: commands that stay inside the project run without a safety check, and macOS limits what they can reach.
