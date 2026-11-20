@@ -3,7 +3,8 @@
 // someone else. Markdown, light: a bold label per section and a list under it.
 //
 // What it reads of a record, and nothing else: its type, time and sequence number; a tool end's durationMs, ok,
-// chars and shell-sandbox word (a fixed list); the token counts of a usage record and of a compaction; a tool's name, only through toolLabel (agent/perf.ts:
+// chars and shell-sandbox word (a fixed list); the token counts of a usage record and of a compaction, and a usage
+// record's purpose (a fixed list) and dollars; a tool's name, only through toolLabel (agent/perf.ts:
 // a built-in name, "mcp" or "other"); a message's role; a run's origin and end reason, each through a fixed list; and
 // the numbers and fixed words of the records written for it (retry, check, question.*, compaction.start, run.start's
 // timing). An approval's id pairs a card with its answer and is dropped once paired. Message text, arguments,
@@ -13,6 +14,7 @@
 // "not recorded"), and so does any list of records: broken ones are skipped.
 
 import { duration, toolLabel } from '../agent/perf';
+import { CALL_PURPOSES, formatUsd } from '../calls';
 
 /** One record, as much of it as the report keeps. */
 interface Step {
@@ -33,6 +35,10 @@ interface Step {
   prompt?: number;
   completion?: number;
   cacheRead?: number;
+  /** A usage record's dollars, when its price was known */
+  usd?: number;
+  /** A usage record of a call other than the agent's turn: what it was for (check, title, compaction, merge) */
+  purpose?: string;
   before?: number;
   after?: number;
   verdict?: string;
@@ -53,6 +59,7 @@ type Kind =
   | 'result'
   | 'message'
   | 'usage'
+  | 'call'
   | 'tool.start'
   | 'tool.end'
   | 'approval.request'
@@ -119,8 +126,13 @@ function slim(r: unknown): Step | null {
       const role = d.message && typeof d.message === 'object' ? (d.message as { role?: unknown }).role : undefined;
       return s(role === 'user' ? 'user' : role === 'assistant' ? 'reply' : role === 'tool' ? 'result' : 'message');
     }
-    case 'usage':
-      return s('usage', { prompt: num(d.promptTokens), completion: num(d.completionTokens), cacheRead: num(d.cacheReadTokens) });
+    case 'usage': {
+      // A call other than the agent's turn (a newer log has one per counted call) is kept apart: it is not a turn's
+      // model call and leaves the turns' numbers as they were
+      const purpose = oneOf(CALL_PURPOSES as string[], d.for, 'turn');
+      const usd = num(d.usd);
+      return s(purpose === 'turn' ? 'usage' : 'call', { prompt: num(d.promptTokens), completion: num(d.completionTokens), cacheRead: num(d.cacheReadTokens), ...(usd !== undefined ? { usd } : {}), ...(purpose === 'turn' ? {} : { purpose }) });
+    }
     case 'tool.start':
       return s('tool.start', { tool: toolLabel(d.name as string) });
     case 'tool.end':
@@ -172,6 +184,8 @@ function words(st: Step | undefined): string {
     case 'reply':
     case 'usage':
       return 'model reply';
+    case 'call':
+      return 'other model call';
     case 'result':
       return 'tool result';
     case 'message':
@@ -259,10 +273,13 @@ const SLOWEST_CALLS = 3;
  * text of numbers and fixed words.
  */
 export function sessionReport(records: readonly unknown[], opts: ReportOptions = {}): string {
-  const steps = (Array.isArray(records) ? records : [])
+  const all = (Array.isArray(records) ? records : [])
     .map(slim)
     .filter((x): x is Step => !!x)
     .sort((a, b) => a.t - b.t || a.seq - b.seq);
+  // The calls that are not the agent's turns (checks, title, summaries): only in the token and cost lines
+  const others = all.filter((x) => x.kind === 'call');
+  const steps = all.filter((x) => x.kind !== 'call');
   const out: string[] = ['**Session report** · numbers only, no content'];
   if (!steps.length) {
     out.push('', 'Nothing recorded for this session yet.');
@@ -464,6 +481,12 @@ export function sessionReport(records: readonly unknown[], opts: ReportOptions =
     out.push(`- input: ${line(ins)}${cached}`);
     out.push(`- output: ${line(outs)}`);
   }
+  const checkCalls = others.filter((c) => c.purpose === 'check');
+  if (checkCalls.length) out.push(`- safety checks: ${plural(checkCalls.length, 'call')}, ${tok(sum(checkCalls.map((c) => c.prompt ?? 0)))} in, ${tok(sum(checkCalls.map((c) => c.completion ?? 0)))} out`);
+
+  // ---------- Cost: only when every counted call's price is known ----------
+  const priced = [...usage, ...others];
+  if (priced.length && priced.every((c) => c.usd !== undefined)) out.push('', `**Cost** ${formatUsd(sum(priced.map((c) => c.usd ?? 0)))}, estimated from list prices`);
 
   // ---------- Compactions ----------
   const compactions: { before?: number; after?: number; ms?: number }[] = [];

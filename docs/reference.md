@@ -234,7 +234,7 @@ Panels in the right-hand rail, tabs beside the Browser, a strip above the compos
 - Settings → History → **Delete all sessions** deletes every session at once, each the way a single delete does: into the trash for the period set there, or away at once when it is Off. Running sessions are stopped first, and the window opens on a fresh session.
 - Search in the sidebar looks through titles, messages, tool calls and what compactions folded away.
 - A session's menu exports it as Markdown; `history.export` also writes JSON or the raw log.
-- `/report` turns the log into a report of numbers only (turns, model and tool calls, waits on you, safety checks, retries, the longest silent stretches, tokens, compactions) that is safe to share; `node scripts/session-report.js <log>` does the same outside the app ([latency.md](latency.md#report)).
+- `/report` turns the log into a report of numbers only (turns, model and tool calls, waits on you, safety checks, retries, the longest silent stretches, tokens, compactions, and the cost when every call's price is known) that is safe to share; `node scripts/session-report.js <log>` does the same outside the app ([latency.md](latency.md#report)).
 
 ## Context and compaction
 
