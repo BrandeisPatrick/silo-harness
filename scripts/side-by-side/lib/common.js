@@ -3,6 +3,7 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { analyse, looksLikeTestRun } = require('./shell.js');
 
 const HERE = path.join(__dirname, '..');
 const TASKS = path.join(HERE, 'tasks');
@@ -104,8 +105,6 @@ const KINDS = {
 const kindOf = (name) => KINDS[name] || 'other';
 const KIND_NAMES = ['read', 'search', 'edit', 'shell', 'other'];
 
-/** A shell command that runs tests. */
-const looksLikeTestRun = (cmd) => /\bnode\s+(?:[^|;&]*\s)?--test\b|\bnode\s+[^|;&]*\.test\.[cm]?js\b|\bnpm\s+(?:run\s+)?t(?:est)?\b|\bnpx\s+(?:jest|vitest|mocha)\b|\b(?:jest|vitest|mocha|pytest)\b/.test(String(cmd || ''));
 
 /** Tool counts by raw name and by kind, from the steps. */
 function toolCounts(steps) {
@@ -121,16 +120,37 @@ function toolCounts(steps) {
   return { total, byName, byKind };
 }
 
-/** The finish fields: what the run did last and what its final message looks like. */
-function finishFields(final, steps, project) {
+/** A shell step's reading of its command (made from the whole command when the step was built; else from `cmd`). */
+const shellOf = (s) => (s.type === 'tool' && s.kind === 'shell' ? s.shell || analyse(s.cmd) : null);
+
+/** Words in a text. */
+const wordCount = (t) => (String(t || '').trim() ? String(t).trim().split(/\s+/).length : 0);
+
+/**
+ * The finish fields: what the run did last and what its final message looks like. `narration` is the assistant
+ * texts before the final message, as an array of strings.
+ */
+function finishFields(final, steps, project, narration = []) {
   const text = String(final || '');
-  const lastEdit = steps.reduce((at, s, i) => (s.type === 'tool' && s.kind === 'edit' ? i : at), -1);
-  const testAfter = steps.some((s, i) => i > lastEdit && s.type === 'tool' && s.kind === 'shell' && looksLikeTestRun(s.cmd));
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // An edit: an edit tool on a file that is not prose (a README edit after the tests needs no new test run), or a
+  // shell command that wrote files
+  const isEdit = (s) => s.type === 'tool' && ((s.kind === 'edit' && !/\.(?:md|markdown|txt|rst)$/i.test(s.file || '')) || Boolean(shellOf(s) && shellOf(s).writes));
+  const lastEdit = steps.reduce((at, s, i) => (isEdit(s) ? i : at), -1);
+  const testAfter = steps.some((s, i) => {
+    const sh = shellOf(s);
+    return sh && sh.testRun && (i > lastEdit || (i === lastEdit && sh.testAfterWrite));
+  });
+  const shells = steps.map(shellOf).filter(Boolean);
+  const words = wordCount(text);
   return {
-    // null when the run made no edit through an edit tool (a question, or edits made from the shell)
+    // null when the run made no edit (an edit tool on a non-prose file, or a shell command that wrote files)
     ranTestsAfterLastEdit: lastEdit < 0 ? null : testAfter,
-    ranTestsAtAll: steps.some((s) => s.type === 'tool' && s.kind === 'shell' && looksLikeTestRun(s.cmd)),
+    ranTestsAtAll: shells.some((sh) => sh.testRun),
+    shellWrites: shells.filter((sh) => sh.writes).length,
+    shellReads: shells.filter((sh) => sh.readOnly).length,
+    cdPrefixed: shells.filter((sh) => sh.cdPrefixed).length,
+    narrationMessages: narration.length,
+    narrationWords: narration.reduce((a, t) => a + wordCount(t), 0),
     finalChars: text.length,
     finalWords: words,
     finalLines: text.trim() ? text.trim().split('\n').length : 0,
@@ -172,6 +192,7 @@ function writeSummary(runDir, s) {
     tools: toolCounts(s.steps),
     steps: s.steps,
     checks: s.checks ?? null,
+    ...(s.stoppedOn !== undefined ? { stoppedOn: s.stoppedOn, stoppedText: s.stoppedText ?? null } : {}),
     finish: s.finish,
     log: s.log ?? {},
   };
@@ -184,4 +205,4 @@ const short = (s, n = 200) => {
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
 
-module.exports = { HERE, TASKS, TASK_IDS, loadTask, parseArgs, prepareRun, gitChanges, kindOf, KIND_NAMES, looksLikeTestRun, toolCounts, finishFields, runVerify, writeSummary, short };
+module.exports = { HERE, TASKS, TASK_IDS, loadTask, parseArgs, prepareRun, gitChanges, kindOf, KIND_NAMES, looksLikeTestRun, analyse, toolCounts, finishFields, runVerify, writeSummary, short };
