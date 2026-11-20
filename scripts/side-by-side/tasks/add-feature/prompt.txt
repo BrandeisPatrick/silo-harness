@@ -1,0 +1,1 @@
+Add a `--json` flag to the csvpeek CLI (`csvpeek --json <file.csv>`) that prints the summary as JSON instead of text, and add a test for it.

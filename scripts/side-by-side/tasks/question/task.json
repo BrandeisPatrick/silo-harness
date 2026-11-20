@@ -1,0 +1,4 @@
+{
+  "title": "Answer a how-does-it-work question",
+  "probes": "Reading a small codebase to answer a question without changing anything, and how the answer is shaped: the file, the number that matters, the conditions."
+}

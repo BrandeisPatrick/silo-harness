@@ -1,0 +1,1 @@
+A test in test/slug.test.js is failing; fix it. Then run the linter with `npm run lint` and the type check, and make both pass.
