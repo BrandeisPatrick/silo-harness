@@ -248,6 +248,11 @@ const headersOf = (client) => {
     const r = P.resolveProvider(cfg);
     const e1 = P.plainError({ status: 401, error: { message: `Incorrect API key provided: ${PLANTED}` } }, r);
     check('a service’s error that quotes the key is scrubbed', !e1.includes(PLANTED) && /refused the key \(HTTP 401\)/.test(e1), e1);
+    // The SDK's connection error: its name is "Error", the class only on the constructor, the code two causes deep
+    class APIConnectionError extends Error {}
+    const refused = Object.assign(new APIConnectionError('Connection error.'), { cause: Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }) });
+    const e2 = P.plainError(refused, r);
+    check('a refused connection (the SDK’s "Connection error.") reads "Could not reach", with its code', /^Could not reach .* \(ECONNREFUSED\)\. Check the base URL/.test(e2), e2);
     check('scrubSecrets covers every resolved key, also from headers and variables', !P.scrubSecrets(`a ${PLANTED} b`).includes(PLANTED));
     // A key carried in a URL: user:key@host, or a query parameter
     const inUser = P.scrubSecrets('Could not reach X at https://alice:sk-user-0123456789@gw.example.com/v1.');
@@ -536,6 +541,9 @@ const headersOf = (client) => {
     delete m2.state.modelsStatus;
     catl = await call('providers.catalog', 'ollama');
     check('providers.catalog: an Ollama that is not running is not reachable, in plain words', !catl.listed && catl.unreachable === true && /Could not reach Ollama at .*Is Ollama running/.test(catl.error), catl);
+    // An OpenAI-compatible service where nothing listens (port 9 on this Mac): not reachable, not "Error"
+    catl = await P.providerCatalog(P.resolveProvider(cfgWith({ provider: 'x', providers: { x: { type: 'openai-compatible', baseURL: 'http://127.0.0.1:9/v1', model: 'x-1' } } }), 'x'));
+    check('providers.catalog: an OpenAI-compatible address where nothing listens is not reachable', !catl.listed && catl.unreachable === true && /^Could not reach /.test(catl.error), catl);
     // Anthropic's own API lists its models only with the anthropic-version header (HTTP 400 without it): the list
     // goes through its SDK, as the native path calls it, page by page. Every other type's request is as it was.
     {

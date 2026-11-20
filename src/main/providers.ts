@@ -501,11 +501,22 @@ export async function providerCatalog(r: ResolvedProvider, timeoutMs = 8000): Pr
   }
 }
 
+/**
+ * The SDK's connection errors keep the class name on the constructor only (their `name` is "Error") and put the
+ * reason one or two causes deep ("Connection error." ← "fetch failed" ← ECONNREFUSED): what kind it is, and the code.
+ */
+function connectionFacts(err: unknown): { kind: string; code: string } {
+  const e = err as { name?: string; constructor?: { name?: string }; cause?: { code?: string; message?: string; cause?: { code?: string } } };
+  const kind = [e?.name, e?.constructor?.name].map((x) => String(x ?? '')).find((x) => /APIConnection|AbortError|TimeoutError/.test(x)) ?? '';
+  return { kind, code: String(e?.cause?.code ?? e?.cause?.cause?.code ?? '') };
+}
+
 /** The service could not be reached at all, or did not answer in time (as opposed to an error it answered with). */
 function isUnreachable(err: unknown): boolean {
-  const e = err as { name?: string; message?: string; status?: number; cause?: { code?: string } };
+  const e = err as { name?: string; message?: string; status?: number; cause?: { code?: string; message?: string } };
   if (e?.status) return false;
-  return /APIConnection(?:Timeout)?Error|AbortError|TimeoutError/.test(String(e?.name)) || Boolean(e?.cause?.code) || /fetch failed|ECONNREFUSED|ENOTFOUND|timed? ?out/i.test(String(e?.message));
+  const f = connectionFacts(err);
+  return Boolean(f.kind) || Boolean(f.code) || /fetch failed|ECONNREFUSED|ENOTFOUND|timed? ?out|^Connection error/i.test(String(e?.message)) || /fetch failed/i.test(String(e?.cause?.message));
 }
 
 /** A service's error in plain words, without the key. */
@@ -513,8 +524,9 @@ export function plainError(err: unknown, r: ResolvedProvider): string {
   const e = err as { status?: number; message?: string; name?: string; error?: { message?: string }; cause?: { code?: string; message?: string } };
   const detail = String(e?.error?.message || e?.message || err || 'unknown error').replace(/^\d{3}\s+/, '').trim();
   let msg: string;
-  if (e?.name === 'APIConnectionTimeoutError' || e?.name === 'AbortError' || e?.name === 'TimeoutError' || /timed? ?out|aborted/i.test(String(e?.message))) msg = `${r.label} did not answer in time (${r.baseURL}).`;
-  else if (e?.name === 'APIConnectionError' || e?.cause?.code) msg = `Could not reach ${r.label} at ${r.baseURL}${e?.cause?.code ? ` (${e.cause.code})` : ''}. Check the base URL and your connection.`;
+  const f = connectionFacts(err);
+  if (/APIConnectionTimeoutError|AbortError|TimeoutError/.test(f.kind) || /timed? ?out|aborted/i.test(String(e?.message))) msg = `${r.label} did not answer in time (${r.baseURL}).`;
+  else if (f.kind === 'APIConnectionError' || f.code || (!e?.status && /^Connection error/i.test(String(e?.message)))) msg = `Could not reach ${r.label} at ${r.baseURL}${f.code ? ` (${f.code})` : ''}. Check the base URL and your connection.`;
   else if (e?.status === 401 || e?.status === 403) msg = `${r.label} refused the key (HTTP ${e.status}): ${detail}${r.keySource ? ` Check ${r.keySource}.` : ''}`;
   else if (e?.status === 404) msg = `${r.label} answered 404: ${detail} Check the model id ("${r.model}") and the base URL (${r.baseURL}).`;
   else if (e?.status === 429) msg = `${r.label} is rate limiting or out of credit (HTTP 429): ${detail}`;
