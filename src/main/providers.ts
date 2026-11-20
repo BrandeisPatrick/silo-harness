@@ -89,11 +89,18 @@ const remember = (key: string) => {
   if (key && key.length >= 8) secrets.add(key);
 };
 
-/** `text` with every key this process has resolved replaced by "…" (a service's error may quote it). */
+/** A URL's user:key@ part, and the value of a query parameter named like a key, token, secret or signature */
+const URL_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi;
+const URL_KEY_PARAM = /([?&][\w.-]*(?:key|token|secret|auth|sig|signature|password|passwd|pwd|credential)[\w.-]*=)[^\s&#"'<>)]+/gi;
+
+/**
+ * `text` with every key this process has resolved replaced by "…" (a service's error may quote it), and the keys a URL
+ * in it carries: a base URL with user:key@host or ?api_key=… shows neither.
+ */
 export function scrubSecrets(text: string): string {
   let out = text;
   for (const s of secrets) if (out.includes(s)) out = out.split(s).join('…');
-  return out;
+  return out.replace(URL_USERINFO, '$1…@').replace(URL_KEY_PARAM, '$1…');
 }
 
 // ---------- Resolving ----------
@@ -470,7 +477,7 @@ export async function providerCatalog(r: ResolvedProvider, timeoutMs = 8000): Pr
     if (!isUnreachable(err)) {
       // A 404 here is the list itself missing, not a model: plainError would point at the model id
       const status = (err as { status?: number })?.status;
-      return { ...base, models: own, listed: false, error: status === 404 ? `${r.label} has no list of models at ${r.baseURL}/models (HTTP 404).` : plainError(err, r) };
+      return { ...base, models: own, listed: false, error: status === 404 ? scrubSecrets(`${r.label} has no list of models at ${r.baseURL}/models (HTTP 404).`) : plainError(err, r) };
     }
     const words = /did not answer in time/.test(plainError(err, r)) ? `${r.label} did not answer in time at ${r.baseURL}.` : `Could not reach ${r.label} at ${r.baseURL}.`;
     return { ...base, models: own, listed: false, unreachable: true, error: scrubSecrets(r.type === 'ollama' ? `${words} Is Ollama running? Start it with ollama serve.` : words) };

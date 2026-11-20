@@ -249,6 +249,26 @@ const headersOf = (client) => {
     const e1 = P.plainError({ status: 401, error: { message: `Incorrect API key provided: ${PLANTED}` } }, r);
     check('a service’s error that quotes the key is scrubbed', !e1.includes(PLANTED) && /refused the key \(HTTP 401\)/.test(e1), e1);
     check('scrubSecrets covers every resolved key, also from headers and variables', !P.scrubSecrets(`a ${PLANTED} b`).includes(PLANTED));
+    // A key carried in a URL: user:key@host, or a query parameter
+    const inUser = P.scrubSecrets('Could not reach X at https://alice:sk-user-0123456789@gw.example.com/v1.');
+    check('scrubSecrets removes a key given as user:key@host', !inUser.includes('sk-user-0123456789') && !inUser.includes('alice') && inUser.includes('https://…@gw.example.com/v1'), inUser);
+    const inBare = P.scrubSecrets('at http://sk-bare-0123456789@10.0.0.2:4000/v1 (HTTP 404)');
+    check('…and a key given alone before the @', !inBare.includes('sk-bare-0123456789') && inBare.includes('http://…@10.0.0.2:4000/v1'), inBare);
+    const inQuery = P.scrubSecrets('X has no list of models at https://gw.example.com/v1?api-version=2024-10-01&api_key=sk-q-0123456789&x=1/models (HTTP 404).');
+    check('scrubSecrets removes a key given as a query parameter, and keeps the other parameters', !inQuery.includes('sk-q-0123456789') && inQuery.includes('api_key=…') && inQuery.includes('api-version=2024-10-01') && inQuery.includes('&x=1'), inQuery);
+    check('…also as key=, token= and access_token=', ['?key=abc123secret', '?token=abc123secret', '&access_token=abc123secret', '?sig=abc123secret'].every((q) => !P.scrubSecrets(`https://h.example${q}`).includes('abc123secret')));
+    check('…and leaves a URL without a key alone', P.scrubSecrets('Could not reach X at https://gw.example.com/v1?api-version=2024-10-01.') === 'Could not reach X at https://gw.example.com/v1?api-version=2024-10-01.');
+    // providerCatalog's "no list of models" (HTTP 404) text names the base URL: without the key in it
+    {
+      const http = require('node:http');
+      const srv = http.createServer((q, s) => { s.writeHead(404, { 'content-type': 'application/json' }); s.end('{"error":{"message":"not found"}}'); });
+      await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+      const QKEY = 'sk-in-query-0123456789';
+      const rq = P.resolveProvider({ ...cfg, provider: 'q', providers: { q: { type: 'openai-compatible', baseURL: `http://127.0.0.1:${srv.address().port}/v1?api_key=${QKEY}`, apiKey: 'none-needed-here', model: 'm' } } }, 'q');
+      const cq = await P.providerCatalog(rq, 3000);
+      check('providerCatalog: a 404 for the list does not show a key carried in the base URL', !cq.listed && /has no list of models at .*\(HTTP 404\)/.test(cq.error) && !cq.error.includes(QKEY), cq.error);
+      srv.close();
+    }
     check('the remote page and the history export use activeModel, not a key', P.activeModel(cfg) === 'm');
     delete process.env.LEAK_ENV;
   }
