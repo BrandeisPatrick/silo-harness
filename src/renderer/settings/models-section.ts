@@ -13,6 +13,7 @@ import { actions, button, chip, group, groupTitle, iconButton, note, row, sectio
 import { onPush } from '../rpc.js';
 import { activeProvider, allProviders } from '../provider-view.js';
 import type { Ctx, Section } from './ctx.js';
+import { LatestRequests } from './models-model.js';
 
 /** A list the page fetched less than this long ago is shown again as it is (Refresh asks again) */
 const CATALOG_FRESH_MS = 2 * 60_000;
@@ -270,7 +271,8 @@ export function modelSection(ctx: Ctx): Section {
 
   /** Each provider's list, with when it came and what it was asked as (a new key or address asks again) */
   const catalogs = new Map<string, { at: number; sig: string; cat: ProviderCatalog }>();
-  const pending = new Map<string, Promise<ProviderCatalog>>();
+  /** The latest list request per provider: an older one's result is dropped, and the spinner follows the latest */
+  const pending = new LatestRequests<ProviderCatalog>();
   /** Row test results, by provider and model, kept while the window is open */
   const results = new Map<string, { ok: boolean; text: string }>();
   /** Per group: the filter text and whether every model shows */
@@ -284,20 +286,19 @@ export function modelSection(ctx: Ctx): Section {
     const p = viewOf(name);
     const sig = p ? sigOf(p) : '';
     const have = catalogs.get(name);
-    if (!force && have && have.sig === sig && Date.now() - have.at < CATALOG_FRESH_MS) return have.cat;
-    const inFlight = pending.get(name);
-    if (inFlight && !force) return inFlight;
-    const req = ctx
-      .call('providers.catalog', name)
-      .catch((err): ProviderCatalog => ({ name, models: p ? [p.model, ...p.models].filter(Boolean) : [], own: p ? [p.model, ...p.models].filter(Boolean) : [], listed: false, error: ctx.cleanError(err) }))
-      .then((cat) => {
-        catalogs.set(name, { at: Date.now(), sig, cat });
-        pending.delete(name);
-        renderGroup(name);
-        setCheckChoices();
-        return cat;
-      });
-    pending.set(name, req);
+    const inFlight = pending.inFlight(name);
+    // A request out for another key or address would land after this answer and replace it: a new one is asked instead
+    if (!force && have && have.sig === sig && Date.now() - have.at < CATALOG_FRESH_MS && (!inFlight || inFlight.sig === sig)) return have.cat;
+    if (inFlight && !force && inFlight.sig === sig) return inFlight.req;
+    const ask = () =>
+      ctx
+        .call('providers.catalog', name)
+        .catch((err): ProviderCatalog => ({ name, models: p ? [p.model, ...p.models].filter(Boolean) : [], own: p ? [p.model, ...p.models].filter(Boolean) : [], listed: false, error: ctx.cleanError(err) }));
+    const req = pending.start(name, sig, ask, (cat) => {
+      catalogs.set(name, { at: Date.now(), sig, cat });
+      renderGroup(name);
+      setCheckChoices();
+    });
     renderGroup(name);
     return req;
   }
@@ -596,10 +597,9 @@ export function modelSection(ctx: Ctx): Section {
       renderAll();
       setCheckChoices();
       void refreshCheck();
-      // A provider whose key or address changed is asked again
+      // A provider whose key or address changed is asked again, also while a request made before the change is out
       for (const p of allProviders(cfg)) {
-        const have = catalogs.get(p.name);
-        if (have && have.sig !== sigOf(p) && !pending.has(p.name)) void catalog(p.name);
+        if (pending.askAgain(p.name, sigOf(p), catalogs.get(p.name)?.sig)) void catalog(p.name);
       }
     },
     async load() {

@@ -191,6 +191,52 @@ const OR_KEY = 'mock-or-key-0123456789';
     check('… the Provider select follows', (await app.evaluate(`document.querySelector('#provider').value`)) === 'openrouter');
     check('… and Use sent no model request', chats(or).length === orBeforeUse && chats(gw).length === gwBeforeUse);
 
+    // --- List requests that overlap: only the latest one's answer shows, and the spinner follows it ---
+    {
+      const refreshOr = () => app.evaluate(`(() => { const b = document.querySelector(${JSON.stringify(`${group('openrouter')} .sp-provider-head button`)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
+      const orSpinning = () => app.evaluate(`Boolean(document.querySelector(${JSON.stringify(`${group('openrouter')} .sp-provider-head button.spinning`)}))`);
+      const oldList = [...or.state.models];
+      // A forced refresh while a slower request is out: the newer answer stays when the older lands after it
+      or.state.modelsDelayMs = 2500;
+      check('refresh while idle: a click', await refreshOr());
+      await sleep(300);
+      or.state.modelsDelayMs = 100;
+      or.state.models = ['anthropic/claude-haiku-5.5', 'new/model-a'];
+      check('refresh again while that one is out: a click', await refreshOr());
+      const newer = await until(async () => /2 models offered/.test(await groupText('openrouter')), 3000);
+      check('… the newer answer shows', Boolean(newer), (await groupText('openrouter')).slice(0, 200));
+      or.state.models = oldList;
+      await sleep(3000);
+      check('… and the older one, landing later, does not replace it', /2 models offered/.test(await groupText('openrouter')), (await groupText('openrouter')).slice(0, 200));
+      // The other order: the older lands first, while the newer is still out: the spinner keeps turning
+      or.state.modelsDelayMs = 300;
+      await refreshOr();
+      await sleep(50);
+      or.state.modelsDelayMs = 2500;
+      await refreshOr();
+      await sleep(900);
+      check('an older request that lands while a newer one is out leaves the spinner turning', await orSpinning());
+      const settled = await until(async () => !(await orSpinning()) && /42 models offered/.test(await groupText('openrouter')), 4000);
+      check('… until the newer one lands', Boolean(settled), (await groupText('openrouter')).slice(0, 200));
+      or.state.modelsDelayMs = 0;
+      // A change of address while a request is out asks again: the gateway moves to a slow service, and back before
+      // that one answers; the list shown is the gateway's, not the slow service's that lands last
+      const alt = await startMock();
+      alt.state.models = ['alt-model'];
+      alt.state.modelsDelayMs = 2500;
+      const setGatewayUrl = (url) => app.evaluate(`(async () => { const c = await oc.getConfig(); await oc.setConfig({ ...c, portkey: { ...c.portkey, baseURL: ${JSON.stringify(url)} } }); })()`);
+      const gwUrl = `http://127.0.0.1:${gw.port}/v1`;
+      const gwListsBefore = lists(gw).length;
+      await setGatewayUrl(`http://127.0.0.1:${alt.port}/v1`);
+      const altAsked = await until(async () => lists(alt).length === 1, 2000);
+      await setGatewayUrl(gwUrl);
+      const back = await until(async () => lists(gw).length > gwListsBefore && /3 models offered/.test(await groupText('portkey')), 2000);
+      check('a new address while a request is out: asked again, and that address\'s list shows', Boolean(altAsked) && Boolean(back), { alt: lists(alt).length, gw: lists(gw).length - gwListsBefore, text: (await groupText('portkey')).slice(0, 80) });
+      await sleep(2800);
+      check('… and the old address\'s answer, landing later, does not replace it', /3 models offered/.test(await groupText('portkey')) && !(await groupText('portkey')).includes('alt-model'), (await groupText('portkey')).slice(0, 80));
+      alt.close();
+    }
+
     // --- Search still finds the rows (Connected hides while searching) ---
     const search = async (q) => {
       await app.fill('#settings-search', q);

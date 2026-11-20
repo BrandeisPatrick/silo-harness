@@ -193,6 +193,38 @@ const { check, done } = require('./support/check.js');
     check("state: can't list, says why, and that the configured model shows", st.label === "Can't list models" && /404/.test(st.detail) && /Showing the model in your settings/.test(st.detail), st);
     check('state: checking while nothing came yet', M.providerState(view(), null).label === 'Checking…');
 
+    // The list requests: only the latest request's answer counts, a change of key or address while one is out asks
+    // again, and the provider is busy (the spinner turns) until the latest lands
+    {
+      const later = () => { let resolve; const p = new Promise((r) => (resolve = r)); return { p, resolve }; };
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const R = new M.LatestRequests();
+      let shown = [];
+      const a = later();
+      const b = later();
+      const ra = R.start('gw', 'sig-1', () => a.p, (v) => shown.push(v));
+      check('requests: a change of key or address while a request is out asks again', R.askAgain('gw', 'sig-2', undefined) && !R.askAgain('gw', 'sig-1', undefined));
+      check('requests: none out, asked again only when the list on hand was for another signature', !R.askAgain('x', 's', undefined) && R.askAgain('x', 's', 'old') && !R.askAgain('x', 's', 's'));
+      const rb = R.start('gw', 'sig-2', () => b.p, (v) => shown.push(v));
+      a.resolve('old list');
+      await tick();
+      check('requests: an older request that lands first is dropped, and the provider is still busy', shown.length === 0 && R.has('gw') && R.inFlight('gw').sig === 'sig-2', shown);
+      b.resolve('new list');
+      const [va, vb] = await Promise.all([ra, rb]);
+      check('requests: the latest answer is shown, once, and both callers get it; then not busy', shown.join() === 'new list' && va === 'new list' && vb === 'new list' && !R.has('gw'), { shown, va, vb });
+      // The other order: the latest lands first, the older one later and is dropped
+      shown = [];
+      const c = later();
+      const d = later();
+      const rc = R.start('gw', 'sig-1', () => c.p, (v) => shown.push(v));
+      const rd = R.start('gw', 'sig-1', () => d.p, (v) => shown.push(v));
+      d.resolve('forced');
+      await tick();
+      check('requests: a forced refresh that lands first is shown and ends the busy state', shown.join() === 'forced' && !R.has('gw'));
+      c.resolve('stale');
+      check('requests: …and the older answer landing after it changes nothing', (await rc) === 'forced' && (await rd) === 'forced' && shown.join() === 'forced', { shown });
+    }
+
     // The list a group shows
     const ids = M.modelIds(view({ model: 'b' }), cat({ models: ['a', 'b', 'c'] }), ['b']);
     check('modelIds: the marked model first, no repeats', ids.join() === 'b,a,c', ids);

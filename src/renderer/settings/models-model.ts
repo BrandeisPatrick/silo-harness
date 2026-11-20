@@ -196,3 +196,51 @@ export function checkTestWords(r: CheckTestView): { tone: 'ok' | 'danger' | 'neu
   if (r.cancelled) lines.unshift({ tone: 'neutral', text: `Stopped after ${r.done} of ${r.total}.` });
   return { tone: fa ? 'danger' : 'ok', headline: `Judged ${r.right} of ${r.done} right.`, lines };
 }
+
+/**
+ * The list requests in flight, one latest per provider. Each request gets a number; a result that lands after a later
+ * request for the same provider started is dropped (the later one decides), so a refresh or a change of key or address
+ * while a request is out never leaves the older answer on screen. A provider counts as busy until its latest lands.
+ */
+export class LatestRequests<T> {
+  private next = 0;
+  private live = new Map<string, { no: number; sig: string; req: Promise<T> }>();
+  private landed = new Map<string, T>();
+
+  /** The latest request for `name` still out, with the signature it was asked for */
+  inFlight(name: string): { sig: string; req: Promise<T> } | undefined {
+    return this.live.get(name);
+  }
+
+  has(name: string): boolean {
+    return this.live.has(name);
+  }
+
+  /**
+   * Whether `name` should be asked again for `sig`: the request out was asked for another signature, or (none out)
+   * the list on hand was (`listedSig`, undefined when there is none yet).
+   */
+  askAgain(name: string, sig: string, listedSig: string | undefined): boolean {
+    const out = this.live.get(name);
+    return out ? out.sig !== sig : listedSig !== undefined && listedSig !== sig;
+  }
+
+  /**
+   * Starts a request for `name` asked as `sig` (`ask` must not reject). `onLatest` gets its result only when it is still
+   * the latest when it lands; the promise resolves with the latest request's result either way.
+   */
+  start(name: string, sig: string, ask: () => Promise<T>, onLatest: (v: T) => void): Promise<T> {
+    const no = ++this.next;
+    const req = ask().then((v): T | Promise<T> => {
+      const cur = this.live.get(name);
+      if (cur && cur.no !== no) return cur.req;
+      if (!cur) return this.landed.has(name) ? (this.landed.get(name) as T) : v;
+      this.live.delete(name);
+      this.landed.set(name, v);
+      onLatest(v);
+      return v;
+    });
+    this.live.set(name, { no, sig, req });
+    return req;
+  }
+}
