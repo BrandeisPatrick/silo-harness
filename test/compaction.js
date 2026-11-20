@@ -224,7 +224,7 @@ function cleanCut(msgs, cut) {
   const baseConfig = {
     provider: 'portkey',
     ollama: { baseURL: `http://127.0.0.1:${model.port}/v1`, model: 'mock', numCtx: 4096, think: 'auto' },
-    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12660 },
+    portkey: { baseURL: `http://127.0.0.1:${model.port}/v1`, apiKey: 'test', model: 'mock', virtualKey: '', provider: '', providerApiKey: '', configId: '', contextWindow: 12700 },
     // 12,000 until the system prompt's guidance on reads, searches and evidence (about 120 tokens) came in; 12,150
     // until the bullet asking for short updates while working (about 60 tokens); 12,240 until the bash tool's path
     // argument with its two sentences and edit_file's edits list (about 110 tokens); 12,380 until the closing rule

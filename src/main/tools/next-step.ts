@@ -1,18 +1,25 @@
 import type { NextStep } from '../../shared/next-step';
 import type { Tool } from './types';
 
-// next_step, as Claude Code ends a turn that leaves the user a decision or a step: a small card under the last reply
-// with a recap in grey, one question and one or two replies that answer it (the recommended one first). It needs no
-// approval and does nothing but show the card: it returns at once, and the user's answer is their next message (a
-// click on a reply sends its label). Offered to top-level sessions only (Agent.toolPool). The window draws only what
-// parseNextStep returns, and as text, never markup: the words are the model's.
+// next_step, as the Claude Code desktop app does it: when a turn's work is done and leaves the user a decision or a
+// step, the model calls it, then writes its closing reply in full; the card (a recap in grey, one question, one or
+// two replies, the recommended one first) is drawn under that reply and never replaces it. A model that writes the
+// reply first and calls it last gets the same picture. It needs no approval and does nothing but show the card: it
+// returns at once, and the user's answer is their next message (a click on a reply sends its label). An empty
+// message after it is nudged once for the reply, then the recap stands in (Agent, 'recap_reply'). Offered to
+// top-level sessions only (Agent.toolPool). The window draws only what parseNextStep returns, and as text, never
+// markup: the words are the model's.
 
 export const MAX_RECAP = 300;
 export const MAX_QUESTION = 100;
 export const MAX_REPLY = 24;
 export const MAX_REPLIES = 2;
 /** What the model reads after a card was shown */
-export const SHOWN = 'The card is shown under your reply. End your turn now; the user answers with their next message.';
+export const SHOWN =
+  'The card is ready; it is drawn under your reply. Now write your reply to the user in full, standing on its own, without asking the card\'s question again. (If you already wrote it before this call, you are done.)';
+/** The nudge when the message after a card is empty (it starts as the app's own nudge does, so the transcript, compaction and dreams leave it out alike) */
+export const NEXT_STEP_NUDGE = 'You returned an empty response. Your reply to the user is still missing: write it now, in full. The next-step card is drawn under it and does not replace it.';
+
 
 /** Plain text on one line: control, zero-width and direction characters and runs of white space become one space. */
 function plain(v: unknown): string {
@@ -65,7 +72,8 @@ export function nextStepOrNull(args: unknown): NextStep | null {
 
 export const nextStep: Tool = {
   name: 'next_step',
-  description: "Ends a turn that leaves the user a decision or a step: a card under your reply with a recap and, optionally, one question with one or two replies to click (recommended first). Call it last, once; plain text.",
+  description:
+    "Call it once when the turn's work is done and leaves the user a decision or a step to take, then write your reply to the user in full: the card (a recap, optionally one question with one or two replies to click) is drawn under that reply and does not replace it. The first reply is the recommended one. Plain text.",
   parameters: {
     type: 'object',
     properties: {

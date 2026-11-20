@@ -36,7 +36,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
-import { SHOWN as SHOWN_NEXT_STEP } from './tools/next-step';
+import { NEXT_STEP_NUDGE, SHOWN as SHOWN_NEXT_STEP, nextStepOrNull } from './tools/next-step';
 import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type SandboxPlan, type Tool, type ToolContext, type ToolResult } from './tools';
 import { runShell } from './tools/shell';
 import { deniedPorts, outputLines, probeSandbox, profileFor, realish, sandboxableFolder, sandboxHostNow, sandboxSettings } from './sandbox';
@@ -503,17 +503,34 @@ export class Agent {
     return [...builtIn, ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
   }
 
-  /** The last thing in the conversation is the result of a next_step call that showed its card. */
-  private endedWithNextStep(): boolean {
+  /**
+   * The next_step card this turn showed with no reply written after it yet: its recap, and whether the reply came
+   * before the call instead (in the message that made it). Null when there is none, or a reply already follows it.
+   */
+  private pendingCard(): { recap: string; replied: boolean } | null {
     const msgs = this.session.messages;
-    const last = msgs[msgs.length - 1] as { role?: string; tool_call_id?: string; content?: unknown } | undefined;
-    if (last?.role !== 'tool' || last.content !== SHOWN_NEXT_STEP) return false;
-    for (let i = msgs.length - 2; i >= 0; i--) {
-      const m = msgs[i] as { role?: string; tool_calls?: { id: string; function?: { name?: string } }[] };
-      if (m.role !== 'assistant') continue;
-      return (m.tool_calls ?? []).some((c) => c.id === last.tool_call_id && c.function?.name === 'next_step');
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i] as { role?: string; content?: unknown; tool_call_id?: string; tool_calls?: { id: string; function?: { name?: string; arguments?: string } }[] };
+      if (m.role === 'user') {
+        if (typeof m.content === 'string' && m.content.startsWith('You returned an empty response.')) continue;
+        return null;
+      }
+      if (m.role === 'assistant') {
+        if (typeof m.content === 'string' && m.content.trim()) return null;
+        continue;
+      }
+      if (m.role !== 'tool' || m.content !== SHOWN_NEXT_STEP) continue;
+      for (let k = i - 1; k >= 0; k--) {
+        const a = msgs[k] as typeof m;
+        if (a.role !== 'assistant') continue;
+        const call = (a.tool_calls ?? []).find((c) => c.id === m.tool_call_id && c.function?.name === 'next_step');
+        if (!call) return null;
+        const step = nextStepOrNull(call.function?.arguments ?? '');
+        return step ? { recap: step.recap, replied: typeof a.content === 'string' && Boolean(a.content.trim()) } : null;
+      }
+      return null;
     }
-    return false;
+    return null;
   }
 
   /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
@@ -1542,7 +1559,7 @@ export class Agent {
         tt.end(this.finishOf(reply), reply.toolCalls.length);
         // Also where the provider reports no usage (noteCache never runs): a pause is measured from this reply
         this.cacheState().lastAt = this.now();
-        const { text } = reply;
+        let { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
         const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
         this.emit({ type: 'thinking_done' });
@@ -1563,12 +1580,20 @@ export class Agent {
         }
 
         if (!text.trim() && !toolCalls.length && !reply.cut) {
-          // Small models sometimes return nothing after a tool result. Nudge once, then give up. Nothing after a
-          // next_step card is the turn ending as asked (the card closes it), not an empty response.
-          if (!nudged && !this.endedWithNextStep()) {
+          // Small models sometimes return nothing after a tool result. Nudge once, then give up. After a next_step
+          // card the reply is still owed (the card sits under it): asked for once; still nothing, the card's recap is
+          // the reply, so the user never gets a card alone. A reply written before the call needs nothing more.
+          const card = this.pendingCard();
+          if (card?.replied) {
+            /* the turn ends: the reply came before the call */
+          } else if (!nudged) {
             nudged = true;
-            this.store.append(this.session, { role: 'user', content: 'You returned an empty response. If the task is complete, summarize the result. If a tool failed, fix the problem and continue.' });
+            this.store.append(this.session, { role: 'user', content: card ? NEXT_STEP_NUDGE : 'You returned an empty response. If the task is complete, summarize the result. If a tool failed, fix the problem and continue.' });
             continue;
+          } else if (card) {
+            text = card.recap;
+            tt.fallback('recap_reply');
+            this.emit({ type: 'text_delta', text });
           }
         }
         // Tool groups the calls load (load_tools) or need (a tool of a group not loaded yet): offered from here on

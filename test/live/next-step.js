@@ -3,7 +3,8 @@
 // the recap, the question, two replies (the first the primary one with ⌘↵). The model's words are text, never markup.
 // A real click on a reply sends its label as the user's message and quiets the card (only the chosen reply stays);
 // ⌘↵ with an empty chat bar picks the first reply (with text typed it sends that, as always). After a reload the
-// stored cards are quiet with their chosen replies marked. Under each reply, after Copy, the time it was written.
+// stored cards are quiet with their chosen replies marked. A model that calls the tool first and writes its reply
+// after gets the card under that reply; one that writes nothing after it, even when asked, gets the recap as its reply. Under each reply, after Copy, the time it was written.
 // Run: npm run build && node test/live/next-step.js [screenshot-dir]
 const fs = require('node:fs');
 const os = require('node:os');
@@ -107,7 +108,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     // 5. After a reload the stored cards are quiet, the chosen replies marked
     await app.evaluate('location.reload()');
     await app.waitFor(`document.querySelectorAll('#messages .next-step').length === 3`, 15_000, 'the stored cards');
-    await sleep(500);
+    await sleep(1000);
     c = await cards();
     check('5: stored cards are quiet, in the replies, with the chosen replies', c.every((x) => x.quiet && x.inReply) && c[0].buttons.map((b) => b.label).join() === 'Not yet' && c[1].buttons.map((b) => b.label).join() === 'Ship it' && c[2].buttons.length === 0 && c[0].buttons[0].chosen, c);
     const times = await app.evaluate(`[...document.querySelectorAll('#messages > .msg.assistant')].filter((a) => a.querySelector('.md').innerText.trim()).map((a) => ({ time: a.querySelector('.msg-time')?.textContent ?? '', shown: getComputedStyle(a.querySelector(':scope > .msg-actions')).opacity === '1' }))`);
@@ -117,6 +118,35 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     await sleep(400);
     users = await userTexts();
     check('5: ⌘↵ picks nothing from a stored card', users[users.length - 1] === 'Something else first', users);
+
+    // 6. The call first, then the reply (as the tool asks): the card moves under that reply, live and after a reload
+    const lastCard = () => app.evaluate(`(() => { const c = [...document.querySelectorAll('#messages .next-step')].pop(); const r = c.closest('.msg.assistant'); const replies = [...document.querySelectorAll('#messages > .msg.assistant')]; return { inReply: !!r, reply: r ? r.querySelector('.md').innerText.trim() : '', inLast: r === replies[replies.length - 1], beforeActions: c.nextElementSibling?.classList.contains('msg-actions') ?? false, quiet: c.classList.contains('quiet'), buttons: [...c.querySelectorAll('.next-step-reply')].length, cards: document.querySelectorAll('#messages .next-step').length }; })()`);
+    replies.push({ content: 'Checking the CI config first.', toolCalls: [{ id: 'n6', name: 'next_step', args: { recap: 'Lint is not set up yet.', question: 'Which checks should CI run?', replies: ['ESLint and tsc', 'Only tsc'] } }] });
+    replies.push({ content: 'Nothing lints the code today. Adding ESLint and tsc would catch both style and type errors.', delayMs: 300 });
+    await app.send('What should CI check?');
+    await app.waitFor(nothingRuns, 30_000, 'the sixth run to end');
+    await sleep(500);
+    let lc = await lastCard();
+    check('6: call first, reply after: the card sits under that reply (the last one), above its Copy row, live', lc.cards === 4 && lc.inReply && lc.inLast && lc.beforeActions && /^Nothing lints/.test(lc.reply) && !lc.quiet && lc.buttons === 2, lc);
+    await app.screenshot(path.join(shots, 'next-step-call-first.png'));
+
+    // 7. The call first, then nothing (twice): the recap is the reply, the card under it
+    replies.push({ content: '', toolCalls: [{ id: 'n7', name: 'next_step', args: { recap: 'The build passes; nothing is deployed.', question: 'Deploy now?', replies: ['Deploy', 'Wait'] } }] });
+    replies.push({ content: '' });
+    replies.push({ content: '' });
+    await app.send('Build it.');
+    await app.waitFor(nothingRuns, 30_000, 'the seventh run to end');
+    await sleep(500);
+    lc = await lastCard();
+    check('7: nothing written after the card, even when asked: the recap is the reply, with the card under it', lc.cards === 5 && lc.inReply && lc.inLast && lc.reply === 'The build passes; nothing is deployed.' && lc.buttons === 2, lc);
+    const quietBefore = await app.evaluate(`[...document.querySelectorAll('#messages .next-step')][3].classList.contains('quiet')`);
+    check('7: the card before it went quiet (a message was sent)', quietBefore);
+
+    await app.evaluate('location.reload()');
+    await app.waitFor(`document.querySelectorAll('#messages .next-step').length === 5`, 15_000, 'the stored cards (6, 7)');
+    await sleep(500);
+    const stored67 = await app.evaluate(`[...document.querySelectorAll('#messages .next-step')].slice(3).map((c) => { const r = c.closest('.msg.assistant'); return r ? r.querySelector('.md').innerText.trim().slice(0, 20) : null; })`);
+    check('6, 7: stored, each card is under its turn\'s last reply', stored67[0] === 'Nothing lints the co' && stored67[1] === 'The build passes; no', stored67);
 
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));

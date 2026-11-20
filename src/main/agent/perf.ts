@@ -25,7 +25,7 @@ export type Outcome = 'ok' | 'failed' | 'denied' | 'blocked' | 'stopped' | 'time
  */
 export type PermissionPath = 'rule' | 'read_only' | 'allowed_before' | 'card' | 'check' | 'refused' | 'hook' | 'question' | 'sandbox';
 /** A changed request after a refusal, or a slower way of asking (see complete.ts, anthropic.ts). */
-export type Fallback = 'no_stream_usage' | 'no_cache_fields' | 'no_effort' | 'non_streaming' | 'plain_chat' | 'deferred_tools' | 'thinking_stripped' | 'compacted';
+export type Fallback = 'no_stream_usage' | 'no_cache_fields' | 'no_effort' | 'non_streaming' | 'plain_chat' | 'deferred_tools' | 'thinking_stripped' | 'compacted' | 'recap_reply';
 /** The work the harness does before a request goes out (Agent.run's turn loop). */
 export type PreStep = 'notes' | 'queue' | 'prune_compact' | 'context_note' | 'build';
 export const PRE_STEPS: readonly PreStep[] = ['notes', 'queue', 'prune_compact', 'context_note', 'build'];
@@ -46,7 +46,7 @@ const MODES = new Set(['ask', 'acceptEdits', 'auto', 'plan', 'bypass']);
 const RUN_ENDS = new Set(['done', 'aborted', 'max_turns', 'error', 'plan', 'loop']);
 const OUTCOMES = new Set<Outcome>(['ok', 'failed', 'denied', 'blocked', 'stopped', 'timed_out']);
 const PATHS = new Set<PermissionPath>(['rule', 'read_only', 'allowed_before', 'card', 'check', 'refused', 'hook', 'question', 'sandbox']);
-const FALLBACKS = new Set<Fallback>(['no_stream_usage', 'no_cache_fields', 'no_effort', 'non_streaming', 'plain_chat', 'deferred_tools', 'thinking_stripped', 'compacted']);
+const FALLBACKS = new Set<Fallback>(['no_stream_usage', 'no_cache_fields', 'no_effort', 'non_streaming', 'plain_chat', 'deferred_tools', 'thinking_stripped', 'compacted', 'recap_reply']);
 const FINISHES = new Set<Finish>(['stop', 'tool_use', 'length', 'refusal', 'error', 'aborted']);
 
 /** The built-in tools whose names a record keeps; the agent adds load_tools. */

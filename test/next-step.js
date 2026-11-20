@@ -5,7 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const projectDir = process.argv[2] || path.join(__dirname, '..');
-const { nextStep, parseNextStep, nextStepOrNull, SHOWN } = require(path.join(projectDir, 'dist/main/tools/next-step.js'));
+const { nextStep, parseNextStep, nextStepOrNull, SHOWN, NEXT_STEP_NUDGE } = require(path.join(projectDir, 'dist/main/tools/next-step.js'));
 const { allTools } = require(path.join(projectDir, 'dist/main/tools/index.js'));
 const { systemPrompt } = require(path.join(projectDir, 'dist/main/agent/prompt.js'));
 const { toTranscript } = require(path.join(projectDir, 'dist/main/sessions.js'));
@@ -59,15 +59,15 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   for (const mode of ['ask', 'acceptEdits', 'auto', 'plan', 'bypass']) check(`offered in ${mode} mode`, allTools(mode).some((t) => t.name === 'next_step'));
   const props = nextStep.parameters.properties;
   check('the schema: recap required, replies at most 2', nextStep.parameters.required.join() === 'recap' && props.replies.maxItems === 2 && props.recap.type === 'string' && props.question.type === 'string');
-  check('the spec says when to call it and that it is the last thing', /decision or a step/.test(nextStep.description) && /Call it last, once/.test(nextStep.description) && /recommended first/.test(nextStep.description));
-  check('the tool returns at once with the fixed text', (await nextStep.run(CARD, {})).content === SHOWN && /End your turn/.test(SHOWN));
+  check('the spec: call it when the work is done, then write the reply; the first reply is the recommended one, unmarked', /decision or a step/.test(nextStep.description) && /then write your reply to the user in full/.test(nextStep.description) && /does not replace it/.test(nextStep.description) && /first reply is the recommended one/.test(nextStep.description));
+  check('the tool returns at once with the fixed text', (await nextStep.run(CARD, {})).content === SHOWN && /write your reply to the user in full/.test(SHOWN) && /without asking the card's question again/.test(SHOWN) && !/End your turn/.test(SHOWN));
   check('the tool refuses a bad card with the reason', /add the question/.test(await nextStep.run({ recap: 'r', replies: ['Yes'] }, {}).then(() => '', (e) => e.message)));
 
   // ---------- The system prompt ----------
   const cfg = { permissionMode: 'ask', workingDirectory: os.tmpdir(), systemPromptExtra: '', mcpServers: {} };
   const prompt = systemPrompt(cfg, [], null);
   const line = prompt.split('\n').find((l) => l.includes('next_step')) ?? '';
-  check('the prompt has one sentence on next_step, next to the closing rule', / When you have next_step and the turn leaves the user a decision or a step to take, call it once as the last thing in the turn; otherwise do not\.$/.test(line) && line.startsWith('- Keep going until the task is complete') && line.includes('Then close briefly'), line);
+  check('the prompt has one sentence on next_step, next to the closing rule', / When you have next_step and the turn leaves the user a decision or a step to take, call it once when the work is done, then write that closing reply; otherwise do not\.$/.test(line) && line.startsWith('- Keep going until the task is complete') && line.includes('Then close briefly'), line);
   check('a session with its own tools (a dream) is not told about it', !systemPrompt(cfg, [], null, '', ['remember', 'recall']).includes('next_step'));
 
   // ---------- Through the runtime ----------
@@ -99,7 +99,8 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   const offered = (req) => (req?.payload.tools ?? []).map((t) => t.function.name);
   const streamed = () => state.requests.filter((q) => q.url === '/v1/chat/completions' && q.payload.stream);
 
-  // 1. A turn that ends with a reply and a card: no approval, the tool returns at once
+  // 1. The reply first, the call last (some models do it that way): no approval, the tool returns at once, and the
+  // empty message after it ends the turn (the reply is written)
   state.replies.push({ content: 'The importer now resumes.', toolCalls: [{ id: 'n1', name: 'next_step', args: CARD }] });
   state.replies.push({ content: '' });
   rt.send(A, 'Make the importer resumable.');
@@ -109,7 +110,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   const end = of('tool_end').find((e) => e.name === 'next_step');
   check('1: the call ends ok with the fixed text', end && end.ok && end.result === SHOWN, end);
   const msgs1 = app.store.get(A).messages;
-  check('1: an empty reply after the card ends the turn: no nudge, no second answer', !JSON.stringify(msgs1).includes('empty response') && streamed().length === 2, msgs1.slice(-2));
+  check('1: the reply came before the call: the empty message after it ends the turn, no nudge, no second answer', !JSON.stringify(msgs1).includes('empty response') && streamed().length === 2, msgs1.slice(-2));
   let items = toTranscript(app.store.get(A));
   let card = items.find((i) => i.role === 'next_step');
   check('1: the stored transcript has the card, not a tool row', card && JSON.stringify(card.step) === JSON.stringify(CARD) && !card.chosen && !items.some((i) => i.role === 'tool' && i.name === 'next_step'), items);
@@ -125,6 +126,36 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   items = toTranscript(app.store.get(A));
   card = items.find((i) => i.role === 'next_step');
   check('2: the stored card marks the chosen reply', card?.chosen === 'Yes, new branch', card);
+
+  // 1b. The call first, then the reply (as the tool asks): the card's turn has its reply after the card
+  state.replies.push({ content: '', toolCalls: [{ id: 'n1b', name: 'next_step', args: { recap: 'Lint is not set up yet.', question: 'Which checks should CI run?', replies: ['ESLint + tsc', 'Only tsc'] } }] });
+  state.replies.push({ content: 'I looked at the CI config: nothing lints the code today. Adding ESLint and tsc would catch both style and type errors.' });
+  rt.send(A, 'What should CI check?');
+  await idle();
+  items = toTranscript(app.store.get(A));
+  const c1b = items.filter((i) => i.role === 'next_step').pop();
+  const after1b = items[items.indexOf(c1b) + 1];
+  check('1b: the call first, then the reply: no nudge, the reply after the card', !JSON.stringify(app.store.get(A).messages).includes('empty response') && !JSON.stringify(app.store.get(A).messages).includes(NEXT_STEP_NUDGE) && after1b?.role === 'assistant' && /nothing lints/.test(after1b.text) && c1b.step.replies.join('|') === 'ESLint + tsc|Only tsc', { c1b, after1b });
+  check('1b: the model read that the card is ready and the reply is owed', state.requests.some((q) => JSON.stringify(q.payload.messages ?? []).includes('Now write your reply to the user in full')));
+
+  // 1c. The call first, then nothing: asked once for the reply; still nothing, the recap is the reply (and counted)
+  events = [];
+  state.requests.length = 0;
+  state.replies.push({ content: '', toolCalls: [{ id: 'n1c', name: 'next_step', args: { recap: 'The build passes; nothing is deployed.', question: 'Deploy now?', replies: ['Deploy', 'Wait'] } }] });
+  state.replies.push({ content: '' });
+  state.replies.push({ content: '' });
+  rt.send(A, 'Build it.');
+  await idle();
+  const msgs1c = app.store.get(A).messages;
+  const nudges = msgs1c.filter((m) => m.role === 'user' && m.content === NEXT_STEP_NUDGE).length;
+  check('1c: the empty message after the card is nudged once, for the reply', nudges === 1 && streamed().length === 3, { nudges, n: streamed().length });
+  const last1c = msgs1c[msgs1c.length - 1];
+  check('1c: still empty, the recap is the reply (stored, and shown as text)', last1c.role === 'assistant' && last1c.content === 'The build passes; nothing is deployed.' && of('text_delta').some((e) => e.text === 'The build passes; nothing is deployed.'), last1c);
+  const fallbacks = (rt.agentFor(A).lastTiming()?.turns ?? []).flatMap((t) => t.fallbacks);
+  check('1c: the timing record counts it as a recap_reply fallback', fallbacks.includes('recap_reply'), fallbacks);
+  items = toTranscript(app.store.get(A));
+  const c1c = items.filter((i) => i.role === 'next_step').pop();
+  check('1c: in the transcript the recap reply follows the card', items[items.indexOf(c1c) + 1]?.role === 'assistant' && items[items.indexOf(c1c) + 1].text === 'The build passes; nothing is deployed.');
 
   // 3. A refused card stays a tool row with the reason the model read
   events = [];

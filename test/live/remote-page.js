@@ -460,6 +460,11 @@ async function main() {
   check('next step: the card shows', await waitFor(win, `Boolean(document.querySelector('#transcript .next-step'))`));
   const step = await js(win, `(() => { const c = document.querySelector('#transcript .next-step'); return { recap: c.querySelector('.next-step-recap').textContent, question: c.querySelector('.next-step-question').textContent, markup: c.querySelectorAll('b').length, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent + (b.classList.contains('primary') ? '*' : '')), row: [...document.querySelectorAll('#transcript .tool')].some((t) => /next_step|Next step/.test(t.textContent)) }; })()`);
   check('next step: recap, question as text, two replies (the first primary), no tool row', step.recap === 'The login test passes; nothing is pushed.' && step.question === 'Open a <b>pull request</b>?' && step.markup === 0 && JSON.stringify(step.buttons) === JSON.stringify(['Yes, open it*', 'Not yet']) && !step.row, step);
+  // The reply comes after the call (as the tool asks): the card moves under it
+  for (const chunk of ['The suite ', 'passes; ', 'opening a pull request is up to you.']) f.emit(A, { type: 'text_delta', text: chunk });
+  f.emit(A, { type: 'text_done' });
+  f.emit(A, { type: 'assistant_message', text: 'The suite passes; opening a pull request is up to you.', toolCalls: 0 });
+  check('next step: the reply written after the call sits above the card', await waitFor(win, `(() => { const c = document.querySelector('#transcript .next-step'); const p = c.previousElementSibling; return p && p.classList.contains('assistant') && p.innerText.includes('opening a pull request is up to you'); })()`));
   await js(win, `document.querySelector('#transcript .next-step').scrollIntoView({ block: 'center' })`);
   await sleep(200);
   await shot(win, '6c-next-step');

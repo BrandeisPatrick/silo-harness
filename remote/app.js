@@ -1032,6 +1032,18 @@
     return card;
   }
 
+  /**
+   * The model calls next_step, then writes its reply: each card goes under the last reply of its turn (the replies
+   * after it, before the next user message).
+   */
+  function settleNextSteps() {
+    for (const card of el.transcript.querySelectorAll('.next-step')) {
+      let last = null;
+      for (let n = card.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) if (n.classList.contains('assistant')) last = n;
+      if (last) last.after(card);
+    }
+  }
+
   /** Anything the user sent quiets the live cards: only the reply they sent stays, as a grey pill. */
   function quietNextSteps(text) {
     const said = typeof text === 'string' ? text.trim().toLowerCase() : '';
@@ -1089,6 +1101,7 @@
     // Calls no reply came after
     const left = takeCards('');
     if (left) t.append(left);
+    settleNextSteps();
     if (live.thinking) {
       V.thinking = thinkingEl(live.running);
       V.thinkingText = live.thinking;
@@ -1258,6 +1271,7 @@
           endStreaming();
         } else if (ev.text) append(assistantEl(ev.text));
         V.assistant = null;
+        if (ev.text) settleNextSteps();
         // The cards it names, and those the calls before it were waiting with, go under it
         if (ev.text) {
           const cards = takeCards(ev.text);
