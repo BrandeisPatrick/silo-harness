@@ -122,6 +122,21 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
     h.el.classList.toggle('folded', h.folded);
   }
 
+  /** Shows a group's calls as rows of their own (opening it without its line), or gives the group its line back. */
+  function flatten(g: HTMLDetailsElement, on: boolean): void {
+    if (g.classList.contains('flat') === on) return;
+    g.classList.toggle('flat', on);
+    if (on) {
+      if (!g.open) {
+        g.dataset.flatOpened = 'true';
+        g.open = true;
+      }
+    } else if (g.dataset.flatOpened) {
+      delete g.dataset.flatOpened;
+      g.open = false;
+    }
+  }
+
   /** Hides or shows the turn's process to match the header. */
   function apply(h: Head): void {
     const nodes = nodesOf(h);
@@ -145,6 +160,11 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
       n.classList.toggle('turn-act-last', on && !(next < nodes.length && act[next]));
     });
     h.el.classList.toggle('has-card', any && !h.folded);
+    // A finished turn whose activity is one group: unfolded, the card's rows are that group's calls themselves (its
+    // line would only repeat the header's words). Several groups (text between them) keep their lines; so does a
+    // turn still running.
+    const groups = nodes.filter((n, i) => act[i] && n.classList.contains('tool-group'));
+    for (const g of nodes.filter((n) => n.classList.contains('tool-group'))) flatten(g as HTMLDetailsElement, g === groups[0] && groups.length === 1 && !h.folded && h.liveSince === undefined && !g.classList.contains('live'));
     draw(h);
   }
 

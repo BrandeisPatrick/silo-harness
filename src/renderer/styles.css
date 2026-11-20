@@ -780,6 +780,14 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 #messages > .turn-act > .group-body { padding: 0 0 8px; }
 #messages > .turn-act > .group-body > :is(.tool, .thinking, .session-msg) > summary { padding: 0 12px; }
 #messages > .turn-act.msg.assistant { padding: 8px 12px; }
+/* A turn's only group, unfolded (turn-fold.ts): no line of its own, its calls are the card's rows, a hairline between them */
+#messages > .tool-group.flat > summary { display: none; }
+#messages > .tool-group.flat > .group-body { max-height: none; overflow: visible; padding: 0; -webkit-mask-image: none; mask-image: none; }
+#messages > .tool-group.flat > .group-body > * + * { border-top: 1px solid var(--code-panel-line); }
+#messages > .tool-group.flat > .group-body > :is(.tool, .thinking, .session-msg) > summary { height: auto; min-height: 36px; padding: 8px 12px; }
+#messages > .tool-group.flat > .group-body > .tool:not([open]) > summary .tool-chevron { visibility: visible; }
+#messages > .tool-group.flat > .group-body > .tool > .tool-body { margin: 0 12px 12px 36px; }
+#messages > .tool-group.flat > .group-body > .approval.done > .decided { height: auto; min-height: 36px; padding: 8px 12px; }
 #messages > .turn-act.approval.done > .decided { height: auto; min-height: 36px; padding: 8px 12px; }
 #messages > .turn-act.thinking > .body { margin: 0 12px 12px 16px; }
 :root.mod-bg #messages > .turn-act { -webkit-backdrop-filter: blur(var(--code-blur)) saturate(1.4); backdrop-filter: blur(var(--code-blur)) saturate(1.4); }

@@ -157,7 +157,8 @@ export function createToolGroups({ messages: messagesEl, config, running, addNod
     group.addEventListener('toggle', () => {
       // A live line's words follow it: the call in flight while shut, the heading of the list while open
       if (group.classList.contains('live')) updateGroup(group);
-      if (!group.open) return;
+      // A turn's only group, unfolded, shows its calls as the card's rows (turn-fold.ts): no row opens by itself
+      if (!group.open || group.classList.contains('flat')) return;
       const cards = groupCards(group);
       if (cards.length === 1 && !group.classList.contains('live')) cards[0].el.open = true;
       syncCap(group);

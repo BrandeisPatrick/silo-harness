@@ -107,19 +107,21 @@ const { check, done } = checker();
     t = await lastTurn();
     check('Enter on the focused header unfolds it', t.expanded === 'true' && t.nodes.every((n) => n.shown));
 
-    // ---------- 2. A long group: opened, its calls are flat at its edge, capped with a fade ----------
+    // ---------- 2. A long group among two (text between them): opened, its calls are flat at its edge, capped with a fade ----------
     replies.push({ content: 'Reading all of them.', toolCalls: Array.from({ length: 14 }, (_, i) => ({ id: `r${i}`, name: 'read_file', args: { path: `note-${i + 1}.txt` } })) });
+    replies.push({ content: 'And the first one again.', toolCalls: [{ id: 'r14', name: 'read_file', args: { path: 'note-1.txt' } }] });
     replies.push({ content: 'All fourteen notes are fine.' });
     await app.send('Read every note');
     await idle();
     t = await lastTurn();
-    check('a second turn: its own header, folded, "Read 14 files · Ns"', t.heads === 2 && t.expanded === 'false' && /^Read 14 files · \d+s$/.test(t.label), t.label);
+    check('a second turn: its own header, folded, "Read 14 files · Ns" (the file read again counts once)', t.heads === 2 && t.expanded === 'false' && /^Read 14 files · \d+s$/.test(t.label), t.label);
+    check('unfolded, a turn with two groups keeps their lines', await app.evaluate(`(() => { [...document.querySelectorAll('#messages > .turn-head button')].pop().click(); const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2); [...document.querySelectorAll('#messages > .turn-head button')].pop().click(); return g.length === 2 && g.every((x) => !x.classList.contains('flat')); })()`));
     await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
     await sleep(150);
-    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().open = true`);
+    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].open = true`);
     await sleep(300);
     const list = await app.evaluate(`(() => {
-      const g = [...document.querySelectorAll('#messages > .tool-group')].pop();
+      const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0];
       const body = g.querySelector('.group-body');
       const rows = [...body.querySelectorAll(':scope > .tool')];
       const sum = g.querySelector('summary').getBoundingClientRect();
@@ -132,13 +134,13 @@ const { check, done } = checker();
     check('rows about 25 px apart, one line each', list.pitch >= 24 && list.pitch <= 26, list.pitch);
     check('the list is capped at about nine rows and scrolls, its last row fading', list.height >= 200 && list.height <= 240 && list.scroll > list.height && list.more && /gradient/.test(list.mask), list);
     check('rows show no chevron until hovered', list.chevronHidden);
-    await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); g.scrollIntoView({ block: 'center' }); })()`);
+    await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0]; g.scrollIntoView({ block: 'center' }); })()`);
     await sleep(300);
     await app.screenshot(path.join(shots, 'fold-3-long-group.png'));
-    await app.evaluate(`(() => { const b = [...document.querySelectorAll('#messages > .tool-group')].pop().querySelector('.group-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); })()`);
+    await app.evaluate(`(() => { const b = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].querySelector('.group-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); })()`);
     await sleep(250);
-    check('scrolled to its end, the fade goes', !(await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().querySelector('.group-body').classList.contains('more')`)));
-    const rowOpen = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); const row = g.querySelector('.group-body > .tool'); row.querySelector('summary').click(); return new Promise((r) => setTimeout(() => r({ open: row.open, body: (row.querySelector('.tool-body')?.textContent ?? '').trim().slice(0, 40), capped: getComputedStyle(g.querySelector('.group-body')).maxHeight }), 200)); })()`);
+    check('scrolled to its end, the fade goes', !(await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].querySelector('.group-body').classList.contains('more')`)));
+    const rowOpen = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0]; const row = g.querySelector('.group-body > .tool'); row.querySelector('summary').click(); return new Promise((r) => setTimeout(() => r({ open: row.open, body: (row.querySelector('.tool-body')?.textContent ?? '').trim().slice(0, 40), capped: getComputedStyle(g.querySelector('.group-body')).maxHeight }), 200)); })()`);
     check('a row still opens to its output on click (and lifts the cap)', rowOpen.open && /Note 1/.test(rowOpen.body) && rowOpen.capped === 'none', rowOpen);
 
     // ---------- 3. A reopened session folds the same way and shows its time ----------
@@ -150,6 +152,26 @@ const { check, done } = checker();
     const secs = (s) => Number(/(\d+)s/.exec(s)?.[1] ?? NaN);
     check('reloaded: both turns folded, process hidden', after.every((h) => h.expanded === 'false' && h.hidden > 0), after);
     check('reloaded: each shows the time it worked (the one stored)', after.every((h, i) => / · \d+s$/.test(h.label) && h.label.replace(/\d+s$/, '') === before[i].replace(/\d+s$/, '') && Math.abs(secs(h.label) - secs(before[i])) <= 1), { before, after: after.map((h) => h.label) });
+
+    // ---------- 3b. A turn whose activity is one group: unfolded, the calls are the card's rows (no line repeating the header) ----------
+    replies.push({ content: '', toolCalls: [{ id: 'f1', name: 'read_file', args: { path: 'note-1.txt' } }, { id: 'f2', name: 'read_file', args: { path: 'note-2.txt' } }, { id: 'f3', name: 'bash', args: { command: 'echo ok' } }] });
+    replies.push({ content: 'Both notes are fine.' });
+    await app.send('Read two notes and check');
+    await idle();
+    await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
+    await sleep(400);
+    const flat = await app.evaluate(`(() => {
+      const g = [...document.querySelectorAll('#messages > .tool-group')].pop();
+      const rows = [...g.querySelectorAll(':scope > .group-body > .tool')];
+      const r = rows.map((x) => x.querySelector('summary').getBoundingClientRect());
+      return { flat: g.classList.contains('flat'), card: g.classList.contains('turn-act'), line: getComputedStyle(g.querySelector(':scope > summary')).display, rows: rows.map((x) => x.querySelector('summary').innerText.replace(/\\s+/g, ' ').trim()), shown: r.every((b) => b.height > 0), pitch: r[1].top - r[0].top, height: r[0].height, hair: getComputedStyle(rows[1]).borderTopStyle, chevron: getComputedStyle(rows[0].querySelector('.tool-chevron')).visibility, opened: rows.some((x) => x.open) };
+    })()`);
+    check('3b: unfolded, the one group shows its calls as rows: no group line, a hairline between rows, 36 px rows, chevrons shown, none opened', flat.flat && flat.card && flat.line === 'none' && flat.rows.length === 3 && /^Read note-1\.txt/.test(flat.rows[0]) && /^Bash echo ok/.test(flat.rows[2]) && flat.shown && flat.height === 36 && flat.pitch === 37 && flat.hair === 'solid' && flat.chevron === 'visible' && !flat.opened, flat);
+    await app.screenshot(path.join(shots, 'fold-3b-one-group.png'));
+    await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
+    await sleep(300);
+    const shut = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); return { flat: g.classList.contains('flat'), open: g.open, hidden: getComputedStyle(g).display === 'none' }; })()`);
+    check('3b: folded again, the group has its line back, shut and hidden', !shut.flat && !shut.open && shut.hidden, shut);
 
     // ---------- 4. An approval card waiting is never hidden; decided, it folds with the process ----------
     await app.evaluate(`(async () => { const c = await oc.getConfig(); await oc.setConfig({ ...c, permissionMode: 'ask', autoApprove: false }); })()`);
