@@ -18,7 +18,8 @@ import { bus } from './bus.js';
 import { getPath, matchesQuery, patchFor, SECTIONS, sectionForTarget, tabForTarget, isSectionId, type SectionId } from './settings/model.js';
 import { row, segmented, selectControl, switchControl, textControl, type Row } from './settings/ui.js';
 import type { Call, Ctx, Section } from './settings/ctx.js';
-import { contextSection, generalSection, modelSection, permissionsSection } from './settings/config-sections.js';
+import { contextSection, generalSection, permissionsSection } from './settings/config-sections.js';
+import { modelSection } from './settings/models-section.js';
 import { modsSection } from './settings/mods-section.js';
 import { pagesSection, remoteSection, skillsSection } from './settings/feature-sections.js';
 import { aboutSection, appearanceSection, filesSection, historySection, mcpSection } from './settings/info-sections.js';
@@ -238,6 +239,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     save,
     savePatch,
     adopt,
+    isOwned: (field) => isOwned(field),
     switchField(o) {
       const read = () => Boolean(getPath(deps.config(), o.field)) !== Boolean(o.invert);
       const input = switchControl(read(), (on) => void save(r, o.field, o.invert ? !on : on).then((ok) => !ok && (input.checked = read())));

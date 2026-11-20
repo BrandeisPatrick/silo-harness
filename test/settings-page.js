@@ -169,6 +169,53 @@ const { check, done } = require('./support/check.js');
     check('a section and a tab as one target', m.sectionForTarget('mods:backgrounds') === 'mods' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null);
     check('refMod', m.refMod('hyperspace/holo') === 'hyperspace' && m.refMod('a@/x/y/holo') === 'a@/x/y');
   }
+
+  // --- Settings → Models (src/renderer/settings/models-model.ts) ---------------------------------------------
+  {
+    check('Models: the section keeps its id and is called Models', m.SECTIONS.find((s) => s.id === 'model')?.title === 'Models' && m.isSectionId('model') && m.sectionForTarget('ollama-fields') === 'model' && m.sectionForTarget('portkey-fields') === 'model');
+    const copy2 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-models-page-')), 'models-model.mjs');
+    fs.copyFileSync(path.join(projectDir, 'dist/renderer/settings/models-model.js'), copy2);
+    const M = await import(pathToFileURL(copy2).href);
+    fs.rmSync(path.dirname(copy2), { recursive: true, force: true });
+    const view = (o = {}) => ({ name: 'gw', type: 'portkey', label: 'Gateway', builtIn: true, baseURL: 'http://gw.example/v1', model: 'claude-opus-5-5', models: [], contextWindow: 200000, key: 'set', keySource: 'PORTKEY_API_KEY', headers: [], ...o });
+    const cat = (o = {}) => ({ name: 'gw', models: ['claude-opus-5-5', 'claude-haiku-5-5'], own: ['claude-opus-5-5'], listed: true, ...o });
+
+    // The state in plain words
+    let st = M.providerState(view(), cat(), true);
+    check('state: ready, with how many models', st.label === 'Ready' && st.tone === 'ok' && st.detail === '2 models offered.', st);
+    st = M.providerState(view({ key: 'missing' }), null, true);
+    check('state: no key found, naming the variable (the gateway: or under Connection)', st.label === 'No key found' && /Set PORTKEY_API_KEY, or enter the key under Connection/.test(st.detail) && st.tone === 'warn', st);
+    st = M.providerState(view({ name: 'groq', builtIn: false, key: 'missing', keySource: 'GROQ_API_KEY', label: 'Groq' }), cat({ noKey: true, listed: false }), false);
+    check('state: a named provider without its key names its variable; not in use, it is not in colour', st.label === 'No key found' && /Set GROQ_API_KEY in your environment or in settings\.json/.test(st.detail) && st.tone === 'neutral', st);
+    st = M.providerState(view({ name: 'ollama', type: 'ollama', label: 'Ollama', key: 'none' }), cat({ listed: false, unreachable: true, models: [], own: [], error: 'Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.' }), true);
+    check('state: not reachable, with the reason; red only for the provider in use', st.label === 'Not reachable' && st.tone === 'danger' && /Is Ollama running/.test(st.detail), st);
+    st = M.providerState(view(), cat({ listed: false, error: 'Gateway answered 404: no route.', models: ['claude-opus-5-5'] }), true);
+    check("state: can't list, says why, and that the configured model shows", st.label === "Can't list models" && /404/.test(st.detail) && /Showing the model in your settings/.test(st.detail), st);
+    check('state: checking while nothing came yet', M.providerState(view(), null).label === 'Checking…');
+
+    // The list a group shows
+    const ids = M.modelIds(view({ model: 'b' }), cat({ models: ['a', 'b', 'c'] }), ['b']);
+    check('modelIds: the marked model first, no repeats', ids.join() === 'b,a,c', ids);
+    check('modelIds: without a list, the configured model and the entry’s list', M.modelIds(view({ model: 'x', models: ['y', 'x'] }), null).join() === 'x,y');
+    const many = Array.from({ length: 300 }, (_, i) => `vendor/model-${i}`);
+    let s = M.shownModels(many, '', false);
+    check('shownModels: the first eight of a long list, and how many more', s.shown.length === M.MODELS_SHOWN && s.more === 292 && s.matched === 300, s.more);
+    s = M.shownModels(many, '', true);
+    check('shownModels: Show all shows all', s.shown.length === 300 && s.more === 0);
+    s = M.shownModels(many, 'model-29', false);
+    check('shownModels: a filter shows the matches', s.matched === 11 && s.shown.length === 11 && s.shown.every((x) => x.includes('model-29')), s.shown);
+    s = M.shownModels(many, 'model', false);
+    check('shownModels: a broad filter shows fifty, then Show all', s.shown.length === M.MATCHES_SHOWN && s.more === 250);
+    s = M.shownModels(many, 'nothing-like-it', false, new Set(['vendor/model-299']));
+    check('shownModels: the model in use stays whatever the filter says', s.matched === 0 && s.shown.join() === 'vendor/model-299', s);
+    check('matchesModel: every word, any case', M.matchesModel('anthropic/claude-OPUS-5.5', 'opus 5.5') && !M.matchesModel('claude-haiku-5-5', 'opus'));
+
+    // A test's words
+    check('testWords: "Answered in 840 ms", "Answered in 1.2 s"', M.testWords({ ok: true, ms: 840 }).text === 'Answered in 840 ms' && M.testWords({ ok: true, ms: 1234 }).text === 'Answered in 1.2 s' && M.testWords({ ok: true, ms: 840 }).ok);
+    check('testWords: the plain error as it came', M.testWords({ ok: false, ms: 3, error: 'Gateway refused the key (HTTP 401): bad key' }).text === 'Gateway refused the key (HTTP 401): bad key' && !M.testWords({ ok: false, ms: 0 }).ok && M.testWords({ ok: false, ms: 0 }).text === 'It did not answer.');
+    check('rowKey: one per provider and model', M.rowKey('a', 'b:c') !== M.rowKey('a:b', 'c'));
+    check('modelWords: Claude ids in words, others as they are', M.modelWords('claude-haiku-5-5') === 'Claude Haiku 5.5' && M.modelWords('@anthropic/claude-opus-5-5') === 'Claude Opus 5.5' && M.modelWords('anthropic/claude-sonnet-5.5') === 'Claude Sonnet 5.5' && M.modelWords('claude-opus-5') === 'Claude Opus 5' && M.modelWords('claude-haiku-4-5-20251001') === 'Claude Haiku 4.5' && M.modelWords('claude-sonnet-4-20250514') === 'Claude Sonnet 4' && M.modelWords('gpt-5-mini') === 'gpt-5-mini', [M.modelWords('claude-haiku-4-5-20251001'), M.modelWords('claude-sonnet-4-20250514')]);
+  }
   done();
 })().catch((err) => {
   console.error('CRASH', err);

@@ -7,11 +7,11 @@
 // else, so a reasoning setting of the session's never reaches it.
 
 import type Anthropic from '@anthropic-ai/sdk';
-import type { AppConfig, NamedProviderConfig } from '../../shared/types';
+import type { AppConfig } from '../../shared/types';
 import { isSyntheticUser } from '../compact';
 import { loadInstructions } from '../instructions';
 import { contextSize, ollamaComplete, type Usage } from '../ollama';
-import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
+import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider, withModel } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
 import { LOAD_TOOLS } from '../tools/groups';
 import { isNativeAnthropic, nativeError, nativeUsage } from './anthropic';
@@ -384,15 +384,6 @@ export interface ClassifierTarget {
   label: string;
   /** Set when the model is the faster default (CHECK_MODEL_CANDIDATE), not the session's own or the user's choice */
   candidate?: string;
-}
-
-/** `cfg` with `model` as the model of `provider`, which it puts in use. */
-function withModel(cfg: AppConfig, provider: string, model: string): AppConfig {
-  if (provider === 'ollama') return { ...cfg, provider, ollama: { ...cfg.ollama, model } };
-  if (provider === 'portkey') return { ...cfg, provider, portkey: { ...cfg.portkey, model } };
-  const entry = cfg.providers?.[provider];
-  if (!entry) return { ...cfg, provider };
-  return { ...cfg, provider, providers: { ...cfg.providers, [provider]: { ...entry, model } as NamedProviderConfig } };
 }
 
 /**

@@ -476,7 +476,8 @@ const headersOf = (client) => {
     const app = createApp({
       userData: tmp(),
       appRoot: projectDir,
-      loadConfig: () => cfgWith({ provider: 'm', providers: { m: { type: 'openai-compatible', baseURL: `http://127.0.0.1:${m2.port}/v1`, model: 'a-model', models: ['own-model'] } } }),
+      // Ollama at a closed port: a test never reaches an Ollama of this Mac
+      loadConfig: () => cfgWith({ provider: 'm', ollama: { ...defaultConfig().ollama, baseURL: 'http://127.0.0.1:9/v1' }, providers: { m: { type: 'openai-compatible', baseURL: `http://127.0.0.1:${m2.port}/v1`, model: 'a-model', models: ['own-model'] } } }),
       saveConfig: () => {},
     });
     const pushes = [];
@@ -493,6 +494,38 @@ const headersOf = (client) => {
     check('config:changed carries the window copy with the providers resolved', cp?.payload?.providerView?.active?.name === 'm' && cp.payload.providerView.active.model === 'b-model');
     const t = await call('providers.test', 'm');
     check('providers.test answers ok with the time', t.ok && t.model && t.ms >= 0, t);
+    // With a model: exactly that model, through that provider, one request; the config stays as it was
+    const before = m2.state.requests.length;
+    const tm = await call('providers.test', 'm', 'a-model');
+    const sentTest = m2.state.requests.slice(before).filter((q) => q.url === '/v1/chat/completions');
+    check('providers.test with a model sends one request to exactly that model', tm.ok && sentTest.length === 1 && sentTest[0].payload.model === 'a-model' && sentTest[0].payload.max_tokens === 16, sentTest.map((q) => q.payload.model));
+    check('… and changes nothing in the config', app.config().providers.m.model === 'b-model' && app.config().provider === 'm');
+    const tOther = await call('providers.test', 'ollama', 'qwen3:14b');
+    check('providers.test of another provider’s model: a plain error when it cannot be reached, the provider in use unchanged', !tOther.ok && /Ollama/.test(tOther.error) && tOther.model === 'qwen3:14b' && app.config().provider === 'm', tOther);
+    const tUnknown = await call('providers.test', 'nope', 'x');
+    check('providers.test of an unknown provider: its plain error, nothing sent', !tUnknown.ok && /There is no provider named "nope"/.test(tUnknown.error));
+    m2.state.replies.push({ nonStream: true, status: 401, error: 'invalid key mock-secret-0123456789' });
+    const tBad = await call('providers.test', 'm', 'a-model');
+    check('providers.test: a refusal comes back in plain words', !tBad.ok && /HTTP 401/.test(tBad.error), tBad);
+    // What a provider offers, for Settings → Models
+    let catl = await call('providers.catalog', 'm');
+    check('providers.catalog: its own models first, then the listed ones, listed', catl.listed && JSON.stringify(catl.models) === '["b-model","own-model","a-model"]' && JSON.stringify(catl.own) === '["b-model","own-model"]', catl);
+    m2.state.modelsStatus = 404;
+    catl = await call('providers.catalog', 'm');
+    check('providers.catalog: a service that cannot list says why, and its own models stay', !catl.listed && !catl.unreachable && /404/.test(catl.error) && JSON.stringify(catl.models) === '["b-model","own-model"]', catl);
+    delete m2.state.modelsStatus;
+    catl = await call('providers.catalog', 'ollama');
+    check('providers.catalog: an Ollama that is not running is not reachable, in plain words', !catl.listed && catl.unreachable === true && /Could not reach Ollama at .*Is Ollama running/.test(catl.error), catl);
+    {
+      const app2 = createApp({ userData: tmp(), appRoot: projectDir, loadConfig: () => cfgWith({ provider: 'g', providers: { g: { type: 'groq', model: 'llama-x' } } }), saveConfig: () => {} });
+      app2.push = () => {};
+      setupProviders(app2, { linkDir, command, pathOf: async () => '' });
+      const saved = process.env.GROQ_API_KEY;
+      delete process.env.GROQ_API_KEY;
+      const nk = await app2.invokeRpc('providers.catalog', ['g']);
+      if (saved !== undefined) process.env.GROQ_API_KEY = saved;
+      check('providers.catalog: no key, nothing asked, the variable named', nk.noKey && !nk.listed && /GROQ_API_KEY/.test(nk.error) && JSON.stringify(nk.models) === '["llama-x"]', nk);
+    }
     let st = await call('cli.status');
     check('cli.status: available, not installed, the link folder on the PATH', st.available && !st.installed && st.onPath && st.link === path.join(linkDir, 'silo'));
     // The link the app made under the command's old name goes when the new one is installed; a stranger's stays

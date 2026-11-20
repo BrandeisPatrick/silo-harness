@@ -43,6 +43,8 @@ export interface Ctx {
   savePatch(row: Row, patch: Partial<AppConfig>): Promise<boolean>;
   /** The window's config copy follows a config the main process returned */
   adopt(next: AppConfig): void;
+  /** A settings.json file sets this field (its row is read-only here) */
+  isOwned(field: string): boolean;
 
   switchField(opts: FieldOptions & { invert?: boolean }): Row;
   textField(opts: FieldOptions & { parse: (text: string) => Parsed<unknown>; format?: (v: unknown) => string; placeholder?: string; type?: 'text' | 'password' | 'number'; width?: number; mono?: boolean; inputId?: string; multiline?: boolean }): Row;

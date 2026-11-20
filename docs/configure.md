@@ -50,7 +50,7 @@ Each block is a whole `~/.silo-harness/settings.json`. `provider` chooses the pr
 }
 ```
 
-The built-in `portkey` block (Settings → Model → the gateway fields) keeps working as before; a named entry is the way to have several Portkey setups side by side.
+The built-in `portkey` block (Settings → Models → the gateway fields) keeps working as before; a named entry is the way to have several Portkey setups side by side.
 
 ### Anthropic
 
@@ -255,7 +255,7 @@ The `autoMode` block tells Auto mode's safety check about your setup (see [Auto 
 | --- | --- | --- |
 | `environment` | `""` | Free text the check reads: which accounts, clusters and hosts are what, e.g. "aisolutions-dev is a dev AWS account". |
 | `allow` | `[]` | Plain-language rules the check allows, e.g. "Deploys to staging", "Deleting pods in the dev namespace". |
-| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Model or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. |
+| `model` | `""` | The check's model: `"<provider>:<model>"` with a provider of Settings → Models or `providers`, or a model id of the session's provider. Empty: Claude Haiku 5.5 when the session runs a larger Claude model on Anthropic's own API, otherwise the session's own model. |
 | `learn` | `true` | Record your answers on approval cards and give them to the check (Settings → Permissions → Auto mode → Learn from my answers). |
 
 ```json
