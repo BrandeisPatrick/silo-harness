@@ -60,7 +60,9 @@ const OR_KEY = 'mock-or-key-0123456789';
 
     // --- The page ---
     await app.evaluate(`document.querySelector('#settings-btn').click()`);
-    await sleep(300);
+    await sleep(1200);
+    const openedAt = await app.evaluate(`document.querySelector('.sp-nav-item.active')?.dataset.section`);
+    check('Settings opened at another section asks no provider for its list', openedAt !== 'model' && lists(gw).length === 0 && lists(or).length === 0, { openedAt, gw: lists(gw).length, or: lists(or).length });
     await app.click('#sp-nav-model');
     const navLabel = await app.text('#sp-nav-model');
     const title = await app.text('#sp-sec-model .sp-title');

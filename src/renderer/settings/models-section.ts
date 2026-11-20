@@ -574,6 +574,15 @@ export function modelSection(ctx: Ctx): Section {
   const loadAll = (force = false) => {
     for (const p of allProviders(ctx.config())) void catalog(p.name, force);
   };
+  // The lists are asked for when this section comes on screen, not whenever Settings opens: a provider on the local
+  // network is reached only once the user opened the page that lists it
+  let listsWanted = false;
+  const loadWhenShown = () => {
+    if (!listsWanted || !el.classList.contains('current')) return;
+    listsWanted = false;
+    loadAll();
+  };
+  new MutationObserver(loadWhenShown).observe(el, { attributes: true, attributeFilter: ['class'] });
   return {
     id: 'model',
     el,
@@ -603,7 +612,8 @@ export function modelSection(ctx: Ctx): Section {
       renderAll();
       setCheckChoices();
       void refreshCheck();
-      loadAll();
+      listsWanted = true;
+      loadWhenShown();
       return 'ok';
     },
   };
