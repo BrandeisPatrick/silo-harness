@@ -7,16 +7,18 @@
 // else, so a reasoning setting of the session's never reaches it.
 
 import type Anthropic from '@anthropic-ai/sdk';
-import type { AppConfig, NamedProviderConfig } from '../../shared/types';
+import type { AppConfig } from '../../shared/types';
 import { isSyntheticUser } from '../compact';
-import { loadInstructions } from '../instructions';
+import { loadInstructions, type InstructionFile } from '../instructions';
 import { contextSize, ollamaComplete, type Usage } from '../ollama';
-import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider } from '../providers';
+import { isOllama, makeClient, ollamaOf, providerNames, resolveProvider, withModel } from '../providers';
 import { displayText, type Msg, type Session } from '../sessions';
 import { LOAD_TOOLS } from '../tools/groups';
 import { isNativeAnthropic, nativeError, nativeUsage } from './anthropic';
 import { usageOf, type RawUsage } from './complete';
 import { AUTO_NOTE_PREFIX } from './auto-rules';
+import { cacheShape, checkCacheFields, isFieldRefusal, refusedCacheFields } from './gateway-cache';
+import type OpenAI from 'openai';
 import { errorMessage } from './errors';
 import { BLOCK_KIND_WORDS } from '../sandbox';
 
@@ -264,16 +266,17 @@ const tag = (name: string, body: string) => `<${name}>\n${body}\n</${name}>`;
 /**
  * Per request message: where the parts that stay the same from check to check end: the user's notes and the
  * instruction files, then the user's earlier answers (which change only when the user answers a card), each with the
- * blank line after it. The native path marks each end for the prompt cache.
+ * blank line after it. Both paths mark each end for the prompt cache (the native one, and a gateway's with a Claude
+ * model: gateway-cache.ts checkCacheFields).
  */
 const stableChars = new WeakMap<Msg, number[]>();
 
 /**
  * The check's request: its instructions, then everything it reads, in one user message: what stays the same first
  * (notes, instruction files, the user's earlier answers `learned`, one line each), then the session's messages, the
- * agent's calls and the action.
+ * agent's calls and the action. `instructions` reads the instruction files (the check test reads a made-up home's).
  */
-export function classifierRequest(s: Session, cfg: AppConfig, action: ClassifiedAction, learned: readonly string[] = []): Msg[] {
+export function classifierRequest(s: Session, cfg: AppConfig, action: ClassifiedAction, learned: readonly string[] = [], instructions: (cwd: string) => InstructionFile[] = loadInstructions): Msg[] {
   const cwd = cfg.workingDirectory;
   const parts: string[] = [];
   const env = cfg.autoMode?.environment?.trim();
@@ -286,7 +289,7 @@ export function classifierRequest(s: Session, cfg: AppConfig, action: Classified
   }
   let budget = MAX_INSTRUCTIONS_CHARS;
   const files: string[] = [];
-  for (const f of loadInstructions(cwd)) {
+  for (const f of instructions(cwd)) {
     if (budget <= 0) break;
     const text = clip(f.text, budget);
     budget -= text.length;
@@ -386,15 +389,6 @@ export interface ClassifierTarget {
   candidate?: string;
 }
 
-/** `cfg` with `model` as the model of `provider`, which it puts in use. */
-function withModel(cfg: AppConfig, provider: string, model: string): AppConfig {
-  if (provider === 'ollama') return { ...cfg, provider, ollama: { ...cfg.ollama, model } };
-  if (provider === 'portkey') return { ...cfg, provider, portkey: { ...cfg.portkey, model } };
-  const entry = cfg.providers?.[provider];
-  if (!entry) return { ...cfg, provider };
-  return { ...cfg, provider, providers: { ...cfg.providers, [provider]: { ...entry, model } as NamedProviderConfig } };
-}
-
 /**
  * The model the check runs on: autoMode.model ("<provider>:<model>", or a model id of the session's provider), else
  * `candidate` (CHECK_MODEL_CANDIDATE) when the session runs on Anthropic's own API with a larger Claude model and
@@ -485,7 +479,27 @@ export async function runClassifier(target: ClassifierTarget, messages: Msg[], s
       throw nativeError(err);
     }
   }
-  const res = await client.chat.completions.create({ model, messages, max_tokens: MAX_REPLY_TOKENS, stream: false }, { signal: timeout, maxRetries: 0 });
+  // A gateway with a Claude model (or OpenAI) caches what the request marks: the instructions and the start of the
+  // user message that is the same on every check, under the conditions the agent's own requests use (gateway-cache.ts).
+  // A gateway that refuses the fields gets the same request without them, and none again while the app runs.
+  const shape = cacheShape(resolveProvider(cfg), model);
+  const withFields = shape !== null && !refusedCacheFields.has(client.baseURL);
+  const ask = (body: { messages: Msg[]; extra: Record<string, unknown> }) =>
+    client.chat.completions.create({ model, messages: body.messages, max_tokens: MAX_REPLY_TOKENS, stream: false, ...body.extra } as OpenAI.ChatCompletionCreateParamsNonStreaming, { signal: timeout, maxRetries: 0 });
+  let res: OpenAI.ChatCompletion;
+  if (withFields) {
+    const system = messages.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n');
+    const user = messages.find((m) => m.role === 'user');
+    // As on the native path: each stable end long enough, with the instructions, to be cached
+    const ends = user ? (stableChars.get(user) ?? []).filter((e) => e < String(user.content).length && system.length + e >= CACHE_MIN_CHARS) : [];
+    try {
+      res = await ask(checkCacheFields(shape, messages, ends, system.length >= CACHE_MIN_CHARS));
+    } catch (err) {
+      if (timeout.aborted || !isFieldRefusal(err)) throw err;
+      refusedCacheFields.add(client.baseURL);
+      res = await ask({ messages, extra: {} });
+    }
+  } else res = await ask({ messages, extra: {} });
   if (res.usage) onUsage?.({ inputTokens: res.usage.prompt_tokens ?? 0, outputTokens: res.usage.completion_tokens ?? 0, ...(res.usage.prompt_tokens_details?.cached_tokens ? { cacheReadTokens: res.usage.prompt_tokens_details.cached_tokens } : {}) });
   if (res.usage) onCallUsage?.(usageOf(res.usage as RawUsage));
   return res.choices?.[0]?.message?.content ?? '';

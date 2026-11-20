@@ -17,7 +17,7 @@ import type { ProvidersRpc } from './providers';
 import type { HooksEvents, HooksRpc } from './hooks';
 import type { BrowserEvents, BrowserRpc } from './browser';
 import type { ChatCardsRpc } from './chat-cards';
-import type { AutoModeRpc } from './auto-mode';
+import type { AutoModeEvents, AutoModeRpc } from './auto-mode';
 import type { UpdatesEvents, UpdatesRpc } from './updates';
 
 export interface CoreRpc {
@@ -38,4 +38,4 @@ export interface CoreEvents {
 }
 
 export type RpcMethods = CoreRpc & ModsRpc & ContextRpc & HistoryRpc & ImagesRpc & SchedulesRpc & PowerRpc & SubagentsRpc & RemoteRpc & SettingsRpc & DreamingRpc & ProvidersRpc & HooksRpc & BrowserRpc & ChatCardsRpc & AutoModeRpc & UpdatesRpc;
-export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents & BrowserEvents & UpdatesEvents;
+export type RpcEvents = CoreEvents & ModsEvents & SchedulesEvents & PowerEvents & RemoteEvents & SettingsEvents & DreamingEvents & HooksEvents & BrowserEvents & UpdatesEvents & AutoModeEvents;

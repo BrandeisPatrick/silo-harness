@@ -20,6 +20,7 @@ import { PRESETS, validateProviderEntry } from './provider-presets';
 import os from 'node:os';
 import path from 'node:path';
 import { configDir } from './paths';
+import type { ProviderCatalog } from '../shared/providers';
 
 /** The user's settings.json as messages show it (~/… when it is under the home folder). */
 function shownSettingsPath(): string {
@@ -212,7 +213,7 @@ function resolveNamed(cfg: AppConfig, name: string, env: NodeJS.ProcessEnv): Res
   if (keyRequired && !apiKey) {
     error = `${label} needs a key: set ${keyVar} in your environment or in the "env" block of ${shownSettingsPath()}${e.apiKeyEnv ? '' : `, or name another variable with providers.${name}.apiKeyEnv`}.`;
   } else if (!e.model) {
-    error = `No model set for ${label}. Choose one in Settings → Model, or run: silo provider use ${name} --model <id>`;
+    error = `No model set for ${label}. Choose one in Settings → Models, or run: silo provider use ${name} --model <id>`;
   }
   return {
     name,
@@ -267,6 +268,15 @@ export function makeClient(cfg: AppConfig): ProviderClient {
   const out: ProviderClient = { client: clientFor(r), model: r.model, label: `${r.label} · ${r.model}`, maxOutput: r.maxOutput };
   if (isNativeAnthropic(r)) out.native = anthropicClient(r);
   return out;
+}
+
+/** `cfg` with `model` as the model of `provider`, which it puts in use (an unknown name stays unknown). */
+export function withModel(cfg: AppConfig, provider: string, model: string): AppConfig {
+  if (provider === 'ollama') return { ...cfg, provider, ollama: { ...cfg.ollama, model } };
+  if (provider === 'portkey') return { ...cfg, provider, portkey: { ...cfg.portkey, model } };
+  const entry = cfg.providers?.[provider];
+  if (!entry) return { ...cfg, provider };
+  return { ...cfg, provider, providers: { ...cfg.providers, [provider]: { ...entry, model } as NamedProviderConfig } };
 }
 
 /** True when the provider in use is an Ollama (the block or a named entry of type ollama): the native path. */
@@ -392,16 +402,41 @@ export async function modelCapabilities(cfg: AppConfig): Promise<ModelCapabiliti
 }
 
 /** Lists locally available Ollama models via the native /api/tags endpoint. */
-export async function listOllamaModels(baseURL: string): Promise<string[]> {
-  const res = await fetch(`${ollamaRoot(baseURL)}/api/tags`);
+export async function listOllamaModels(baseURL: string, signal?: AbortSignal): Promise<string[]> {
+  const res = await fetch(`${ollamaRoot(baseURL)}/api/tags`, signal ? { signal } : undefined);
   if (!res.ok) throw new Error(`Ollama returned HTTP ${res.status}`);
   const data = (await res.json()) as { models?: { name: string }[] };
   return (data.models ?? []).map((m) => m.name).sort();
 }
 
+/** Pages of Anthropic's list of models followed at most: at its default of 20 a page, far more than it lists. */
+const ANTHROPIC_LIST_PAGES = 10;
+
+/**
+ * Anthropic's own list of models (GET /v1/models), asked through its SDK with the client the native path uses
+ * (anthropicClient): the SDK sends the anthropic-version header that endpoint requires, and the key as it does on the
+ * Messages API. The list comes in pages (has_more, after_id); this follows them, ANTHROPIC_LIST_PAGES at most.
+ */
+async function listAnthropicModels(r: ResolvedProvider, signal: AbortSignal): Promise<string[]> {
+  let page = await anthropicClient(r).models.list({}, { signal, maxRetries: 0 });
+  const ids = page.data.map((m) => m.id);
+  for (let n = 1; n < ANTHROPIC_LIST_PAGES && page.hasNextPage(); n++) {
+    page = await page.getNextPage();
+    ids.push(...page.data.map((m) => m.id));
+  }
+  return ids;
+}
+
+/** What a service lists, sorted: Anthropic's own API through its SDK, any other its OpenAI-compatible GET /models. */
+async function askModels(r: ResolvedProvider, signal: AbortSignal): Promise<string[]> {
+  const ids = isNativeAnthropic(r) ? await listAnthropicModels(r, signal) : (await clientFor(r).models.list({ signal, maxRetries: 0 })).data.map((m) => m.id);
+  return ids.filter((id) => typeof id === 'string' && id).sort();
+}
+
 /**
  * The models a provider offers: Ollama's local ones, or the service's GET /models (most OpenAI-compatible services
- * have it), with the entry's own list first. Rejects when the service cannot be asked and the entry lists none.
+ * have it, and Anthropic's own API), with the entry's own list first. Rejects when the service cannot be asked and the
+ * entry lists none.
  */
 export async function listModels(r: ResolvedProvider, timeoutMs = 8000): Promise<string[]> {
   const own = [...r.models];
@@ -410,13 +445,43 @@ export async function listModels(r: ResolvedProvider, timeoutMs = 8000): Promise
     if (r.type === 'ollama') asked = await listOllamaModels(r.baseURL);
     else {
       if (r.keyRequired && !r.apiKey) throw new Error(r.error ?? 'no key');
-      const page = await clientFor(r).models.list({ signal: AbortSignal.timeout(timeoutMs), maxRetries: 0 });
-      asked = page.data.map((m) => m.id).filter((id) => typeof id === 'string').sort();
+      asked = await askModels(r, AbortSignal.timeout(timeoutMs));
     }
   } catch (err) {
     if (!own.length) throw new Error(plainError(err, r));
   }
   return [...new Set([...own, ...asked])];
+}
+
+/**
+ * What a provider offers, for Settings → Models: its own models (the one set, then the entry's list) and what the
+ * service lists, with why it could not list when it could not. Never rejects; nothing is asked of a provider without
+ * its key.
+ */
+export async function providerCatalog(r: ResolvedProvider, timeoutMs = 8000): Promise<ProviderCatalog> {
+  const own = [...new Set([r.model, ...r.models].map((m) => String(m ?? '').trim()).filter(Boolean))];
+  const base = { name: r.name, own };
+  if (r.keyRequired && !r.apiKey) return { ...base, models: own, listed: false, noKey: true, error: scrubSecrets(r.error ?? `${r.label} needs a key.`) };
+  try {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const asked = r.type === 'ollama' ? await listOllamaModels(r.baseURL, signal) : await askModels(r, signal);
+    return { ...base, models: [...new Set([...own, ...asked])], listed: true };
+  } catch (err) {
+    if (!isUnreachable(err)) {
+      // A 404 here is the list itself missing, not a model: plainError would point at the model id
+      const status = (err as { status?: number })?.status;
+      return { ...base, models: own, listed: false, error: status === 404 ? `${r.label} has no list of models at ${r.baseURL}/models (HTTP 404).` : plainError(err, r) };
+    }
+    const words = /did not answer in time/.test(plainError(err, r)) ? `${r.label} did not answer in time at ${r.baseURL}.` : `Could not reach ${r.label} at ${r.baseURL}.`;
+    return { ...base, models: own, listed: false, unreachable: true, error: scrubSecrets(r.type === 'ollama' ? `${words} Is Ollama running? Start it with ollama serve.` : words) };
+  }
+}
+
+/** The service could not be reached at all, or did not answer in time (as opposed to an error it answered with). */
+function isUnreachable(err: unknown): boolean {
+  const e = err as { name?: string; message?: string; status?: number; cause?: { code?: string } };
+  if (e?.status) return false;
+  return /APIConnection(?:Timeout)?Error|AbortError|TimeoutError/.test(String(e?.name)) || Boolean(e?.cause?.code) || /fetch failed|ECONNREFUSED|ENOTFOUND|timed? ?out/i.test(String(e?.message));
 }
 
 /** A service's error in plain words, without the key. */

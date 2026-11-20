@@ -476,7 +476,8 @@ const headersOf = (client) => {
     const app = createApp({
       userData: tmp(),
       appRoot: projectDir,
-      loadConfig: () => cfgWith({ provider: 'm', providers: { m: { type: 'openai-compatible', baseURL: `http://127.0.0.1:${m2.port}/v1`, model: 'a-model', models: ['own-model'] } } }),
+      // Ollama at a closed port: a test never reaches an Ollama of this Mac
+      loadConfig: () => cfgWith({ provider: 'm', ollama: { ...defaultConfig().ollama, baseURL: 'http://127.0.0.1:9/v1' }, providers: { m: { type: 'openai-compatible', baseURL: `http://127.0.0.1:${m2.port}/v1`, model: 'a-model', models: ['own-model'] } } }),
       saveConfig: () => {},
     });
     const pushes = [];
@@ -493,6 +494,73 @@ const headersOf = (client) => {
     check('config:changed carries the window copy with the providers resolved', cp?.payload?.providerView?.active?.name === 'm' && cp.payload.providerView.active.model === 'b-model');
     const t = await call('providers.test', 'm');
     check('providers.test answers ok with the time', t.ok && t.model && t.ms >= 0, t);
+    // With a model: exactly that model, through that provider, one request; the config stays as it was
+    const before = m2.state.requests.length;
+    const tm = await call('providers.test', 'm', 'a-model');
+    const sentTest = m2.state.requests.slice(before).filter((q) => q.url === '/v1/chat/completions');
+    check('providers.test with a model sends one request to exactly that model', tm.ok && sentTest.length === 1 && sentTest[0].payload.model === 'a-model' && sentTest[0].payload.max_tokens === 16, sentTest.map((q) => q.payload.model));
+    check('… and changes nothing in the config', app.config().providers.m.model === 'b-model' && app.config().provider === 'm');
+    const tOther = await call('providers.test', 'ollama', 'qwen3:14b');
+    check('providers.test of another provider’s model: a plain error when it cannot be reached, the provider in use unchanged', !tOther.ok && /Ollama/.test(tOther.error) && tOther.model === 'qwen3:14b' && app.config().provider === 'm', tOther);
+    const tUnknown = await call('providers.test', 'nope', 'x');
+    check('providers.test of an unknown provider: its plain error, nothing sent', !tUnknown.ok && /There is no provider named "nope"/.test(tUnknown.error));
+    m2.state.replies.push({ nonStream: true, status: 401, error: 'invalid key mock-secret-0123456789' });
+    const tBad = await call('providers.test', 'm', 'a-model');
+    check('providers.test: a refusal comes back in plain words', !tBad.ok && /HTTP 401/.test(tBad.error), tBad);
+    // What a provider offers, for Settings → Models
+    let catl = await call('providers.catalog', 'm');
+    check('providers.catalog: its own models first, then the listed ones, listed', catl.listed && JSON.stringify(catl.models) === '["b-model","own-model","a-model"]' && JSON.stringify(catl.own) === '["b-model","own-model"]', catl);
+    m2.state.modelsStatus = 404;
+    catl = await call('providers.catalog', 'm');
+    check('providers.catalog: a service that cannot list says why, and its own models stay', !catl.listed && !catl.unreachable && /404/.test(catl.error) && JSON.stringify(catl.models) === '["b-model","own-model"]', catl);
+    delete m2.state.modelsStatus;
+    catl = await call('providers.catalog', 'ollama');
+    check('providers.catalog: an Ollama that is not running is not reachable, in plain words', !catl.listed && catl.unreachable === true && /Could not reach Ollama at .*Is Ollama running/.test(catl.error), catl);
+    // Anthropic's own API lists its models only with the anthropic-version header (HTTP 400 without it): the list
+    // goes through its SDK, as the native path calls it, page by page. Every other type's request is as it was.
+    {
+      const listReqs = (mock) => mock.state.requests.filter((q) => q.url.split('?')[0] === '/v1/models');
+      const plainList = listReqs(m2);
+      check('an OpenAI-compatible provider’s list request is unchanged: its bearer, no anthropic-version, no x-api-key', plainList.length > 0 && plainList.every((q) => !('anthropic-version' in q.headers) && !('x-api-key' in q.headers) && /^Bearer /.test(q.headers.authorization || '')), plainList.map((q) => q.headers));
+      const ma = await startMock();
+      const ANT_KEY = 'mock-ant-key-0123456789';
+      Object.assign(ma.state, { anthropicModels: true, apiKey: ANT_KEY, modelsPageSize: 10, models: Array.from({ length: 25 }, (_, i) => `claude-mock-${String(i).padStart(2, '0')}`) });
+      try {
+        const bare = await fetch(`http://127.0.0.1:${ma.port}/v1/models`, { headers: { authorization: `Bearer ${ANT_KEY}` } });
+        check('(the mock answers as Anthropic does: a list request without anthropic-version is HTTP 400)', bare.status === 400 && /anthropic-version: header is required/.test(await bare.text()));
+        const ant = P.resolveProvider(cfgWith({ provider: 'a', providers: { a: { type: 'anthropic', baseURL: `http://127.0.0.1:${ma.port}/v1/`, model: 'claude-own' } } }), undefined, { ANTHROPIC_API_KEY: ANT_KEY });
+        const n0 = listReqs(ma).length;
+        const c = await P.providerCatalog(ant);
+        const asked = listReqs(ma).slice(n0);
+        check('providers.catalog on the anthropic type: listed, every page followed (25 models in pages of 10, 3 requests)', c.listed && c.models.length === 26 && c.models[0] === 'claude-own' && c.models.includes('claude-mock-24') && asked.length === 3, { listed: c.listed, error: c.error, n: c.models.length, asked: asked.map((q) => q.url) });
+        // The header's value is the SDK's own (it sends it on every request of the native path), so it is not pinned here
+        const sdkVersion = asked[0]?.headers['anthropic-version'];
+        check('… each request with the anthropic-version header and the key, as the native path sends them', asked.length === 3 && /^\d{4}-\d{2}-\d{2}$/.test(sdkVersion || '') && asked.every((q) => q.headers['anthropic-version'] === sdkVersion && /^Anthropic\/JS /.test(q.headers['user-agent'] || '') && (q.headers.authorization === `Bearer ${ANT_KEY}` || q.headers['x-api-key'] === ANT_KEY)), asked.map((q) => ({ v: q.headers['anthropic-version'], ua: q.headers['user-agent'], auth: Boolean(q.headers.authorization || q.headers['x-api-key']) })));
+        check('… each next page asked after the last id of the one before', /after_id=claude-mock-09/.test(asked[1]?.url || '') && /after_id=claude-mock-19/.test(asked[2]?.url || ''), asked.map((q) => q.url));
+        const n1 = listReqs(ma).length;
+        const viaList = await P.listModels(ant);
+        check('listModels (the model menu) asks the anthropic type the same way', viaList.length === 25 && listReqs(ma).slice(n1).every((q) => q.headers['anthropic-version'] === sdkVersion), viaList.length);
+        Object.assign(ma.state, { modelsPageSize: 1, models: Array.from({ length: 12 }, (_, i) => `claude-one-${String(i).padStart(2, '0')}`) });
+        const n2 = listReqs(ma).length;
+        const capped = await P.providerCatalog(ant);
+        check('… at most 10 pages are followed: a longer list stops there and keeps what came', capped.listed && capped.models.length === 11 && listReqs(ma).length - n2 === 10, { n: capped.models.length, asked: listReqs(ma).length - n2 });
+        ma.state.apiKey = 'another-key-0123456789';
+        const refused = await P.providerCatalog(ant);
+        check('… a refused key comes back in plain words, without the key', !refused.listed && /401/.test(refused.error || '') && !refused.error.includes(ANT_KEY), refused);
+      } finally {
+        ma.close();
+      }
+    }
+    {
+      const app2 = createApp({ userData: tmp(), appRoot: projectDir, loadConfig: () => cfgWith({ provider: 'g', providers: { g: { type: 'groq', model: 'llama-x' } } }), saveConfig: () => {} });
+      app2.push = () => {};
+      setupProviders(app2, { linkDir, command, pathOf: async () => '' });
+      const saved = process.env.GROQ_API_KEY;
+      delete process.env.GROQ_API_KEY;
+      const nk = await app2.invokeRpc('providers.catalog', ['g']);
+      if (saved !== undefined) process.env.GROQ_API_KEY = saved;
+      check('providers.catalog: no key, nothing asked, the variable named', nk.noKey && !nk.listed && /GROQ_API_KEY/.test(nk.error) && JSON.stringify(nk.models) === '["llama-x"]', nk);
+    }
     let st = await call('cli.status');
     check('cli.status: available, not installed, the link folder on the PATH', st.available && !st.installed && st.onPath && st.link === path.join(linkDir, 'silo'));
     // The link the app made under the command's old name goes when the new one is installed; a stranger's stays

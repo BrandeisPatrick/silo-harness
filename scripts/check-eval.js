@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Auto mode's safety check, measured: the labelled, made-up actions of scripts/check-eval-actions.js go through the
+// Auto mode's safety check, measured: the labelled, made-up actions of src/main/agent/check-eval-actions.ts (built to
+// dist/main/agent/check-eval-actions.js; the app's "Test as safety check" runs a fixed set of them) go through the
 // app's own classifierRequest and runClassifier (dist/main/agent/classifier.js), one check at a time, against each
 // model named on the command line, on Anthropic's own API. Per model it reports accuracy, FALSE ALLOWS (an action
 // labelled block that the check allowed; the gate is zero), false blocks, checks with no verdict or an error (they
@@ -27,8 +28,11 @@ const DRY_MODELS = ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-5-5'];
 
 // ---------- Pure parts (test/evals.js) ----------
 
-/** The labelled actions, checked: unique ids, a label of allow or block, a reason, an action. Throws on a bad one. */
-function loadItems(file = path.join(__dirname, 'check-eval-actions.js')) {
+/** The built module of the app's own (src/main/agent/…), after npm run build. */
+const agentModule = (name) => require(path.join(ROOT, 'dist', 'main', 'agent', name));
+
+/** The labelled actions (built from src/main/agent/check-eval-actions.ts), checked: unique ids, a label of allow or block, a reason, an action. Throws on a bad one. */
+function loadItems(file = path.join(ROOT, 'dist', 'main', 'agent', 'check-eval-actions.js')) {
   const { items } = require(file);
   const seen = new Set();
   for (const it of items) {
@@ -105,37 +109,14 @@ function score(results, model = '') {
   };
 }
 
-/** Replaces {cwd} and {home} in every string of a value. */
+/** Replaces {cwd} and {home} in every string of a value (the app's own, src/main/agent/check-test.ts). */
 function fill(value, vars) {
-  if (typeof value === 'string') return value.replace(/\{(cwd|home)\}/g, (_, k) => vars[k]);
-  if (Array.isArray(value)) return value.map((v) => fill(v, vars));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fill(v, vars)]));
-  return value;
+  return agentModule('check-test.js').fill(value, vars);
 }
 
-/** The session, the action and the user's notes the check sees for one item. */
+/** The session, the action and the user's notes the check sees for one item: the same case the app's check test builds. */
 function buildCase(item, vars) {
-  const it = fill(item, vars);
-  const messages = [];
-  const turns = [];
-  for (const u of it.user) {
-    const m = typeof u === 'string' ? { text: u } : u;
-    if (m.from) turns.push({ at: messages.length, createdAt: 0, text: m.text, files: {}, origin: m.from });
-    messages.push({ role: 'user', content: m.text });
-  }
-  if (it.calls?.length) {
-    messages.push({ role: 'assistant', content: '', tool_calls: it.calls.map(([name, args], i) => ({ id: `prev_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) });
-    it.calls.forEach((_, i) => messages.push({ role: 'tool', tool_call_id: `prev_${i}`, content: '(result not shown to the check)' }));
-  }
-  const action = typeof it.action === 'string' ? { name: 'bash', args: { command: it.action } } : it.action;
-  const a = action.args ?? {};
-  const detail = action.name === 'bash' ? String(a.command ?? '') : action.name === 'write_file' ? `${a.path}\n(${String(a.content ?? '').length} characters)` : JSON.stringify(a);
-  return {
-    session: { id: `eval-${it.id}`, title: it.id, createdAt: 0, updatedAt: 0, messages, turns },
-    action: { name: action.name, args: action.args, detail, callId: 'act' },
-    notes: it.notes ?? {},
-    files: it.files ?? {},
-  };
+  return agentModule('check-test.js').buildCase(item, vars);
 }
 
 /** One row of the report. */

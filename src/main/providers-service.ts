@@ -9,7 +9,7 @@ import type { App } from './app';
 import { loginPath } from './mcp';
 import type { EffortLevel } from '../shared/types';
 import { isEffortLevel } from './agent/effort';
-import { listModels, providerView, resolveProvider, testProvider } from './providers';
+import { listModels, providerCatalog, providerView, resolveProvider, testProvider, withModel } from './providers';
 import { envVar } from './paths';
 
 /** The command's name (it was open-harness before the rename) */
@@ -100,7 +100,14 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
       source: 'app',
       run: (args) => effortCommand(args),
     }),
-    app.rpc.handle('providers.test', async (name) => testProvider(resolveProvider(app.config(), name ? String(name) : undefined))),
+    app.rpc.handle('providers.catalog', async (name) => providerCatalog(resolveProvider(app.config(), String(name || app.config().provider || 'ollama')))),
+    // With a model, that model of that provider (Settings → Models tests each row): only ever on a click, never on its own
+    app.rpc.handle('providers.test', async (name, model) => {
+      const cfg = app.config();
+      const n = name ? String(name) : cfg.provider || 'ollama';
+      const m = typeof model === 'string' ? model.trim() : '';
+      return testProvider(resolveProvider(m ? withModel(cfg, n, m) : cfg, n));
+    }),
     app.rpc.handle('cli.status', () => status()),
     app.rpc.handle('cli.install', async () => {
       const s = await status();
