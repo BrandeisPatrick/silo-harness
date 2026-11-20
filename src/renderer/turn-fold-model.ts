@@ -6,9 +6,29 @@
 // else (shown images, cards, a plan, a card still waiting, notices, errors, compaction markers) is never part of the
 // process. A call Auto mode blocked is one of the turn's rows: it folds with them, and the header counts it.
 
-/** The header's count of blocked calls: " · 4 blocked" (nothing for none) */
-export function blockedText(n: number): string {
-  return n > 0 ? ` · ${n} blocked` : '';
+/** At most this many kinds are named on a folded turn's line, then "and N more" */
+export const FOLD_KINDS = 3;
+
+/**
+ * The words of a finished turn's line from the phrases of what it did (tool-activity.ts, in the order things first
+ * happened): "Ran 3 commands, read 2 files, edited job.ts", at most FOLD_KINDS of them, then "and 2 more".
+ */
+export function foldWords(phrases: readonly string[]): string {
+  const list = phrases.filter(Boolean);
+  if (!list.length) return '';
+  const text = list.length <= FOLD_KINDS ? list.join(', ') : `${list.slice(0, FOLD_KINDS).join(', ')} and ${list.length - FOLD_KINDS} more`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A turn's line in parts: while it runs "Working for 18s"; after, what it did, the blocked count (a part of its own,
+ * drawn in the warning tint), and the time: "Ran 3 commands, read 2 files · 1 blocked · 2m 10s". A turn that did
+ * nothing nameable reads "Worked for 2m 10s · 1 blocked".
+ */
+export function foldLine(running: boolean, ms: number | undefined, words: string, blocked: number): { words: string; blocked: string; time: string } {
+  const b = blocked > 0 ? `${blocked} blocked` : '';
+  if (running || !words) return { words: '', blocked: b, time: headText(running, ms) };
+  return { words, blocked: b, time: typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? elapsedText(ms) : '' };
 }
 
 /** "18s", "1m 05s": the status line's format, which the header shares */

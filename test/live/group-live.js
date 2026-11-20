@@ -87,7 +87,8 @@ const { check, done } = checker();
     await sleep(300);
     s = await state();
     check('1: a call joins: the list stays open, no row opened by itself', s.open && s.rows.every((r) => !r), s);
-    check('1: the line moved at most a row as the view followed the bottom', before.top - s.top <= 30, { before: before.top, now: s.top });
+    // (a row, and the 8 px the opened list keeps under it inside the turn's card)
+    check('1: the line moved at most a row as the view followed the bottom', before.top - s.top <= 36, { before: before.top, now: s.top });
     await idle();
     const log1 = await stop();
     const live1 = log1.filter((e) => e.live);

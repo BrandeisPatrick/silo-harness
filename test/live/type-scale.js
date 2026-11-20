@@ -133,7 +133,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
     check('inline code: 14 px mono, an 18 px patch, 4.5 px side padding, 5 px radius, no border', m.code.fs === '14px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '5px' && m.code.border === 'none', m.code);
     check('code blocks 13/20 mono', m.pre.fs === '13px' && m.pre.lh === '20px', m.pre);
     check('list items about 4 px apart', m.liGap !== null && m.liGap >= 3 && m.liGap <= 5, m.liGap);
-    check('tool lines: 14 px, muted, a 24 px row, no box; 8 px between two, 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '14px' && m.tool.h === 24 && m.tool.border === 'none' && m.tool.pitch === 32 && m.tool.gapAfter === 16, m.tool);
+    check('tool lines: 14 px, muted, the rows of the turn\'s card (36 px, a hairline between), 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '14px' && m.tool.h === 36 && m.tool.border === 'solid' && m.tool.pitch === 37 && m.tool.gapAfter === 16, m.tool);
     check('the user bubble: 16 px, 10/16 padding, 18 px radius (4 px at the bottom right)', m.bubble.fs === '16px' && m.bubble.pad === '10px 16px' && m.bubble.radius === '18px', m.bubble);
     check('the task card: the column width, 10 px radius, 12 px padding, 28 px rows at 14 px', m.task.w <= 728.5 && m.task.radius === '10px' && m.task.pad === '12px' && near(m.task.row, 28) && m.task.fs === '14px', m.task);
     check('top bar 44 px plus its hairline; the title 14 px regular', m.topbar === 45 && m.titleFs === '14px' && m.titleFw === '400', { h: m.topbar, fs: m.titleFs, fw: m.titleFw });

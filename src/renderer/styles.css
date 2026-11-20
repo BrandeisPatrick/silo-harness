@@ -709,11 +709,13 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 @media (prefers-reduced-motion: reduce) {
   .tool-group.live > summary :is(.group-verb, .group-arg) { animation: none; color: var(--text-400); background: none; }
 }
-/* The line over a turn's process: "Working for 18s" while it runs, then "Worked for 53s", the button that folds the
-   process away and brings it back; a hairline under it, the width of the column. */
-.transcript > .turn-head { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+/* The line over a turn's process: "Working for 18s" while it runs, then what it did ("Ran 3 commands, read 2 files ·
+   1 blocked · 2m 10s"), the button that folds the process away and brings it back. Unfolded, the process sits in a
+   card right under it (.turn-act). */
+.transcript > .turn-head { margin-bottom: 12px; }
+.transcript > .turn-head.has-card { margin-bottom: 8px; }
 .turn-head-btn {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: var(--r-control);
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 24px; padding: 0 4px; border-radius: var(--r-control);
   font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
 }
 .turn-head-btn:hover:not(:disabled) { color: var(--text-200); }
@@ -721,11 +723,31 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .turn-head-chevron { display: inline-flex; flex: none; opacity: 0.8; transition: transform 0.12s ease; }
 .turn-head-chevron .icon { width: 12px; height: 12px; }
 .turn-head.live .turn-head-chevron { display: none; }
-/* " · 4 blocked": calls Auto mode blocked in the turn, in a quiet warning tint (their rows are in the fold) */
+.turn-head-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "1 blocked": calls Auto mode blocked in the turn, in a quiet warning tint (their rows are in the fold) */
 .turn-head-blocked { color: color-mix(in srgb, var(--warn) 70%, var(--text-400)); }
-.turn-head-blocked:empty { display: none; }
 .turn-head-btn[aria-expanded="true"] .turn-head-chevron { transform: rotate(90deg); }
 .transcript > .turn-hidden { display: none !important; }
+/* A turn's process, unfolded: one card (the code panels' surface, a hairline, 12px corners) with a hairline between
+   its rows; every row keeps its own behaviour (it opens in place). The rows are the transcript's own nodes, marked by
+   turn-fold.ts: the transcript stays flat. */
+#messages > .turn-act {
+  margin-top: 0; margin-bottom: 0;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-bottom-width: 0; border-radius: 0;
+}
+#messages > .turn-act-first { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+#messages > .turn-act-last { margin-bottom: 16px; border-bottom-width: 1px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+#messages > .turn-act > summary { height: auto; min-height: 36px; padding: 8px 12px; border-radius: 0; }
+#messages > .turn-act-first > summary { border-radius: 11px 11px 0 0; }
+#messages > .turn-act-last:not([open]) > summary { border-radius: 0 0 11px 11px; }
+#messages > .turn-act-first.turn-act-last:not([open]) > summary { border-radius: 11px; }
+#messages > .turn-act > .tool-body { margin: 0 12px 12px 36px; }
+#messages > .turn-act > .group-body { padding: 0 0 8px; }
+#messages > .turn-act > .group-body > :is(.tool, .thinking, .session-msg) > summary { padding: 0 12px; }
+#messages > .turn-act.msg.assistant { padding: 8px 12px; }
+#messages > .turn-act.approval.done > .decided { height: auto; min-height: 36px; padding: 8px 12px; }
+#messages > .turn-act.thinking > .body { margin: 0 12px 12px 16px; }
+:root.mod-bg #messages > .turn-act { -webkit-backdrop-filter: blur(var(--code-blur)) saturate(1.4); backdrop-filter: blur(var(--code-blur)) saturate(1.4); }
 /* A folded run: the summary takes the room and is cut last; the diff total, failed and denied sit on its right */
 .group-verb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .group-verb.mono { font-family: var(--mono); font-size: 0.9em; }

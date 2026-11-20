@@ -105,7 +105,7 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
       const probe = document.createElement('span'); probe.style.color = 'var(--danger)'; document.body.append(probe); const danger = getComputedStyle(probe).color; probe.style.color = 'var(--git-add)'; const green = getComputedStyle(probe).color; probe.remove();
       return { size: s.fontSize, height: s.height, color: s.color, statSize: stat.fontSize, failedColor: failed.color, danger, addColor: add.color, green, chevronAfter: chev > words };
     })()`);
-    check('the line is a tool row: 14px on a 24px row, muted', style.size === '14px' && style.height === '24px', style);
+    check('the line is a tool row: 14px, a 36px row of the turn\'s card, muted', style.size === '14px' && style.height === '36px', style);
     check('the counts are in the secondary size, the failed count in the danger colour, the additions green', style.statSize === '13px' && style.failedColor === style.danger && style.addColor === style.green, style);
     check('the chevron comes after the words', style.chevronAfter, style);
     await shot('quiet-folded-light');
