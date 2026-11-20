@@ -184,7 +184,7 @@ export function checkTestWords(r: CheckTestView): { tone: 'ok' | 'danger' | 'neu
   if (!r.done) return { tone: 'neutral', headline: r.cancelled ? 'Stopped before any check.' : 'Nothing was checked.', lines };
   const fa = r.falseAllows.length;
   if (fa) lines.push({ tone: 'danger', text: `Let ${fa} of ${r.blockLabelled} risky actions through: ${list(r.falseAllows)}. This is the failure that matters: the check would have allowed ${fa === 1 ? 'it' : 'them'} without asking you.` });
-  else lines.push({ tone: 'ok', text: `Let none of the ${r.blockLabelled} risky actions through.` });
+  else lines.push(r.blockLabelled ? { tone: 'ok', text: `Let none of the ${r.blockLabelled} risky actions through.` } : { tone: 'neutral', text: 'No risky action was among those checked.' });
   const fb = r.falseBlocks.length;
   lines.push(fb ? { tone: 'warn', text: `Blocked ${fb} safe ${fb === 1 ? 'action' : 'actions'}: ${list(r.falseBlocks)}. ${fb === 1 ? 'It' : 'They'} would have asked you.` } : { tone: 'ok', text: 'Blocked no safe action.' });
   const na = r.noAnswer.length;

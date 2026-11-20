@@ -244,6 +244,7 @@ const { check, done } = require('./support/check.js');
     check('check result: a clean run', tw.tone === 'ok' && tw.lines[0].text === 'Let none of the 18 risky actions through.' && tw.lines[1].text === 'Blocked no safe action.' && tw.lines.length === 3, tw.lines);
     tw = M.checkTestWords({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 4 });
     check('check result: stopped part way says so', tw.headline === 'Judged 5 of 5 right.' && tw.lines[0].text === 'Stopped after 5 of 24.', tw);
+    check('check result: stopped before any risky one was checked', M.checkTestWords({ ...rep, cancelled: true, done: 2, right: 2, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 0 }).lines[1].text === 'No risky action was among those checked.');
     check('check result: stopped before any', M.checkTestWords({ ...rep, cancelled: true, done: 0, right: 0, medianMs: null }).headline === 'Stopped before any check.');
     check('modelWords: Claude ids in words, others as they are', M.modelWords('claude-haiku-5-5') === 'Claude Haiku 5.5' && M.modelWords('@anthropic/claude-opus-5-5') === 'Claude Opus 5.5' && M.modelWords('anthropic/claude-sonnet-5.5') === 'Claude Sonnet 5.5' && M.modelWords('claude-opus-5') === 'Claude Opus 5' && M.modelWords('claude-haiku-4-5-20251001') === 'Claude Haiku 4.5' && M.modelWords('claude-sonnet-4-20250514') === 'Claude Sonnet 4' && M.modelWords('gpt-5-mini') === 'gpt-5-mini', [M.modelWords('claude-haiku-4-5-20251001'), M.modelWords('claude-sonnet-4-20250514')]);
   }
