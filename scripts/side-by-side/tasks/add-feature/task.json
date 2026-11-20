@@ -1,0 +1,4 @@
+{
+  "title": "Add a --json flag to a small CLI",
+  "probes": "A small feature across a few files: reading the code, changing the CLI, adding a test, and checking it all still passes."
+}

@@ -5,6 +5,7 @@ import type { ModsConfig } from './mods';
 import type { ImageInfo } from './images';
 import type { DreamingConfig } from './dreaming';
 import type { AutoBlock } from './auto-mode';
+import type { CallRecord, RunInfo, RunResult } from './history';
 
 import type { RpcEvents, RpcMethods } from './rpc';
 
@@ -560,8 +561,11 @@ export interface PlanInfo {
 }
 
 export type AgentEvent =
-  /** A run began. `timing`: the run's id in the timing log (agent/perf.ts), which the history log's run.start keeps */
-  | { type: 'run_start'; timing?: string }
+  /**
+   * A run began. `timing`: the run's id in the timing log (agent/perf.ts), which the history log's run.start keeps,
+   * with `info`: the model, the provider's label, the mode, the shell sandbox and the app's version.
+   */
+  | { type: 'run_start'; timing?: string; info?: RunInfo }
   | { type: 'text_delta'; text: string }
   | { type: 'text_done' }
   | { type: 'thinking_delta'; text: string }
@@ -575,9 +579,10 @@ export type AgentEvent =
   | { type: 'usage'; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
   /**
    * What the session has cost so far, after each model call it counts (src/main/cost.ts): the estimate in dollars and
-   * its short label ("$0.04", "<$0.01"); neither when a call of the session has no known price.
+   * its short label ("$0.04", "<$0.01"); neither when a call of the session has no known price. `call`: the call
+   * just counted, which the history log writes as a usage record (numbers, its model and what it was for).
    */
-  | { type: 'cost'; usd?: number; label?: string }
+  | { type: 'cost'; usd?: number; label?: string; call?: CallRecord }
   /**
    * The agent wants to do something that needs the user's OK. `mode` is the permission mode at the time;
    * `reason` is set when the auto-mode guard paused an action (e.g. "uses sudo"); `alwaysLabel` is the text
@@ -659,8 +664,9 @@ export type AgentEvent =
    * `text` is the last assistant text of the run, when it had any. `loop`: the model repeated one call 5 times.
    * `continued`: the user chose "Send now" on a queued message, so the run was cut (reason usually `aborted`) and the
    * next one, with that message, starts right after this event; the session never counts as idle in between.
+   * `result`: the run's times, counts, tokens and dollars, for the history log's run.end.
    */
-  | { type: 'run_end'; reason: RunEndReason; text?: string; continued?: boolean };
+  | { type: 'run_end'; reason: RunEndReason; text?: string; continued?: boolean; result?: RunResult };
 
 /** Why an attempt at a model request failed, in the words the records keep (agent/perf.ts FailKind) */
 export type FailKindWord = 'idle' | 'connection' | 'rate_limited' | 'busy' | 'too_long' | 'other';

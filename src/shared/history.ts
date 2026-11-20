@@ -16,9 +16,12 @@ import type { SessionMeta } from './types';
  * Everything else is context for people and tools:
  *   session.created { title, cwd, origin, parentId?, forkedFrom?, seedLength? } · session.renamed { title }
  *   session.deleted {} · session.restored {} · session.merged { from, title } · session.forked { from, seedLength }
- *   run.start { origin, from?, timing? } · run.end { reason, text?, continued? }
+ *   run.start { origin, from?, timing?, model?, provider?, mode?, sandbox?, app? } (RunInfo)
+ *   run.end { reason, text?, continued?, result? } (RunResult: times, counts, tokens, per model, dollars)
  *   thinking { text, ms } · tool.start { id, name, args, mcp? } · tool.end { id, name, ok, durationMs, chars }
- *   usage { promptTokens, completionTokens, cacheReadTokens?, cacheWriteTokens? }
+ *   usage { promptTokens, completionTokens, cacheReadTokens?, cacheWriteTokens?, model?, for?, ms?, usd? } (CallRecord):
+ *         one per counted model call (the agent's turns, safety checks, the title, compaction and merge summaries;
+ *         a log written before `for` was added has turns only)
  *   approval.request { id, name, detail, reason? } · approval.resolved { id, ok, scope }
  *   plan { id, title, status } · artifact { id, title, kind, version } · image { id, name } · tasks { tasks }
  *   compaction { id, reason, tokensBefore, tokensAfter, summary } · notice { message } · error { message }
@@ -36,6 +39,70 @@ import type { SessionMeta } from './types';
  *
  * No request or system-prompt record is written: what was sent is rebuilt from the conversation records.
  */
+/**
+ * What a counted model call was for: the agent's turn, Auto mode's safety check, the session's title, a compaction
+ * summary, a merge summary. A usage record with no `for` (written before the field was added, when only the agent's
+ * turns had one) is a turn.
+ */
+export type CallPurpose = 'turn' | 'check' | 'title' | 'compaction' | 'merge';
+
+/** A usage record's data: one counted model call, numbers, the model's id and what it was for. Never text. */
+export interface CallRecord {
+  /** The whole prompt: uncached input, cache reads and cache writes */
+  promptTokens: number;
+  completionTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  model: string;
+  for: CallPurpose;
+  /** How long the call took (a turn: from its first attempt, retries included, to its usage) */
+  ms?: number;
+  /** Its dollars, when its price is known */
+  usd?: number;
+}
+
+/** run.start's data beyond its origin: what the run ran with. */
+export interface RunInfo {
+  /** The model's id */
+  model?: string;
+  /** The provider's label, as the window shows it */
+  provider?: string;
+  /** The permission mode */
+  mode?: string;
+  /** The shell sandbox is on for this run */
+  sandbox?: boolean;
+  /** The app's version */
+  app?: string;
+}
+
+/** run.end's result: where the run's time went and what its model calls used (every call of the run, checks included). */
+export interface RunResult {
+  wallMs: number;
+  /** The agent's model calls, from each one's first attempt to its reply */
+  modelMs: number;
+  /** Tool calls' own work (less the checks and the user's waits inside them) */
+  toolMs: number;
+  /** Auto mode's safety checks */
+  checkMs: number;
+  /** Waiting on the user: approval cards and questions */
+  waitMs: number;
+  /** The agent's model calls (turns that sent a request) */
+  modelCalls: number;
+  toolCalls: number;
+  /** Safety checks run */
+  checks: number;
+  /** Tool calls not allowed to run (blocked by a check or a hook, refused on a card or by a rule) */
+  blocked: number;
+  /** Model requests tried again */
+  retries: number;
+  /** input: uncached input; cacheWrite: five-minute and one-hour writes. input + cacheRead + cacheWrite = the prompts */
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Per model id */
+  byModel: Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; usd?: number }>;
+  /** Only when every call's price is known (the rule of the window's figure) */
+  usd?: number;
+}
+
 export interface HistoryRecord {
   v: 1;
   /** Position in this session's log, from 1 */

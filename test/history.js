@@ -95,7 +95,16 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const toolEnd = recs.find((r) => r.type === 'tool.end');
   check('1: tool.end has ok, durationMs and the result length, not the text', toolEnd.data.ok === true && typeof toolEnd.data.durationMs === 'number' && toolEnd.data.chars === h.store.get(A).messages[3].content.length && !('result' in toolEnd.data), toolEnd.data);
   check('1: approval records', recs.find((r) => r.type === 'approval.request').data.name === 'bash' && recs.find((r) => r.type === 'approval.resolved').data.ok === true);
-  check('1: run.end has the reason and the text', same(recs.filter((r) => r.type === 'run.end').map((r) => r.data), [{ reason: 'done', text: 'It printed logged.' }, { reason: 'done', text: 'Second answer.' }]));
+  check('1: run.end has the reason and the text', same(recs.filter((r) => r.type === 'run.end').map((r) => ({ reason: r.data.reason, text: r.data.text })), [{ reason: 'done', text: 'It printed logged.' }, { reason: 'done', text: 'Second answer.' }]));
+  // What the run ran with, each counted call, and the run's totals (numbers, model ids, the provider's label only)
+  check('1: run.start carries the model, the provider\'s label, the mode, the sandbox and the app\'s version', runStart.data.model === 'mock-model' && typeof runStart.data.provider === 'string' && runStart.data.provider.length > 0 && runStart.data.mode === 'ask' && runStart.data.sandbox === false && runStart.data.app === require(path.join(projectDir, 'package.json')).version, runStart.data);
+  const usages = recs.filter((r) => r.type === 'usage');
+  check('1: each usage record says its model, that it was a turn, and how long it took', usages.length === 3 && usages.every((u) => u.data.model === 'mock-model' && u.data.for === 'turn' && Number.isInteger(u.data.ms) && u.data.ms >= 0 && u.data.promptTokens === 300 && u.data.completionTokens === 30), usages.map((u) => u.data));
+  check('1: …and no dollars without a price for the model', usages.every((u) => !('usd' in u.data)));
+  const ends = recs.filter((r) => r.type === 'run.end').map((r) => r.data.result);
+  check('1: run.end\'s result: times, counts and tokens of the run, no dollars without a price', ends.length === 2 && ends.every((x) => x && typeof x.wallMs === 'number' && typeof x.modelMs === 'number' && typeof x.toolMs === 'number' && x.checkMs === 0 && typeof x.waitMs === 'number' && x.checks === 0 && x.blocked === 0 && x.retries === 0 && !('usd' in x)) && ends[0].modelCalls === 2 && ends[0].toolCalls === 1 && ends[1].modelCalls === 1 && ends[1].toolCalls === 0, ends);
+  check('1: …its tokens are its usage records\' sums (input is the uncached part), per model too', same(ends[0].tokens, { input: 600, output: 60, cacheRead: 0, cacheWrite: 0 }) && same(ends[0].byModel, { 'mock-model': { calls: 2, input: 600, output: 60, cacheRead: 0, cacheWrite: 0 } }) && ends[1].tokens.input === 300, ends);
+  check('1: …and the wait on the approval card is under waitMs, not toolMs', ends[0].waitMs > 0, ends[0]);
   check('1: the log replays to the session exactly', same(replayConversation(recs).messages, h.store.get(A).messages));
   // Thinking, notices and the other event records, through the runtime's own dispatch
   const dispatch = (id, ev) => h.rt['dispatch'](id, ev);

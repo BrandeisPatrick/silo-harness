@@ -111,6 +111,72 @@ function makeLog({ skipNew = false, oldFirstRun = false } = {}) {
   const none = sessionReport(makeLog().filter((r) => !['check', 'retry'].includes(r.type)));
   check('2: a newer log with no check or retry says none', /\*\*Safety checks\*\* none\n/.test(none) && /\*\*Retries\*\* none\n/.test(none));
 
+  // ---------- 2b: the newer fields (run.start's info, run.end's result, usage's model, for, ms and usd) ----------
+  // The report of the log above as the version before these fields wrote it, word for word
+  const BEFORE = [
+    "**Session report** · numbers only, no content",
+    "",
+    "**Time** 7m 17s working in 2 turns, over 17m 17s",
+    "- turn 1, your message: 7m 06s",
+    "- turn 2, queued message: 11s, stopped",
+    "",
+    "**Model calls** 4, 5m 26s in all, median 6s",
+    "- slowest: call 2 5m 12s, call 4 8s, call 1 4s",
+    "",
+    "**Tool calls** 5, 2s of their own work (approvals and checks not included)",
+    "- bash: 1, 1s",
+    "- MCP tools: 1, 0.5s, 1 failed",
+    "- write_file: 1, 0.0s",
+    "- ask_user: 1, time under Waiting on you",
+    "- other tools: 1, 0.0s, 1 failed",
+    "",
+    "**Waiting on you** 1m 05s",
+    "- approval cards: 1, 20s",
+    "- questions: 1, 45s",
+    "",
+    "**Safety checks** 1, 3s in all, slowest 3s",
+    "- allow 1",
+    "",
+    "**Retries** 1, 1s waiting before them",
+    "- why: no data 1",
+    "- longest failed attempt: 5m 00s (no data)",
+    "",
+    "**Longest stretches with no record**",
+    "- 5m 00s in turn 1, 8s in: after tool result, before retry",
+    "- 45s in turn 1, 5m 43s in: after question card, before your answer",
+    "- 30s in turn 1, 6m 28s in: after compaction start, before compaction",
+    "- 20s in turn 1, 5m 20s in: after approval card, before your approval",
+    "- 12s in turn 1, 5m 08s in: after retry, before model reply",
+    "",
+    "**Tokens per model call** 4 calls",
+    "- input: 12k min, 14k median, 21k max, 60k total, 40% read from cache",
+    "- output: 200 min, 600 median, 5.2k max, 6.6k total",
+    "",
+    "**Compactions** 1",
+    "- 150k → 20k tokens, 30s"
+  ].join('\n');
+  check('2b: a log without the newer fields reports exactly as before', out === BEFORE, out);
+  // The same session written with the newer fields: every usage record says what it was for and its dollars, a check
+  // call has its own usage record, run.start and run.end carry their info and result
+  const priced = (usd) => makeLog().flatMap((r) => {
+    if (r.type === 'run.start') return [{ ...r, data: { ...r.data, model: 'claude-opus-5-5', provider: 'Anthropic', mode: 'auto', sandbox: false, app: '0.19.0' } }];
+    if (r.type === 'run.end') return [{ ...r, data: { ...r.data, result: { wallMs: 1, modelMs: 1, toolMs: 0, checkMs: 0, waitMs: 0, modelCalls: 1, toolCalls: 0, checks: 0, blocked: 0, retries: 0, tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, byModel: {} } } }];
+    if (r.type === 'usage') return [{ ...r, data: { ...r.data, model: 'claude-opus-5-5', for: 'turn', ms: 1234, ...(usd ? { usd: 0.5 } : {}) } }];
+    // The check's own model call ends just before its record
+    if (r.type === 'check') return [{ ...r, t: r.t - 1, type: 'usage', data: { promptTokens: 1500, completionTokens: 40, model: 'claude-haiku-5-5', for: 'check', ms: 2400, ...(usd ? { usd: 0.25 } : {}) } }, r];
+    return [r];
+  });
+  const newer = sessionReport(priced(true));
+  const strip = (t) => t.replace(/\n- safety checks: [^\n]*/, '').replace(/\n\n\*\*Cost\*\*[^\n]*/, '');
+  check('2b: with the newer fields, the turns\' numbers are the same (model calls, stretches, tokens per call)', strip(newer) === BEFORE, newer);
+  check('2b: …one line for the checks\' tokens', /\*\*Tokens per model call\*\* 4 calls\n- input: [^\n]*\n- output: [^\n]*\n- safety checks: 1 call, 1\.5k in, 40 out\n/.test(newer), newer.match(/\*\*Tokens[\s\S]*?\n\n/)?.[0]);
+  check('2b: …and the Cost line, the sum of every counted call (four turns and the check)', newer.includes('\n\n**Cost** $2.25, estimated from list prices\n') && leaks(newer).length === 0, newer.match(/\*\*Cost\*\*.*/)?.[0]);
+  const unpriced = sessionReport(priced(false));
+  check('2b: no Cost line when a call has no price; the checks\' line still there', !/\*\*Cost\*\*/.test(unpriced) && /- safety checks: 1 call/.test(unpriced) && strip(unpriced) === BEFORE);
+  const partly = priced(true).map((r) => (r.type === 'usage' && r.data.for === 'check' ? { ...r, data: { ...r.data, usd: undefined } } : r));
+  check('2b: …nor when only one call (the check) has none', !/\*\*Cost\*\*/.test(sessionReport(partly)));
+  check('2b: no Cost line for a log without dollars at all', !/\*\*Cost\*\*/.test(out) && !/\*\*Cost\*\*/.test(old));
+
   // ---------- 3: what it tolerates ----------
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-report-'));
   const file = path.join(tmp, 'session-falcon-secret.jsonl');

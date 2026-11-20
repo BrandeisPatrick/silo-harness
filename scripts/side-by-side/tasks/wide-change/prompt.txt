@@ -1,0 +1,1 @@
+In notebox, the storage layer (src/store) is synchronous, and everything above it calls it synchronously. Make it asynchronous everywhere: the store should use promises (node:fs/promises), and every function of the public API that reads or writes data should return a promise. Keep the behaviour the same, and update the tests and the README to match.
