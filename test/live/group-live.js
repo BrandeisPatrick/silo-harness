@@ -150,6 +150,8 @@ const { check, done } = checker();
     s = await state();
     check('4: a click between two calls opens the line', s.open && s.live && s.rows.every((r) => !r), s);
     await app.waitFor(liveWith(2), 15_000, 'the second call (4)');
+    // Let the new row settle where it lands (it fades in) before the mouse goes to it
+    await sleep(300);
     await realClick(`${G}.querySelector(':scope > .group-body > .tool:last-child > summary')`);
     await press('h');
     const row = await app.evaluate(`(() => { const r = ${G}.querySelector(':scope > .group-body > .tool:last-child'); const s = r.querySelector(':scope > summary'); return { open: r.open, ring: s.matches(':focus-visible'), focused: document.activeElement === s, typed: document.querySelector('#input').value }; })()`);
