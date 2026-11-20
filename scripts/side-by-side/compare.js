@@ -107,7 +107,7 @@ function mdTable(header, rows) {
 // ---------- Log fields ----------
 
 /** Collapsed map keys: model ids under these keys are data, not field names. */
-const MAP_KEYS = new Set(['modelUsage', 'model_usage_since_last_result']);
+const MAP_KEYS = new Set(['modelUsage', 'model_usage_since_last_result', 'byModel']);
 /** Keys that are ids (a tool call's, a message's, a uuid): data, shown as <id>. */
 const ID_KEY = /^(?:toolu_|call_|msg_|req_)|^[0-9a-f]{8}-[0-9a-f]{4}-/;
 
@@ -164,19 +164,28 @@ function timingParts(runs) {
   return parts;
 }
 
-/** Questions a log can answer, as field paths that must be there in some record. */
+/**
+ * Questions a log can answer, as field paths one of which must be there in some record; `kind:path` must be there in a
+ * record of that kind (the history log's record types, Claude Code's event kinds), and `kind:a+b` needs both. A note in
+ * parentheses is shown, not looked for.
+ */
 const QUESTIONS = [
+  ['model, permission mode and version at the start', { claude: ['system/init:model+permissionMode+claude_code_version'], history: ['run.start:data.model+data.mode+data.app'], timing: [] }],
   ['tokens per model call', { claude: ['message.usage.input_tokens'], history: ['data.promptTokens'], timing: ['promptTokens'] }],
   ['cache reads and writes', { claude: ['usage.cache_read_input_tokens'], history: ['data.cacheReadTokens'], timing: ['cacheReadTokens'] }],
-  ['how long each model call took', { claude: ['duration_api_ms (total only)'], history: [], timing: ['endMs'] }],
+  ['how long each model call took', { claude: ['duration_api_ms (total only)'], history: ['usage:data.ms'], timing: ['endMs'] }],
+  ['wall time and model time of a run', { claude: ['result/success:duration_ms+duration_api_ms'], history: ['run.end:data.result.wallMs+data.result.modelMs'], timing: ['run.summary:wallMs+modelMs'] }],
+  ['tokens of every call of a run, per model', { claude: ['modelUsage.<model>.inputTokens'], history: ['data.result.byModel.<model>.input'], timing: [] }],
+  ["the safety checks' tokens", { claude: [], history: ['usage:data.for (check)'], timing: [] }],
   ['time to first token', { claude: ['ttft_ms (first call only)'], history: [], timing: ['firstEventMs'] }],
   ['how long each tool call took', { claude: ['timestamp (tool_use to tool_result)'], history: ['data.durationMs'], timing: ['wallMs', 'execMs'] }],
   ['tool arguments (commands, paths)', { claude: ['message.content[].input'], history: ['data.args'], timing: [] }],
-  ['safety check verdicts', { claude: ['tool_result_meta[].permission_decision.decision'], history: ['data.verdict'], timing: ['permission[].check'] }],
-  ['how long the safety checks took', { claude: [], history: ['data.ms'], timing: ['permission[].checkMs'] }],
-  ['commands that ran sandboxed', { claude: [], timing: ['sandbox', 'sandboxed'], history: ['data.sandbox'] }],
+  ['safety check verdicts', { claude: ['tool_result_meta[].permission_decision.decision'], history: ['check:data.verdict'], timing: ['permission[].check'] }],
+  ['how long the safety checks took', { claude: [], history: ['check:data.ms'], timing: ['permission[].checkMs'] }],
+  ['commands that ran sandboxed', { claude: [], timing: ['sandbox', 'sandboxed'], history: ['tool.end:data.sandbox'] }],
   ['retries of a model call', { claude: [], history: ['data.attempt'], timing: ['retryWaits', 'retries'] }],
-  ['cost in dollars', { claude: ['total_cost_usd'], history: [], timing: [] }],
+  ['cost in dollars', { claude: ['total_cost_usd'], history: ['run.end:data.result.usd', 'usage:data.usd'], timing: [] }],
+  ['tool calls not allowed to run', { claude: ['permission_denials'], history: ['run.end:data.result.blocked'], timing: ['outcome'] }],
   ['the text of messages', { claude: ['message.content[].text'], history: ['data.message.content'], timing: [] }],
 ];
 
@@ -186,7 +195,7 @@ function logFields(outDir) {
   const historyFiles = findFiles(outDir, 'history.jsonl');
   const timingFiles = findFiles(outDir, 'timing.jsonl');
   const claude = collect(claudeFiles.flatMap(readJsonl), claudeKind, 3);
-  const history = collect(historyFiles.flatMap(readJsonl), (r) => r.type || '?', 4);
+  const history = collect(historyFiles.flatMap(readJsonl), (r) => r.type || '?', 5);
   const parts = timingParts(timingFiles.flatMap(readJsonl));
   const timing = new Map();
   for (const { kind, rec } of parts) {
@@ -199,6 +208,9 @@ function logFields(outDir) {
   sources.push({ id: 'history', title: "Silo Harness's history log (history/<session>.jsonl in the profile; copied as history.jsonl)", files: historyFiles.length, kinds: history });
   sources.push({ id: 'timing', title: "Silo Harness's timing log (timing/timing.jsonl in the profile; this session's runs copied as timing.jsonl)", files: timingFiles.length, kinds: timing });
 
+  // Which kinds carry each field, for a `kind:path` question
+  const byKind = {};
+  for (const s of sources) byKind[s.id] = s.kinds;
   const md = ['# Log fields', '', 'Record kinds and the field names each carries (names only, no values), from the logs under this folder. Nested fields are dotted; `[]` is an array of objects. Model ids used as map keys show as `<model>`, tool-call and message ids as `<id>`.', ''];
   const all = {};
   for (const s of sources) {
@@ -211,11 +223,18 @@ function logFields(outDir) {
     md.push('');
   }
   md.push('## Which log answers what', '', 'A field that answers it is there in at least one record of these runs (a blank: no field for it was seen).', '');
-  const has = (id, f) => [...all[id]].some((x) => x === f || x.endsWith(`.${f}`));
+  const match = (fields, f) => [...fields].some((x) => x === f || x.endsWith(`.${f}`));
+  const has = (id, spec) => {
+    const f = spec.replace(/ \(.*\)$/, '');
+    const colon = f.indexOf(':');
+    if (colon < 0) return match(all[id], f);
+    const kind = byKind[id].get(f.slice(0, colon));
+    return Boolean(kind && f.slice(colon + 1).split('+').every((p) => match(kind.fields, p)));
+  };
   const rows = QUESTIONS.map(([q, by]) => [
     q,
     ...['claude', 'history', 'timing'].map((id) => {
-      const hit = (by[id] || []).find((f) => has(id, f.replace(/ \(.*\)$/, '')));
+      const hit = (by[id] || []).find((f) => has(id, f));
       return hit ? `\`${hit}\`` : '';
     }),
   ]);

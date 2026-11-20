@@ -17,4 +17,4 @@ one commit, under the output folder you give. Never point it at a folder inside 
 `--mock` runs the mock model instead. `run-claude.js --parse-only <events.jsonl>` rebuilds a summary from a saved
 event stream without running `claude`, and `run-silo.js <task> --parse-only <runDir>` rebuilds a Silo run's summary
 from its saved logs. A Silo run that shows a question or approval card is ended there (`stoppedOn` in the summary). Both default to `claude-haiku-5-5`. Each run folder holds `summary.json` (the
-same shape for every runner), `final.txt`, `verify.json` and the raw logs.
+same shape for every runner), `final.txt`, `verify.json` and the raw logs. A Silo run's cost comes from its history log's `run.end` records (`result.usd`) when every run has one, else from the session's saved totals; its tokens are the agent's turns, and the safety checks' own calls are counted apart (`checks.checkTokens`).

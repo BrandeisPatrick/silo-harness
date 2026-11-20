@@ -59,13 +59,18 @@ function scriptMock(app, script) {
 function parseLogs(history, timingRuns, transcript, origin) {
   const steps = [];
   const starts = new Map();
+  // The agent's turns' usage records (a record with no `for` is one: older logs have no other), and the other counted
+  // calls (Auto mode's checks, the title, compaction and merge summaries)
   const usage = [];
+  const otherCalls = [];
   const checkRecs = [];
   const runStarts = [];
+  const runEndRecs = [];
   for (const r of history) {
     const d = r.data || {};
     if (r.type === 'run.start') runStarts.push(r);
-    else if (r.type === 'usage') usage.push(r);
+    else if (r.type === 'run.end') runEndRecs.push(r);
+    else if (r.type === 'usage') (d.for === undefined || d.for === 'turn' ? usage : otherCalls).push(r);
     else if (r.type === 'check') checkRecs.push(d);
     else if (r.type === 'tool.start') {
       const step = { type: 'tool', name: d.name, kind: c.kindOf(d.name), atMs: r.t - origin, ms: null, ok: null };
@@ -102,8 +107,8 @@ function parseLogs(history, timingRuns, transcript, origin) {
   }
   steps.sort((a, b) => a.atMs - b.atMs || (a.type === 'model' ? -1 : 1));
 
-  // Tokens: the usage records (the agent's own calls); prompt tokens there include cache reads and writes, so `in`
-  // is what is left of them, as Claude Code's input_tokens
+  // Tokens: the turns' usage records (the agent's own calls); prompt tokens there include cache reads and writes, so
+  // `in` is what is left of them, as Claude Code's input_tokens
   const tokens = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
   const src = usage.length ? usage.map((u) => u.data || {}) : turns.map((t) => ({ promptTokens: t.promptTokens, completionTokens: t.completionTokens, cacheReadTokens: t.cacheReadTokens, cacheWriteTokens: t.cacheWriteTokens }));
   for (const u of src) {
@@ -120,8 +125,14 @@ function parseLogs(history, timingRuns, transcript, origin) {
   for (const ch of checkRecs) verdicts[ch.verdict] = (verdicts[ch.verdict] || 0) + 1;
   const sum = (k) => timingRuns.reduce((a, r) => a + ((r.summary && r.summary[k]) || 0), 0);
   const autoBlocked = (transcript || []).filter((i) => i.role === 'auto_blocked').length;
+  // The safety checks' own model calls (a usage record each, in a newer log)
+  const checkCalls = otherCalls.filter((u) => u.data.for === 'check');
+  const checkTokens = checkCalls.length
+    ? { calls: checkCalls.length, in: checkCalls.reduce((a, u) => a + (u.data.promptTokens || 0), 0), out: checkCalls.reduce((a, u) => a + (u.data.completionTokens || 0), 0), ms: checkCalls.reduce((a, u) => a + (u.data.ms || 0), 0) }
+    : null;
   const checks = {
     checksRun: checkRecs.length,
+    checkTokens,
     checksMs: checkRecs.reduce((a, ch) => a + (ch.ms || 0), 0),
     verdicts,
     blocks: verdicts.block || 0,
@@ -131,8 +142,13 @@ function parseLogs(history, timingRuns, transcript, origin) {
     sandboxReruns: sum('sandboxReruns'),
   };
 
-  const runEnds = history.filter((r) => r.type === 'run.end').map((r) => r.data && r.data.reason);
+  const runEnds = runEndRecs.map((r) => r.data && r.data.reason);
+  // run.end's result (a newer log): the cost only when every run has its dollars, as the window's figure
+  const results = runEndRecs.map((r) => r.data && r.data.result).filter(Boolean);
+  const resultUsd = results.length && results.length === runEndRecs.length && results.every((x) => typeof x.usd === 'number') ? results.reduce((a, x) => a + x.usd, 0) : null;
+  const callMs = usage.map((u) => u.data.ms).filter((v) => typeof v === 'number');
   return {
+    resultUsd,
     steps,
     modelCalls: turns.length || usage.length,
     tokens,
@@ -149,7 +165,11 @@ function parseLogs(history, timingRuns, transcript, origin) {
       checksMs: timingRuns.length ? sum('checksMs') : null,
       otherMs: timingRuns.length ? sum('otherMs') : null,
       retries: timingRuns.length ? sum('retries') : null,
-      usageRecords: usage.length,
+      usageRecords: usage.length + otherCalls.length,
+      otherCallRecords: otherCalls.length,
+      runResults: results.length,
+      modelCallMs: callMs.length ? callMs.reduce((a, b) => a + b, 0) : null,
+      resultModelMs: results.length ? results.reduce((a, x) => a + (x.modelMs || 0), 0) : null,
       stepTimesFrom: 'the message being sent',
     },
   };
@@ -204,13 +224,14 @@ function summarise(task, runDir, project) {
     verify,
     modelCalls: parsed.modelCalls,
     tokens: parsed.tokens,
-    costUsd: run.costSummary && typeof run.costSummary.usd === 'number' ? run.costSummary.usd : null,
+    // run.end's result.usd when the log has it, else the session's cost as the app works it out
+    costUsd: parsed.resultUsd !== null ? parsed.resultUsd : run.costSummary && typeof run.costSummary.usd === 'number' ? run.costSummary.usd : null,
     steps: parsed.steps,
     checks: parsed.checks,
     finish: c.finishFields(final, parsed.steps, project, narration),
     stoppedOn: run.stoppedOn ?? null,
     stoppedText: run.stoppedText ?? null,
-    log: { ...parsed.log, wallFrom: 'send to idle', timedOut: run.timedOut, mock: run.mock, sandbox: run.sandbox },
+    log: { ...parsed.log, costFrom: parsed.resultUsd !== null ? 'run.end result.usd' : 'session cost', wallFrom: 'send to idle', timedOut: run.timedOut, mock: run.mock, sandbox: run.sandbox },
   });
 }
 
