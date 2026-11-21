@@ -120,7 +120,7 @@ async function shoot(app, name, topJs) {
     const s2 = await statusText(app);
     const secs = (t) => Number(/for (\d+) s/.exec(t ?? '')?.[1] ?? -1);
     check('3: after 30 s with nothing, the line says "No output for 30 s · retries at 5 min"', secs(s1) >= 30 && secs(s1) <= 32, s1);
-    check('3: …counting up', secs(s2) >= secs(s1) + 2, { s1, s2 });
+    check('3: …counting up (it repaints once a second, so 2.2 s later reads 1 or 2 s more)', secs(s2) > secs(s1), { s1, s2 });
     check('3: …and the line is not cut', await uncut(app));
     await shoot(app, 'no-output', lastUser);
     await app.waitFor(`!/^No output/.test(document.querySelector('#status-text')?.textContent ?? '')`, 20_000, 'the silence to end');
@@ -156,5 +156,5 @@ async function shoot(app, name, topJs) {
     if (app) await app.close();
     fs.rmSync(project, { recursive: true, force: true });
   }
-  done();
+  process.exit(done() ? 1 : 0);
 })();

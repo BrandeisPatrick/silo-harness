@@ -89,7 +89,7 @@ const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));
     console.log(`screenshots: ${shots}`);
   } catch (err) {
-    console.log(`FAIL crashed: ${err && err.stack ? err.stack : err}`);
+    check('no crash', false, err && err.stack ? err.stack : String(err));
   } finally {
     await app?.close().catch(() => undefined);
     fs.rmSync(profile, { recursive: true, force: true });

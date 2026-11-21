@@ -239,5 +239,5 @@ const KEY = 'mock-live-key-0123456789';
     fs.rmSync(profile, { recursive: true, force: true });
     fs.rmSync(linkDir, { recursive: true, force: true });
   }
-  done();
+  process.exit(done() ? 1 : 0);
 })();
