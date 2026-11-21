@@ -20,7 +20,7 @@ The result starts with the final URL and the total length, then the page's title
 - **No identity.** No cookies, no sign-in, no credentials in the URL. The only identifying header is `User-Agent: SiloHarness/<version>`.
 - **https first.** An `http://` URL is tried as `https://` first, and over http only if https cannot connect.
 - **Limits.** 30 seconds per call, 5 MB of body (decompressed; the rest is not read), and Stop ends it at once.
-- **Approval.** The first fetch from a site asks with the browser's site card: Allow once, allow the site for this session, or always. It is the same rule and the same list as the browser's, so a site you allowed for one is allowed for the other (Settings → Browser → Sites the agent may always use). Bypass mode does not ask.
+- **Approval.** The first fetch from a site asks with the browser's site card: Allow once, allow the site for this session, or always. It is the same rule and the same list as the browser's, so a site you allowed for one is allowed for the other (Settings → Browser → Advanced → Sites the agent may always use). Bypass mode does not ask.
 
 Because only public addresses are reached, `web_fetch` never makes macOS ask for local network access.
 

@@ -11,6 +11,7 @@ import type { App } from './app';
 import type { LookKind, ModCaller, ModInfo, ModLayout, ModLookTarget, ModPermission, ModSeat, ModsConfig } from '../shared/mods';
 import type { AppConfig } from '../shared/types';
 import { configDir, projectConfigDir } from './paths';
+import { trashItem } from './trash';
 import { loadSkills } from './skills';
 import { ModRegistry } from './mods/registry';
 import { LOOK_KINDS, hasFeatureParts, hasLookParts, inUseKinds, isPartOf, lookPartsOf, needsStylesApproval, settingFits, splitRef } from './mods/manifest';
@@ -57,7 +58,7 @@ export interface ModsController {
 
 function electronHost(app: App): ModsHost {
   return {
-    trash: (dir) => shell.trashItem(dir),
+    trash: (dir) => trashItem(dir),
     reveal: (dir) => shell.showItemInFolder(path.join(dir, 'mod.json')),
     async chooseImage() {
       const win = app.window();

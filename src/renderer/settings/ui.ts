@@ -1,9 +1,11 @@
 // Building blocks of the settings page: a row (title, description, one control at the right), the controls it holds,
-// and the row's feedback (an inline problem, the "Saved" tick, the "Set in settings.json" pill).
+// the row's feedback (an inline problem, the "Saved" tick, the lock of a field settings.json sets), the cards rows
+// sit in and the disclosures (a page's Advanced, Models' Connection).
 
 import { escapeHtml, h } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
 import { tilde } from '../home.js';
+import { cutMiddle } from './model.js';
 
 export interface RowOptions {
   /** Unique on the page; the row is #sp-row-<id> */
@@ -18,6 +20,8 @@ export interface RowOptions {
   pill?: string;
   /** The control goes under the text, full width (a multi-line field, a list) */
   full?: boolean;
+  /** The title and description are for the search and screen readers only: the row shows its control alone */
+  bare?: boolean;
 }
 
 export interface Row {
@@ -36,7 +40,7 @@ let uid = 0;
 export function row(opts: RowOptions, control?: HTMLElement | null): Row {
   const titleId = `sp-t-${opts.id}`;
   const descId = `sp-d-${opts.id}`;
-  const el = h('div', { class: `sp-row${opts.full ? ' full' : ''}`, id: `sp-row-${opts.id}`, 'data-row': opts.id });
+  const el = h('div', { class: `sp-row${opts.full ? ' full' : ''}${opts.bare ? ' bare' : ''}`, id: `sp-row-${opts.id}`, 'data-row': opts.id });
   if (opts.field) el.dataset.field = opts.field;
   el.dataset.search = [opts.title, opts.desc ?? '', opts.keywords ?? '', opts.pill ?? ''].join(' ');
   const title = h('div', { class: 'sp-row-title' }, h('span', { id: titleId, class: 'sp-row-name' }, opts.title));
@@ -108,6 +112,111 @@ export function group(title: string | null, ...rows: (Row | HTMLElement | null |
 
 export function note(text: string, cls = ''): HTMLElement {
   return h('p', { class: `sp-note${cls ? ` ${cls}` : ''}` }, text);
+}
+
+// ---------- Cards and disclosures ----------
+
+export type CardEl = HTMLElement & { body: HTMLElement; head: HTMLElement | null };
+
+/**
+ * Rows that belong together: one rounded panel with a hairline border and hairlines between its rows, with an optional
+ * small title above it. It is a group to the search, so a card without a match hides while searching.
+ */
+export function card(title: string | null, ...rows: (Row | HTMLElement | null | undefined | false)[]): CardEl {
+  const body = h('div', { class: 'sp-card' });
+  for (const r of rows) if (r) body.append(r instanceof HTMLElement ? r : r.el);
+  const g = h('div', { class: 'sp-group sp-card-group' }) as unknown as CardEl;
+  g.head = null;
+  if (title) {
+    g.head = h('div', { class: 'sp-card-head' }, h('h4', { class: 'sp-card-title' }, title));
+    g.append(g.head);
+  }
+  g.append(body);
+  g.body = body;
+  return g;
+}
+
+/** A small control at the right of a card's title line. */
+export function cardAction(c: CardEl, control: HTMLElement): void {
+  if (!c.head) {
+    c.head = h('div', { class: 'sp-card-head' });
+    c.prepend(c.head);
+  }
+  c.head.append(control);
+}
+
+export type Disclosure = HTMLElement & { body: HTMLElement; setOpen(open: boolean): void; isOpen(): boolean };
+
+const DISCLOSURE_KEY = 'settings.advanced.';
+
+/**
+ * A disclosure, closed by default: a chevron and a label, the content under it. With `remember` (a page's id), its
+ * open state is kept per page. The 'sp-open' event opens it (a search hit or a deep link inside it).
+ */
+export function disclosure(label: string, opts: { remember?: string; cls?: string } = {}, ...children: (Row | HTMLElement | null | undefined | false)[]): Disclosure {
+  const toggle = h('button', { type: 'button', class: 'sp-disclosure', 'aria-expanded': 'false', html: `${icon('chevron-right', 14)}<span>${escapeHtml(label)}</span>` });
+  const body = h('div', { class: 'sp-advanced-rows' });
+  for (const c of children) if (c) body.append(c instanceof HTMLElement ? c : c.el);
+  const el = h('div', { class: `sp-advanced${opts.cls ? ` ${opts.cls}` : ''}` }, h('div', { class: 'sp-disclosure-row' }, toggle), body) as unknown as Disclosure;
+  const key = opts.remember ? DISCLOSURE_KEY + opts.remember : '';
+  const setOpen = (open: boolean, store = true) => {
+    el.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    if (key && store) {
+      try {
+        if (open) localStorage.setItem(key, '1');
+        else localStorage.removeItem(key);
+      } catch {
+        /* not remembered */
+      }
+    }
+  };
+  let initial = false;
+  try {
+    initial = Boolean(key) && localStorage.getItem(key) === '1';
+  } catch {
+    initial = false;
+  }
+  setOpen(initial, false);
+  toggle.addEventListener('click', () => setOpen(!el.classList.contains('open')));
+  el.addEventListener('sp-open', (e) => {
+    e.stopPropagation();
+    setOpen(true);
+  });
+  el.body = body;
+  el.setOpen = (open) => setOpen(open);
+  el.isOpen = () => el.classList.contains('open');
+  return el;
+}
+
+/** A page's Advanced: everything but its everyday rows, at the bottom, closed by default, remembered per page. */
+export function advanced(page: string, ...children: (Row | HTMLElement | null | undefined | false)[]): Disclosure {
+  return disclosure('Advanced', { remember: page, cls: 'sp-page-advanced' }, ...children);
+}
+
+/** Opens every disclosure around `el`, innermost first (a search hit, a deep link). */
+export function uncoverDisclosures(el: HTMLElement): void {
+  for (let d = el.closest<HTMLElement>('.sp-advanced'); d; d = d.parentElement?.closest<HTMLElement>('.sp-advanced') ?? null) d.dispatchEvent(new CustomEvent('sp-open'));
+}
+
+/** The lock on a control a settings.json file sets: its tooltip says so; a click opens the file's row. */
+export function lockButton(path: string, onClick: () => void): HTMLButtonElement {
+  const b = h('button', { type: 'button', class: 'sp-lock', title: 'Set in settings.json', 'aria-label': `Set in settings.json${path ? ` (${path})` : ''}`, html: icon('lock', 13) });
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+/** Characters of a path a row's description shows before it is cut in the middle */
+export const PATH_CHARS = 56;
+
+/** A row's description as a path: from ~, cut in the middle when long, whole on hover. */
+export function pathDesc(r: Row, p: string, max = PATH_CHARS): void {
+  const full = String(p ?? '');
+  r.setDesc(cutMiddle(tildePath(full), max));
+  r.descEl.classList.add('sp-path');
+  r.descEl.title = full;
+  // The search finds the whole path, not the cut one
+  r.el.dataset.search = `${r.el.dataset.search ?? ''} ${tildePath(full)}`;
 }
 
 // ---------- Controls ----------

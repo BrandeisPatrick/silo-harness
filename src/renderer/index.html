@@ -254,7 +254,7 @@
               <button type="button" id="rules-add-btn" class="btn" disabled><span data-icon="plus" data-icon-size="14"></span><span>Add</span></button>
             </div>
             <p id="rules-add-error" class="rules-status" role="alert" hidden></p>
-            <p class="hint">Claude Code's rule format, e.g. <code>Edit(src/**)</code>, <code>mcp__github</code>. <a href="https://github.com/BrandeisPatrick/silo-harness/blob/main/docs/reference.md#permission-rules" target="_blank" rel="noopener">Rules reference</a></p>
+            <p class="hint rules-format"><a href="https://github.com/BrandeisPatrick/silo-harness/blob/main/docs/reference.md#permission-rules" target="_blank" rel="noopener" title="Claude Code's rule format, e.g. Edit(src/**), mcp__github">Rule format</a></p>
             <p id="rules-global-for" class="rules-for" hidden>Every project, from <span id="rules-global-file" class="rules-cwd">settings.json</span></p>
             <div id="rules-global" class="rules-list" hidden>
               <div class="rules-row" hidden>
@@ -320,6 +320,8 @@
           <blockquote id="confirm-quote-text" class="confirm-quote-text"></blockquote>
         </figure>
         <p id="confirm-desc" hidden></p>
+        <ul id="confirm-list" class="confirm-list" hidden></ul>
+        <label id="confirm-check" class="confirm-check" hidden><input type="checkbox" id="confirm-check-input"><span id="confirm-check-label"></span></label>
       </div>
     </div>
     <footer class="dialog-foot">

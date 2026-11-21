@@ -92,6 +92,16 @@ export interface ProviderView {
   headers: string[];
   /** The settings file that defines it, when one does (its fields are read-only in Settings) */
   owner?: 'user' | 'project';
+  /** The last four characters of a key that is set and long enough to keep them hidden (12 or more); never more */
+  keyTail?: string;
+  /** Where the key in effect comes from: the app's settings (config.json), your settings.json, your shell, a project's settings.json */
+  keyFrom?: 'app' | 'settings' | 'shell' | 'project';
+  /** A key typed in Settings → Models can be saved for it (in your own files) */
+  keyEditable?: boolean;
+  /** The key in effect is kept in your own files, so Settings → Models can remove it */
+  keyRemovable?: boolean;
+  /** Added by you (an entry of config.json or your settings.json), so Settings → Models can remove it */
+  removable?: boolean;
   /** Why it cannot be used as it is (no key, no model, no base URL), in plain words */
   error?: string;
   /** The effort pill; absent where the model or the service takes no effort setting */
@@ -930,6 +940,12 @@ export interface SiloHarnessApi {
   homeDir: string;
   getConfig(): Promise<AppConfig>;
   setConfig(cfg: AppConfig): Promise<AppConfig>;
+  /**
+   * Full reset (the app back to its first launch; with settingsJson your settings.json too) or Reset settings (the
+   * app's saved settings back to defaults). Everything that goes is moved to the Trash and the app relaunches. Only the
+   * main window's own page may ask (Settings → Developer, after a confirmation).
+   */
+  reset(kind: 'full' | 'settings', opts?: { settingsJson?: boolean }): Promise<{ relaunching: boolean }>;
   chooseDirectory(): Promise<string | null>;
   listOllamaModels(): Promise<string[]>;
   /** Absolute path of a File dropped onto the window (Electron's webUtils) */

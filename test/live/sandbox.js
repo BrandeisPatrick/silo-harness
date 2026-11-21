@@ -4,7 +4,7 @@
 // the check, is allowed and runs again outside; git add and npm install go straight to the check (allowed, blocked),
 // with no sandboxed first run. Five calls, three checks. The rows that ran in the sandbox carry its mark, and the one
 // that ran twice shows both runs. In Plan mode a read runs in the read-only sandbox: a grep that reaches .env reads no
-// secret, and the agent is told why. Then, in a fresh window with the sandbox off: Settings → Permissions → Auto mode
+// secret, and the agent is told why. Then, in a fresh window with the sandbox off: Settings → Permissions (its first card)
 // turns it on, shows Local ports and the folders, saves a folder, and is screenshotted in light and dark. Temp folders only.
 // Run: npm run build && node test/live/sandbox.js [screenshot-dir]
 const fs = require('node:fs');
@@ -110,7 +110,7 @@ const sh = (id, args) => ({ id, name: 'bash', args });
     await app.close();
   }
 
-  // ---------- 3. Settings → Permissions → Auto mode, the sandbox off at first ----------
+  // ---------- 3. Settings → Permissions, the sandbox off at first ----------
   const app2 = await launch({ mode: 'auto', mock: true, config: { theme: 'light' } });
   try {
     const cfg = () => app2.evaluate('window.oc.getConfig()');
@@ -123,7 +123,8 @@ const sh = (id, args) => ({ id, name: 'bash', args });
     await app2.waitFor(`window.oc.getConfig().then((c) => c.sandbox && c.sandbox.enabled === true)`, 5000, 'the setting saved');
     await app2.waitFor(`!document.querySelector('#sp-row-sandbox-loopback').hidden`, 5000, 'Local ports to show');
     v = await shown();
-    check('settings: on, saved, Local ports and the folders shown; this Mac can run it', v.on && v.ports && v.folders && v.desc === 'Commands that stay in the project and temp folders run without the check.', v);
+    // On a Mac that cannot run it the line would say "This Mac cannot run the sandbox."
+    check('settings: on, saved, Local ports and the folders shown; this Mac can run it', v.on && v.ports && v.folders && v.desc === 'Contained commands skip the safety check.', v);
     await app2.fill('#sandbox-allowWrite', '~');
     await app2.evaluate(`document.querySelector('#sandbox-allowWrite').dispatchEvent(new FocusEvent('blur'))`);
     await app2.waitFor(`!document.querySelector('#sp-row-sandbox-allowWrite .sp-problem').hidden`, 5000, 'the problem line');
@@ -133,7 +134,7 @@ const sh = (id, args) => ({ id, name: 'bash', args });
     await app2.evaluate(`document.querySelector('#sandbox-allowWrite').dispatchEvent(new FocusEvent('blur'))`);
     await app2.waitFor(`window.oc.getConfig().then((c) => Array.isArray(c.sandbox?.allowWrite) && c.sandbox.allowWrite.length === 2)`, 5000, 'the folders saved');
     check('settings: two folders saved', JSON.stringify((await cfg()).sandbox.allowWrite) === JSON.stringify(['~/silo-sandbox-scratch', '/Volumes/Work/builds']));
-    // The group's title and its three sandbox rows, scrolled into view (the group goes on with the learned answers)
+    // The first card, from Default mode to the sandbox's three rows (the card ends with them), scrolled into view
     await app2.evaluate(`document.querySelector('#sp-row-sandbox-enabled').closest('.sp-group').scrollIntoView({ block: 'start' })`);
     const box = await app2.evaluate(`(() => { const top = document.querySelector('#sp-row-sandbox-enabled').closest('.sp-group').getBoundingClientRect(); const end = document.querySelector('#sp-row-sandbox-allowWrite').getBoundingClientRect(); return { x: top.x - 16, y: top.y - 16, width: top.width + 32, height: end.bottom - top.y + 32 }; })()`);
     for (const t of ['light', 'dark']) {

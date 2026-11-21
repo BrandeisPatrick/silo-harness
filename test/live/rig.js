@@ -131,6 +131,8 @@ async function launch(opts = {}) {
     // The app's own config directory (settings.json, skills, mods) is redirected too, so a test never reads yours.
     SILO_HARNESS_CONFIG_DIR: home,
     PORTKEY_API_KEY: key || 'mock-key',
+    // Nothing a test moves to the Trash lands in yours: a stand-in folder beside the profile (trash.ts)
+    SILO_HARNESS_TRASH_DIR: `${profile}-trash`,
     ...(ant ? { SILO_HARNESS_LIVE_RELAY_KEY: ant.key } : {}),
     ...(opts.env || {}),
   };
@@ -222,6 +224,8 @@ async function launch(opts = {}) {
   const api = {
     root,
     profile,
+    /** The stand-in for the Trash this launch uses (SILO_HARNESS_TRASH_DIR) */
+    trashDir: `${profile}-trash`,
     project,
     port,
     /** true when the run talks to the real API, false with the mock model */
@@ -395,7 +399,10 @@ async function launch(opts = {}) {
         if (!exited) child.kill('SIGKILL');
       }
       mock?.close();
-      if (ownsProfile) fs.rmSync(profile, { recursive: true, force: true });
+      if (ownsProfile) {
+        fs.rmSync(profile, { recursive: true, force: true });
+        fs.rmSync(`${profile}-trash`, { recursive: true, force: true });
+      }
     },
   };
   // The page is usable once the composer has taken focus at the end of its start-up.

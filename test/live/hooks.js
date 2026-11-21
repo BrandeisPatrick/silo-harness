@@ -2,8 +2,8 @@
 // blocks rm (a notice in the transcript, the file survives), a PostToolUse hook that appends to a log file (with a
 // statusMessage in the status line while it runs), a UserPromptSubmit hook whose stdout reaches the model, a Stop hook
 // that sends the run back once, the fixture mod (test/fixtures/hooks-mod) whose worker view asks before every read
-// (the approval card appears, even in bypass mode), and Settings → Hooks listing them and their runs.
-// Screenshots (light and dark, scale 2): Settings → Hooks and the hook notice in the transcript, into $SHOTS.
+// (the approval card appears, even in bypass mode), and Settings → Developer → Hooks listing them and their runs.
+// Screenshots (light and dark, scale 2): Settings → Developer → Hooks and the hook notice in the transcript, into $SHOTS.
 // Run: npm run build && node test/live/hooks.js
 const fs = require('node:fs');
 const os = require('node:os');
@@ -142,30 +142,35 @@ const setTheme = (app, scheme) => app.evaluate(`(async () => { const c = await w
     const n3 = await notices(app);
     check('the mod\'s PostToolUse systemMessage is a notice', n3.some((t) => /Hooks fixture saw Read/.test(t)), n3);
 
-    // 4. Settings → Hooks
+    // 4. Settings → Developer → Hooks (the old 'hooks' page id lands there)
     await app.evaluate(`window.__oc_debug.settings.open('hooks')`);
-    await app.waitFor(`document.querySelectorAll('#sp-row-hooks-runs').length > 0 && document.querySelectorAll('.sp-hook').length >= 5`, 10_000, 'the Hooks page');
+    await app.waitFor(`document.querySelector('#sp-sec-developer.current') && document.querySelectorAll('#sp-sec-developer .sp-hook-run').length > 0 && document.querySelectorAll('#sp-sec-developer .sp-hook').length >= 5`, 10_000, 'the Hooks card');
     const page = await app.evaluate(`(() => {
-      const sec = document.querySelector('#sp-row-hooks-runs').closest('section');
-      return { groups: [...sec.querySelectorAll('.sp-group-title')].map((e) => e.textContent), hooks: [...sec.querySelectorAll('.sp-hook')].map((e) => e.innerText.replace(/\\s+/g, ' ')), runs: [...sec.querySelectorAll('.sp-hook-run')].map((e) => e.innerText.replace(/\\s+/g, ' ')) };
+      const sec = document.querySelector('#sp-sec-developer');
+      return { events: [...sec.querySelectorAll('.sp-hook .sp-row-desc')].map((e) => e.textContent.split(' · ')[0]), hooks: [...sec.querySelectorAll('.sp-hook')].map((e) => e.innerText.replace(/\\s+/g, ' ')), runs: [...sec.querySelectorAll('.sp-hook-run')].map((e) => e.innerText.replace(/\\s+/g, ' ')) };
     })()`);
-    check('Settings → Hooks groups the hooks by event', ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].every((g) => page.groups.includes(g)), page.groups);
+    const ORDER = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification', 'Stop', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'];
+    check('Settings → Developer → Hooks lists the hooks in event order, each naming its event', ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].every((g) => page.events.includes(g)) && page.events.every((e, i) => i === 0 || ORDER.indexOf(page.events[i - 1]) <= ORDER.indexOf(e)), page.events);
     check('… each with its matcher, type and file', page.hooks.some((t) => /block-rm\.sh/.test(t) && /matcher Bash/.test(t) && /if Bash\(rm \*\)/.test(t) && /settings\.json/.test(t)), page.hooks);
     check('… and the mod\'s hooks with the mod\'s name as the source', page.hooks.some((t) => /Hooks fixture/.test(t) && /Mod/.test(t)), page.hooks);
     check('the recent runs: event, tool, exit code or decision, duration, first stderr line', page.runs.some((t) => /PreToolUse · Bash/.test(t) && /exit 2/.test(t) && /block/.test(t) && /Blocked: rm is not allowed/.test(t)) && page.runs.some((t) => /PreToolUse · Read/.test(t) && /ask/.test(t)), page.runs.slice(0, 6));
-    await app.evaluate(`document.querySelector('.sp-content, .settings-content, [data-section="hooks"]')?.scrollTo?.(0, 0)`).catch(() => undefined);
+    await app.evaluate(`document.querySelector('#sp-sec-developer .sp-hooks-wrap')?.scrollIntoView({ block: 'start' })`).catch(() => undefined);
+    // The dialog fades in: shoot it once it has
+    await app.waitFor(`!document.querySelector('#settings').getAnimations({ subtree: true }).some((a) => a.playState === 'running')`, 3000, 'Settings to finish opening').catch(() => undefined);
     await sleep(300);
     await app.screenshot(path.join(SHOTS, 'settings-hooks-light.png'));
     await setTheme(app, 'dark');
     await sleep(400);
     await app.screenshot(path.join(SHOTS, 'settings-hooks-dark.png'));
     await setTheme(app, 'light');
-    const overflow = await app.evaluate(`(() => { const sec = document.querySelector('#sp-row-hooks-runs').closest('section'); return sec.scrollWidth - sec.clientWidth; })()`);
-    check('the Hooks page does not overflow sideways', overflow <= 0, overflow);
-    // Clear
-    await app.evaluate(`[...document.querySelectorAll('#sp-row-hooks-runs button')].find((b) => /Clear/.test(b.innerText)).click()`);
+    // The hooks are cards of Developer now: its scroller does not scroll sideways, and no hook or run (long paths)
+    // spills out of its card. (A card head's icon button reaches 2 px past the section by design, into the padding.)
+    const overflow = await app.evaluate(`(() => { const body = document.querySelector('#settings-body'); const cards = [...document.querySelectorAll('#sp-sec-developer .sp-hooks-wrap .sp-card')]; return { body: body.scrollWidth - body.clientWidth, cards: cards.map((c) => c.scrollWidth - c.clientWidth) }; })()`);
+    check('the Hooks cards do not overflow sideways', overflow.body <= 0 && overflow.cards.length === 2 && overflow.cards.every((n) => n <= 0), overflow);
+    // Clear: the trash button in the head of the Recent hook runs card
+    await app.evaluate(`document.querySelector('.sp-hook-run').closest('.sp-card-group').querySelector('.sp-card-head button[aria-label="Clear the runs"]').click()`);
     await app.waitFor(`document.querySelectorAll('.sp-hook-run').length === 0`, 5_000, 'the runs to clear');
-    check('Clear empties the recent runs', true);
+    check('Clear empties the recent runs, and their card hides', await app.evaluate(`[...document.querySelectorAll('#sp-sec-developer .sp-hooks-wrap .sp-card-group')].find((g) => /Recent hook runs/.test(g.querySelector('.sp-card-title')?.textContent || ''))?.hidden === true`));
     const errs = app.console.filter((l) => /^\[(error|exception)\]/.test(l) && !/favicon/.test(l));
     check('no renderer errors', errs.length === 0, errs.slice(0, 3));
   } catch (err) {

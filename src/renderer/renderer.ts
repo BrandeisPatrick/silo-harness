@@ -2277,8 +2277,8 @@ function noticeProjectSettings(info: SettingsInfo | null | undefined): void {
   const sets = [plain.slice(0, 4).join(', ') + (plain.length > 4 ? ` and ${plain.length - 4} more` : ''), hooks, env ? `${env} environment variable${env === 1 ? '' : 's'}` : ''].filter(Boolean).join(', plus ');
   addSystemMessage(
     f.changed
-      ? `This project's settings.json changed and is off until you approve it in Settings → Configuration files.`
-      : `This project's settings.json sets ${sets}. It is off until you approve it in Settings → Configuration files.`,
+      ? `This project's settings.json changed and is off until you approve it in Settings → Developer → Configuration files.`
+      : `This project's settings.json sets ${sets}. It is off until you approve it in Settings → Developer → Configuration files.`,
     'notice',
   );
 }

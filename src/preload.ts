@@ -8,6 +8,7 @@ ipcRenderer.setMaxListeners(200);
 const api: SiloHarnessApi = {
   homeDir: process.env.HOME ?? '',
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:get'),
+  reset: (kind: 'full' | 'settings', opts?: { settingsJson?: boolean }): Promise<{ relaunching: boolean }> => ipcRenderer.invoke('app:reset', kind, opts ?? {}),
   setConfig: (cfg: AppConfig): Promise<AppConfig> => ipcRenderer.invoke('config:set', cfg),
   chooseDirectory: (): Promise<string | null> => ipcRenderer.invoke('cwd:choose'),
   listOllamaModels: (): Promise<string[]> => ipcRenderer.invoke('models:list'),

@@ -15,7 +15,7 @@ import { closeMenu, openMenu, type MenuSection } from './popover.js';
 import { appendTranscriptItem, registerTranscriptItem } from './transcript-items.js';
 import { homeDir } from './home.js';
 import { modeOf } from './modes.js';
-import { LOOK_TABS, MOD_TABS, isLookOnly, isSectionId, lookSetPatch, lookSets, modTabs, type ModTab } from './settings/model.js';
+import { LOOK_TABS, MOD_TABS, isLookOnly, landingFor, lookSetPatch, lookSets, modTabs, type ModTab } from './settings/model.js';
 import {
   ERR,
   HELLO_TIMEOUT_MS,
@@ -612,7 +612,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
           deps.openPage(section);
           return null;
         }
-        if (!isSectionId(section)) throw bad(`section: no Settings section "${section}"`);
+        // A page that is gone (context, files, hooks, about) lands where its settings are now
+        if (!landingFor(section)) throw bad(`section: no Settings section "${section}"`);
         deps.openSettings(section);
         return null;
       }
@@ -1617,7 +1618,8 @@ export function createModsHost(deps: ModsHostDeps): ModsHost {
       text = how === 'later' ? `${name} stays off. Turn it on in` : how === 'on' ? (picks ? `${name} is on. Use its looks in` : `${name} is on`) : `${name} was turned on in Settings`;
       if (!(how === 'later' || (how === 'on' && picks))) tab = '';
     }
-    const where = tab ? `Settings → Mods${tab === 'mods' ? '' : ` → ${MOD_TABS.find((t) => t.id === tab)!.title}`}` : '';
+    // The look tabs are on Appearance; a mod's switch is on Mods
+    const where = tab ? (tab === 'mods' ? 'Settings → Mods' : `Settings → Appearance → ${MOD_TABS.find((t) => t.id === tab)!.title}`) : '';
     const link = where && how !== 'elsewhere' ? ` <button type="button" class="link-btn mod-offer-where" data-tab="${escapeHtml(tab)}">${escapeHtml(where)}</button>` : '';
     o.el.classList.add('done');
     o.el.innerHTML = `<div class="mod-offer-decided"><span class="${how === 'later' ? 'no' : 'ok'}">${icon(how === 'later' ? 'x' : 'check', 14)}</span><span>${escapeHtml(text)}${link}</span></div>`;

@@ -1,17 +1,19 @@
-// Live check of the settings page in the real window: every section in light and dark at two window sizes, one
-// control of each kind applied at once and still there after a relaunch, rejected values, a field a settings.json
-// owns, search, Esc and the keyboard, the MCP and rules panels, the mods list (real backend), the old entry points.
-// Features this build does not have (settings.info, app.info, history.*) are driven through
+// Live check of the settings page in the real window: every page in light and dark at two window sizes, one control
+// of each kind applied at once and still there after a relaunch, rejected values, a field a settings.json owns (its
+// lock), search (rows inside a closed Advanced included), Esc and the keyboard, the MCP and rules panels, the mods
+// list (real backend), Appearance's look tabs, and every old entry point and row id landing where its setting lives
+// now. Features this build does not have (settings.info, app.info, history.*) are driven through
 // window.__oc_debug.settings.mock. The model is never called, so this runs against the mock model.
 //
 // Run: npm run build && node test/live/settings-page.js [screenshot-dir]
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { launch, checker, sleep } = require('./rig.js');
 
-// Scheduled and Dreaming are pages of their own now (test/live/pages.js); a search finds them under Pages
-const SECTIONS = ['general', 'model', 'permissions', 'context', 'mods', 'mcp', 'skills', 'remote', 'history', 'appearance', 'files', 'about'];
+// Scheduled and Dreaming are pages of their own (test/live/pages.js); a search finds them under Pages
+const SECTIONS = ['general', 'model', 'permissions', 'appearance', 'browser', 'remote', 'mods', 'mcp', 'skills', 'history', 'developer'];
 const now = Date.now();
 const MOCK = {
   info: {
@@ -41,6 +43,11 @@ const js = (v) => JSON.stringify(v);
   // A skill so its section has rows to look at.
   fs.mkdirSync(path.join(project, '.silo-harness', 'skills', 'release-notes'), { recursive: true });
   fs.writeFileSync(path.join(project, '.silo-harness', 'skills', 'release-notes', 'SKILL.md'), '---\nname: release-notes\ndescription: Write release notes from the merged pull requests since the last tag.\n---\nSteps…\n');
+  // The old ids (pages and rows that moved), from the window's own table: each must land where its setting lives
+  const copy = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-settings-model-')), 'model.mjs');
+  fs.copyFileSync(path.join(__dirname, '..', '..', 'dist', 'renderer', 'settings', 'model.js'), copy);
+  const { LEGACY_SECTIONS, ROW_MOVES } = await import(pathToFileURL(copy).href);
+  fs.rmSync(path.dirname(copy), { recursive: true, force: true });
 
   const open = async (app, section) => {
     await app.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-${section}')?.click(); })()`);
@@ -48,6 +55,12 @@ const js = (v) => JSON.stringify(v);
   };
   const isOpen = (app) => app.evaluate(`document.querySelector('#settings').open`);
   const cfg = (app) => app.evaluate('window.oc.getConfig()');
+  /** Opens a disclosure (a page's Advanced, Models → Connection) when it is closed */
+  const disclose = async (app, sel) => {
+    if (!(await app.evaluate(`document.querySelector(${js(sel)}).classList.contains('open')`))) await app.click(`${sel} > .sp-disclosure-row > .sp-disclosure`);
+    await sleep(200);
+  };
+  const advancedOf = (s) => `#sp-sec-${s} .sp-page-advanced`;
 
   let app;
   try {
@@ -59,20 +72,21 @@ const js = (v) => JSON.stringify(v);
         await app.evaluate(`window.__oc_debug.rules.mock({ cwd: ${js(project)}, programs: ['git', 'npm'], reasons: ['uses sudo'], edits: true, mcp: [] })`);
         for (const s of SECTIONS) {
           await open(app, s);
-          if (s === 'mods') await app.evaluate(`document.querySelector('.sp-mod:not(.sp-tab-out) .sp-mod-expand')?.click()`);
+          if (s === 'mods') await app.evaluate(`document.querySelector('#sp-sec-mods .sp-mod .sp-mod-expand')?.click()`);
           await sleep(150);
           await app.screenshot(path.join(shots, `${size.width}-${theme}-${s}.png`));
         }
-        // Layout: the controls sit in one column at the right, nothing overflows the page horizontally.
+        // Layout: the controls on screen sit in one column at the right, nothing overflows the page horizontally.
         await open(app, 'general');
         const layout = await app.evaluate(`(() => {
           const body = document.querySelector('#settings-body');
-          const rights = [...document.querySelectorAll('.sp-section.current .sp-row:not(.full) .sp-row-control')].map((c) => Math.round(c.getBoundingClientRect().right));
+          const rights = [...document.querySelectorAll('.sp-section.current .sp-row:not(.full) .sp-row-control')].filter((c) => c.offsetParent).map((c) => Math.round(c.getBoundingClientRect().right));
           const dlg = document.querySelector('#settings').getBoundingClientRect();
           return { rights, overflow: body.scrollWidth - body.clientWidth, dlg: { w: Math.round(dlg.width), h: Math.round(dlg.height) } };
         })()`);
-        check(`${size.width}/${theme}: controls align at the right`, new Set(layout.rights).size === 1, layout.rights);
+        check(`${size.width}/${theme}: controls align at the right`, layout.rights.length >= 4 && new Set(layout.rights).size === 1, layout.rights);
         check(`${size.width}/${theme}: no horizontal overflow`, layout.overflow <= 0, layout);
+        check(`${size.width}/${theme}: General's Advanced is closed at first`, !(await app.evaluate(`document.querySelector(${js(advancedOf('general'))}).classList.contains('open')`)) && !(await app.evaluate(`Boolean(document.querySelector('#maxTurns').offsetParent)`)));
         await open(app, 'mods');
         const modRights = await app.evaluate(`[...document.querySelectorAll('.sp-section.current .sp-row .sp-row-control')].filter((c) => c.offsetParent).map((c) => Math.round(c.getBoundingClientRect().right))`);
         check(`${size.width}/${theme}: mod switches align with the other controls`, new Set(modRights).size === 1, modRights);
@@ -86,10 +100,15 @@ const js = (v) => JSON.stringify(v);
     // ---------- Behaviour, on a profile kept for a relaunch ----------
     app = await launch({ mock: true, profile, project });
     await app.evaluate(`window.__oc_debug.settings.mock(${js({ app: MOCK.app, history: MOCK.history })})`);
+    const st = () => app.evaluate('window.__oc_debug.settings.state()');
+    const shown = (sel) => app.evaluate(`(() => { const e = document.querySelector(${js(sel)}); return Boolean(e && e.offsetParent); })()`);
+    const visible = (id) => shown(`#sp-row-${id}`);
 
     // Entry points
     await app.click('#settings-btn');
     check('the sidebar button opens it', await isOpen(app));
+    const nav = await app.evaluate(`[...document.querySelectorAll('.sp-nav-item[data-section]')].filter((b) => !b.hidden).map((b) => b.dataset.section).join()`);
+    check('eleven pages in order: General, Models, Permissions, Appearance | Browser, Remote control, Mods, MCP servers, Skills | History, Developer', nav === SECTIONS.join(), nav);
     await app.key('Escape');
     check('Esc closes it', !(await isOpen(app)));
     await app.key(',', { meta: true });
@@ -103,7 +122,7 @@ const js = (v) => JSON.stringify(v);
     await app.waitFor(`Boolean(document.querySelector('.mcp-manage'))`, 5000);
     await app.click('.mcp-manage');
     await sleep(200);
-    check('"Manage in Settings…" opens MCP servers', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'mcp' && (await isOpen(app)));
+    check('"Manage in Settings…" opens MCP servers', (await st()).section === 'mcp' && (await isOpen(app)));
     await app.evaluate(`document.querySelector('#settings').close()`);
 
     // One control of each kind, applied at once
@@ -111,20 +130,23 @@ const js = (v) => JSON.stringify(v);
     const before = await cfg(app);
     await app.click('#sp-row-notifications input.switch');
     await app.evaluate(`[...document.querySelectorAll('#sp-row-keepAwake input')].find((i) => i.value === 'always').click()`);
+    await disclose(app, advancedOf('general'));
+    check("General → Advanced opens on a click and shows Max tool turns", await app.evaluate(`Boolean(document.querySelector('#maxTurns').offsetParent)`));
     await app.fill('#maxTurns', '25');
     await app.evaluate(`document.querySelector('#maxTurns').blur()`);
-    await open(app, 'context');
-    await app.fill('#compactThreshold', '0.65');
     await open(app, 'model');
+    await disclose(app, advancedOf('model'));
+    await app.fill('#compactThreshold', '0.65');
+    await disclose(app, '#sp-sec-model .sp-connection');
     await app.fill('#portkey-contextWindow', '150000');
     await app.key('Enter');
     await sleep(500);
     let c = await cfg(app);
     check('switch applied (notifications)', c.notifications === !before.notifications, c.notifications);
     check('segmented applied (keep awake)', c.keepAwake === 'always', c.keepAwake);
-    check('text applied on blur (max tool turns)', c.maxTurns === 25, c.maxTurns);
-    check('select applied (compact at)', c.compactThreshold === 0.65, c.compactThreshold);
-    check('text applied on Enter (context window)', c.portkey.contextWindow === 150000, c.portkey.contextWindow);
+    check('text applied on blur (max tool turns, in General → Advanced)', c.maxTurns === 25, c.maxTurns);
+    check('select applied (compact at, in Models → Advanced)', c.compactThreshold === 0.65, c.compactThreshold);
+    check('text applied on Enter (context window, in Models → Connection)', c.portkey.contextWindow === 150000, c.portkey.contextWindow);
     check('the Saved tick showed', await app.exists('#sp-row-portkey-contextWindow .sp-saved.show'));
 
     // Rejected values: nothing saved, the problem inline
@@ -140,17 +162,28 @@ const js = (v) => JSON.stringify(v);
     await sleep(300);
     check('a valid value clears the problem and saves', (await cfg(app)).maxTurns === 30 && !(await app.exists('#sp-row-maxTurns.invalid')));
     await open(app, 'model');
-    // The Ollama rows show only for Ollama: switch to it to edit one, then back.
-    await app.fill('#provider', 'ollama');
-    await sleep(300);
+    // The Ollama rows show only for Ollama: choose it in the Provider picker to edit one, then back to the gateway
+    const pickProvider = async (label) => {
+      await app.click('#provider');
+      await sleep(200);
+      const ok = await app.evaluate(`(() => { const o = [...document.querySelectorAll('.sp-picker-pop .sp-picker-item')].find((x) => x.title === ${js(label)} || x.innerText.trim().startsWith(${js(label)})); if (!o) return false; o.click(); return true; })()`);
+      await sleep(600);
+      return ok;
+    };
+    // Ollama is offered once it is set up (Add provider, covered by models-page.js); the same call here
+    await app.evaluate(`window.oc.rpc('providers.use', 'ollama')`);
+    await sleep(600);
+    check('the Provider picker shows Ollama in use', /Ollama/.test((await app.text('#provider')) || ''), await app.text('#provider'));
+    await disclose(app, '#sp-sec-model .sp-connection');
     await app.fill('#ollama-numCtx', 'abc');
     await app.evaluate(`document.querySelector('#ollama-numCtx').blur()`);
+    await sleep(300);
     const numCtxProblem = /whole number/.test((await app.text('#sp-row-ollama-numCtx .sp-problem')) || '');
-    check('Ollama rows show for Ollama', await app.evaluate(`Boolean(document.querySelector('#sp-row-ollama-numCtx').offsetParent) && !document.querySelector('#sp-row-portkey-apiKey').offsetParent`));
+    check('Ollama rows show for Ollama (under Connection), the gateway rows do not', (await visible('ollama-numCtx')) && !(await visible('portkey-baseURL')));
     await app.fill('#ollama-numCtx', String(before.ollama.numCtx));
     await app.evaluate(`document.querySelector('#ollama-numCtx').blur()`);
-    await app.fill('#provider', 'portkey');
-    await sleep(300);
+    check('… and back to the gateway', await pickProvider('Gateway'));
+    await disclose(app, '#sp-sec-model .sp-connection');
     await app.fill('#portkey-contextWindow', 'abc');
     await app.evaluate(`document.querySelector('#portkey-contextWindow').blur()`);
     await sleep(300);
@@ -162,25 +195,27 @@ const js = (v) => JSON.stringify(v);
     await app.evaluate(`document.querySelector('#portkey-contextWindow').blur()`);
 
     // Provider: only the selected provider's rows show
-    const visible = (id) => app.evaluate(`(() => { const e = document.querySelector('#sp-row-${id}'); return Boolean(e && e.offsetParent); })()`);
-    check('gateway rows show for the gateway', (await visible('portkey-apiKey')) && !(await visible('ollama-baseURL')));
+    check('gateway rows show for the gateway', (await visible('portkey-baseURL')) && (await visible('provider-apiKey')) && !(await visible('ollama-baseURL')));
 
     // An owned field (the main-process side is absent here: through the mock)
     await app.evaluate(`window.__oc_debug.settings.mock(${js(MOCK)})`);
     await sleep(300);
     await open(app, 'general');
     check('a field settings.json owns is disabled', await app.evaluate(`document.querySelector('#maxTurns').disabled`));
-    check('… with the pill and the path as its tooltip', /settings\.json/.test(await app.evaluate(`document.querySelector('#sp-row-maxTurns .sp-owned')?.title ?? ''`)));
+    const lock = await app.evaluate(`(() => { const l = document.querySelector('#sp-row-maxTurns .sp-lock'); return l ? { title: l.title, label: l.getAttribute('aria-label') } : null; })()`);
+    check('… with a lock on its control: "Set in settings.json", the file in its label', lock?.title === 'Set in settings.json' && lock.label.includes('/Users/me/.silo-harness/settings.json'), lock);
+    check('… and no lock on a field no file sets', !(await app.exists('#sp-row-notifications .sp-lock')));
     await app.screenshot(path.join(shots, 'owned.png'));
-    await app.click('#sp-row-maxTurns .sp-owned');
-    await sleep(200);
-    check('clicking the pill opens Configuration files', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'files');
-    await app.evaluate(`[...document.querySelectorAll('#sp-sec-files button')].find((b) => /Trust and apply/.test(b.innerText)).click()`);
+    await app.click('#sp-row-maxTurns .sp-lock');
+    await sleep(300);
+    let s0 = await st();
+    check("clicking the lock opens Developer at the file's row", s0.section === 'developer' && s0.revealed === 'file-user' && (await visible('file-user')), s0);
+    await app.evaluate(`[...document.querySelectorAll('#sp-sec-developer button')].find((b) => /Trust and apply/.test(b.innerText)).click()`);
     await app.waitFor(`document.querySelector('#confirm-dialog').open`, 3000);
     await app.click('#confirm-ok');
     await sleep(300);
     check('Trust and apply reaches settings.trustProject', (await app.evaluate('window.__oc_debug.settings.calls()')).some((x) => x.method === 'settings.trustProject' && x.args[0] === true));
-    check('… and the project file now shows Applied', /Applied/.test(await app.text('#sp-sec-files')));
+    check('… and the project file now shows Applied', /Applied/.test(await app.text('#sp-row-file-project-trust')));
 
     // Search
     const searchFor = async (q) => {
@@ -189,14 +224,16 @@ const js = (v) => JSON.stringify(v);
       return app.evaluate(`({ rows: [...document.querySelectorAll('.sp-section.has-hit .sp-row.hit')].filter((r) => r.offsetParent).map((r) => r.dataset.row), empty: !document.querySelector('#settings-empty').hidden, dim: [...document.querySelectorAll('.sp-nav-item.dim')].length })`);
     };
     let s = await searchFor('theme');
-    check('search "theme" finds Theme', s.rows.includes('theme'), s.rows);
+    check('search "theme" finds the colour scheme', s.rows.includes('theme'), s.rows);
     await app.screenshot(path.join(shots, 'search-theme.png'));
     s = await searchFor('key');
-    check('search "key" finds the API keys (of either provider)', s.rows.includes('portkey-apiKey') && s.rows.includes('portkey-providerApiKey') && s.rows.includes('portkey-virtualKey'), s.rows);
+    check('search "key" finds the API key and the gateway’s keys (inside Connection, closed or not)', s.rows.includes('provider-apiKey') && s.rows.includes('portkey-providerApiKey') && s.rows.includes('portkey-virtualKey'), s.rows);
     check('… and dims sections without a match', s.dim > 3, s.dim);
     await app.screenshot(path.join(shots, 'search-key.png'));
     s = await searchFor('sleep');
     check('search "sleep" finds Keep awake', s.rows.includes('keepAwake') && s.rows.length <= 3, s.rows);
+    s = await searchFor('compact');
+    check('search "compact" finds the context rows inside Models → Advanced', s.rows.includes('autoCompact') && s.rows.includes('compactThreshold'), s.rows);
     s = await searchFor('dream');
     check('search "dream" finds the Dreaming page (no longer a section), listed first', s.rows[0] === 'page-dreaming' && s.rows.includes('page-dreaming-daily'), s.rows);
     s = await searchFor('cron');
@@ -208,33 +245,65 @@ const js = (v) => JSON.stringify(v);
     await app.key('Escape');
     await sleep(150);
     check('Esc first clears the search', (await isOpen(app)) && (await app.evaluate(`document.querySelector('#settings-search').value`)) === '');
-    check('… and the section that was open comes back', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'files' && (await visible('files-reload')));
+    check('… and the page that was open comes back', (await st()).section === 'developer' && (await shown('#files-reload')));
     await app.key('Escape');
     check('… then Esc closes', !(await isOpen(app)));
 
     // Keyboard navigation
     await app.click('#settings-btn');
-    await app.evaluate(`document.querySelector('#sp-nav-files').focus()`);
+    await app.evaluate(`document.querySelector('#sp-nav-history').focus()`);
     await app.key('ArrowDown');
     await sleep(100);
-    check('ArrowDown moves to the next section', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'hooks' && (await app.evaluate(`document.activeElement.id`)) === 'sp-nav-hooks');
+    check('ArrowDown moves to the next page', (await st()).section === 'developer' && (await app.evaluate(`document.activeElement.id`)) === 'sp-nav-developer');
     await app.key('ArrowUp');
     await app.key('ArrowUp');
-    check('ArrowUp goes back', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'appearance');
+    check('ArrowUp goes back', (await st()).section === 'skills');
     check('every control has a name', await app.evaluate(`[...document.querySelectorAll('#settings input, #settings select, #settings textarea')].filter((e) => e.offsetParent && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby') && !e.labels?.length && !e.closest('label')).map((e) => e.id || e.outerHTML.slice(0, 80)).length === 0`));
 
     // A feature that is absent hides its section
     await app.evaluate(`window.__oc_debug.settings.mock(${js({ app: MOCK.app, history: null })})`);
     await sleep(300);
     check('without history.* the History section and its nav item hide', await app.evaluate(`document.querySelector('#sp-nav-history').hidden && document.querySelector('#sp-sec-history').hidden`));
-    // The same for Configuration files when settings.info is reported absent; with the real backend it shows.
+    // The same for Developer's Configuration files card when settings.info is reported absent; with the real backend it shows.
+    const filesCardHidden = `document.querySelector('#files-reload').closest('.sp-card-group').hidden`;
     await app.evaluate(`window.__oc_debug.settings.mock(${js({ app: MOCK.app, history: MOCK.history, absent: ['settings.info'] })})`);
     await sleep(300);
-    check('without settings.info Configuration files hides', await app.evaluate(`document.querySelector('#sp-nav-files').hidden`));
+    check('without settings.info the Configuration files card hides', await app.evaluate(filesCardHidden));
     await app.evaluate(`window.__oc_debug.settings.mock(null)`);
     await sleep(300);
-    check('with the real backend Configuration files shows', await app.evaluate(`!document.querySelector('#sp-nav-files').hidden`));
+    check('with the real backend Configuration files shows', !(await app.evaluate(filesCardHidden)));
+
+    // Every old page and row id lands where its setting lives now: its page, its row on screen (Advanced, a tab or
+    // Connection opened for it). Real backend, the gateway in use.
+    const landed = [];
+    const old = { ...Object.fromEntries(Object.entries(LEGACY_SECTIONS).map(([k, v]) => [k, v.row ?? null])), ...ROW_MOVES };
+    for (const [target, rowId] of Object.entries(old)) {
+      // Where the row is on the page (its section), before asking for it
+      const want = rowId ? await app.evaluate(`document.querySelector('#sp-row-${rowId}')?.closest('.sp-section')?.dataset.section ?? null`) : LEGACY_SECTIONS[target].section;
+      await app.evaluate(`(() => { const d = document.querySelector('#settings'); if (d.open) d.close(); })()`);
+      // Advanced closed on every page, so the target has to open it
+      await app.evaluate(`document.querySelectorAll('.sp-page-advanced.open > .sp-disclosure-row > .sp-disclosure, .sp-connection.open > .sp-disclosure-row > .sp-disclosure').forEach((d) => d.click())`);
+      await app.evaluate(`window.__oc_debug.settings.open(${js(target)})`);
+      await sleep(250);
+      const got = await st();
+      // A target that is still an element of the page (the reload button's id) is used as it is
+      const still = await app.evaluate(`(() => { const e = document.getElementById(${js(target)}); return e && e.closest('.sp-section') ? { section: e.closest('.sp-section').dataset.section, shown: Boolean(e.offsetParent) } : null; })()`);
+      const ok = still ? got.open && got.section === still.section && still.shown : got.open && got.section === want && (!rowId || (got.revealed === rowId && (await visible(rowId))));
+      if (!ok) landed.push({ target, rowId, want, got: { section: got.section, revealed: got.revealed } });
+      // An old id with the sp-row- prefix too
+      if (rowId && ROW_MOVES[target]) {
+        await app.evaluate(`window.__oc_debug.settings.open(${js(`sp-row-${target}`)})`);
+        await sleep(150);
+        const g2 = await st();
+        if (g2.revealed !== rowId || !(await visible(rowId))) landed.push({ target: `sp-row-${target}`, rowId, got: g2.revealed });
+      }
+    }
+    check(`every old page and row id (${Object.keys(old).length}) lands on its row, on screen`, landed.length === 0, landed);
+    await app.evaluate(`window.__oc_debug.settings.open('autoMode-checkTest')`);
+    await sleep(200);
+    check('… e.g. the old safety check Test row opens Models with its Advanced open', (await st()).section === 'model' && (await app.evaluate(`document.querySelector(${js(advancedOf('model'))}).classList.contains('open')`)));
     await app.evaluate(`window.__oc_debug.settings.mock(${js({ app: MOCK.app, history: MOCK.history })})`);
+    await sleep(300);
 
     // History through the mock: restore one
     await open(app, 'history');
@@ -272,7 +341,8 @@ const js = (v) => JSON.stringify(v);
 
     // Mods (real backend). The built-in mods that restyle the app start off, so this follows one mod that is on.
     await open(app, 'mods');
-    check('the bundled mods are listed', (await app.count('#sp-sec-mods .sp-mod')) >= 7);
+    check('the bundled mods are listed, one line each', (await app.count('#sp-sec-mods .sp-mod')) >= 7);
+    check('… but not a mod that is only looks (Hyperspace: its looks are on Appearance)', !(await app.exists('#sp-row-mod-hyperspace')));
     const modKey = await app.evaluate(`document.querySelector('#sp-sec-mods .sp-mod input.switch:checked').dataset.focusKey.split('|')[0]`);
     const modSwitch = `#sp-sec-mods .sp-mod input.switch[data-focus-key=${JSON.stringify(modKey + '|switch')}]`;
     await app.evaluate(`document.querySelector(${js(modSwitch)}).click()`);
@@ -293,7 +363,7 @@ const js = (v) => JSON.stringify(v);
     );
     const appeared = await app.waitFor(`Boolean(document.querySelector('#sp-row-mod-word-count'))`, 10_000).catch(() => false);
     check('a mod written while the page is open appears (mods:changed)', Boolean(appeared));
-    check('… under Yours, marked Off', /Off/.test((await app.text('#sp-row-mod-word-count')) || ''));
+    check('… under Yours, its switch off', await app.evaluate(`(() => { const r = document.querySelector('#sp-row-mod-word-count'); return r.closest('.sp-card-group')?.querySelector('.sp-card-title')?.textContent === 'Yours' && !r.querySelector('input.switch').checked; })()`));
     await app.click('#sp-row-mod-word-count input.switch');
     await app.waitFor(`document.querySelector('#confirm-dialog').open`, 3000).catch(() => false);
     const sheet = (await app.text('#confirm-dialog')) || '';
@@ -313,43 +383,23 @@ const js = (v) => JSON.stringify(v);
     check("its own setting applies (mods.setSetting)", mods.find((m) => m.id === 'word-count')?.settings.unit === 'characters');
     await app.screenshot(path.join(shots, 'mod-expanded.png'));
 
-    // ---------- Settings → Mods by kind: the tabs ----------
-    const st = () => app.evaluate('window.__oc_debug.settings.state()');
-    const shown = (sel) => app.evaluate(`(() => { const e = document.querySelector(${js(sel)}); return Boolean(e && e.offsetParent); })()`);
-    const tabTo = async (t) => {
-      await app.click(`#sp-modtab-${t}`);
-      await sleep(150);
-    };
-    const layoutNow = async () => (await cfg(app)).mods.layout;
-    const looks = (t) => app.evaluate(`window.__oc_debug.looks.state(${js(t)})`);
-    /** A version used as a person does: its card (it shows in the preview), then Use */
-    const useCard = async (t, ref) => {
-      await tabTo(t);
-      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref="${ref}"]`);
-      await sleep(400);
-      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-use`);
-      await sleep(600);
-    };
-    const TABS = ['mods', 'backgrounds', 'chat-bar', 'conversation'];
-    await open(app, 'mods');
-    check('the Mods tab strip is exactly Mods, Background, Chat bar, Conversation (no Theme)', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Mods,Background,Chat bar,Conversation' && !(await app.exists('#sp-modtab-themes')) && !(await app.exists('.sp-look-tab[data-subtab="themes"]')));
-    // The Mods tab's toolbar: New ⌄ (From a template…, Install…) and Reload; one form open at a time
-    await tabTo('mods');
-    const toolbar = await app.evaluate(`[...document.querySelectorAll('#sp-modpanel .sp-toolbar > button, #sp-modpanel .sp-toolbar > .sp-menu-wrap > button')].map((b) => b.textContent.trim())`);
+    // The Mods page's toolbar: New ⌄ (From a template…, Install…) and Reload; one form open at a time
+    const toolbar = await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods .sp-toolbar > button, #sp-sec-mods .sp-toolbar > .sp-menu-wrap > button')].map((b) => b.textContent.trim())`);
     check('the Mods toolbar is New and Reload (no Install… button)', JSON.stringify(toolbar) === js(['New', 'Reload']), toolbar);
+    check('the Mods page has no tab strip (the looks are on Appearance)', !(await app.exists('#sp-sec-mods [role=tablist]')));
     const menuInside = [];
     const pickNew = async (label) => {
-      await app.click('#sp-modpanel .sp-mods-new');
+      await app.click('#sp-sec-mods .sp-mods-new');
       await sleep(200);
-      const items = await app.evaluate(`[...document.querySelectorAll('#sp-modpanel .sp-toolbar .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
-      menuInside.push(await app.evaluate(`(() => { const m = document.querySelector('#sp-modpanel .sp-toolbar .sp-menu').getBoundingClientRect(); const p = document.querySelector('#sp-modpanel').getBoundingClientRect(); return m.left >= p.left - 1 && m.right <= p.right + 1; })()`));
-      await app.evaluate(`[...document.querySelectorAll('#sp-modpanel .sp-toolbar .sp-menu .sp-menu-item')].find((b) => b.textContent === ${js(label)}).click()`);
+      const items = await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods .sp-toolbar .sp-menu .sp-menu-item')].map((b) => b.textContent)`);
+      menuInside.push(await app.evaluate(`(() => { const m = document.querySelector('#sp-sec-mods .sp-toolbar .sp-menu').getBoundingClientRect(); const p = document.querySelector('#sp-sec-mods .sp-mods').getBoundingClientRect(); return m.left >= p.left - 1 && m.right <= p.right + 1; })()`));
+      await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods .sp-toolbar .sp-menu .sp-menu-item')].find((b) => b.textContent === ${js(label)}).click()`);
       await sleep(250);
       return items;
     };
-    const forms = () => app.evaluate(`({ create: !document.querySelector('#sp-modpanel > .sp-form[aria-label="Create a mod"]')?.hidden, install: !document.querySelector('#sp-modpanel > .sp-form[aria-label="Install a mod"]')?.hidden, focus: document.activeElement?.closest('.sp-form')?.getAttribute('aria-label') ?? null })`);
+    const forms = () => app.evaluate(`({ create: !document.querySelector('#sp-sec-mods .sp-mods > .sp-form[aria-label="Create a mod"]')?.hidden, install: !document.querySelector('#sp-sec-mods .sp-mods > .sp-form[aria-label="Install a mod"]')?.hidden, focus: document.activeElement?.closest('.sp-form')?.getAttribute('aria-label') ?? null })`);
     const newItems = await pickNew('From a template…');
-    check('New ⌄ on the Mods tab offers From a template… and Install…', JSON.stringify(newItems) === js(['From a template…', 'Install…']), newItems);
+    check('New ⌄ offers From a template… and Install…', JSON.stringify(newItems) === js(['From a template…', 'Install…']), newItems);
     let fm = await forms();
     check('From a template… opens the New mod form, its first field focused', fm.create && !fm.install && fm.focus === 'Create a mod', fm);
     await pickNew('Install…');
@@ -359,27 +409,48 @@ const js = (v) => JSON.stringify(v);
     fm = await forms();
     check('picking Install… again closes it', !fm.create && !fm.install, fm);
     check('the menu opens inside the Mods page, not over the side bar', menuInside.length === 3 && menuInside.every(Boolean), menuInside);
-    await tabTo('backgrounds');
-    check('a tab is selected by a click', (await st()).tab === 'backgrounds' && (await app.evaluate(`document.querySelector('#sp-modtab-backgrounds').getAttribute('aria-selected')`)) === 'true');
-    // Hyperspace has no switch: no card on any tab, its looks are versions on theirs
+
+    // ---------- Appearance: the colour scheme and the look tabs (Background, Chat bar, Conversation) ----------
+    const layoutNow = async () => (await cfg(app)).mods.layout;
+    const looks = (t) => app.evaluate(`window.__oc_debug.looks.state(${js(t)})`);
+    const tabTo = async (t) => {
+      if ((await st()).section !== 'appearance') await open(app, 'appearance');
+      await app.click(`#sp-modtab-${t}`);
+      await sleep(150);
+    };
+    /** A version used as a person does: its card (it shows in the preview), then Use */
+    const useCard = async (t, ref) => {
+      await tabTo(t);
+      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref="${ref}"]`);
+      await sleep(400);
+      await app.click(`.sp-look-tab[data-subtab="${t}"] .sp-look-use`);
+      await sleep(600);
+    };
+    const LOOK_TABS = ['backgrounds', 'chat-bar', 'conversation'];
+    await open(app, 'appearance');
+    check('Appearance: the colour scheme as three pictures, Light, Dark, System', (await app.evaluate(`[...document.querySelectorAll('#sp-row-theme input')].map((i) => i.value).join()`)) === 'light,dark,system' && (await app.count('#sp-row-theme .sp-scheme svg')) === 3);
+    check('… then the tab strip Background, Chat bar, Conversation (no Mods, no Theme)', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-appearance [role=tablist] [role=tab]')].map((b) => b.textContent).join()`)) === 'Background,Chat bar,Conversation' && !(await app.exists('#sp-modtab-themes')) && !(await app.exists('#sp-modtab-mods')));
+    await app.screenshot(path.join(shots, 'appearance.png'));
+    await tabTo('chat-bar');
+    check('a tab is selected by a click', (await st()).tab === 'chat-bar' && (await app.evaluate(`document.querySelector('#sp-modtab-chat-bar').getAttribute('aria-selected')`)) === 'true');
+    // Hyperspace has no switch: no row on Mods, its looks are versions on Appearance's tabs
     const onTabs = {};
-    for (const t of TABS) {
+    for (const t of LOOK_TABS) {
       await tabTo(t);
       onTabs[t] = {
-        hyperCard: await shown('#sp-row-mod-hyperspace'),
         words: await shown('#sp-row-mod-word-count'),
         hyperVersion: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref^="hyperspace/"]`),
         theme: await shown(`.sp-look-tab[data-subtab="${t}"] .sp-look-card[data-ref^="theme-"]`),
       };
-      await app.screenshot(path.join(shots, `mods-tab-${t}.png`));
+      await app.screenshot(path.join(shots, `appearance-tab-${t}.png`));
     }
-    check('a general mod (Word count) is only on the Mods tab, with its switch', TABS.every((t) => onTabs[t].words === (t === 'mods')), onTabs);
-    check('Hyperspace has no card or switch anywhere; its looks are on Background, Chat bar and Conversation', TABS.every((t) => !onTabs[t].hyperCard && onTabs[t].hyperVersion === ['backgrounds', 'chat-bar', 'conversation'].includes(t)), onTabs);
-    check('no theme is a version on any tab', TABS.every((t) => !onTabs[t].theme), onTabs);
+    check("a general mod (Word count) is not on Appearance's tabs", LOOK_TABS.every((t) => !onTabs[t].words), onTabs);
+    check("Hyperspace's looks are versions on Background, Chat bar and Conversation", LOOK_TABS.every((t) => onTabs[t].hyperVersion), onTabs);
+    check('no theme is a version on any tab', LOOK_TABS.every((t) => !onTabs[t].theme), onTabs);
 
     // Background: use Hyperspace's, see its settings under it, move Dim
     await tabTo('backgrounds');
-    check('Background has the preview, the Dim row and New; no picker', (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane .lp-stage')) && (await shown('#sp-row-background-dim')) && (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-new')) && !(await app.exists('#sp-sec-mods select[aria-labelledby="sp-t-background"]')));
+    check('Background has the preview, the Dim row and New; no picker', (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-pane .lp-stage')) && (await shown('#sp-row-background-dim')) && (await shown('.sp-look-tab[data-subtab="backgrounds"] .sp-look-new')) && !(await app.exists('#sp-sec-appearance select[aria-labelledby="sp-t-background"]')));
     await useCard('backgrounds', 'hyperspace/starfield');
     await app.waitFor(`window.oc.getConfig().then((c) => c.mods.layout.background === 'hyperspace/starfield')`, 5000).catch(() => {});
     check('using the Hyperspace background applies it', (await layoutNow()).background === 'hyperspace/starfield' && (await app.evaluate(`document.documentElement.classList.contains('mod-bg')`)));
@@ -417,23 +488,23 @@ const js = (v) => JSON.stringify(v);
     await app.evaluate(`document.querySelector('#sp-modtab-conversation').focus()`);
     await app.key('ArrowRight');
     await sleep(100);
-    check('ArrowRight from the last tab wraps to the first', (await st()).tab === 'mods' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-mods');
+    check('ArrowRight from the last tab wraps to the first', (await st()).tab === 'backgrounds' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-backgrounds');
     await app.key('ArrowRight');
     await sleep(100);
-    check('ArrowRight moves to the next tab', (await st()).tab === 'backgrounds' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-backgrounds');
+    check('ArrowRight moves to the next tab', (await st()).tab === 'chat-bar' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-chat-bar');
     await app.key('ArrowLeft');
     await app.key('ArrowLeft');
     await sleep(100);
     check('ArrowLeft goes back (and wraps)', (await st()).tab === 'conversation' && (await app.evaluate('document.activeElement.id')) === 'sp-modtab-conversation');
-    check('only the selected tab is in the tab order', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-mods [role=tab]')].map((b) => b.tabIndex).join()`)) === '-1,-1,-1,0');
+    check('only the selected tab is in the tab order', (await app.evaluate(`[...document.querySelectorAll('#sp-sec-appearance [role=tab]')].map((b) => b.tabIndex).join()`)) === '-1,-1,0');
     // Search: a row inside a tab is found, and choosing it opens its tab
-    await tabTo('mods');
+    await tabTo('chat-bar');
     s = await searchFor('dim');
     check('search "dim" finds the Dim row on the Background tab', s.rows.includes('background-dim'), s.rows);
     await app.click('#sp-row-background-dim .sp-row-name');
     await sleep(300);
-    let now = await st();
-    check('choosing the hit clears the search and opens Mods → Background', now.section === 'mods' && now.tab === 'backgrounds' && now.query === '' && (await shown('#sp-row-background-dim')), now);
+    let at = await st();
+    check('choosing the hit clears the search and opens Appearance → Background', at.section === 'appearance' && at.tab === 'backgrounds' && at.query === '' && (await shown('#sp-row-background-dim')), at);
     await app.screenshot(path.join(shots, 'search-opened-backgrounds.png'));
     s = await searchFor('install');
     check('search "install" finds the look tabs, whose New ⌄ has Install…', ['background', 'look-composer', 'look-conversation'].every((r) => s.rows.includes(r)), s.rows);
@@ -442,34 +513,32 @@ const js = (v) => JSON.stringify(v);
     await app.evaluate(`document.querySelector('#settings-search').focus()`);
     await app.key('Enter');
     await sleep(300);
-    now = await st();
-    check('Enter goes to the first hit, on its tab', now.tab === 'chat-bar' && now.query === '' && (await app.evaluate(`Boolean(document.activeElement.closest('#sp-row-look-composer'))`)), now);
-    // Appearance: Light, Dark and System, and one row per look with the one in use, opening its tab
-    await open(app, 'appearance');
-    check('Appearance keeps Light, Dark and System, a Looks group, and no pickers', !(await app.exists('#sp-sec-appearance select')) && /Looks/.test(await app.text('#sp-sec-appearance')) && (await app.evaluate(`[...document.querySelectorAll('#sp-row-theme input')].map((i) => i.value).join()`)) === 'system,light,dark');
-    const kindText = await app.evaluate(`['background', 'composer', 'conversation'].map((k) => document.querySelector('#sp-row-appearance-' + k + ' .sp-row-desc').textContent).join(' | ')`);
-    check('… it shows each look in use in words, and has no Theme row', kindText === 'Hyperspace: Starfield | Hyperspace: Cockpit | Hyperspace: Holo terminal' && !(await app.exists('#sp-row-appearance-themes')), kindText);
-    await app.screenshot(path.join(shots, 'appearance.png'));
-    await app.click('#sp-row-appearance-conversation button');
+    at = await st();
+    check('Enter goes to the first hit, on its tab', at.section === 'appearance' && at.tab === 'chat-bar' && at.query === '' && (await app.evaluate(`Boolean(document.activeElement.closest('#sp-row-look-composer'))`)), at);
+    // The old entry points: the sidebar's Customize row, openSettings('mods', { tab }), 'mods:<tab>', an old row id
+    await app.evaluate(`window.__oc_debug.settings.open('appearance-conversation')`);
     await sleep(200);
-    now = await st();
-    check('its Conversation row opens Mods → Conversation', now.section === 'mods' && now.tab === 'conversation', now);
-    // The sidebar's Customize row, and openSettings with a tab
+    at = await st();
+    check("the old Appearance → Conversation row's id opens Appearance → Conversation", at.section === 'appearance' && at.tab === 'conversation' && at.revealed === 'look-conversation', at);
     await app.evaluate(`document.querySelector('#settings').close()`);
     await app.evaluate(`document.querySelector('#customize-row').click()`);
     await sleep(300);
-    now = await st();
-    check("the sidebar's Customize row opens Mods at the tab last open", now.open && now.section === 'mods' && now.tab === 'conversation', now);
+    at = await st();
+    check("the sidebar's Customize row opens Appearance at the tab last open", at.open && at.section === 'appearance' && at.tab === 'conversation', at);
     await app.evaluate(`window.__oc_debug.settings.open('mods', { tab: 'chat-bar' })`);
-    check("openSettings('mods', { tab }) opens that tab", (await st()).tab === 'chat-bar');
+    at = await st();
+    check("openSettings('mods', { tab: 'chat-bar' }) opens Appearance at that tab", at.section === 'appearance' && at.tab === 'chat-bar', at);
     await app.evaluate(`window.__oc_debug.settings.open('mods', { tab: 'themes' })`);
-    check("… and a tab that is gone (themes) leaves it where it was, without an error", (await st()).tab === 'chat-bar' && (await st()).section === 'mods');
+    at = await st();
+    check('… a tab that is gone (themes) opens Mods, without an error', at.section === 'mods', at);
     await app.evaluate(`window.__oc_debug.settings.open('mods:backgrounds')`);
-    check("… and so does 'mods:backgrounds'", (await st()).tab === 'backgrounds');
-    await app.evaluate(`window.__oc_debug.settings.open('appearance')`);
+    at = await st();
+    check("… 'mods:backgrounds' opens Appearance → Background", at.section === 'appearance' && at.tab === 'backgrounds', at);
+    await app.evaluate(`window.__oc_debug.settings.open('general')`);
     await app.evaluate(`window.__oc_debug.settings.open('sp-row-look-conversation')`);
     await sleep(200);
-    check('an element id on a tab opens that tab', (await st()).section === 'mods' && (await st()).tab === 'conversation');
+    at = await st();
+    check('an element id on a tab opens that tab', at.section === 'appearance' && at.tab === 'conversation', at);
     await app.evaluate(`window.oc.rpc('mods.setLayout', { looks: { conversation: null, composer: null }, background: null, backgroundImage: null, backgroundDim: 0.5 })`);
     await app.evaluate(`window.oc.rpc('mods.setEnabled', 'hyperspace', false)`);
     // The card in the chat for a new background links to the Background tab
@@ -485,12 +554,15 @@ const js = (v) => JSON.stringify(v);
       const where = (await app.text('.mod-offer[data-mod="dusk-glow"]')) || '';
       await app.click('.mod-offer[data-mod="dusk-glow"] .mod-offer-where');
       await sleep(400);
-      now = await st();
+      at = await st();
       const bgTab = await looks('backgrounds');
-      check('the chat card of a new background links to Settings → Mods → Background, with it previewed', /Settings → Mods → Background/.test(where) && now.open && now.section === 'mods' && now.tab === 'backgrounds' && bgTab.shown === 'dusk-glow/main' && bgTab.previewing, { where, now, bgTab });
+      check('the chat card of a new background links to Settings → Appearance → Background, with it previewed', /Settings → Appearance → Background/.test(where) && at.open && at.section === 'appearance' && at.tab === 'backgrounds' && bgTab.shown === 'dusk-glow/main' && bgTab.previewing, { where, at, bgTab });
       await app.evaluate(`document.querySelector('#settings').close()`);
     } else check('the chat card of a new background appears', false);
 
+    // General's Advanced left open, for the relaunch
+    await open(app, 'general');
+    await disclose(app, advancedOf('general'));
     // Theme through the page applies to the window
     await open(app, 'appearance');
     await app.evaluate(`[...document.querySelectorAll('#sp-row-theme input')].find((i) => i.value === 'dark').click()`);
@@ -507,7 +579,11 @@ const js = (v) => JSON.stringify(v);
     c = await cfg(app);
     check('after a relaunch: notifications, keep awake, max turns, compact at, context window, theme persisted', c.notifications === !before.notifications && c.keepAwake === 'always' && c.maxTurns === 30 && c.compactThreshold === 0.65 && c.portkey.contextWindow === 150000 && c.theme === 'dark', [c.notifications, c.keepAwake, c.maxTurns, c.compactThreshold, c.portkey.contextWindow, c.theme]);
     await app.click('#settings-btn');
+    await sleep(200);
     check('the page reopens at the section last open', (await app.evaluate('window.__oc_debug.settings.state().section')) === 'appearance');
+    await app.evaluate(`window.__oc_debug.settings.open('general')`);
+    await sleep(200);
+    check("… and General's Advanced as it was left (open)", await app.evaluate(`document.querySelector(${js(advancedOf('general'))}).classList.contains('open')`));
     await app.close();
     app = null;
     console.log(`screenshots: ${shots}`);

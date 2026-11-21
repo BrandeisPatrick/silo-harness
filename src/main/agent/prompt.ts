@@ -14,7 +14,7 @@ import { BROWSER_RULES, WEB_RULES, LOAD_TOOLS, groupsPromptLine, type GroupId } 
 
 /** Tells the model what is missing, so it can say so instead of improvising. */
 export const ESSENTIAL_NOTE =
-  'The user chose the essential tools, so the tools for scheduled tasks, sub-sessions and writing mods are turned off. If the user asks for one of those, say that they can be turned on in Settings → Context ("Tools offered to the model").';
+  'The user chose the essential tools, so the tools for scheduled tasks, sub-sessions and writing mods are turned off. If the user asks for one of those, say that they can be turned on in Settings → Models → Advanced ("Tools offered").';
 
 /** The app's registered prompt sections: those every session shares, and the session's own (its name, its parent). */
 export interface PromptExtra {

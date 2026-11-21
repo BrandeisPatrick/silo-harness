@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { configDir } from './paths';
 import type { ProviderCatalog } from '../shared/providers';
+import { keyPlace, type KeyPlace } from './provider-keys';
 
 /** The user's settings.json as messages show it (~/… when it is under the home folder). */
 function shownSettingsPath(): string {
@@ -305,8 +306,17 @@ export function activeModel(cfg: AppConfig): string {
 
 // ---------- What the window may see ----------
 
-/** A resolved provider with the key reduced to set / not set. */
-export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): ProviderView {
+/** The last four characters of a key, for "••••3f2a": only of a key long enough (12 or more) that they give nothing away. */
+export function keyTail(key: string): string {
+  return key && key.length >= 12 ? key.slice(-4) : '';
+}
+
+/**
+ * A resolved provider with the key reduced to set / not set (and the last four characters of a long one), where it
+ * comes from and whether the window may save or remove one (`place`, provider-keys.ts).
+ */
+export function providerView(r: ResolvedProvider, owner?: 'user' | 'project', place?: KeyPlace): ProviderView {
+  const tail = keyTail(r.apiKey);
   return {
     name: r.name,
     type: r.type,
@@ -321,6 +331,11 @@ export function providerView(r: ResolvedProvider, owner?: 'user' | 'project'): P
     keySource: r.keySource,
     headers: Object.keys(r.headers).filter((h) => !/^x-portkey-api-key$/i.test(h)),
     ...(owner ? { owner } : {}),
+    ...(tail ? { keyTail: tail } : {}),
+    ...(place?.from ? { keyFrom: place.from } : {}),
+    ...(place ? { keyEditable: Boolean(place.save), keyRemovable: Boolean(place.remove) } : {}),
+    // An entry of your own (config.json or your settings.json); never a built-in block or a project's entry
+    ...(!r.builtIn && owner !== 'project' && !r.error?.startsWith('There is no provider') ? { removable: true } : {}),
     ...(r.error ? { error: scrubSecrets(r.error) } : {}),
     ...withEffort(r),
     ...(isNativeAnthropic(r) ? { native: true } : {}),
@@ -339,8 +354,9 @@ export function effortOf(cfg: AppConfig, name: string): EffortLevel | undefined 
   return resolveProvider(cfg, name).effort;
 }
 
-export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, env: NodeJS.ProcessEnv = process.env): ProvidersView {
-  const all = providerNames(cfg).map((n) => providerView(resolveProvider(cfg, n, env), owned[`providers.${n}`]));
+/** Every provider as the window sees it. `envBy`: which settings file set each variable (SettingsLayer.envOwners). */
+export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, env: NodeJS.ProcessEnv = process.env, envBy: Record<string, 'user' | 'project'> = {}): ProvidersView {
+  const all = providerNames(cfg).map((n) => providerView(resolveProvider(cfg, n, env), owned[`providers.${n}`], keyPlace(cfg, n, owned, envBy, env)));
   const name = cfg.provider || 'ollama';
   const active = all.find((p) => p.name === name) ?? providerView(resolveProvider(cfg, name, env));
   return { active, all };
@@ -350,7 +366,7 @@ export function providersView(cfg: AppConfig, owned: Record<string, 'user' | 'pr
  * The config as the window gets it: keys masked (KEY_MASK when set, '' when not), header values masked, and the
  * providers resolved in providerView. acceptFromWindow undoes the masks on the way back.
  */
-export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}): AppConfig {
+export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'project'> = {}, envBy: Record<string, 'user' | 'project'> = {}): AppConfig {
   const mask = (v: string | undefined) => (v ? KEY_MASK : '');
   const providers: AppConfig['providers'] = {};
   for (const [name, e] of Object.entries(cfg.providers ?? {})) {
@@ -365,7 +381,7 @@ export function windowConfig(cfg: AppConfig, owned: Record<string, 'user' | 'pro
     portkey: { ...cfg.portkey, apiKey: mask(cfg.portkey?.apiKey), providerApiKey: mask(cfg.portkey?.providerApiKey) },
     ...(cfg.webSearch ? { webSearch: { ...cfg.webSearch, apiKey: mask(cfg.webSearch.apiKey) } } : {}),
     providers,
-    providerView: providersView(cfg, owned),
+    providerView: providersView(cfg, owned, process.env, envBy),
     // MCP env and header values stay in the main process (config:set keeps the current ones)
     mcpServers: Object.fromEntries(Object.entries(cfg.mcpServers ?? {}).map(([n, c]) => [n, maskedConfig(n, c)])),
     mcpProjectValues: {},
@@ -485,11 +501,22 @@ export async function providerCatalog(r: ResolvedProvider, timeoutMs = 8000): Pr
   }
 }
 
+/**
+ * The SDK's connection errors keep the class name on the constructor only (their `name` is "Error") and put the
+ * reason one or two causes deep ("Connection error." ← "fetch failed" ← ECONNREFUSED): what kind it is, and the code.
+ */
+function connectionFacts(err: unknown): { kind: string; code: string } {
+  const e = err as { name?: string; constructor?: { name?: string }; cause?: { code?: string; message?: string; cause?: { code?: string } } };
+  const kind = [e?.name, e?.constructor?.name].map((x) => String(x ?? '')).find((x) => /APIConnection|AbortError|TimeoutError/.test(x)) ?? '';
+  return { kind, code: String(e?.cause?.code ?? e?.cause?.cause?.code ?? '') };
+}
+
 /** The service could not be reached at all, or did not answer in time (as opposed to an error it answered with). */
 function isUnreachable(err: unknown): boolean {
-  const e = err as { name?: string; message?: string; status?: number; cause?: { code?: string } };
+  const e = err as { name?: string; message?: string; status?: number; cause?: { code?: string; message?: string } };
   if (e?.status) return false;
-  return /APIConnection(?:Timeout)?Error|AbortError|TimeoutError/.test(String(e?.name)) || Boolean(e?.cause?.code) || /fetch failed|ECONNREFUSED|ENOTFOUND|timed? ?out/i.test(String(e?.message));
+  const f = connectionFacts(err);
+  return Boolean(f.kind) || Boolean(f.code) || /fetch failed|ECONNREFUSED|ENOTFOUND|timed? ?out|^Connection error/i.test(String(e?.message)) || /fetch failed/i.test(String(e?.cause?.message));
 }
 
 /** A service's error in plain words, without the key. */
@@ -497,8 +524,9 @@ export function plainError(err: unknown, r: ResolvedProvider): string {
   const e = err as { status?: number; message?: string; name?: string; error?: { message?: string }; cause?: { code?: string; message?: string } };
   const detail = String(e?.error?.message || e?.message || err || 'unknown error').replace(/^\d{3}\s+/, '').trim();
   let msg: string;
-  if (e?.name === 'APIConnectionTimeoutError' || e?.name === 'AbortError' || e?.name === 'TimeoutError' || /timed? ?out|aborted/i.test(String(e?.message))) msg = `${r.label} did not answer in time (${r.baseURL}).`;
-  else if (e?.name === 'APIConnectionError' || e?.cause?.code) msg = `Could not reach ${r.label} at ${r.baseURL}${e?.cause?.code ? ` (${e.cause.code})` : ''}. Check the base URL and your connection.`;
+  const f = connectionFacts(err);
+  if (/APIConnectionTimeoutError|AbortError|TimeoutError/.test(f.kind) || /timed? ?out|aborted/i.test(String(e?.message))) msg = `${r.label} did not answer in time (${r.baseURL}).`;
+  else if (f.kind === 'APIConnectionError' || f.code || (!e?.status && /^Connection error/i.test(String(e?.message)))) msg = `Could not reach ${r.label} at ${r.baseURL}${f.code ? ` (${f.code})` : ''}. Check the base URL and your connection.`;
   else if (e?.status === 401 || e?.status === 403) msg = `${r.label} refused the key (HTTP ${e.status}): ${detail}${r.keySource ? ` Check ${r.keySource}.` : ''}`;
   else if (e?.status === 404) msg = `${r.label} answered 404: ${detail} Check the model id ("${r.model}") and the base URL (${r.baseURL}).`;
   else if (e?.status === 429) msg = `${r.label} is rate limiting or out of credit (HTTP 429): ${detail}`;

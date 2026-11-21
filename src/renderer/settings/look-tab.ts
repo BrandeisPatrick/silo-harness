@@ -1,4 +1,4 @@
-// One look tab of Settings → Mods (Background, Chat bar, Conversation). At the top, a preview of what is in
+// One look tab of Settings → Appearance (Background, Chat bar, Conversation). At the top, a preview of what is in
 // use, or of the version being tried; under it the version's name and source with "In use", or Use and Back to
 // current; its mod's own settings (and Dim on Background); then every version as a card, Default first, then the
 // built-in ones, yours and the project's. A click on a card previews it; Use applies it, asking first the first time

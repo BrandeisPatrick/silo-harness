@@ -2,7 +2,8 @@
 //   - the app runs on a throwaway profile and config folder; the command adds an OpenRouter-style provider that
 //     points at the mock model and selects it; the window's label and Settings follow without a restart
 //   - a message is answered through it (with the key as bearer), a broken key gives the plain error, the window
-//     never holds the key, the Model section switches providers, the Command line tool row installs and removes
+//     never holds the key, Settings → Models switches providers and models (writing where each is kept), the Command
+//     line tool row installs and removes
 //   - with ANTHROPIC_API_KEY: a provider of type anthropic using apiKeyEnv, provider test says ok, and a short real
 //     exchange works; the key stays in the environment and is never written to disk
 // Run: npm run build && node test/live/providers.js [screenshot-dir]
@@ -116,41 +117,61 @@ const KEY = 'mock-live-key-0123456789';
     check('the key is nowhere in the window', !(await app.evaluate('document.documentElement.outerHTML')).includes(KEY));
     mock.state.apiKey = undefined;
 
-    // --- Settings → Model with several providers; the one in use is owned by settings.json ---
+    // --- Settings → Models with several providers; the one in use is chosen in settings.json by the command ---
     await open('model');
-    const sel = await app.evaluate(`(() => { const s = document.querySelector('#provider'); return { value: s.value, disabled: s.disabled, options: [...s.options].map((o) => o.textContent) }; })()`);
-    check('Settings → Model lists every provider and shows the one in use', sel.value === 'openrouter' && sel.options.length === 5 && sel.options.some((o) => /LM Studio/.test(o)) && sel.options.some((o) => /Groq/.test(o)), sel);
-    check('… read-only, set in settings.json by the command', sel.disabled && (await app.exists('#sp-row-provider .sp-owned')));
+    const status = () => app.evaluate(`document.querySelector('#sp-row-provider .sp-status')?.innerText.trim() ?? ''`);
     const visible = (id) => app.evaluate(`(() => { const e = document.querySelector('#sp-row-${id}'); return Boolean(e && e.offsetParent); })()`);
-    check('the named provider’s rows show; the gateway’s and Ollama’s do not', (await visible('provider-service')) && (await visible('provider-model')) && !(await visible('portkey-apiKey')) && !(await visible('ollama-model')));
-    const keyDesc = await app.text('#sp-row-provider-key .sp-row-desc');
-    check('the key row says Set from MOCK_PROVIDER_KEY', /^Set from MOCK_PROVIDER_KEY/.test(keyDesc || ''), keyDesc);
-    check('the model field holds the model', (await app.evaluate(`document.querySelector('#provider-model').value`)) === 'anthropic/claude-sonnet-4.5');
-    await app.click('#sp-row-provider-service button');
-    const tested = await until(async () => /answered with/.test((await app.text('#sp-row-provider-service .sp-row-desc')) || ''), 15_000);
-    check('Test answers through the provider', Boolean(tested), await app.text('#sp-row-provider-service'));
+    const pickerLabel = (id) => app.evaluate(`document.querySelector('#${id} .sp-picker-label')?.textContent ?? ''`);
+    const options = async (id) => {
+      await app.click(`#${id}`);
+      await sleep(300);
+      const o = await app.evaluate(`[...document.querySelectorAll('.sp-picker-pop .sp-picker-item')].map((x) => x.innerText.trim())`);
+      return o;
+    };
+    const pick = async (id, text) => {
+      const opts = await options(id);
+      const ok = await app.evaluate(`(() => { const o = [...document.querySelectorAll('.sp-picker-pop .sp-picker-item')].find((x) => x.title === ${JSON.stringify(text)} || x.innerText.trim().startsWith(${JSON.stringify(text)})); if (!o) return false; o.click(); return true; })()`);
+      if (!ok) await app.key('Escape');
+      return { ok, opts };
+    };
+    await until(async () => (await status()) === 'Ready', 8000);
+    check('Settings → Models shows the provider in use, Ready', /^OpenRouter/.test(await pickerLabel('provider')) && (await status()) === 'Ready', { label: await pickerLabel('provider'), status: await status() });
+    const listed = await options('provider');
+    await app.key('Escape');
+    check('… its picker lists the providers set up (LM Studio, the gateway), not Groq without its key', listed.some((o) => /^OpenRouter/.test(o)) && listed.some((o) => /LM Studio/.test(o)) && listed.some((o) => /^Gateway/.test(o)) && !listed.some((o) => /Groq/.test(o)), listed);
+    check('… not locked although your settings.json chooses it: a choice here is written there', !(await app.evaluate(`document.querySelector('#provider').disabled`)) && !(await app.exists('#sp-row-provider .sp-lock')));
+    check('the key row: the last four, from your shell (the variable the entry names), read-only', (await app.text('#sp-row-provider-apiKey .sp-key-box')) === '••••••••6789' && /From your shell/.test((await app.text('#sp-row-provider-apiKey .sp-row-desc')) || '') && !(await visible('provider-apiKey-input')));
+    check('the model picker holds the model', (await pickerLabel('provider-model')) === 'anthropic/claude-sonnet-4.5');
+    await app.click('#sp-sec-model .sp-connection .sp-disclosure');
+    check('Connection: the named provider’s address, not the gateway’s or Ollama’s rows', (await visible('provider-baseURL')) && !(await visible('portkey-baseURL')) && !(await visible('ollama-numCtx')) && (await app.text('#sp-row-provider-baseURL .sp-row-desc')) === mockURL);
+    await app.click('#sp-sec-model .sp-connection .sp-disclosure');
+    await app.click('#sp-row-provider-model .sp-pair-side .btn');
+    const tested = await until(async () => /^Answered in/.test((await app.text('#sp-row-provider-model .sp-row-result')) || ''), 15_000);
+    check('Test answers through the provider', Boolean(tested), await app.text('#sp-row-provider-model .sp-row-result'));
     await app.screenshot(path.join(shots, 'settings-model-several-providers.png'));
 
-    // The model from the window
-    await app.fill('#provider-model', 'openai/gpt-5-mini');
-    await app.key('Enter');
+    // The model from the window: written to the entry in your settings.json
+    const chose = await pick('provider-model', 'openai/gpt-5-mini');
     const changed = await until(async () => (await cfg()).providerView.active.model === 'openai/gpt-5-mini');
-    check('choosing a model in Settings applies at once', Boolean(changed) && /openai\/gpt-5-mini/.test((await app.text('#model-btn')) || ''));
+    check('choosing a model in Settings applies at once', chose.ok && Boolean(changed) && /openai\/gpt-5-mini/.test((await app.text('#model-btn')) || ''), chose.opts);
+    check('… and is kept in your settings.json, where the entry is', JSON.parse(fs.readFileSync(userFile, 'utf8')).providers.openrouter.model === 'openai/gpt-5-mini');
 
-    // --- The Model section switches providers once the file no longer chooses one ---
+    // --- The provider from the window once the file no longer chooses one: the app's settings keep it ---
     r = await cli(['config', 'unset', 'provider']);
-    await until(async () => !(await app.evaluate(`document.querySelector('#provider').disabled`)));
-    // config.json still holds the gateway block as the choice
-    await app.fill('#provider', 'lmstudio');
+    await app.evaluate(`window.oc.rpc('settings.reload')`);
+    await pick('provider', 'LM Studio');
     const lm = await until(async () => (await cfg()).provider === 'lmstudio');
-    check('the Model section switches to another provider', Boolean(lm) && (await visible('provider-service')) && /LM Studio/.test((await app.text('#sp-row-provider-service .sp-row-desc')) || ''));
-    await app.fill('#provider', 'portkey');
+    check('the picker switches to another provider', Boolean(lm) && /LM Studio/.test(await pickerLabel('provider')) && !('provider' in JSON.parse(fs.readFileSync(userFile, 'utf8'))));
+    check('… LM Studio takes no key: no API key row', !(await visible('provider-apiKey')));
+    await pick('provider', 'Gateway');
     const pk = await until(async () => (await cfg()).provider === 'portkey');
-    check('… and back to the gateway block, whose rows show again', Boolean(pk) && (await visible('portkey-apiKey')) && !(await visible('provider-service')));
-    await app.fill('#provider', 'groq');
-    await until(async () => (await cfg()).provider === 'groq');
-    const groqKey = await app.text('#sp-row-provider-key .sp-row-desc');
-    check('a provider without its key says which variable to set', /Not set\. Groq needs a key: set GROQ_API_KEY/.test(groqKey || ''), groqKey);
+    await app.click('#sp-sec-model .sp-connection .sp-disclosure');
+    check('… and back to the gateway block, whose rows show again', Boolean(pk) && (await visible('portkey-baseURL')) && !(await visible('provider-baseURL')));
+    await app.click('#sp-sec-model .sp-connection .sp-disclosure');
+    // Groq has no key, so the picker does not list it; the command (or the model menu) can still choose it
+    await app.evaluate(`window.oc.rpc('providers.use', 'groq')`);
+    await until(async () => (await cfg()).provider === 'groq' && (await status()) === 'No key');
+    check('a provider without its key: "No key", the key field open', (await status()) === 'No key' && (await visible('provider-apiKey')) && (await app.evaluate(`!document.querySelector('#provider-apiKey-input').hidden`)), await status());
     await app.screenshot(path.join(shots, 'settings-model-key-missing.png'));
     await closeSettings();
     await app.evaluate(`document.querySelector('#new-chat-btn, #new-session-btn')?.click()`);
@@ -158,18 +179,18 @@ const KEY = 'mock-live-key-0123456789';
     const strip = await app.evaluate(`document.querySelector('#setup-strip')?.innerText || ''`);
     check('the setup strip says the key is missing, with Settings at hand', /Groq needs a key/.test(strip) && /Open settings/.test(strip), strip);
     await open('model');
-    await app.fill('#provider', 'openrouter');
+    await pick('provider', 'OpenRouter');
     await until(async () => (await cfg()).provider === 'openrouter');
-    // Back to a file-owned choice for the screenshot of an owned provider
+    // Back to a file-owned choice for the screenshot
     await cli(['provider', 'use', 'openrouter']);
-    await until(() => app.evaluate(`document.querySelector('#provider').disabled`));
-    await sleep(300);
+    await sleep(600);
     await app.screenshot(path.join(shots, 'settings-model-owned-by-settings-json.png'));
 
     // --- The Command line tool row ---
-    await open('general');
+    await open('developer');
     const cliDesc = await app.text('#sp-row-cli .sp-row-desc');
-    check('the Command line tool row shows the command’s full path', /bin\/silo/.test(cliDesc || ''), cliDesc);
+    const cliTip = await app.evaluate(`document.querySelector('#sp-row-cli .sp-row-desc').title`);
+    check('the Command line tool row (Developer → This Mac) says where it links, the command’s full path on hover', cliDesc === `Links silo in ${linkDir}` && /bin\/silo$/.test(cliTip || ''), { cliDesc, cliTip });
     await app.evaluate(`[...document.querySelectorAll('#sp-row-cli button')].find((b) => /Install/.test(b.innerText)).click()`);
     const linked = await until(() => fs.existsSync(path.join(linkDir, 'silo')));
     check('Install links it in the link folder', Boolean(linked) && fs.readlinkSync(path.join(linkDir, 'silo')).endsWith(path.join('bin', 'silo')));

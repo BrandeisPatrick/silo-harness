@@ -1,6 +1,6 @@
 // Feature: providers. What the window asks about providers beyond the config itself (which already carries them
 // resolved, see windowConfig in providers.ts): the models one offers, choosing a model, a quick test; and the
-// command-line tool's row in Settings → General, which links the bundled `silo` into ~/.local/bin.
+// command-line tool's row in Settings → Developer → This Mac, which links the bundled `silo` into ~/.local/bin.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,8 +9,15 @@ import type { App } from './app';
 import { loginPath } from './mcp';
 import type { EffortLevel } from '../shared/types';
 import { isEffortLevel } from './agent/effort';
-import { listModels, providerCatalog, providerView, resolveProvider, testProvider, withModel } from './providers';
+import { listModels, providerCatalog, providerNames, providerView, resolveProvider, testProvider, withModel } from './providers';
 import { envVar } from './paths';
+import type { AddProviderInput, AddProviderResult, ProviderPresetInfo } from '../shared/providers';
+import type { AppConfig, NamedProviderConfig, ProviderType } from '../shared/types';
+import { cleanKey, configWith, editUserSettings, keyPlace, setIn, type KeySpot } from './provider-keys';
+import { PRESETS, PROVIDER_TYPES, providerNameProblem, validateProviderEntry } from './provider-presets';
+import { settingsLayer } from './settings';
+import { reloadSettingsNow } from './settings-service';
+import { isRecord } from './json';
 
 /** The command's name (it was open-harness before the rename) */
 export const CLI_NAME = 'silo';
@@ -80,18 +87,34 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
 
   const disposers = [
     app.rpc.handle('providers.models', async (name) => listModels(resolveProvider(app.config(), String(name || app.config().provider)))),
-    app.rpc.handle('providers.setModel', (name, model) => {
+    app.rpc.handle('providers.setModel', async (name, model) => {
       const n = String(name || app.config().provider);
       const m = String(model ?? '').trim();
       if (!m) throw new Error('Choose a model.');
-      app.updateConfig((c) => {
-        if (n === 'ollama') return { ...c, ollama: { ...c.ollama, model: m } };
-        if (n === 'portkey') return { ...c, portkey: { ...c.portkey, model: m } };
-        const entry = c.providers?.[n];
-        if (!entry) throw new Error(`There is no provider named "${n}".`);
-        return { ...c, providers: { ...c.providers, [n]: { ...entry, model: m } } };
-      });
+      if (n !== 'ollama' && n !== 'portkey' && !app.config().providers?.[n]) throw new Error(`There is no provider named "${n}".`);
+      await writeField(n === 'ollama' ? ['ollama', 'model'] : n === 'portkey' ? ['portkey', 'model'] : ['providers', n, 'model'], m);
     }),
+    app.rpc.handle('providers.use', async (name) => {
+      const n = String(name ?? '');
+      if (!providerNames(app.config()).includes(n)) throw new Error(`There is no provider named "${n}".`);
+      if (app.config().provider !== n) await writeField(['provider'], n);
+    }),
+    app.rpc.handle('providers.setKey', async (name, key) => {
+      const n = String(name ?? '');
+      const k = cleanKey(key);
+      const place = placeOf(n);
+      if (!place.save) throw new Error(lockedKeyWords(n, place.from));
+      await writeSpot(place.save, k);
+    }),
+    app.rpc.handle('providers.removeKey', async (name) => {
+      const n = String(name ?? '');
+      const place = placeOf(n);
+      if (!place.remove) throw new Error(place.from ? lockedKeyWords(n, place.from) : 'There is no key to remove.');
+      await writeSpot(place.remove, undefined);
+    }),
+    app.rpc.handle('providers.presets', () => presets()),
+    app.rpc.handle('providers.add', (input) => addProvider(input)),
+    app.rpc.handle('providers.remove', (name) => removeProvider(String(name ?? ''))),
     app.rpc.handle('providers.setEffort', (name, level) => setEffort(String(name || app.config().provider), level)),
     app.commands.register({
       name: 'effort',
@@ -126,6 +149,139 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
       return status();
     }),
   ];
+  // ---------- Writing where a setting lives ----------
+
+  const userFile = () => settingsLayer.userFile();
+  const owned = () => settingsLayer.info().owned;
+  /** The file that sets `keys` (or a field above it), if one does */
+  const ownerOf = (keys: string[]): 'user' | 'project' | undefined => {
+    const o = owned();
+    for (let i = keys.length; i > 0; i--) {
+      const hit = o[keys.slice(0, i).join('.')];
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+
+  /** Reads the settings files again (settings-service.ts), so a change to your settings.json applies at once. */
+  async function reloadSettings(): Promise<void> {
+    // Without the settings feature (a headless suite): recompute the layer here
+    if (!reloadSettingsNow()) app.updateConfig((c) => settingsLayer.recompute(c));
+  }
+
+  async function writeSpot(spot: KeySpot, value: string | undefined): Promise<void> {
+    if (spot.file === 'settings') {
+      editUserSettings(userFile(), (d) => setIn(d, spot.path, value));
+      await reloadSettings();
+    } else app.updateConfig((c) => configWith(c, spot.path, value));
+  }
+
+  /**
+   * Sets one field where it lives: in your settings.json when that file sets it (or a field above it), refused when a
+   * project's settings.json does, else in the app's settings (config.json).
+   */
+  async function writeField(keys: string[], value: string): Promise<void> {
+    const owner = ownerOf(keys);
+    if (owner === 'project') throw new Error("This project's settings.json sets this. Change it there.");
+    if (owner === 'user') await writeSpot({ file: 'settings', path: keys }, value);
+    else await writeSpot({ file: 'config', path: keys }, value);
+  }
+
+  const placeOf = (n: string) => {
+    if (!providerNames(app.config()).includes(n)) throw new Error(`There is no provider named "${n}".`);
+    return keyPlace(app.config(), n, owned(), settingsLayer.envOwners());
+  };
+
+  /** Why a key cannot be saved or removed here, in plain words */
+  function lockedKeyWords(n: string, from: string | null): string {
+    const r = resolveProvider(app.config(), n);
+    if (from === 'shell') return `This key comes from your shell (${r.keySource}). Change it there.`;
+    if (from === 'project') return `This key comes from this project's settings.json (${r.keySource}). Change it there.`;
+    return `${r.label} takes no key.`;
+  }
+
+  // ---------- Adding and removing providers ----------
+
+  function presets(): ProviderPresetInfo[] {
+    return PROVIDER_TYPES.map((type) => {
+      const p = PRESETS[type];
+      return { type, label: p.label, keyRequired: p.keyRequired, ...(p.keyEnv ? { keyEnv: p.keyEnv } : {}), keyInEnv: Boolean(p.keyEnv && process.env[p.keyEnv]), baseURL: p.baseURL };
+    });
+  }
+
+  /** Puts `n` in use when the provider is not chosen by a project's file; says why not otherwise. */
+  async function select(n: string): Promise<AddProviderResult> {
+    if (ownerOf(['provider']) === 'project') return { name: n, selected: false, note: "This project's settings.json chooses the provider." };
+    if (app.config().provider !== n) await writeField(['provider'], n);
+    return { name: n, selected: true };
+  }
+
+  async function addProvider(input: AddProviderInput): Promise<AddProviderResult> {
+    const type = String(input?.type ?? '') as ProviderType;
+    const preset = PRESETS[type];
+    if (!preset) throw new Error('Choose a type.');
+    const key = String(input?.apiKey ?? '').trim() ? cleanKey(input.apiKey) : '';
+    // Ollama: the built-in one, nothing to add
+    if (type === 'ollama') return select('ollama');
+    // A gateway, while the built-in block has no key: the key goes in the block, which is put in use
+    if (type === 'portkey') {
+      const block = keyPlace(app.config(), 'portkey', owned(), settingsLayer.envOwners());
+      if (!block.from && block.save) {
+        if (!key) throw new Error('Paste the key.');
+        await writeSpot(block.save, key);
+        return select('portkey');
+      }
+    }
+    const name = String(input?.name ?? '').trim();
+    if (!name) throw new Error('Name it.');
+    const bad = providerNameProblem(name);
+    if (bad) throw new Error(bad[0].toUpperCase() + bad.slice(1) + '.');
+    if (app.config().providers?.[name] !== undefined) throw new Error(`There is already a provider named "${name}".`);
+    const entry: Record<string, unknown> = { type };
+    if (type === 'openai-compatible') {
+      const url = String(input?.baseURL ?? '').trim();
+      if (!url) throw new Error('Enter the base URL.');
+      entry.baseURL = url;
+    }
+    if (key) entry.apiKey = key;
+    else if (preset.keyRequired && !(preset.keyEnv && process.env[preset.keyEnv])) throw new Error('Paste the key.');
+    const { entry: valid, problems } = validateProviderEntry(name, entry, { scope: 'user' });
+    if (!valid || problems.length) throw new Error(`${(problems[0]?.message ?? 'That entry is not valid').replace(/^./, (c) => c.toUpperCase())}.`);
+    editUserSettings(userFile(), (d) => {
+      if (!isRecord(d.providers)) d.providers = {};
+      const providers = d.providers as Record<string, unknown>;
+      if (providers[name] !== undefined) throw new Error(`There is already a provider named "${name}" in your settings.json.`);
+      providers[name] = entry;
+    });
+    await reloadSettings();
+    if (!app.config().providers?.[name]) throw new Error('Your settings.json was saved, but the provider did not load. Check the file under Developer.');
+    return select(name);
+  }
+
+  async function removeProvider(n: string): Promise<void> {
+    const cfg = app.config();
+    if (n === 'ollama' || n === 'portkey') throw new Error('A built-in provider cannot be removed.');
+    if (!cfg.providers?.[n]) throw new Error(`There is no provider named "${n}".`);
+    const owner = owned()[`providers.${n}`];
+    if (owner === 'project') throw new Error("This provider comes from this project's settings.json. Remove it there.");
+    // The one in use goes: the first other provider that is ready takes its place (else Ollama)
+    if ((cfg.provider || 'ollama') === n) {
+      const next = providerNames(cfg).find((x) => x !== n && !resolveProvider(cfg, x).error) ?? 'ollama';
+      if (ownerOf(['provider']) !== 'project') await writeField(['provider'], next);
+    }
+    if (owner === 'user') {
+      editUserSettings(userFile(), (d) => {
+        if (isRecord(d.providers)) delete (d.providers as Record<string, unknown>)[n];
+      });
+      await reloadSettings();
+    } else
+      app.updateConfig((c: AppConfig) => {
+        const providers = { ...(c.providers ?? {}) } as Record<string, NamedProviderConfig>;
+        delete providers[n];
+        return { ...c, providers };
+      });
+  }
+
   /** Stores the effort of a provider entry (null: none, the model's default). */
   function setEffort(n: string, level: EffortLevel | null): void {
     if (level !== null && !isEffortLevel(level)) throw new Error('Choose low, medium, high, xhigh or max.');

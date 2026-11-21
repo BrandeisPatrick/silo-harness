@@ -3,14 +3,18 @@
 /* ---------- The modal: header, navigation on the left, the section on the right ---------- */
 dialog.dialog.settings-dialog {
   width: min(1020px, calc(100vw - 48px)); height: min(800px, calc(100vh - 48px)); max-width: none; max-height: none;
-  --sp-selected: color-mix(in srgb, var(--text-100) 7%, transparent);
-  --sp-hover: color-mix(in srgb, var(--text-100) 4%, transparent);
+  /* The selected page is a filled pill; hover is a clearly lighter tint of it */
+  --sp-selected: color-mix(in srgb, var(--text-100) 9%, transparent);
+  --sp-hover: color-mix(in srgb, var(--text-100) 3.5%, transparent);
+  /* The colour scheme pictures show each scheme as it is, whatever the window's own */
+  --sp-scheme-light-bg: #ffffff; --sp-scheme-light-side: #f3f3f3; --sp-scheme-light-ink: #d4d4d4; --sp-scheme-light-field: #ffffff;
+  --sp-scheme-dark-bg: #1d1d1d; --sp-scheme-dark-side: #141414; --sp-scheme-dark-ink: #4a4a4a; --sp-scheme-dark-field: #262626;
 }
 /* In dark the selected row reads lighter than the controls around it */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) dialog.dialog.settings-dialog { --sp-selected: color-mix(in srgb, var(--text-100) 15%, transparent); --sp-hover: color-mix(in srgb, var(--text-100) 6%, transparent); }
+  :root:not([data-theme="light"]) dialog.dialog.settings-dialog { --sp-selected: color-mix(in srgb, var(--text-100) 15%, transparent); --sp-hover: color-mix(in srgb, var(--text-100) 5%, transparent); }
 }
-:root[data-theme="dark"] dialog.dialog.settings-dialog { --sp-selected: color-mix(in srgb, var(--text-100) 15%, transparent); --sp-hover: color-mix(in srgb, var(--text-100) 6%, transparent); }
+:root[data-theme="dark"] dialog.dialog.settings-dialog { --sp-selected: color-mix(in srgb, var(--text-100) 15%, transparent); --sp-hover: color-mix(in srgb, var(--text-100) 5%, transparent); }
 .sp { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .sp-head { display: flex; align-items: center; justify-content: space-between; flex: none; height: 45px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--border-subtle); }
 .sp-head h2 { margin: 0; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 500; }
@@ -30,11 +34,13 @@ dialog.dialog.settings-dialog {
 .sp-nav-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sp-nav-item .icon { color: var(--text-400); }
 .sp-nav-item:hover { background: var(--sp-hover); color: var(--text-100); }
-.sp-nav-item.active { background: var(--sp-selected); color: var(--text-100); }
+.sp-nav-item.active, .sp-nav-item.active:hover { background: var(--sp-selected); color: var(--text-100); font-weight: 500; }
 .sp-nav-item.active .icon { color: var(--text-200); }
 .sp-nav-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .sp-nav-item.dim { opacity: 0.4; }
 .sp-nav-sep { flex: none; height: 1px; margin: 6px 10px; background: var(--border-subtle); }
+/* The app and its version, quiet, at the foot of the navigation */
+.sp-side-foot { flex: none; margin-top: auto; padding: 8px 10px 2px; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); user-select: text; }
 
 .sp-content { position: relative; flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 4px 32px 40px; scroll-padding: 24px; }
 .sp-content:focus-visible { outline: none; }
@@ -71,13 +77,19 @@ dialog.dialog.settings-dialog {
 .sp-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .sp-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); }
 .sp-row-name { min-width: 0; overflow-wrap: anywhere; }
-.sp-row-desc { font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); overflow-wrap: anywhere; max-width: 560px; }
+.sp-row-desc { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; max-width: 560px; }
+/* One line: a description never wraps (the whole of a cut one is its tooltip) */
+.sp-card .sp-row:not(.full) > .sp-row-text > .sp-row-desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.sp-row-meta { font-family: var(--mono); font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-row.bare > .sp-row-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sp-row.bare > .sp-row-control { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
+.sp-row.sp-muted-row .sp-row-name { color: var(--text-200); }
 .sp-row-desc.sp-path, .sp-path { font-family: var(--mono); font-size: var(--fs-code); }
 .sp-row-control { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; max-width: 60%; }
 .sp-row.full { flex-direction: column; align-items: stretch; gap: 10px; }
 .sp-row.full .sp-row-control { max-width: none; justify-content: stretch; }
 .sp-row.full .sp-row-control > :not(.sp-saved) { flex: 1 1 auto; min-width: 0; }
-.sp-row.full .sp-saved { right: 0; top: -28px; bottom: auto; }
+.sp-row.full .sp-saved { right: 0; top: -14px; transform: none; }
 .sp-row.clickable:not(.owned) { cursor: default; }
 .sp-row.flash { animation: sp-flash 1.4s ease-out; }
 @keyframes sp-flash { 0%, 30% { background: var(--accent-soft); } 100% { background: transparent; } }
@@ -86,12 +98,10 @@ dialog.dialog.settings-dialog {
 .sp-pill { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 7px; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--text-400); }
 /* The provider pill only helps when rows of both providers can show, which is while searching */
 .sp-content:not(.searching) .sp-row[data-provider] .sp-pill { display: none; }
-.sp-owned {
-  display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 7px; border: 1px solid var(--border); border-radius: 999px;
-  font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--text-200); background: transparent; cursor: pointer;
-}
-.sp-owned:hover { background: var(--hover); color: var(--text-100); }
-.sp-row.owned .sp-row-control { opacity: 0.55; }
+/* A field a settings.json file sets: a small lock on its control */
+.sp-lock { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: var(--r-control); color: var(--text-400); }
+.sp-lock:hover { background: var(--hover); color: var(--text-100); }
+.sp-row.owned .sp-row-control > :not(.sp-lock):not(.sp-saved) { opacity: 0.55; }
 
 .sp-chip { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 7px; border-radius: 999px; font-size: var(--fs-micro); line-height: var(--lh-micro); font-weight: 500; color: var(--text-200); background: var(--sp-selected); white-space: nowrap; }
 .sp-chip.ok { color: var(--success); background: var(--success-soft); }
@@ -104,7 +114,7 @@ dialog.dialog.settings-dialog {
 .sp-row.invalid .sp-input:focus { box-shadow: 0 0 0 2px var(--danger-soft); }
 
 .sp-saved {
-  position: absolute; right: 0; bottom: calc(100% + 1px); display: inline-flex; align-items: center; gap: 4px;
+  position: absolute; right: calc(100% + 8px); top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--fs-small); line-height: var(--lh-small); color: var(--success); white-space: nowrap; pointer-events: none;
   opacity: 0; transition: opacity 0.2s;
 }
@@ -150,16 +160,43 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-range-value { width: 36px; text-align: right; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); font-variant-numeric: tabular-nums; }
 .sp-mono-list { font-family: var(--mono); font-size: var(--fs-code); }
 
-/* Advanced routing disclosure */
+/* ---------- Cards: rows that belong together, in one rounded panel with hairlines between them ---------- */
+.sp-card-group { margin-top: 16px; }
+.sp-card-head { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0 2px 6px; }
+.sp-card-group + .sp-card-group > .sp-card-head, .sp-advanced-rows > .sp-card-group > .sp-card-head { margin-top: 8px; }
+.sp-card-title { flex: 1 1 auto; margin: 0; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text-200); }
+.sp-card-head .sp-icon-btn { margin-right: -4px; }
+/* The hairline is each row's bottom edge, overlapping the next by a pixel; the card clips the last one, so the hairlines
+   stay right whichever rows are hidden (the search hides most) */
+.sp-card { position: relative; border: 1px solid var(--border-subtle); border-radius: var(--r-card-lg); overflow: hidden; }
+.sp-card .sp-row:not(.sp-sub-row), .sp-card > .sp-advanced > .sp-disclosure-row { min-height: 56px; padding: 11px 16px; border-top: none; border-bottom: 1px solid var(--border-subtle); margin-bottom: -1px; }
+.sp-card .sp-row.full:not(.sp-sub-row) { padding-top: 14px; padding-bottom: 14px; }
+.sp-card .sp-row.bare:not(.sp-sub-row) { min-height: 52px; }
+.sp-card .sp-row.sp-panel-row { padding: 16px; }
+.sp-card > .sp-advanced > .sp-disclosure-row { min-height: 44px; display: flex; align-items: center; }
+.sp-card .sp-advanced-rows .sp-row:not(.sp-sub-row) { padding-left: 34px; }
+.sp-content.searching .sp-card .sp-advanced-rows .sp-row { padding-left: 16px; }
+.sp-card > .sp-note { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: -1px; }
+.sp-card-group[hidden], .sp-card .sp-row[hidden] { display: none !important; }
+/* Reset: the danger card */
+.sp-danger-card .sp-card { border-color: var(--danger-line); }
+.sp-danger-card .sp-card-title { color: var(--danger); }
+.sp-danger-card .sp-card .sp-row:not(.sp-sub-row) { border-bottom-color: color-mix(in srgb, var(--danger) 18%, transparent); }
+
+/* ---------- Disclosures: a page's Advanced at its foot; a fold inside a card (Connection, Built-in) ---------- */
+.sp-page-advanced { margin-top: 28px; }
+.sp-page-advanced > .sp-disclosure-row { padding: 0; border-top: none; }
+.sp-page-advanced > .sp-advanced-rows > .sp-card-group:first-child { margin-top: 10px; }
+.sp-page-advanced > .sp-advanced-rows .sp-row { padding-left: 16px; }
 .sp-disclosure-row { padding: 12px 0; border-top: 1px solid var(--border-subtle); }
 .sp-disclosure { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px 0 2px; border-radius: var(--r-control); font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); }
 .sp-disclosure:hover { color: var(--text-100); background: var(--sp-hover); }
 .sp-disclosure .icon { color: var(--text-400); transition: transform 0.12s ease; }
 .sp-advanced.open .sp-disclosure .icon { transform: rotate(90deg); }
-.sp-advanced-rows .sp-row { padding-left: 20px; }
+.sp-advanced:not(.sp-page-advanced) > .sp-advanced-rows > .sp-row:not(.sp-sub-row) { padding-left: 20px; }
 /* A list whose rows a section rebuilds (Settings → Browser): its empty note reads like a row */
 .sp-rows > .sp-note { margin: 0; padding: 14px 0; border-top: 1px solid var(--border-subtle); }
-.sp-content.searching .sp-advanced-rows .sp-row { padding-left: 0; }
+.sp-content.searching .sp-advanced:not(.sp-page-advanced) > .sp-advanced-rows > .sp-row { padding-left: 16px; }
 
 /* Search: nothing found */
 .sp-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 96px 24px; color: var(--text-400); text-align: center; }
@@ -187,58 +224,82 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-inline-status.error { color: var(--danger); }
 .sp-inline-status .icon { flex: none; margin-top: 1px; }
 
-/* ---------- Models: every connected provider and the models it offers ---------- */
-.sp-group.sp-models > .sp-note.sp-models-intro { margin: 0 0 4px; padding: 0; border-top: none; max-width: 640px; }
-.sp-provider { margin-top: 24px; }
-.sp-provider-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-.sp-provider-title { margin: 0; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
-.sp-provider-gap { flex: 1 1 auto; }
-.sp-provider-detail { margin-top: 2px; max-width: 640px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; }
-.sp-provider-detail.danger { color: var(--danger); }
-.sp-models-filter-row { position: relative; display: flex; align-items: center; max-width: 320px; margin-top: 12px; }
-.sp-models-filter-icon { position: absolute; left: 10px; top: 8px; display: inline-flex; color: var(--text-400); pointer-events: none; }
-.sp-input.sp-models-filter { padding-left: 32px; }
-.sp-model-list { margin-top: 8px; border-top: 1px solid var(--border-subtle); }
-.sp-model { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-.sp-model-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.sp-model-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.sp-model-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-code); line-height: var(--lh-ui); color: var(--text-100); }
-.sp-model-result { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); overflow-wrap: anywhere; }
-.sp-model-result .icon { flex: none; margin-top: 3px; }
-.sp-model-result.ok .icon { color: var(--success); }
-.sp-model-result.error { color: var(--danger); }
-.sp-model-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-.sp-model-empty { padding: 14px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
-.sp-models-more { display: inline-flex; align-items: center; height: 26px; margin: 6px 0 0 -6px; padding: 0 6px; border-radius: var(--r-control); font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); }
-.sp-models-more:hover { background: var(--sp-hover); color: var(--text-100); }
+/* ---------- Models: one card (Provider, Model, API key), Connection, Add provider ---------- */
+/* A control and what sits at its right (a status, Test, Replace), lined up across the card's rows */
+.sp-pair { display: flex; align-items: center; gap: 10px; }
+.sp-pair-side { display: flex; align-items: center; gap: 6px; width: 104px; }
+.sp-pair-side > [hidden] { display: none; }
+.sp-row-control.sp-pair-row > .btn { margin-left: 2px; }
+.sp-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); white-space: nowrap; }
+.sp-dot { flex: none; color: var(--text-400); }
+.sp-dot.ok { color: var(--success); }
+.sp-dot.warn { color: var(--warn); }
+.sp-dot.danger { color: var(--danger); }
+.sp-row-desc.danger { color: var(--danger); }
 
-/* The safety check's row: the eval line under what it runs on; a test's result under the test's row */
-.sp-row-desc.sp-check-note { font-size: var(--fs-small); line-height: var(--lh-small); }
-/* A row whose text grows below (a result): the control stays level with the title */
-.sp-row.sp-row-top { align-items: flex-start; }
-.sp-row.sp-row-top > .sp-row-control { margin-top: 4px; }
-.sp-check-result { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-100); max-width: 640px; }
-.sp-check-head { margin-bottom: 2px; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
-.sp-check-line { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); overflow-wrap: anywhere; }
-.sp-check-line .icon { flex: none; margin-top: 3px; color: var(--text-400); }
-.sp-check-line.ok .icon { color: var(--success); }
-.sp-check-line.danger { color: var(--danger); }
-.sp-check-line.danger .icon { color: var(--danger); }
-.sp-check-line.warn .icon { color: var(--warn); }
-.sp-check-on { margin-top: 4px; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--text-400); overflow-wrap: anywhere; }
+/* The picker: a button that looks like a select, and its list */
+.sp-picker { display: inline-flex; flex: none; max-width: 100%; }
+.sp-picker-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 30px 0 10px; position: relative;
+  background: var(--field-bg); color: var(--text-100); border: 1px solid var(--border); border-radius: var(--r-card);
+  font-size: var(--fs-ui); line-height: var(--lh-ui); text-align: left; cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.sp-picker-btn:hover { border-color: color-mix(in srgb, var(--text-400) 45%, transparent); }
+.sp-picker-btn:focus-visible, .sp-picker-btn[aria-expanded="true"] { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--field-ring); }
+.sp-picker-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sp-picker-dot { display: inline-flex; flex: none; }
+.sp-picker-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-picker-label.mono, .sp-picker-text.mono { font-family: var(--mono); font-size: var(--fs-code); }
+.sp-picker-label.placeholder { color: var(--text-400); font-family: var(--font); font-size: var(--fs-ui); }
+.sp-picker-chev { position: absolute; right: 10px; top: 7px; display: inline-flex; color: var(--text-400); pointer-events: none; }
+.sp-picker-pop {
+  position: absolute; z-index: 40; display: flex; flex-direction: column; max-height: 340px; padding: 4px;
+  background: var(--bg-000); border: 1px solid var(--border); border-radius: var(--r-pop); box-shadow: var(--shadow-pop);
+}
+.sp-input.sp-picker-search { flex: none; margin-bottom: 4px; }
+.sp-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.sp-picker-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border-radius: var(--r-control); font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); cursor: pointer; }
+.sp-picker-item.active { background: var(--hover); }
+.sp-picker-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-picker-note { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+.sp-picker-empty, .sp-picker-foot { padding: 6px 10px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
+
+/* The API key: dots and the last four, in a box like a field; the field itself while a key is typed */
+.sp-key-field { display: inline-flex; flex: none; max-width: 100%; }
+.sp-key-box { display: flex; align-items: center; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--r-card); background: var(--bg-100); font-family: var(--mono); font-size: var(--fs-code); color: var(--text-200); letter-spacing: 0.02em; overflow: hidden; white-space: nowrap; }
+.sp-key-box.locked { background: transparent; border-style: dashed; color: var(--text-400); }
+.sp-key-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sp-key-box > .sp-lock { margin-left: auto; margin-right: -6px; }
+.sp-key-box.none { font-family: var(--font); font-size: var(--fs-ui); color: var(--text-400); letter-spacing: 0; }
+.sp-key-field > [hidden] { display: none; }
+
+/* A test's result, under its row, across the row's whole width */
+.sp-row:has(> .sp-row-result:not([hidden])) { flex-wrap: wrap; row-gap: 2px; }
+.sp-row > .sp-row-result { flex: 1 0 100%; margin-top: -4px; }
+.sp-row-result { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); overflow-wrap: anywhere; }
+.sp-row-result[hidden] { display: none; }
+.sp-row-result .icon { flex: none; margin-top: 3px; }
+.sp-row-result.ok .icon { color: var(--success); }
+.sp-row-result.danger { color: var(--danger); }
+
+/* Add provider: a link-like button, then a short form in the card */
+.btn.sp-add-provider-btn { background: none; border-color: transparent; color: var(--text-200); padding-left: 4px; }
+.btn.sp-add-provider-btn:hover { background: var(--sp-hover); color: var(--text-100); }
+.sp-add-form { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: -1px; }
+.sp-add-form[hidden] { display: none; }
+.sp-form-line { display: flex; align-items: center; gap: 16px; }
+.sp-form-line[hidden] { display: none; }
+.sp-form-label { width: 96px; flex: none; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); }
+.sp-add-form > .sp-problem { margin: 0 0 0 112px; }
+.sp-form-actions { display: flex; gap: 8px; margin-left: 112px; }
 
 /* ---------- Mods ---------- */
-.sp-row.sp-mod { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 0; align-items: center; }
-.sp-mod .sp-row-control { grid-column: 4; max-width: none; }
-.sp-mod-expand { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: -4px; border-radius: var(--r-control); color: var(--text-400); }
-.sp-mod-expand:hover { background: var(--sp-hover); color: var(--text-100); }
-.sp-mod-expand .icon { transition: transform 0.12s ease; }
-.sp-mod.open .sp-mod-expand .icon { transform: rotate(90deg); }
-.sp-mod-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-card); background: var(--sp-selected); color: var(--text-200); cursor: default; }
+.sp-row.sp-mod { row-gap: 0; align-items: center; }
+.sp-mod .sp-row-control { max-width: none; }
+.sp-mod-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-card); background: var(--sp-selected); color: var(--text-200); }
 .sp-mod-icon img { display: block; }
-.sp-mod .sp-row-text { cursor: default; }
 .sp-mod-version { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); font-variant-numeric: tabular-nums; }
-.sp-mod-detail { grid-column: 3 / 5; display: flex; flex-direction: column; gap: 14px; padding: 14px 0 2px; }
+.sp-mod-detail { display: flex; flex-direction: column; gap: 14px; padding: 12px 0 4px; }
 .sp-detail-block { display: flex; flex-direction: column; gap: 6px; }
 .sp-detail-title { font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text-200); }
 .sp-detail-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -339,3 +400,43 @@ textarea.sp-input { height: auto; min-height: 92px; padding: 8px 10px; line-heig
 .sp-menu-item .icon { color: var(--text-200); }
 .sp-menu-item:hover, .sp-menu-item:focus-visible { background: var(--hover); outline: none; }
 .sp-menu-item.danger, .sp-menu-item.danger .icon { color: var(--danger); }
+
+/* ---------- Appearance: the colour scheme as three pictures ---------- */
+.sp-theme-row > .sp-row-control { max-width: none; }
+.sp-schemes { display: inline-flex; gap: 14px; }
+.sp-scheme { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; }
+.sp-scheme input { position: absolute; opacity: 0; pointer-events: none; }
+.sp-scheme-frame { display: block; line-height: 0; border-radius: 8px; box-shadow: 0 0 0 1px var(--border); transition: box-shadow 0.12s; overflow: hidden; }
+.sp-scheme-pic { display: block; width: 84px; height: auto; }
+.sp-scheme > span:last-child { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); }
+.sp-scheme:hover .sp-scheme-frame { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-400) 60%, transparent); }
+.sp-scheme input:checked ~ .sp-scheme-frame { box-shadow: 0 0 0 2px var(--accent); }
+.sp-scheme input:checked ~ span:last-child { color: var(--text-100); font-weight: 500; }
+.sp-scheme input:focus-visible ~ .sp-scheme-frame { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.sp-scheme input:disabled ~ .sp-scheme-frame { opacity: 0.6; }
+.sp-looks { margin-top: 20px; }
+
+/* ---------- Mods: one line each; the icon and the name open a row ---------- */
+.sp-mods > .sp-toolbar { margin: 16px 0 0; }
+.sp-row.sp-mod { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 12px; }
+.sp-mod .sp-row-control { grid-column: 3; }
+.sp-mod > .sp-row-text { cursor: pointer; }
+.sp-mod .sp-mod-detail { grid-column: 2 / 4; }
+button.sp-mod-icon { cursor: pointer; }
+button.sp-mod-icon:hover { color: var(--text-100); }
+button.sp-mod-icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.sp-mod-about { color: var(--text-200); }
+
+/* ---------- Skills: a line each; a long description opens on a click ---------- */
+.sp-toolbar-row { border: none; min-height: 0; padding: 4px 0 0; }
+.sp-skill.sp-expandable > .sp-row-text { cursor: pointer; }
+.sp-skill-full { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-200); overflow-wrap: anywhere; max-width: 600px; }
+.sp-skill.open > .sp-row-text > .sp-row-desc { display: none; }
+
+/* ---------- Remote control and lists ---------- */
+.sp-link-text { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-400); }
+.sp-row.bare > .sp-row-control > .sp-actions { flex: 1 1 auto; min-width: 0; }
+.sp-add-field { flex: 1 1 auto; min-width: 0; max-width: 440px; }
+/* The project's rules: the card's title says whose they are */
+.sp-card #rules-section > .rules-for:first-child { display: none; }
+.sp-inner-fold > .sp-disclosure-row .sp-disclosure { font-size: var(--fs-small); color: var(--text-400); }

@@ -11,7 +11,7 @@ const RUNTIME_SHOWN = 5;
 
 const TAB_OF = { background: 'Background', composer: 'Chat bar', conversation: 'Conversation' } as const;
 
-/** The tabs of Settings → Mods where a mod's looks are chosen ("Background, Chat bar") */
+/** The tabs of Settings → Appearance where a mod's looks are chosen ("Background, Chat bar") */
 function lookTabs(m: ModInfo): string {
   const c = m.manifest?.contributes ?? {};
   const tabs: string[] = [];
@@ -56,7 +56,7 @@ function describeMod(m: ModInfo, layout?: Partial<ModLayout>): string {
   } else lines.push('Views: none');
   const looks = m.manifest?.contributes?.looks ?? [];
   if (looks.length) {
-    lines.push('Looks (scoped to their region; the user picks one per region in Settings → Mods → Chat bar or Conversation):');
+    lines.push('Looks (scoped to their region; the user picks one per region in Settings → Appearance → Chat bar or Conversation):');
     for (const l of looks) lines.push(`- ${l.id}: "${l.title}" for the ${l.target === 'composer' ? 'chat bar (@scope #chatbar)' : 'conversation (@scope #messages)'}, ${l.styles.join(', ')}${chosen?.[l.target] === `${m.key}/${l.id}` ? ' · active' : ''}`);
   }
   if (m.manifest?.contributes?.commands?.length) lines.push(`Commands: ${m.manifest.contributes.commands.map((c) => `/${c.name}`).join(', ')}`);
@@ -73,11 +73,11 @@ function nextStep(m: ModInfo, problems: number, runtime: number, looksOnly: bool
   if (m.state === 'invalid') return 'Fix the problems above in mod.json, then call mod_check again. Nothing of the mod loads until it validates.';
   if (problems) return 'Fix the problems above in mod.json, then call mod_check again.';
   if (looksOnly && m.state === 'off')
-    return `The look is written. Nothing turns it on: the user previews it and uses it from the card in the chat (Preview, Use) or in Settings → Mods → ${lookTabs(m)}, where it shows in a preview first. Tell them so; do not try to apply it yourself. Its files reload in the preview as you save them.`;
+    return `The look is written. Nothing turns it on: the user previews it and uses it from the card in the chat (Preview, Use) or in Settings → Appearance → ${lookTabs(m)}, where it shows in a preview first. Tell them so; do not try to apply it yourself. Its files reload in the preview as you save them.`;
   if (m.state === 'off') return 'The mod is written but off: the user turns it on from the card in the chat or in Settings → Mods. Tell them so; do not try to turn it on yourself.';
   if (m.state === 'paused')
     return looksOnly
-      ? `The look is in use but stopped applying, because it now asks for more than the user approved (${m.wants.join(', ')}). The user approves the change from the card in the chat or with Use in Settings → Mods → ${lookTabs(m)}.`
+      ? `The look is in use but stopped applying, because it now asks for more than the user approved (${m.wants.join(', ')}). The user approves the change from the card in the chat or with Use in Settings → Appearance → ${lookTabs(m)}.`
       : `The mod is paused because it now asks for more than the user approved (${m.wants.join(', ')}). The user approves the change from the card in the chat or in Settings → Mods.`;
   if (runtime) return 'Fix the errors above in the page; it reloads when you save. Then call mod_check again (errors from before the fix stay listed until the app restarts, so compare the times).';
   if (looksOnly) return 'The look is in use and healthy. It reloads as you save it.';
