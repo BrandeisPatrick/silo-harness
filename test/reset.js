@@ -103,6 +103,36 @@ const standItems = () => ls(stand);
     await R.finishReset(p.userData, log);
   }
 
+  // --- Hardening: a folder that is not the app's own, or outside your home, is never swept ---
+  {
+    check('a data folder outside your home (and temp) folder is refused', /not in your home folder/.test(R.resetRefusal('/usr/share') ?? ''), R.resetRefusal('/usr/share'));
+    const odd = path.join(root, 'not-the-app');
+    fs.mkdirSync(odd);
+    fs.writeFileSync(path.join(odd, 'thesis.pdf'), 'x');
+    R.markReset(odd, { kind: 'full', settingsJson: false, at: 2600 });
+    const plan = R.stageReset(odd, log, path.join(root, 'odd-config'));
+    check('a folder that does not look like the app\'s own: nothing is moved, the mark goes, and the window will say so', plan === null && ls(odd).join() === 'thesis.pdf' && R.resetNotices.some((m) => /does not look like this app's own/.test(m)), { left: ls(odd), notices: R.resetNotices });
+    R.resetNotices.length = 0;
+  }
+
+  // --- Hardening: an error while staging never stops the app from starting (reset-at-launch.ts) ---
+  {
+    const p = profile();
+    R.markReset(p.userData, { kind: 'full', settingsJson: false, at: 2700 });
+    fs.writeFileSync(path.join(p.userData, '.silo-reset-2700'), 'a file where the folder goes');
+    const electronPath = require.resolve(path.join(projectDir, 'node_modules', 'electron'));
+    require.cache[electronPath] = { id: electronPath, filename: electronPath, loaded: true, exports: { app: { getPath: () => p.userData } } };
+    let threw = null;
+    try {
+      dist('reset-at-launch.js');
+    } catch (err) {
+      threw = err;
+    }
+    delete require.cache[electronPath];
+    check('an error while staging: no throw, the mark goes, sessions stay, one notice', !threw && !fs.existsSync(path.join(p.userData, R.RESET_MARK)) && ls(p.userData).includes('sessions') && R.resetNotices.length === 1, { threw: threw && threw.message, notices: R.resetNotices });
+    R.resetNotices.length = 0;
+  }
+
   // --- Reset settings ---
   {
     const p = profile();

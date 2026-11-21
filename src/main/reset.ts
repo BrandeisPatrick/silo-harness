@@ -16,6 +16,7 @@
 // SILO_HARNESS_NO_RELAUNCH makes the app quit instead of relaunching (the tests relaunch it themselves).
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { App } from './app';
 import { configDir, envVar } from './paths';
@@ -43,6 +44,30 @@ const STOP_WAIT_MS = 5000;
  * running instance itself (Chromium's lock and, in the tests, the port it listens on).
  */
 const stays = (name: string) => name === RESET_MARK || name.startsWith(STAGE_PREFIX) || name.startsWith('Singleton') || name === 'DevToolsActivePort';
+
+/** What this app always leaves in its data folder: a folder with none of them is not its own */
+const OWN = ['config.json', 'sessions', 'Local State'];
+
+/** What the window says once it is up: a reset that was refused or could not finish at this launch */
+export const resetNotices: string[] = [];
+
+/**
+ * Why a reset may not sweep `userData`, or null when it may: the folder must look like this app's own and lie in your
+ * home folder (or your temp folder, where a test's profile lives).
+ */
+export function resetRefusal(userData: string): string | null {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const dir = real(userData);
+  if (![os.homedir(), os.tmpdir()].some((root) => dir.startsWith(real(root) + path.sep))) return `The reset was refused: the data folder (${userData}) is not in your home folder.`;
+  if (!OWN.some((n) => fs.existsSync(path.join(userData, n)))) return `The reset was refused: the data folder (${userData}) does not look like this app's own.`;
+  return null;
+}
 
 function parsePlan(raw: string): ResetPlan | null {
   try {
@@ -77,6 +102,13 @@ export function stageReset(userData: string, log: (line: string) => void = () =>
   if (!plan) {
     log('[reset] the reset mark is not one this app writes; it was left out');
     fs.rmSync(mark, { force: true });
+    return null;
+  }
+  const refused = resetRefusal(userData);
+  if (refused) {
+    log(`[reset] ${refused}`);
+    fs.rmSync(mark, { force: true });
+    resetNotices.push(`${refused} Nothing was moved.`);
     return null;
   }
   const stage = path.join(userData, `${STAGE_PREFIX}${plan.at}`);
@@ -168,6 +200,8 @@ export function setupReset(app: App): () => void {
     if (!fromMainWindow(e.sender, e.senderFrame, app.window())) throw new Error('A reset starts only from Settings in the app window.');
     if (kind !== 'full' && kind !== 'settings') throw new Error('Unknown reset.');
     if (busy) return { relaunching: true };
+    const refused = resetRefusal(app.userData);
+    if (refused) throw new Error(refused);
     busy = true;
     const plan: ResetPlan = { kind, settingsJson: kind === 'full' && Boolean((opts as { settingsJson?: unknown } | null)?.settingsJson), at: Date.now() };
     // Running sessions stop first (a run's last act is to save its session, which the next launch moves aside)

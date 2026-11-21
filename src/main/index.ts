@@ -33,7 +33,7 @@ import { setupUpdates } from './updates';
 import { setupTiming } from './timing-service';
 import { setupCost } from './cost-service';
 import { setupReport } from './report-service';
-import { finishReset, setupReset } from './reset';
+import { finishReset, resetNotices, setupReset } from './reset';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -153,6 +153,10 @@ function createWindow(): void {
   };
   servers?.on('servers', onServers);
   if (servers) w.webContents.once('did-finish-load', () => onServers(servers.list()));
+  // A reset refused or not finished at this launch (reset.ts): said once
+  w.webContents.once('did-finish-load', () => {
+    for (const message of resetNotices.splice(0)) w.webContents.send('agent:event', { type: 'error', kind: 'notice', message } satisfies AgentEvent, a.runtime.foregroundId());
+  });
   const onTermData = (id: string, data: string) => {
     if (!w.isDestroyed()) w.webContents.send('terminal:data', id, data);
   };

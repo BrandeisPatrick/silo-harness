@@ -43,7 +43,7 @@ export function resetRows(ctx: Ctx): Row[] {
       const checkbox = { label: link ? 'Also my settings.json (providers and keys): it is a link, so only the link goes; the file it points to stays' : 'Also my settings.json (providers and keys)', checked: false };
       const ok = await ctx.confirm({
         title: 'Full reset?',
-        description: 'The app goes back to its first launch and relaunches. Your projects and their files are not touched. These move to the Trash:',
+        description: 'The app goes back to its first launch and relaunches. Quit any other copy of the app first. Your projects and their files are not touched. These move to the Trash:',
         items: FULL_RESET_ITEMS,
         checkbox,
         confirmLabel: 'Reset and relaunch',
