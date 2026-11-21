@@ -651,7 +651,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
    filled from --code-bg, as before these panels (a look written for it keeps its code), unless the look sets
    --code-panel or --code-inline itself: :where() leaves this rule no weight against the look's :scope. */
 :root.mod-bg { --code-panel: var(--panel-veil); }
-:where(#messages[data-look]) { --code-panel: var(--code-bg); --code-panel-solid: var(--code-bg); --code-inline: var(--code-bg); }
+/* …and no hairline of ours either: a look written for 0.20.0 drew its code boxes as fills only; it may set the line itself */
+:where(#messages[data-look]) { --code-panel: var(--code-bg); --code-panel-solid: var(--code-bg); --code-inline: var(--code-bg); --code-panel-line: transparent; }
 .code-block { background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 4px 0 12px; margin-bottom: -8px; }
 .code-lang { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
