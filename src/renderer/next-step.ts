@@ -154,7 +154,8 @@ export function setupNextStep(deps: Deps): void {
         if (n.matches('.msg.user') && live && live.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) quiet(live, n.querySelector('.bubble')?.textContent ?? '');
         else if (n.matches('.msg.assistant')) followReply(n);
       }
-      for (const n of r.removedNodes) if (n instanceof HTMLElement && live && n.contains(live)) live = null;
+      // Gone from the page, not moved (a card moves under the reply that follows it)
+      for (const n of r.removedNodes) if (n instanceof HTMLElement && live && n.contains(live) && !live.isConnected) live = null;
     }
   }).observe(deps.messages, { childList: true });
   document.addEventListener(
