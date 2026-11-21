@@ -4,6 +4,7 @@
 
 import type { AppConfig } from '../../shared/types';
 import type { ModelRequest } from '../../shared/mods';
+import { providerErrorMessage } from '../agent/errors';
 import { contextLimit } from '../context-window';
 import { estimateTokens, renderForSummary } from '../compact';
 import { contextSize, ollamaChat } from '../ollama';
@@ -144,6 +145,7 @@ export async function completeOnce(
     if (signal.aborted) return { text, stopped: true };
     if (timeout.aborted) throw new ModelCallError(`The model did not finish within ${MODEL_TIMEOUT_MS / 1000} s.`, 4008);
     if (err instanceof ModelCallError) throw err;
-    throw new ModelCallError(err instanceof Error ? err.message : String(err), 4000);
+    // Mod code is third-party: it gets the provider's error in plain words, never with a key in it (as a run's errors).
+    throw new ModelCallError(providerErrorMessage(err, cfg), 4000);
   }
 }

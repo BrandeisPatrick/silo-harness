@@ -778,6 +778,11 @@ const resetHome = () => {
     const req3 = mock.state.requests.filter((r) => r.url === '/v1/chat/completions').pop();
     check('portkey request: max_tokens, stream, no tools', req3.payload.max_tokens === 50 && req3.payload.stream === true && !req3.payload.tools);
     check('portkey deltas', deltasFor('r3').map((p) => p.payload.data.text).join('') === 'Hello from Portkey');
+    const key = 'sk-mod-test-0123456789abcdef';
+    f.app.updateConfig((c) => ({ ...c, portkey: { ...c.portkey, apiKey: key } }));
+    mock.state.replies.push({ status: 400, error: `The key ${key} may not use mock-portkey` });
+    const leak = await call(f, 'allperm', 'model.complete', { messages: [{ role: 'user', content: 'hi' }] });
+    check('a failed call reaches the mod in plain words, without the key', leak.error && leak.error.code === 4000 && /HTTP 400/.test(leak.error.message) && !leak.error.message.includes(key) && !leak.error.message.includes(key.slice(8)), leak);
 
     mock.state.delayMs = 1500;
     mock.state.replies.push({ content: 'late' }, { content: 'late' });
