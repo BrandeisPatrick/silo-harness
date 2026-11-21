@@ -7,7 +7,7 @@ const projectDir = process.argv[2] || path.join(__dirname, '..');
 const { createApp } = require(path.join(projectDir, 'dist/main/app.js'));
 const { createHistory, RECOVERED_NOTICE } = require(path.join(projectDir, 'dist/main/history/service.js'));
 const { replayConversation, missingToolResults, INTERRUPTED_RESULT } = require(path.join(projectDir, 'dist/main/history/replay.js'));
-const { parseLog } = require(path.join(projectDir, 'dist/main/history/log.js'));
+const { parseLog, HistoryLog } = require(path.join(projectDir, 'dist/main/history/log.js'));
 const { ArtifactStore } = require(path.join(projectDir, 'dist/main/artifacts.js'));
 const { rewindSession } = require(path.join(projectDir, 'dist/main/sessions.js'));
 const { startMock } = require('./support/mock-model.js');
@@ -480,6 +480,18 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   choice = () => null;
   check('6: a cancelled export returns null', (await h.app.invokeRpc('history.export', [X, 'markdown'])) === null);
   close(h);
+
+  // ---- 7: the log is the user's alone (mode 600): a new one is made so, an older one is brought to it ----
+  {
+    const log = new HistoryLog(path.join(tmp, 'mode-log'));
+    const mode = (id) => fs.statSync(log.file(id)).mode & 0o777;
+    log.append('fresh', 'session.created', {});
+    check('7: a new log is created 600', mode('fresh') === 0o600, mode('fresh').toString(8));
+    fs.writeFileSync(log.file('older'), '', { mode: 0o644 });
+    fs.chmodSync(log.file('older'), 0o644);
+    log.append('older', 'session.created', {});
+    check('7: a log made 644 before is 600 after this process first appends to it', mode('older') === 0o600, mode('older').toString(8));
+  }
 
   for (const o of opened) o.history.dispose();
   mock.close();

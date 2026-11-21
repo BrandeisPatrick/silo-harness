@@ -114,9 +114,15 @@ export class HistoryLog {
       const { record, endsWithNewline } = lastRecord(file);
       seq = (record?.seq ?? 0) + 1;
       if (!endsWithNewline) prefix = '\n';
+      // The log holds full message text: the user's alone. A log made before it was created 600 is brought to 600.
+      try {
+        fs.chmodSync(file, 0o600);
+      } catch {
+        /* no log yet: created 600 below */
+      }
     }
     const rec: HistoryRecord = { v: 1, seq, t, type, data: data ?? {} };
-    fs.appendFileSync(file, prefix + JSON.stringify(rec) + '\n');
+    fs.appendFileSync(file, prefix + JSON.stringify(rec) + '\n', { mode: 0o600 });
     this.seqs.set(sessionId, seq + 1);
     return rec;
   }
