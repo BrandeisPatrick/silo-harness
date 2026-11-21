@@ -10,8 +10,9 @@ import { CONTEXT_NOTE_PREFIX, FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
-import { actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
+import { actionDetails, actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
 import { LOAD_TOOLS } from './tools/groups';
+import { nextStepOrNull } from './tools/next-step';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -269,12 +270,17 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   const turnByAt = new Map<number, number>();
   (s.turns ?? []).forEach((t, i) => turnByAt.set(t.at, i));
   appendTranscript(s, s.messages, items, turnByAt, opts.running === true, shown);
-  // Each user message carries how long its turn worked, when that was recorded
+  // Each user message carries how long its turn worked, when that was recorded; each reply in a turn with a
+  // checkpoint, when it was written (the turn's start plus how long it worked: its end)
   let n = 0;
+  let replyAt: number | undefined;
   for (const it of items) {
+    if (it.role === 'assistant' && replyAt !== undefined) it.at = replyAt;
     if (it.role !== 'user') continue;
     const ms = s.turnTimes?.[n++];
     if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) it.worked = ms;
+    const started = it.turn !== undefined ? s.turns?.[it.turn]?.createdAt : undefined;
+    replyAt = typeof started === 'number' && started > 0 ? started + (it.worked ?? 0) : undefined;
   }
   return items;
 }
@@ -385,7 +391,13 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         // A call Auto mode's check blocked is one quiet line (auto-blocked.ts in the window)
         const blocked = blockedReason(result);
         if (blocked !== null) {
-          items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
+          items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), ...actionDetails(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
+          continue;
+        }
+        // A next_step call is its card (one the tool refused stays a tool row with the reason)
+        const step = call.function.name === 'next_step' && ok ? nextStepOrNull(call.function.arguments) : null;
+        if (step) {
+          items.push({ role: 'next_step', step });
           continue;
         }
         // A show_image call is the image itself (a failed one stays a tool row with its error)
@@ -398,6 +410,19 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         items.push({ role: 'tool', name: call.function.name, args: call.function.arguments, result, ok, ...(sandbox ? { sandbox } : {}) });
       }
     }
+  });
+  markChosenReplies(items);
+}
+
+/** A next_step card's chosen reply: the user's next message, when it was one of the card's replies. */
+function markChosenReplies(items: TranscriptItem[]): void {
+  items.forEach((item, i) => {
+    if (item.role !== 'next_step' || !item.step.replies.length) return;
+    const next = items.slice(i + 1).find((x) => x.role === 'user');
+    const said = next?.role === 'user' ? next.text.trim().toLowerCase() : '';
+    const chosen = said ? item.step.replies.find((r) => r.toLowerCase() === said) : undefined;
+    if (chosen) item.chosen = chosen;
+    else delete item.chosen;
   });
 }
 

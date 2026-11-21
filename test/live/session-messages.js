@@ -120,7 +120,7 @@ const REPLY_B = 'README.md has 7 lines.';
       const sum = el.querySelector('.session-msg-line > summary');
       const link = sum.querySelector('.session-msg-link');
       const next = el.nextElementSibling;
-      return { cls: el.className, summary: sum.innerText.trim(), link: link?.textContent, from: link?.dataset.session, open: el.querySelector('.session-msg-line').open, next: next?.className, nextText: next?.innerText.trim(), turn: el.dataset.turn, bubble: Boolean(el.querySelector('.bubble')), frame: /\\[Message from|Not from the user|session_send/.test(el.innerText) };
+      return { cls: el.className, summary: sum.innerText.trim(), link: link?.textContent, from: link?.dataset.session, open: el.querySelector('.session-msg-line').open, next: next?.className, nextText: (next?.querySelector('.md') ?? next)?.innerText.trim(), turn: el.dataset.turn, bubble: Boolean(el.querySelector('.bubble')), frame: /\\[Message from|Not from the user|session_send/.test(el.innerText) };
     })()`);
     check('B shows "Received message from Release notes", shut', recv.summary === 'Received message from Release notes' && recv.open === false && !recv.bubble, recv);
     check('… with A linked', recv.link === 'Release notes' && recv.from === A, recv);

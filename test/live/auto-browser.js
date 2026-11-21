@@ -66,7 +66,7 @@ const WATCH = `(() => {
     await pending;
     return { result, cards };
   }
-  const quietLines = () => app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => e.innerText.replace(/\\s+/g, ' ').trim())`);
+  const quietLines = () => app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => { const t = (s) => (e.querySelector(s)?.textContent ?? '').replace(/\\s+/g, ' ').trim(); return [t('.tool-verb'), t('.auto-blocked-what')].join(' ') + (e.querySelector('.auto-blocked-allow') ? ' · Allow' : ''); })`);
   const has = (text) => (p) => JSON.stringify(p.messages ?? []).includes(text);
 
   try {
@@ -89,7 +89,7 @@ const WATCH = `(() => {
     check('block: no card, a blocked result', r.cards.length === 0 && (r.result ?? '').startsWith('Blocked by Auto mode: [Other Site] not needed for the task.') && checks() === n + 1, r);
     await app.waitFor(`document.querySelectorAll('#messages .auto-blocked').length > 0`, 10_000, 'the quiet line');
     const lines = await quietLines();
-    check('block: the quiet line names the action', lines.some((l) => l === `Auto mode blocked open fixture.example:${Q} · Allow`), lines);
+    check('block: the quiet line names the action', lines.some((l) => l === `Blocked open fixture.example:${Q} · Allow`), lines);
 
     // ---------- ask: the card, and the user's answer is honoured ----------
     n = checks();

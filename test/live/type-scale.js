@@ -109,7 +109,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
         code: { fs: cs(code).fontSize, h: codeRect.height, pad: cs(code).paddingLeft, radius: cs(code).borderTopLeftRadius, border: cs(code).borderTopStyle },
         pre: { fs: cs(reply.querySelector('pre')).fontSize, lh: cs(reply.querySelector('pre')).lineHeight },
         liGap: lis.length > 1 ? Math.round(box(lis[1]).y - box(lis[0]).b) : null,
-        tool: { lines: tools.map((t) => t.className.split(' ')[0]).join(','), fs: cs(tools[1].querySelector('summary')).fontSize, h: box(tools[1].querySelector('summary')).h, color: cs(tools[1].querySelector('summary')).color, muted: cs(document.documentElement).getPropertyValue('--text-400').trim(), border: cs(tools[1]).borderTopStyle, pitch: Math.round(box(tools[1]).y - box(tools[0]).y), gapAfter: Math.round(box(reply).y - box(tools[1]).b) },
+        tool: { lines: tools.map((t) => t.className.split(' ')[0]).join(','), fs: cs((tools[1].querySelector(':scope.flat > .group-body > .tool > summary') ?? tools[1].querySelector('summary'))).fontSize, h: box((tools[1].querySelector(':scope.flat > .group-body > .tool > summary') ?? tools[1].querySelector('summary'))).h, color: cs((tools[1].querySelector(':scope.flat > .group-body > .tool > summary') ?? tools[1].querySelector('summary'))).color, muted: cs(document.documentElement).getPropertyValue('--text-400').trim(), border: cs(tools[1]).borderTopStyle, pitch: Math.round(box(tools[1]).y - box(tools[0]).y), gapAfter: Math.round(box(reply).y - box(tools[1]).b) },
         bubble: { fs: cs(bubble).fontSize, pad: cs(bubble).padding, radius: cs(bubble).borderTopLeftRadius },
         task: { w: box(task).w, radius: cs(task).borderTopLeftRadius, pad: cs(task).paddingTop, row: box(task.querySelector('.task-row')).h, fs: cs(task.querySelector('.task-row')).fontSize },
         topbar: box(q('.topbar')).h, titleFs: cs(q('#session-title')).fontSize, titleFw: cs(q('#session-title')).fontWeight,
@@ -127,22 +127,22 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
         },
       };
     })()`);
-    check('reply text 15/21, bold 600', m.body.fs === '15px' && m.body.lh === '21px' && m.bold === '600', m.body);
-    check('a heading in a reply is semibold and at most 17 px', m.h2.fs >= 15 && m.h2.fs <= 17 && Number(m.h2.fw) >= 600, m.h2);
-    check('reading column: 736 px at most, running text inset 4 px', m.body.col <= 736 + 0.5 && m.body.inset === 4, m.body);
-    check('inline code: 0.9em mono (13.5 px), an 18 px chip, 4.5 px side padding, 4 px radius, no border', m.code.fs === '13.5px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '4px' && m.code.border === 'none', m.code);
+    check('reply text 16/24, bold 600', m.body.fs === '16px' && m.body.lh === '24px' && m.bold === '600', m.body);
+    check('a heading in a reply is semibold, 17 px at the top two levels', m.h2.fs === 17 && Number(m.h2.fw) >= 600, m.h2);
+    check('reading column: 728 px at most, running text inset 4 px', m.body.col <= 728 + 0.5 && m.body.inset === 4, m.body);
+    check('inline code: 14 px mono, an 18 px patch, 4.5 px side padding, 5 px radius, no border', m.code.fs === '14px' && near(m.code.h, 18, 1) && m.code.pad === '4.5px' && m.code.radius === '5px' && m.code.border === 'none', m.code);
     check('code blocks 13/20 mono', m.pre.fs === '13px' && m.pre.lh === '20px', m.pre);
     check('list items about 4 px apart', m.liGap !== null && m.liGap >= 3 && m.liGap <= 5, m.liGap);
-    check('tool lines: 15 px, muted, a 24 px row, no box; 8 px between two, 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '15px' && m.tool.h === 24 && m.tool.border === 'none' && m.tool.pitch === 32 && m.tool.gapAfter === 16, m.tool);
-    check('the user bubble: 15 px, 12/16 padding, 12 px radius', m.bubble.fs === '15px' && m.bubble.pad === '12px 16px' && m.bubble.radius === '12px', m.bubble);
-    check('the task card: the column width, 10 px radius, 12 px padding, 28 px rows at 14 px', m.task.w <= 736.5 && m.task.radius === '10px' && m.task.pad === '12px' && near(m.task.row, 28) && m.task.fs === '14px', m.task);
+    check('tool lines: 14 px, muted, the rows of the turn\'s card (36 px, a hairline between; the turn\'s one group shows its call as the row), 16 px before the text', m.tool.lines === 'thinking,tool-group' && m.tool.fs === '14px' && m.tool.h === 36 && m.tool.border === 'solid' && m.tool.pitch === 37 && m.tool.gapAfter === 16, m.tool);
+    check('the user bubble: 16 px, 10/16 padding, 18 px radius (4 px at the bottom right)', m.bubble.fs === '16px' && m.bubble.pad === '10px 16px' && m.bubble.radius === '18px', m.bubble);
+    check('the task card: the column width, 10 px radius, 12 px padding, 28 px rows at 14 px', m.task.w <= 728.5 && m.task.radius === '10px' && m.task.pad === '12px' && near(m.task.row, 28) && m.task.fs === '14px', m.task);
     check('top bar 44 px plus its hairline; the title 14 px regular', m.topbar === 45 && m.titleFs === '14px' && m.titleFw === '400', { h: m.topbar, fs: m.titleFs, fw: m.titleFw });
     check('sidebar rows 14 px, 32 px tall on a 34 px pitch, 8 px radius; navigation rows the same', m.side.fs === '14px' && m.side.h === 32 && m.side.pitch === 34 && m.side.radius === '8px' && m.side.navFs === '14px' && m.side.navH === 32, m.side);
     check('date-group labels 12 px, 51 px below the row before and 35 px above the next', m.group && m.group.fs === '12px' && near(m.group.above, 51, 1) && near(m.group.below, 35, 1), m.group);
     check('rail headings 13 px, regular weight, not uppercase', m.rail.fs === '13px' && m.rail.fw === '400' && m.rail.tt === 'none', m.rail);
-    check('chat bar: 46 px tall, 12 px radius, at most 770 px wide', m.bar.h === 46 && m.bar.radius === '12px' && m.bar.w <= 770.5, m.bar);
+    check('chat bar: 49 px tall (one 24 px line), 12 px radius, at most 770 px wide', m.bar.h === 49 && m.bar.radius === '12px' && m.bar.w <= 770.5, m.bar);
     check('chat bar: the plus, the field and the action in one row, centred on one line', m.bar.oneRow && m.bar.cy.every((v) => near(v, m.bar.cy[1], 1)), m.bar.cy);
-    check('chat bar: a 14 px plus 16 px in, the text 45 px in at 15 px, the action glyph 15 px from the right edge', near(m.bar.plusIn, 16) && near(m.bar.plusW, 14, 0.5) && near(m.bar.textIn, 45) && m.bar.inputFs === '15px' && near(m.bar.sendOut, 15, 1.5), m.bar);
+    check('chat bar: a 14 px plus 16 px in, the text 45 px in at 16 px, the action glyph 15 px from the right edge', near(m.bar.plusIn, 16) && near(m.bar.plusW, 14, 0.5) && near(m.bar.textIn, 45) && m.bar.inputFs === '16px' && near(m.bar.sendOut, 15, 1.5), m.bar);
     check('chat bar: #composer-foot outside #composer, its row centred about 20 px below the bar, 12 px muted labels, a 12 px ring 14 px from the right edge', m.bar.footOutside && near(m.bar.footBelow, 20, 1) && m.bar.footFs === '12px' && m.bar.footColor === m.tool.muted && m.bar.ring === 12 && near(m.bar.ringOut, 14, 1), m.bar);
 
     // A mod page's row, through harness.css
@@ -179,7 +179,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
         nav: [cs('.sp-nav-item').fontSize, nav.height],
       };
     })()`);
-    check('Settings: the title and the section heading 15 px / 500', st.title[0] === '15px' && st.title[1] === '500' && st.section[0] === '15px' && st.section[1] === '500', st);
+    check('Settings: the title and the section heading 14 px / 500 (the title size, --fs-title)', st.title[0] === '14px' && st.title[1] === '500' && st.section[0] === '14px' && st.section[1] === '500', st);
     // Rows sit in cards: a 13 px description (--fs-small) under the 14 px title, 11 px of padding above and below
     check('Settings: row titles 14 px regular, descriptions 13 px, 24 px apart', st.rowTitle[0] === '14px' && st.rowTitle[1] === '400' && st.desc === '13px' && st.lines === 24, st);
     check('Settings: about 64 px from row to row in a card (one-line descriptions), navigation rows 32 px at 14 px', near(st.pitch, 64, 1) && st.nav[0] === '14px' && st.nav[1] === 32, st);
@@ -192,7 +192,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
     await app.evaluate(`(async () => { const c = await window.oc.getConfig(); c.theme = 'dark'; await window.oc.setConfig(c); })()`);
     await sleep(800);
     await app.screenshot(path.join(SHOTS, 'window-dark.png'));
-    check('dark: the same scale', (await app.evaluate(`getComputedStyle(document.querySelector('#messages > .msg.assistant p')).fontSize`)) === '15px');
+    check('dark: the same scale', (await app.evaluate(`getComputedStyle(document.querySelector('#messages > .msg.assistant p')).fontSize`)) === '16px');
   } catch (err) {
     check('the run finished', false, String(err && err.stack));
   } finally {

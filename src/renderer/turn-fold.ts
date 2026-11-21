@@ -7,7 +7,8 @@
 
 import type { AppConfig } from '../shared/types';
 import { icon } from './icons.js';
-import { foldsWhenDone, headText, nodeKind, turnShape, type TurnShape } from './turn-fold-model.js';
+import { activityWords, type ActivityCall } from './tool-activity.js';
+import { foldLine, foldWords, foldsWhenDone, nodeKind, turnShape, type TurnShape } from './turn-fold-model.js';
 
 export interface TurnFoldDeps {
   messages: HTMLElement;
@@ -18,6 +19,10 @@ interface Head {
   el: HTMLElement;
   btn: HTMLButtonElement;
   label: HTMLElement;
+  /** What the turn did, in words ("Ran 3 commands, read 2 files"), once it is over */
+  words: string;
+  /** The calls Auto mode blocked in the turn (their rows fold with the rest) */
+  blocked: number;
   /** Counting: when the turn began (the header ticks) */
   liveSince?: number;
   /** How long the turn worked, once it is over (undefined: not known, "Worked") */
@@ -26,6 +31,18 @@ interface Head {
 }
 
 const HIDDEN = 'turn-hidden';
+
+/** The calls a turn made, as the fold line counts them: rows, the rows inside its groups, messages it sent */
+function callsOf(nodes: HTMLElement[]): ActivityCall[] {
+  const rows = nodes.flatMap((n) => {
+    if (n.hidden) return [];
+    if (n.classList.contains('tool-group')) return [...n.querySelectorAll<HTMLElement>(':scope > .group-body > :is(.tool, .session-msg.sent)')];
+    return n.classList.contains('tool') || (n.classList.contains('session-msg') && n.classList.contains('sent')) ? [n] : [];
+  });
+  return rows
+    .filter((r) => !r.hidden && r.dataset.tool)
+    .map((r) => ({ name: r.dataset.tool!, path: r.dataset.path, url: r.dataset.url, created: r.dataset.created === 'true', denied: r.classList.contains('denied'), server: r.dataset.server }));
+}
 
 export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
   const heads = new WeakMap<HTMLElement, Head>();
@@ -37,6 +54,17 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
   let timer: number | undefined;
 
   const summaryMode = () => (config()?.toolActivity ?? 'summary') !== 'all';
+
+  // Runs of calls fold into groups by moving nodes (tool-groups.ts), not through nodeAdded: the cards' marks and the
+  // words follow the transcript's children, at most once a frame
+  let pending = 0;
+  new MutationObserver(() => {
+    if (pending) return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
+      for (const h of allHeads()) apply(h);
+    });
+  }).observe(messagesEl, { childList: true });
   const isUser = (n: Element) => n.classList.contains('msg') && n.classList.contains('user');
 
   /** The header of the turn `node` is in, or where it would go: right after the turn's user message. */
@@ -65,18 +93,83 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
 
   function draw(h: Head): void {
     const live = h.liveSince !== undefined;
-    h.label.textContent = headText(live, live ? Date.now() - h.liveSince! : h.workedMs);
+    const line = foldLine(live, live ? Date.now() - h.liveSince! : h.workedMs, h.words, h.blocked);
+    // "Ran 3 commands, read 2 files · 1 blocked · 2m 10s"; with nothing to name, "Worked for 2m 10s · 1 blocked"
+    const parts: HTMLElement[] = [];
+    const part = (text: string, cls = '') => {
+      if (!text) return;
+      const el = document.createElement('span');
+      if (cls) el.className = cls;
+      el.textContent = text;
+      parts.push(el);
+    };
+    if (line.words) {
+      part(line.words, 'turn-head-words');
+      part(line.blocked, 'turn-head-blocked');
+      part(line.time, 'turn-head-time');
+    } else {
+      part(line.time, 'turn-head-time');
+      part(line.blocked, 'turn-head-blocked');
+    }
+    const want = parts.map((p) => `${p.className}:${p.textContent}`).join('|');
+    if (h.label.dataset.parts !== want) {
+      h.label.dataset.parts = want;
+      h.label.replaceChildren(...parts.flatMap((p, i) => (i ? [document.createTextNode(' · '), p] : [p])));
+    }
     h.el.classList.toggle('live', live);
     h.btn.disabled = live;
     h.btn.setAttribute('aria-expanded', String(!h.folded));
     h.el.classList.toggle('folded', h.folded);
   }
 
+  /** Shows a group's calls as rows of their own (opening it without its line), or gives the group its line back. */
+  function flatten(g: HTMLDetailsElement, on: boolean): void {
+    if (g.classList.contains('flat') === on) return;
+    g.classList.toggle('flat', on);
+    if (on) {
+      if (!g.open) {
+        g.dataset.flatOpened = 'true';
+        g.open = true;
+      }
+    } else if (g.dataset.flatOpened) {
+      delete g.dataset.flatOpened;
+      g.open = false;
+    }
+  }
+
   /** Hides or shows the turn's process to match the header. */
   function apply(h: Head): void {
     const nodes = nodesOf(h);
     const shape = shapeOf(nodes);
-    nodes.forEach((n, i) => n.classList.toggle(HIDDEN, h.folded && shape.process[i]));
+    nodes.forEach((n, i) => {
+      const hide = h.folded && shape.process[i];
+      // A row shown again by unfolding is not new: it does not fade in a second time (a fade would restart here)
+      if (!hide && n.classList.contains(HIDDEN)) n.classList.remove('fade-in');
+      n.classList.toggle(HIDDEN, hide);
+    });
+    h.blocked = nodes.filter((n) => n.classList.contains('auto-blocked')).length;
+    h.words = foldWords(activityWords(callsOf(nodes)).phrases);
+    // Unfolded, the process sits in one card: each run of it (between kept nodes) is marked, with its ends
+    const act = nodes.map((n, i) => shape.process[i] && !n.hidden);
+    const shown = nodes.map((n) => !n.hidden);
+    let any = false;
+    nodes.forEach((n, i) => {
+      const on = act[i];
+      any ||= on;
+      let prev = i - 1;
+      while (prev >= 0 && !shown[prev]) prev--;
+      let next = i + 1;
+      while (next < nodes.length && !shown[next]) next++;
+      n.classList.toggle('turn-act', on);
+      n.classList.toggle('turn-act-first', on && !(prev >= 0 && act[prev]));
+      n.classList.toggle('turn-act-last', on && !(next < nodes.length && act[next]));
+    });
+    h.el.classList.toggle('has-card', any && !h.folded);
+    // A finished turn whose activity is one group: unfolded, the card's rows are that group's calls themselves (its
+    // line would only repeat the header's words). Several groups (text between them) keep their lines; so does a
+    // turn still running.
+    const groups = nodes.filter((n, i) => act[i] && n.classList.contains('tool-group'));
+    for (const g of nodes.filter((n) => n.classList.contains('tool-group'))) flatten(g as HTMLDetailsElement, g === groups[0] && groups.length === 1 && !h.folded && h.liveSince === undefined && !g.classList.contains('live'));
     draw(h);
   }
 
@@ -98,7 +191,7 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
     el.className = 'turn-head';
     el.innerHTML = `<button type="button" class="turn-head-btn" aria-expanded="true"><span class="turn-head-label"></span><span class="turn-head-chevron">${icon('chevron-right')}</span></button>`;
     const btn = el.querySelector<HTMLButtonElement>('button')!;
-    const h: Head = { el, btn, label: el.querySelector<HTMLElement>('.turn-head-label')!, folded: false };
+    const h: Head = { el, btn, label: el.querySelector<HTMLElement>('.turn-head-label')!, words: '', blocked: 0, folded: false };
     heads.set(el, h);
     btn.addEventListener('click', () => {
       if (h.liveSince !== undefined) return;
@@ -148,7 +241,7 @@ export function createTurnFold({ messages: messagesEl, config }: TurnFoldDeps) {
       if (kind === 'keep' || isUser(el)) return;
       const { head, after } = locate(el);
       if (head) {
-        if (head.folded) apply(head);
+        apply(head);
         return;
       }
       if (kind !== 'call' || el.hidden) return;

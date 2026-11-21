@@ -179,12 +179,15 @@ h1, h2 { margin: 0; }
   background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger);
   font-size: 13px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
-/* A call Auto mode blocked: one quiet line, left-aligned like a tool row */
-.note.blocked { justify-content: flex-start; text-align: left; }
-.note.blocked .blocked-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note.blocked code { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
-.note.blocked .blocked-end { flex: none; white-space: nowrap; }
-.note.blocked button.link { padding: 0; border: 0; background: none; font: inherit; color: var(--text-100); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+/* A call Auto mode blocked: one of the tool rows ("Blocked <description>"), the shield in a quiet warning tint; opened,
+   the command, the reason and Allow. The turn's line under its message counts them ("4 blocked"). */
+.tool-status.warn { color: color-mix(in srgb, var(--warn, #a35200) 75%, var(--text-400)); }
+.tool.blocked .tool-verb { font-weight: 400; color: var(--text-200); }
+.blocked-reason { margin-top: 8px; font-size: 12px; line-height: 16px; color: var(--text-200); overflow-wrap: anywhere; }
+.blocked-end { margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--text-400); }
+.blocked-end:empty { display: none; }
+.note.turn-line { justify-content: flex-start; margin: -8px 0 12px; padding: 0 4px; color: color-mix(in srgb, var(--warn, #a35200) 75%, var(--text-400)); }
+.blocked-end button.link { padding: 0; border: 0; background: none; font: inherit; color: var(--text-100); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .divider { display: flex; align-items: center; gap: 12px; margin: 8px 0 16px; font-size: 12px; line-height: 16px; color: var(--text-400); }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border-subtle); }
 
@@ -274,6 +277,14 @@ a.chat-card:active { background: var(--hover); }
 .sm-name { color: var(--text-200); }
 .sm-body { margin: 2px 0 10px 4px; padding: 0 0 0 12px; border-left: 2px solid var(--border); font-size: 13.5px; line-height: 20px; color: var(--text-200); overflow-wrap: anywhere; }
 .sm-note { margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--text-400); }
+
+/* The next-step card that ends a turn: the recap in grey, the question, the replies (a stored or answered card keeps
+   only the chosen one, as a grey pill) */
+.next-step { margin: 4px 0 16px; padding: 14px 16px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-000); font-size: 13px; line-height: 18px; color: var(--text-400); }
+.next-step p { margin: 0; overflow-wrap: anywhere; }
+.next-step-question { margin-top: 10px !important; font-size: 14.5px; line-height: 21px; color: var(--text-100); }
+.next-step-replies { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.next-step-replies .btn.chosen { opacity: 1; color: var(--text-400); }
 
 /* Cards: approval and plan */
 .card {

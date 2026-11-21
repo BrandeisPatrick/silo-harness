@@ -1,7 +1,8 @@
 // Live check of the turn header and the fold, with the mock model in the real window. A turn that calls tools gets
-// "Working for Ns" at the top of its output (the seconds tick) and a hairline; a run of calls is one line that reads
-// the call in flight, faint and shimmering, then says what the run did; when the turn ends with its answer the header
-// reads "Worked for Ns" and the process folds away, leaving the answer; the header (a real button) unfolds and folds
+// "Working for Ns" at the top of its output (the seconds tick); a run of calls is one line that reads the call in
+// flight, faint and shimmering, then says what the run did; when the turn ends with its answer the header says what
+// the turn did and how long it took ("Ran a command, read 2 files · 4s") and the process folds away, leaving the
+// answer; unfolded, the process sits in one card under the header; the header (a real button) unfolds and folds
 // it. An opened group lists its calls flat, capped with a fade. A reloaded session folds the same way and shows its
 // time; an interrupted turn stays open; a card waiting for the user is never hidden; Every call folds nothing; light
 // and dark.
@@ -58,7 +59,7 @@ const { check, done } = checker();
     await app.waitFor(`Boolean(document.querySelector('#messages > .turn-head.live'))`, 15_000, 'the live header');
     let t = await lastTurn();
     check('running: the header sits right under the user message and reads "Working for Ns"', t.afterUser && t.live && /^Working for \d+s$/.test(t.label), t.label);
-    check('running: a hairline under it, no chevron, not a toggle yet', t.hairline && !t.chevron && t.disabled, t);
+    check('running: no chevron, not a toggle yet', !t.chevron && t.disabled, t);
     const first = Number(/(\d+)s/.exec(t.label)[1]);
     const live = await app.waitFor(`(() => { const g = document.querySelector('#messages > .tool-group.live'); return g ? { verb: g.querySelector('.group-verb').textContent, arg: g.querySelector('.group-arg').textContent, opacity: getComputedStyle(g.querySelector('summary')).opacity, mask: getComputedStyle(g.querySelector('summary')).webkitMaskImage, anim: getComputedStyle(g.querySelector('.group-verb')).animationName, spin: g.querySelector('.group-icon').classList.contains('spin') } : null; })()`, 10_000, 'the live group');
     check('the live line reads the call in flight', live.verb === 'Bash' && /sleep 3/.test(live.arg), live);
@@ -76,7 +77,7 @@ const { check, done } = checker();
     const answerTopBefore = await app.evaluate(`document.querySelector('#messages').scrollHeight`);
 
     t = await lastTurn();
-    check('ended: "Worked for Ns", with a chevron, a real button, folded', /^Worked for \d+s$/.test(t.label) && !t.live && t.chevron && t.isButton && !t.disabled && t.expanded === 'false', t);
+    check('ended: what the turn did and its time ("Ran a command, read 2 files · Ns"), with a chevron, a real button, folded', /^Ran a command, read 2 files · \d+s$/.test(t.label) && !t.live && t.chevron && t.isButton && !t.disabled && t.expanded === 'false', t);
     const worked = Number(/(\d+)s/.exec(t.label)[1]);
     check('the time covers the run (about 4 s)', worked >= 3 && worked <= 15, t.label);
     check('folded: the groups and the interim text are hidden', kinds(t, /tool-group/).length === 1 && kinds(t, /tool-group/).every((n) => !n.shown) && t.nodes.filter((n) => /assistant/.test(n.cls) && /look at the notes/.test(n.text)).every((n) => !n.shown), t.nodes);
@@ -91,6 +92,8 @@ const { check, done } = checker();
     await sleep(200);
     t = await lastTurn();
     check('click: the process comes back in place, the header says it is open', t.expanded === 'true' && t.nodes.every((n) => n.shown), t.nodes.filter((n) => !n.shown));
+    const card = await app.evaluate(`(() => { const h = [...document.querySelectorAll('#messages > .turn-head')].pop(); const act = []; for (let n = h.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) if (n.classList.contains('turn-act')) act.push({ cls: n.className, radius: getComputedStyle(n).borderTopLeftRadius, bottom: getComputedStyle(n).borderBottomLeftRadius, line: getComputedStyle(n).borderTopStyle, fs: getComputedStyle(n.querySelector(':scope > summary') ?? n).fontSize }); return act; })()`);
+    check('unfolded: the interim text and the run in one card (12 px corners at its ends, a hairline between rows), the rows at 14 px', card.length === 2 && /turn-act-first/.test(card[0].cls) && card[0].radius === '12px' && /turn-act-last/.test(card[1].cls) && card[1].bottom === '12px' && card.every((c) => c.line === 'solid') && card[1].fs === '14px', card);
     await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
     await sleep(200);
     t = await lastTurn();
@@ -104,19 +107,21 @@ const { check, done } = checker();
     t = await lastTurn();
     check('Enter on the focused header unfolds it', t.expanded === 'true' && t.nodes.every((n) => n.shown));
 
-    // ---------- 2. A long group: opened, its calls are flat at its edge, capped with a fade ----------
+    // ---------- 2. A long group among two (text between them): opened, its calls are flat at its edge, capped with a fade ----------
     replies.push({ content: 'Reading all of them.', toolCalls: Array.from({ length: 14 }, (_, i) => ({ id: `r${i}`, name: 'read_file', args: { path: `note-${i + 1}.txt` } })) });
+    replies.push({ content: 'And the first one again.', toolCalls: [{ id: 'r14', name: 'read_file', args: { path: 'note-1.txt' } }] });
     replies.push({ content: 'All fourteen notes are fine.' });
     await app.send('Read every note');
     await idle();
     t = await lastTurn();
-    check('a second turn: its own header, folded', t.heads === 2 && t.expanded === 'false' && /^Worked for \d+s$/.test(t.label));
+    check('a second turn: its own header, folded, "Read 14 files · Ns" (the file read again counts once)', t.heads === 2 && t.expanded === 'false' && /^Read 14 files · \d+s$/.test(t.label), t.label);
+    check('unfolded, a turn with two groups keeps their lines', await app.evaluate(`(() => { [...document.querySelectorAll('#messages > .turn-head button')].pop().click(); const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2); [...document.querySelectorAll('#messages > .turn-head button')].pop().click(); return g.length === 2 && g.every((x) => !x.classList.contains('flat')); })()`));
     await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
     await sleep(150);
-    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().open = true`);
+    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].open = true`);
     await sleep(300);
     const list = await app.evaluate(`(() => {
-      const g = [...document.querySelectorAll('#messages > .tool-group')].pop();
+      const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0];
       const body = g.querySelector('.group-body');
       const rows = [...body.querySelectorAll(':scope > .tool')];
       const sum = g.querySelector('summary').getBoundingClientRect();
@@ -129,13 +134,13 @@ const { check, done } = checker();
     check('rows about 25 px apart, one line each', list.pitch >= 24 && list.pitch <= 26, list.pitch);
     check('the list is capped at about nine rows and scrolls, its last row fading', list.height >= 200 && list.height <= 240 && list.scroll > list.height && list.more && /gradient/.test(list.mask), list);
     check('rows show no chevron until hovered', list.chevronHidden);
-    await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); g.scrollIntoView({ block: 'center' }); })()`);
+    await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0]; g.scrollIntoView({ block: 'center' }); })()`);
     await sleep(300);
     await app.screenshot(path.join(shots, 'fold-3-long-group.png'));
-    await app.evaluate(`(() => { const b = [...document.querySelectorAll('#messages > .tool-group')].pop().querySelector('.group-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); })()`);
+    await app.evaluate(`(() => { const b = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].querySelector('.group-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); })()`);
     await sleep(250);
-    check('scrolled to its end, the fade goes', !(await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().querySelector('.group-body').classList.contains('more')`)));
-    const rowOpen = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); const row = g.querySelector('.group-body > .tool'); row.querySelector('summary').click(); return new Promise((r) => setTimeout(() => r({ open: row.open, body: (row.querySelector('.tool-body')?.textContent ?? '').trim().slice(0, 40), capped: getComputedStyle(g.querySelector('.group-body')).maxHeight }), 200)); })()`);
+    check('scrolled to its end, the fade goes', !(await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0].querySelector('.group-body').classList.contains('more')`)));
+    const rowOpen = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].slice(-2)[0]; const row = g.querySelector('.group-body > .tool'); row.querySelector('summary').click(); return new Promise((r) => setTimeout(() => r({ open: row.open, body: (row.querySelector('.tool-body')?.textContent ?? '').trim().slice(0, 40), capped: getComputedStyle(g.querySelector('.group-body')).maxHeight }), 200)); })()`);
     check('a row still opens to its output on click (and lifts the cap)', rowOpen.open && /Note 1/.test(rowOpen.body) && rowOpen.capped === 'none', rowOpen);
 
     // ---------- 3. A reopened session folds the same way and shows its time ----------
@@ -146,7 +151,27 @@ const { check, done } = checker();
     const after = await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head')].map((h) => ({ label: h.querySelector('.turn-head-label').textContent, expanded: h.querySelector('button').getAttribute('aria-expanded'), hidden: (() => { let n = 0; for (let x = h.nextElementSibling; x && !x.classList.contains('user'); x = x.nextElementSibling) if (getComputedStyle(x).display === 'none') n++; return n; })() }))`);
     const secs = (s) => Number(/(\d+)s/.exec(s)?.[1] ?? NaN);
     check('reloaded: both turns folded, process hidden', after.every((h) => h.expanded === 'false' && h.hidden > 0), after);
-    check('reloaded: each shows the time it worked (the one stored)', after.every((h, i) => /^Worked for \d+s$/.test(h.label) && Math.abs(secs(h.label) - secs(before[i])) <= 1), { before, after: after.map((h) => h.label) });
+    check('reloaded: each shows the time it worked (the one stored)', after.every((h, i) => / · \d+s$/.test(h.label) && h.label.replace(/\d+s$/, '') === before[i].replace(/\d+s$/, '') && Math.abs(secs(h.label) - secs(before[i])) <= 1), { before, after: after.map((h) => h.label) });
+
+    // ---------- 3b. A turn whose activity is one group: unfolded, the calls are the card's rows (no line repeating the header) ----------
+    replies.push({ content: '', toolCalls: [{ id: 'f1', name: 'read_file', args: { path: 'note-1.txt' } }, { id: 'f2', name: 'read_file', args: { path: 'note-2.txt' } }, { id: 'f3', name: 'bash', args: { command: 'echo ok' } }] });
+    replies.push({ content: 'Both notes are fine.' });
+    await app.send('Read two notes and check');
+    await idle();
+    await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
+    await sleep(400);
+    const flat = await app.evaluate(`(() => {
+      const g = [...document.querySelectorAll('#messages > .tool-group')].pop();
+      const rows = [...g.querySelectorAll(':scope > .group-body > .tool')];
+      const r = rows.map((x) => x.querySelector('summary').getBoundingClientRect());
+      return { flat: g.classList.contains('flat'), card: g.classList.contains('turn-act'), line: getComputedStyle(g.querySelector(':scope > summary')).display, rows: rows.map((x) => x.querySelector('summary').innerText.replace(/\\s+/g, ' ').trim()), shown: r.every((b) => b.height > 0), pitch: r[1].top - r[0].top, height: r[0].height, hair: getComputedStyle(rows[1]).borderTopStyle, chevron: getComputedStyle(rows[0].querySelector('.tool-chevron')).visibility, opened: rows.some((x) => x.open) };
+    })()`);
+    check('3b: unfolded, the one group shows its calls as rows: no group line, a hairline between rows, 36 px rows, chevrons shown, none opened', flat.flat && flat.card && flat.line === 'none' && flat.rows.length === 3 && /^Read note-1\.txt/.test(flat.rows[0]) && /^Bash echo ok/.test(flat.rows[2]) && flat.shown && flat.height === 36 && flat.pitch === 37 && flat.hair === 'solid' && flat.chevron === 'visible' && !flat.opened, flat);
+    await app.screenshot(path.join(shots, 'fold-3b-one-group.png'));
+    await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
+    await sleep(300);
+    const shut = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); return { flat: g.classList.contains('flat'), open: g.open, hidden: getComputedStyle(g).display === 'none' }; })()`);
+    check('3b: folded again, the group has its line back, shut and hidden', !shut.flat && !shut.open && shut.hidden, shut);
 
     // ---------- 4. An approval card waiting is never hidden; decided, it folds with the process ----------
     await app.evaluate(`(async () => { const c = await oc.getConfig(); await oc.setConfig({ ...c, permissionMode: 'ask', autoApprove: false }); })()`);
@@ -172,7 +197,7 @@ const { check, done } = checker();
     await app.evaluate('oc.abort()');
     await idle();
     t = await lastTurn();
-    check('interrupted: "Worked for Ns", open, nothing hidden', /^Worked for \d+s$/.test(t.label) && t.expanded === 'true' && t.nodes.every((n) => n.shown), t);
+    check('interrupted: "Ran a command · Ns", open, nothing hidden', /^Ran a command · \d+s$/.test(t.label) && t.expanded === 'true' && t.nodes.every((n) => n.shown), t);
     check('interrupted: the "Interrupted." line is there', t.nodes.some((n) => /system/.test(n.cls) && /Interrupted/.test(n.text) && n.shown));
 
     // ---------- 6. A plain reply gets no header ----------
@@ -193,7 +218,7 @@ const { check, done } = checker();
     await idle();
     t = await lastTurn();
     const groupOpen = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); return g ? g.open : null; })()`);
-    check('Every call: the header shows, the turn stays open, its group is open', /^Worked for \d+s$/.test(t.label) && t.expanded === 'true' && t.nodes.every((n) => n.shown) && groupOpen === true, { label: t.label, groupOpen });
+    check('Every call: the header shows, the turn stays open, its group is open', /^Read 3 files · \d+s$/.test(t.label) && t.expanded === 'true' && t.nodes.every((n) => n.shown) && groupOpen === true, { label: t.label, groupOpen });
     await app.evaluate(`[...document.querySelectorAll('#messages > .turn-head button')].pop().click()`);
     await sleep(150);
     t = await lastTurn();
@@ -211,9 +236,9 @@ const { check, done } = checker();
         h.querySelector('button').style.transition = 'none';
         const probe = document.createElement('div'); probe.style.color = 'var(--text-400)'; probe.style.borderColor = 'var(--border-subtle)'; document.body.appendChild(probe);
         const want = getComputedStyle(probe).color; const line = getComputedStyle(probe).borderTopColor; probe.remove();
-        return { label: getComputedStyle(h.querySelector('button')).color, want, line: getComputedStyle(h).borderBottomColor, wantLine: line, bg: getComputedStyle(document.body).backgroundColor };
+        return { label: getComputedStyle(h.querySelector('button')).color, want, line: getComputedStyle(h).borderBottomStyle, bg: getComputedStyle(document.body).backgroundColor };
       })()`);
-      check(`${theme}: the header in the muted ink and the hairline in the subtle border`, look.label === look.want && look.line === look.wantLine && look.label !== look.bg, look);
+      check(`${theme}: the header in the muted ink, no hairline of its own (the card under it has the edge)`, look.label === look.want && look.line === 'none' && look.label !== look.bg, look);
     }
     await app.evaluate(`document.documentElement.dataset.theme = 'light'`);
 

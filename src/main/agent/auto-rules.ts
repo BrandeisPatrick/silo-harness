@@ -114,6 +114,31 @@ const oneLine = (s: string, max = 200): string => {
 };
 
 /**
+ * What a blocked call says about itself beyond `actionLine`: its own short description (bash and terminal_run's
+ * `description`, one line) and the whole command as sent (bash, with its `cd <path> &&`). Empty fields are left out.
+ */
+export function actionDetails(name: string, args: unknown): { desc?: string; full?: string } {
+  let a: Record<string, unknown> = {};
+  if (typeof args === 'string') {
+    try {
+      const v = JSON.parse(args) as unknown;
+      if (v && typeof v === 'object') a = v as Record<string, unknown>;
+    } catch {
+      /* not JSON */
+    }
+  } else if (args && typeof args === 'object') a = args as Record<string, unknown>;
+  const s = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : '');
+  const out: { desc?: string; full?: string } = {};
+  const desc = oneLine(s('description'), 120);
+  if (desc) out.desc = desc;
+  if ((name === 'bash' || name === 'terminal_run') && s('command').trim()) {
+    const full = (name === 'bash' && s('path').trim() ? `cd ${s('path').trim()} && ` : '') + s('command').trim();
+    out.full = full.length > 4000 ? `${full.slice(0, 3999)}…` : full;
+  }
+  return out;
+}
+
+/**
  * A blocked action on one line, for the quiet line, Settings and the agent's note: the command, the file (with ~),
  * "tool on server" for an MCP call. `args` are the call's arguments (an object or its JSON); `detail` what its
  * approval showed, used when the arguments do not say.

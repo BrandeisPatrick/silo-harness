@@ -36,6 +36,7 @@ import {
   summaryRequest,
   type PruneOptions,
 } from './compact';
+import { NEXT_STEP_NUDGE, SHOWN as SHOWN_NEXT_STEP, nextStepOrNull } from './tools/next-step';
 import { allTools, builtInToolNames, toSpec, type ApprovalResult, type ApproveOptions, type BrowserApproval, type SandboxPlan, type Tool, type ToolContext, type ToolResult } from './tools';
 import { runShell } from './tools/shell';
 import { deniedPorts, outputLines, probeSandbox, profileFor, realish, sandboxableFolder, sandboxHostNow, sandboxSettings } from './sandbox';
@@ -69,7 +70,7 @@ import { CONTINUE_TEXT, CUT_CALL_TEXT, isCompleteJson, MAX_CONTINUATIONS, REFUSA
 import { approvalLabels, CHECKED_BROWSER_CARDS, decideApproval, DENIED, type ApprovalDecision, type AutoLevel } from './agent/permissions';
 import { answerText, forCheck, LearnedStore } from './agent/learned';
 import { CLASSIFIER_TIMEOUT_MS, candidateRefused, classifierRequest, classifierTarget, isConnectionError, isModelRefusal, parseVerdict, runClassifier, type BrowserFacts, type ClassifiedAction, type ClassifierTarget, type Verdict } from './agent/classifier';
-import { actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
+import { actionDetails, actionKey, actionLine, allowedNote, blockedResult, PAUSE_IN_A_ROW, PAUSE_TOTAL, UNAVAILABLE_REASON } from './agent/auto-rules';
 import type { AutoBlock } from '../shared/auto-mode';
 import { guardCommand, isReadOnlyCall, isReadOnlyCommand, judgedCommand } from './guard';
 import { BASH_TOOLS, compileRules, deniedByRule, EDIT_TOOLS, ruleVerdict } from './agent/rules';
@@ -497,7 +498,39 @@ export class Agent {
     const plan = cfg.permissionMode === 'plan';
     const essential = essentialToolsOnly(cfg);
     const extraTools = registered.filter((t) => !t.scoped && !(essential && t.optional));
-    return [...allTools(cfg.permissionMode, this.sandboxOffered(cfg)), ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+    // next_step's card ends a turn the user reads; a sub-session's turns end in its parent instead
+    const builtIn = allTools(cfg.permissionMode, this.sandboxOffered(cfg)).filter((t) => !(this.session.parentId && t.name === 'next_step'));
+    return [...builtIn, ...(plan ? extraTools.filter((t) => t.readOnly) : extraTools), ...(plan ? mcpTools.filter((t) => t.mcp?.readOnly) : mcpTools)];
+  }
+
+  /**
+   * The next_step card this turn showed with no reply written after it yet: its recap, and whether the reply came
+   * before the call instead (in the message that made it). Null when there is none, or a reply already follows it.
+   */
+  private pendingCard(): { recap: string; replied: boolean } | null {
+    const msgs = this.session.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i] as { role?: string; content?: unknown; tool_call_id?: string; tool_calls?: { id: string; function?: { name?: string; arguments?: string } }[] };
+      if (m.role === 'user') {
+        if (typeof m.content === 'string' && m.content.startsWith('You returned an empty response.')) continue;
+        return null;
+      }
+      if (m.role === 'assistant') {
+        if (typeof m.content === 'string' && m.content.trim()) return null;
+        continue;
+      }
+      if (m.role !== 'tool' || m.content !== SHOWN_NEXT_STEP) continue;
+      for (let k = i - 1; k >= 0; k--) {
+        const a = msgs[k] as typeof m;
+        if (a.role !== 'assistant') continue;
+        const call = (a.tool_calls ?? []).find((c) => c.id === m.tool_call_id && c.function?.name === 'next_step');
+        if (!call) return null;
+        const step = nextStepOrNull(call.function?.arguments ?? '');
+        return step ? { recap: step.recap, replied: typeof a.content === 'string' && Boolean(a.content.trim()) } : null;
+      }
+      return null;
+    }
+    return null;
   }
 
   /** The tool groups this session has loaded (Session.toolGroups), in the order it loaded them. */
@@ -1069,7 +1102,7 @@ export class Agent {
     st.inARow++;
     st.total++;
     const id = action.callId || `block_${randomUUID()}`;
-    const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), reason, at: Date.now() };
+    const block: AutoBlock = { id, sessionId: this.session.id, name: action.name, what: actionLine(action.name, action.args, action.detail), ...actionDetails(action.name, action.args), reason, at: Date.now() };
     this.sessionMap(this.autoBlocks).set(id, { block, key, learn: { tool: action.name, key: action.browser ? action.browser.siteKey ?? action.browser.site : '', line: block.what } });
     this.emit({ type: 'auto_blocked', block: { ...block } });
     if (!st.paused && (st.inARow >= PAUSE_IN_A_ROW || st.total >= PAUSE_TOTAL)) {
@@ -1526,7 +1559,7 @@ export class Agent {
         tt.end(this.finishOf(reply), reply.toolCalls.length);
         // Also where the provider reports no usage (noteCache never runs): a pause is measured from this reply
         this.cacheState().lastAt = this.now();
-        const { text } = reply;
+        let { text } = reply;
         // Ids unique within the session, so each result stays with its own call (Ollama reuses them across runs)
         const toolCalls = uniqueCallIds(reply.toolCalls, this.session.messages);
         this.emit({ type: 'thinking_done' });
@@ -1547,11 +1580,20 @@ export class Agent {
         }
 
         if (!text.trim() && !toolCalls.length && !reply.cut) {
-          // Small models sometimes return nothing after a tool result. Nudge once, then give up.
-          if (!nudged) {
+          // Small models sometimes return nothing after a tool result. Nudge once, then give up. After a next_step
+          // card the reply is still owed (the card sits under it): asked for once; still nothing, the card's recap is
+          // the reply, so the user never gets a card alone. A reply written before the call needs nothing more.
+          const card = this.pendingCard();
+          if (card?.replied) {
+            /* the turn ends: the reply came before the call */
+          } else if (!nudged) {
             nudged = true;
-            this.store.append(this.session, { role: 'user', content: 'You returned an empty response. If the task is complete, summarize the result. If a tool failed, fix the problem and continue.' });
+            this.store.append(this.session, { role: 'user', content: card ? NEXT_STEP_NUDGE : 'You returned an empty response. If the task is complete, summarize the result. If a tool failed, fix the problem and continue.' });
             continue;
+          } else if (card) {
+            text = card.recap;
+            tt.fallback('recap_reply');
+            this.emit({ type: 'text_delta', text });
           }
         }
         // Tool groups the calls load (load_tools) or need (a tool of a group not loaded yet): offered from here on

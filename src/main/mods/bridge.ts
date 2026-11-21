@@ -119,6 +119,9 @@ export function toModTranscript(items: TranscriptItem[]): ModTranscriptItem[] {
       // A call Auto mode's check blocked reads as the call it was, refused
       case 'auto_blocked':
         return { role: 'tool', text: `Blocked by Auto mode: ${i.block.reason}`, name: i.block.name, args: cut(i.block.what, 4000), ok: false };
+      // The next-step card reads as the call it was
+      case 'next_step':
+        return { role: 'tool', text: [i.step.recap, i.step.question].filter(Boolean).join('\n'), name: 'next_step', args: JSON.stringify(i.step), ok: true };
     }
   });
 }

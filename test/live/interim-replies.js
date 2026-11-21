@@ -115,7 +115,8 @@ async function runTurn(mode, shots) {
     check(tag('the interim sentences are styled exactly like the answer'), look.styles.length === 3 && look.styles.every((s) => s === look.styles[2]), look.styles);
     const textToCall = look.gaps.filter((g) => /^msg\.assistant/.test(g.from) && /^tool/.test(g.to)).map((g) => g.gap);
     const callToText = look.gaps.filter((g) => /^tool/.test(g.from) && /^msg\.assistant/.test(g.to)).map((g) => g.gap);
-    check(tag('the space under a sentence before a line matches the space under a line before a sentence'), textToCall.length >= 2 && callToText.length >= 2 && [...textToCall, ...callToText].every((g) => g === callToText[callToText.length - 1]), look.gaps);
+    // Unfolded, the sentences and the lines are the rows of one card: they meet at its hairlines, and the card ends 16 px above the answer
+    check(tag('the sentences and the lines meet inside one card, which ends 16 px above the answer'), textToCall.length >= 2 && callToText.length >= 2 && [...textToCall, ...callToText.slice(0, -1)].every((g) => g === 0) && callToText[callToText.length - 1] === 16, look.gaps);
 
     // Screenshots of the unfolded turn
     for (const scheme of ['light', 'dark']) {

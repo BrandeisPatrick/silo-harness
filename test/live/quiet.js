@@ -105,7 +105,7 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
       const probe = document.createElement('span'); probe.style.color = 'var(--danger)'; document.body.append(probe); const danger = getComputedStyle(probe).color; probe.style.color = 'var(--git-add)'; const green = getComputedStyle(probe).color; probe.remove();
       return { size: s.fontSize, height: s.height, color: s.color, statSize: stat.fontSize, failedColor: failed.color, danger, addColor: add.color, green, chevronAfter: chev > words };
     })()`);
-    check('the line is a tool row: 15px on a 24px row, muted', style.size === '15px' && style.height === '24px', style);
+    check('the line is a tool row: 14px, a 36px row of the turn\'s card, muted', style.size === '14px' && style.height === '36px', style);
     check('the counts are in the secondary size, the failed count in the danger colour, the additions green', style.statSize === '13px' && style.failedColor === style.danger && style.addColor === style.green, style);
     check('the chevron comes after the words', style.chevronAfter, style);
     await shot('quiet-folded-light');
@@ -184,9 +184,11 @@ const SHAPE = `[...document.querySelectorAll('#messages > *')].filter((e) => e.i
     check('a single call folds to one line', (await shape()) === 'ugagaugauga', await shape());
     g = await groups();
     check('…that says what it did', g[g.length - 1].words === 'Read a file' && g[g.length - 1].rows === 1 && g[g.length - 1].meta === '', g[g.length - 1]);
-    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().querySelector(':scope > summary').click()`);
+    // Unfolded, the turn's only group shows its call as the card's row (turn-fold.ts): a click opens it
+    await app.evaluate(`[...document.querySelectorAll('#messages > .tool-group')].pop().querySelector(':scope > .group-body > .tool > summary').click()`);
+    await sleep(200);
     const lone = await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); const t = g.querySelector('.group-body > .tool'); return { open: g.open, row: t.querySelector('.tool-verb').textContent + ' ' + t.querySelector('.tool-arg').textContent, rowOpen: t.open, code: t.querySelector('.tool-body .code-view, .tool-body pre, .tool-body .code') !== null && t.querySelector('.tool-body').getBoundingClientRect().height > 0 }; })()`);
-    check('opened, it shows the row as it always read, open on its details', lone.open && lone.row === 'Read src/cart.js' && lone.rowOpen && lone.code, lone);
+    check('unfolded, the row reads as it always did, and opens on its details', lone.open && lone.row === 'Read src/cart.js' && lone.rowOpen && lone.code, lone);
     await shot('quiet-single-open');
     await app.evaluate(`(() => { const g = [...document.querySelectorAll('#messages > .tool-group')].pop(); g.open = false; g.querySelector('.group-body > .tool').open = false; })()`);
     const folded = await groups();

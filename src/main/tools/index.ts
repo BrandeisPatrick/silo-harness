@@ -12,6 +12,7 @@ import { terminalTools } from './terminal';
 import { createArtifact } from './artifact';
 import { updateTasks } from './tasks';
 import { askUser } from './ask-user';
+import { nextStep } from './next-step';
 import { webTools } from './web';
 
 export type { Tool, ToolContext, ToolResult, ApprovalResult, ApproveOptions, BrowserApproval, SandboxPlan } from './types';
@@ -21,12 +22,12 @@ const planBrowserTools = browserTools.filter((t) => READ_ONLY_BROWSER_TOOLS.has(
 
 /**
  * The tools offered to the model. Plan mode swaps the file-changing tools for submit_plan and keeps only the browser
- * tools that read; ask_user is in every mode. `sandbox`: the shell sandbox is on, and bash says so (and takes outside).
+ * tools that read; ask_user and next_step are in every mode (next_step for top-level sessions only: Agent.toolPool). `sandbox`: the shell sandbox is on, and bash says so (and takes outside).
  */
 export function allTools(mode: PermissionMode = 'ask', sandbox = false): Tool[] {
   const sh = sandbox ? sandboxBash : bash;
-  if (mode === 'plan') return [readFile, listDirectory, glob, grep, sh, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, submitPlan, ...webTools];
-  return [readFile, writeFile, editFile, listDirectory, glob, grep, sh, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, ...webTools];
+  if (mode === 'plan') return [readFile, listDirectory, glob, grep, sh, skillTool, ...planBrowserTools, ...terminalTools, createArtifact, updateTasks, askUser, nextStep, submitPlan, ...webTools];
+  return [readFile, writeFile, editFile, listDirectory, glob, grep, sh, skillTool, ...browserTools, ...terminalTools, createArtifact, updateTasks, askUser, nextStep, ...webTools];
 }
 
 /**

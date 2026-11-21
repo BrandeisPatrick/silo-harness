@@ -360,7 +360,7 @@ async function launch(opts = {}) {
     /** Opens every folded turn (its "Worked for 53s" header), so the process under it is on screen again. */
     unfold: () => evaluate(`[...document.querySelectorAll('#messages > .turn-head.folded button')].forEach((b) => b.click())`),
     /** The last assistant reply's text. */
-    lastReply: () => evaluate(`(() => { const all = document.querySelectorAll('.msg.assistant'); const e = all[all.length - 1]; return e ? e.innerText.trim() : ''; })()`),
+    lastReply: () => evaluate(`(() => { const all = document.querySelectorAll('.msg.assistant'); const e = all[all.length - 1]; return e ? (e.querySelector('.md') ?? e).innerText.trim() : ''; })()`),
     /** Answers the open approval card: 'allow' or 'deny'. */
     async approve(answer = 'allow') {
       await waitFor(`Boolean(document.querySelector('.approval:not(.decided) .btn'))`, 60_000, 'an approval card');

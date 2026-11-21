@@ -5,6 +5,7 @@ import type { ModsConfig } from './mods';
 import type { ImageInfo } from './images';
 import type { DreamingConfig } from './dreaming';
 import type { AutoBlock } from './auto-mode';
+import type { NextStep } from './next-step';
 import type { CallRecord, RunInfo, RunResult } from './history';
 
 import type { RpcEvents, RpcMethods } from './rpc';
@@ -1069,7 +1070,8 @@ export type TranscriptItem =
    * started worked, in ms, when that was recorded (the "Worked for 53s" line)
    */
   | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string; worked?: number }
-  | { role: 'assistant'; text: string }
+  /** at: when the reply was written (its turn's end), in ms, when known */
+  | { role: 'assistant'; text: string; at?: number }
   | { role: 'tool'; name: string; args: string; result: string; ok: boolean; sandbox?: SandboxMark }
   /** A submit_plan call is shown as a plan card instead of a tool row */
   | { role: 'plan'; plan: PlanInfo }
@@ -1082,7 +1084,12 @@ export type TranscriptItem =
   /** A dream's propose_* call is shown as its proposal's card (the window has the proposal from dreaming.list) */
   | { role: 'proposal'; proposalId: string; name: string; args: string; result: string }
   /** A call Auto mode's safety check blocked is shown as one quiet line instead of a tool row */
-  | { role: 'auto_blocked'; block: AutoBlock };
+  | { role: 'auto_blocked'; block: AutoBlock }
+  /**
+   * A next_step call is shown as its card, quiet (no buttons): `chosen` is the reply the user's next message was,
+   * when it was one of them
+   */
+  | { role: 'next_step'; step: NextStep; chosen?: string };
 
 export interface SessionsApi {
   list(): Promise<SessionMeta[]>;
