@@ -173,13 +173,13 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
       const nav = document.querySelector('.sp-nav-item').getBoundingClientRect();
       return {
         title: [cs('#settings-heading').fontSize, cs('#settings-heading').fontWeight],
-        section: [cs('.sp-section.current .sp-title').fontSize, cs('.sp-section.current .sp-title').fontWeight],
+        section: [cs('.sp-section.current .sp-title').fontSize, cs('.sp-section.current .sp-title').fontWeight, cs('.sp-section.current .sp-title').lineHeight],
         rowTitle: [getComputedStyle(row.querySelector('.sp-row-title')).fontSize, getComputedStyle(row.querySelector('.sp-row-title')).fontWeight], desc: getComputedStyle(row.querySelector('.sp-row-desc')).fontSize,
         pitch: Math.round(rows[i + 1].getBoundingClientRect().y - row.getBoundingClientRect().y), lines: Math.round(d.y - t.y), row: row.id,
         nav: [cs('.sp-nav-item').fontSize, nav.height],
       };
     })()`);
-    check('Settings: the title and the section heading 14 px / 500 (the title size, --fs-title)', st.title[0] === '14px' && st.title[1] === '500' && st.section[0] === '14px' && st.section[1] === '500', st);
+    check('Settings: the title 14 px / 500 (--fs-title); a page\'s title ("Models") at the reading size, 16 px on 24 px, semibold', st.title[0] === '14px' && st.title[1] === '500' && st.section[0] === '16px' && st.section[1] === '600' && st.section[2] === '24px', st);
     // Rows sit in cards: a 13 px description (--fs-small) under the 14 px title, 11 px of padding above and below
     check('Settings: row titles 14 px regular, descriptions 13 px, 24 px apart', st.rowTitle[0] === '14px' && st.rowTitle[1] === '400' && st.desc === '13px' && st.lines === 24, st);
     check('Settings: about 64 px from row to row in a card (one-line descriptions), navigation rows 32 px at 14 px', near(st.pitch, 64, 1) && st.nav[0] === '14px' && st.nav[1] === 32, st);

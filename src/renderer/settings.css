@@ -60,7 +60,7 @@ dialog.dialog.settings-dialog {
 .sp-content.searching .sp-disclosure-row { display: none; }
 .sp-content:not(.searching) .sp-advanced:not(.open) .sp-advanced-rows { display: none; }
 
-.sp-title { margin: 18px 0 12px; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 500; color: var(--text-100); }
+.sp-title { margin: 18px 0 12px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; color: var(--text-100); }
 .sp-group { margin-top: 4px; }
 .sp-group-title { margin: 32px 0 4px; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; color: var(--text-100); }
 .sp-group:first-of-type > .sp-group-title { margin-top: 16px; }
