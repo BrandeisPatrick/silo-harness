@@ -3,7 +3,7 @@
    Tokens follow docs/ui-audit.md (Claude desktop reference values).
    Spacing is on a 4px grid. Type comes in two tiers, as in Claude Code:
    what the assistant says (replies, the user's bubble, the chat bar) 16/24
-   (--fs-body), and what it did (the fold line, tool, group and blocked
+   (--fs-reply), and what it did (the fold line, tool, group and blocked
    rows, notices, the status line) 14/20 in the muted colour (--fs-act),
    the thing acted on one step darker. Headings in a reply 17/24 (h1-h2),
    16 below; inline code 14, code blocks 13/20 (--fs-code). Rows and
@@ -20,16 +20,20 @@
   --font-display: ui-serif, "New York", Georgia, serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Type scale. body: replies, the user's bubble, tool and status lines, the chat bar's text. ui: rows, menus,
-     buttons, inputs. small: rail headings, notes, hints, counts. micro: date groups, captions, badges. */
-  --fs-body: 16px;
-  --lh-body: 24px;
+  /* Type scale. reply: the conversation's reading text (replies, the user's bubble, the chat bar's text, the next-step
+     question). body: other text to read (plan cards, proposals, a mod's page). ui: rows, menus, buttons, inputs.
+     small: rail headings, notes, hints, counts. micro: date groups, captions, badges. body and title stay as they
+     were in 0.20 (15/21, 15): mod pages read them. */
+  --fs-reply: 16px;
+  --lh-reply: 24px;
+  --fs-body: 15px;
+  --lh-body: 21px;
   /* What the agent did: the fold line, tool, group and blocked rows, notices, the status line */
   --fs-act: 14px;
   --lh-act: 20px;
   --fs-head: 17px;
   --lh-head: 24px;
-  --fs-title: 14px;
+  --fs-title: 15px;
   --lh-title: 20px;
   --fs-ui: 14px;
   --lh-ui: 20px;
@@ -530,15 +534,15 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   max-width: 85%; padding: 10px 16px;
   background: var(--bubble); color: var(--text-100);
   border-radius: 18px 18px 4px 18px;
-  font-size: var(--fs-body); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: var(--fs-reply); line-height: var(--lh-reply); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 /* A bubble holding another session's words (a report, a merged summary): Markdown, laid out like a reply */
 .msg.user .bubble.rich { white-space: normal; }
 .msg.user .bubble.rich .md p, .msg.user .bubble.rich .md ul, .msg.user .bubble.rich .md ol, .msg.user .bubble.rich .md .code-block { margin-bottom: 8px; }
 .msg.user .bubble.rich .md > :last-child { margin-bottom: 0; }
-.msg.user .bubble.rich .md h1, .msg.user .bubble.rich .md h2 { margin: 12px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); }
+.msg.user .bubble.rich .md h1, .msg.user .bubble.rich .md h2 { margin: 12px 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); }
 .msg.user .bubble.rich .md > :first-child { margin-top: 0; }
-.msg.assistant { position: relative; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); }
+.msg.assistant { position: relative; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); }
 /* A message's actions (Copy; Rewind on the user's): a quiet row of icon buttons under it, never over its words. Under a
    reply it is in the flow, left-aligned with the text (the buttons' glyphs line up with it), shown on hover and always
    for the latest reply; under the user's bubble it sits in the bubble's bottom margin, at its right edge. */
@@ -567,7 +571,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 :root.mod-bg .next-step, #messages[data-look] .next-step { -webkit-backdrop-filter: blur(var(--code-blur)); backdrop-filter: blur(var(--code-blur)); }
 .next-step p { margin: 0; overflow-wrap: anywhere; }
-.next-step-question { margin-top: 12px !important; font-size: calc(var(--fs-act) + 1px); line-height: calc(var(--lh-act) + 2px); color: var(--text-100); }
+.next-step-question { margin-top: 12px !important; font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); }
 .next-step-replies { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .next-step-reply.btn { height: 32px; padding: 0 12px; gap: 8px; border: 0; border-radius: 9px; box-shadow: none; background: var(--button-fill); color: var(--text-100); }
 .next-step-reply.btn:hover { background: var(--button-fill-hover); }
@@ -609,7 +613,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* Headings read as text with weight, not as a form's sections: the top two levels a step larger (16/24), the rest
    the text size; more room above than below, so each belongs to what follows it */
 .md h1, .md h2 { margin: 24px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
-.md h3, .md h4, .md h5, .md h6 { margin: 20px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
+.md h3, .md h4, .md h5, .md h6 { margin: 20px 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); font-weight: 600; }
 .md strong { font-weight: 600; }
 /* Lists: tight items, a modest indent, a muted marker */
 .md ul, .md ol { padding-left: 22px; }
@@ -629,7 +633,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
 /* Inline code: the mono face on a soft patch of tint, no outline, so a sentence with several stays even */
-.md code { font-family: var(--mono); font-size: calc(var(--fs-body) - 2px); padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
+.md code { font-family: var(--mono); font-size: 0.875em; padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }
@@ -1056,7 +1060,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .composer textarea {
   display: block; flex: 1; min-width: 0; min-height: 44px; max-height: 240px; margin: 0 8px; padding: 11px 0 12px;
   border: none; outline: none; background: transparent; resize: none;
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); caret-color: var(--text-100);
+  font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); caret-color: var(--text-100);
 }
 .composer textarea::placeholder { color: var(--text-400); }
 .send {

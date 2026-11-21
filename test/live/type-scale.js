@@ -149,10 +149,11 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
     const envId = (await app.evaluate(`window.__oc_debug.mods.views().map((v) => v.key)`)).find((k) => k.startsWith('environment')) ? 'environment' : null;
     let mod = null;
     for (let i = 0; i < 20 && !mod; i++) {
-      mod = await frameEvalPage(app, 'environment', `(() => { const r = document.querySelector('.info'); if (!r || !r.offsetHeight) return null; const s = getComputedStyle(r); return { fs: s.fontSize, lh: s.lineHeight, h: r.getBoundingClientRect().height, token: getComputedStyle(document.documentElement).getPropertyValue('--fs-ui').trim() }; })()`);
+      mod = await frameEvalPage(app, 'environment', `(() => { const r = document.querySelector('.info'); if (!r || !r.offsetHeight) return null; const s = getComputedStyle(r); return { fs: s.fontSize, lh: s.lineHeight, h: r.getBoundingClientRect().height, token: getComputedStyle(document.documentElement).getPropertyValue('--fs-ui').trim(), ...Object.fromEntries(['--fs-body', '--lh-body', '--fs-title'].map((n) => [n, getComputedStyle(document.documentElement).getPropertyValue(n).trim()])) }; })()`);
       if (!mod) await sleep(300);
     }
     check('a mod panel row is 14 px through harness.css, on a 32 px row, with the kit\'s --fs-ui', envId && mod && mod.fs === '14px' && mod.lh === '20px' && mod.h === 32 && mod.token === '14px', mod);
+    check('a mod page reads the type tokens of 0.20: --fs-body 15/21, --fs-title 15', mod && mod['--fs-body'] === '15px' && mod['--lh-body'] === '21px' && mod['--fs-title'] === '15px', mod);
 
     const small = (await app.evaluate(SMALL_TEXT)).filter((e) => !allowed(e));
     check('no visible text in the window under 12 px (keyboard keys aside)', small.length === 0, small.slice(0, 8));
@@ -179,7 +180,7 @@ const allowed = (e) => e.tag === 'kbd' || /xterm/.test(e.cls);
         nav: [cs('.sp-nav-item').fontSize, nav.height],
       };
     })()`);
-    check('Settings: the title 14 px / 500 (--fs-title); a page\'s title ("Models") at the reading size, 16 px on 24 px, semibold', st.title[0] === '14px' && st.title[1] === '500' && st.section[0] === '16px' && st.section[1] === '600' && st.section[2] === '24px', st);
+    check('Settings: the title 15 px / 500 (--fs-title); a page\'s title ("Models") at the reading size, 16 px on 24 px, semibold', st.title[0] === '15px' && st.title[1] === '500' && st.section[0] === '16px' && st.section[1] === '600' && st.section[2] === '24px', st);
     // Rows sit in cards: a 13 px description (--fs-small) under the 14 px title, 11 px of padding above and below
     check('Settings: row titles 14 px regular, descriptions 13 px, 24 px apart', st.rowTitle[0] === '14px' && st.rowTitle[1] === '400' && st.desc === '13px' && st.lines === 24, st);
     check('Settings: about 64 px from row to row in a card (one-line descriptions), navigation rows 32 px at 14 px', near(st.pitch, 64, 1) && st.nav[0] === '14px' && st.nav[1] === 32, st);
