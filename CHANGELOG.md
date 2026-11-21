@@ -31,6 +31,7 @@ A redesigned Settings with API keys on the Models page, a calmer session view in
 
 ### Fixed
 
+- **Command line tool.** The `silo` command installed from the app starts; in 0.19.0 and 0.20.0 it stopped with an error.
 - **Settings hover.** A hovered page in Settings no longer looks like the selected one.
 - **Copy button.** Copy sits under a reply and no longer covers its text.
 
