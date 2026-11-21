@@ -166,9 +166,12 @@ function logoPng(size = 240) {
     await sleep(300);
     const group = await app.evaluate(`(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); if (!g) return null; return { thumbs: g.querySelectorAll(':scope > summary .group-thumbs img.tool-thumb').length, more: g.querySelector(':scope > summary .thumb-more')?.innerText, open: g.open }; })()`);
     check('(e) a group row shows three thumbnails and +2', group && group.thumbs === 3 && group.more === '+2', group);
-    await app.evaluate(`[...document.querySelectorAll('.tool-group')].pop().querySelector(':scope > summary .group-thumbs img').click()`);
+    // A turn's one group is drawn flat (open, its line hidden): there the thumbnail to click is on a call's own row
+    const rowOpen = `(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); return g.classList.contains('flat') ? g.querySelector(':scope > .group-body > .tool').open : g.open; })()`;
+    const openBefore = await app.evaluate(rowOpen);
+    await app.evaluate(`(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); (g.classList.contains('flat') ? g.querySelector(':scope > .group-body > .tool > summary img.tool-thumb') : g.querySelector(':scope > summary .group-thumbs img')).click(); })()`);
     await sleep(300);
-    check('(e) a group thumbnail opens the lightbox without opening the group', await app.evaluate(`document.getElementById('lightbox').open && ![...document.querySelectorAll('.tool-group')].pop().open`));
+    check('(e) a thumbnail opens the lightbox without toggling its group (or, flat, its row)', (await app.evaluate(`document.getElementById('lightbox').open`)) && (await app.evaluate(rowOpen)) === openBefore);
     await app.evaluate(`document.getElementById('lightbox').close()`);
     await app.evaluate(`document.getElementById('messages').scrollTop = 1e9`);
     await both(app, 'e-group', await last(app, '.tool-group'), 16);
