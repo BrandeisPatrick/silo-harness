@@ -45,7 +45,7 @@ import { FOLDED_GROUPS_HEADING, GROUP_GUIDANCE, LOAD_TOOLS, TOOL_GROUPS, cleanGr
 import { cleanAnswers } from './tools/ask-user';
 import type { BrowserController } from './browser';
 import { expandSlashCommand, type Skill } from './skills';
-import { clip, latestPlan, shownUserCount, toMeta, turnSnapshot, type Msg, type Session, type SessionStore, type Turn } from './sessions';
+import { clip, latestPlan, shownUserCount, toMeta, turnSnapshot, WRITTEN_AT, type Msg, type Session, type SessionStore, type Turn } from './sessions';
 import { generateTitle, titlePrompt } from './titles';
 import { TerminalManager } from './terminal';
 import { ArtifactStore, type ArtifactInput } from './artifacts';
@@ -1567,7 +1567,7 @@ export class Agent {
         // The model declined (Anthropic stop_reason "refusal"): what it wrote stays, one notice, and the run ends
         if (reply.refused) {
           if (text.trim()) {
-            const said: Msg = { role: 'assistant', content: text };
+            const said: Msg = { role: 'assistant', content: text, [WRITTEN_AT]: this.now() } as Msg;
             if (reply.thinking?.length) (said as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
             this.store.append(this.session, said);
             lastText = text;
@@ -1611,6 +1611,7 @@ export class Agent {
           loads.results.set(implied.id, loads.implied.map((g) => this.groupLoadText(cfg, g, pool)).join('\n\n'));
         }
         const assistant: Msg = { role: 'assistant', content: text };
+        if (text.trim()) (assistant as unknown as Record<string, unknown>)[WRITTEN_AT] = this.now();
         // The native Anthropic path's thinking goes back with the reply, on that path only (agent/anthropic.ts)
         if (reply.thinking?.length) (assistant as unknown as Record<string, unknown>)[THINKING_KEY] = reply.thinking;
         if (toolCalls.length) assistant.tool_calls = [...(implied ? [implied] : []), ...(await this.storedCalls(toolCalls, tools, ctx))];

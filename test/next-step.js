@@ -120,8 +120,9 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   check('1: the stored transcript has the card, not a tool row', card && JSON.stringify(card.step) === JSON.stringify(CARD) && !card.chosen && !items.some((i) => i.role === 'tool' && i.name === 'next_step'), items);
   const at = items.indexOf(card);
   const answerAt = items[at - 1]?.at;
-  check('1: the stored reply has the time it was written (its turn\'s end)', typeof answerAt === 'number' && Math.abs(Date.now() - answerAt) < 60_000 && items.filter((i) => i.role === 'user').every((u) => typeof u.at !== 'number'), answerAt);
+  check('1: the stored reply has the time it was written', typeof answerAt === 'number' && Math.abs(Date.now() - answerAt) < 60_000 && items.filter((i) => i.role === 'user').every((u) => typeof u.at !== 'number'), answerAt);
   check('1: the last card with no user message after it is stored open (it keeps its buttons)', card.open === true, card);
+  check('1: the model never gets when a reply was written', state.requests.length > 1 && !state.requests.some((q) => JSON.stringify(q.payload?.messages ?? []).includes('written_at')));
   check('1: the card comes right after the reply it closes', items[at - 1]?.role === 'assistant' && items[at - 1].text === 'The importer now resumes.');
 
   // 2. The user's next message is a reply's label: the stored card marks it

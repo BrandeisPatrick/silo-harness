@@ -16,6 +16,9 @@ import { nextStepOrNull } from './tools/next-step';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
+/** When a reply was written (ms), kept on its stored message under this key for the window; never sent to a model */
+export const WRITTEN_AT = 'written_at';
+
 export interface Session {
   id: string;
   title: string;
@@ -270,17 +273,12 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   const turnByAt = new Map<number, number>();
   (s.turns ?? []).forEach((t, i) => turnByAt.set(t.at, i));
   appendTranscript(s, s.messages, items, turnByAt, opts.running === true, shown);
-  // Each user message carries how long its turn worked, when that was recorded; each reply in a turn with a
-  // checkpoint, when it was written (the turn's start plus how long it worked: its end)
+  // Each user message carries how long its turn worked, when that was recorded (a reply, when it was written: WRITTEN_AT)
   let n = 0;
-  let replyAt: number | undefined;
   for (const it of items) {
-    if (it.role === 'assistant' && replyAt !== undefined) it.at = replyAt;
     if (it.role !== 'user') continue;
     const ms = s.turnTimes?.[n++];
     if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) it.worked = ms;
-    const started = it.turn !== undefined ? s.turns?.[it.turn]?.createdAt : undefined;
-    replyAt = typeof started === 'number' && started > 0 ? started + (it.worked ?? 0) : undefined;
   }
   return items;
 }
@@ -359,7 +357,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
       items.push(item);
     } else if (m.role === 'assistant') {
       const text = typeof m.content === 'string' ? m.content : '';
-      if (text) items.push({ role: 'assistant', text });
+      const at = (m as unknown as Record<string, unknown>)[WRITTEN_AT];
+      if (text) items.push({ role: 'assistant', text, ...(typeof at === 'number' && at > 0 ? { at } : {}) });
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
         // Loading a tool group is the agent's own business: the tools it loaded show their rows when they are used

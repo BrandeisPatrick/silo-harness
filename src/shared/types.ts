@@ -1070,7 +1070,7 @@ export type TranscriptItem =
    * started worked, in ms, when that was recorded (the "Worked for 53s" line)
    */
   | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string; worked?: number }
-  /** at: when the reply was written (its turn's end), in ms, when known */
+  /** at: when the reply was written, in ms, when known (a session from before 0.21 has none) */
   | { role: 'assistant'; text: string; at?: number }
   | { role: 'tool'; name: string; args: string; result: string; ok: boolean; sandbox?: SandboxMark }
   /** A submit_plan call is shown as a plan card instead of a tool row */
