@@ -919,7 +919,8 @@ async function main() {
     await ev(`document.querySelector('.rail-section[data-view="plan/main"] .rail-head-btn').click()`);
 
     // ---------------- images ----------------
-    await viewport(1180, 1000);
+    // Tall enough for the whole turn: its tool rows now sit in a card under the line that says what happened
+    await viewport(1180, 1200);
     scriptImages(mock);
     await app.send("Pull yesterday's traffic panel from Grafana, then replay that hour through the limiter and chart requests per minute, before and after.");
     await mainIdle();
@@ -983,9 +984,8 @@ async function main() {
     await sleep(300);
     await ev(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); })()`);
     await app.waitFor(`document.querySelector('#settings').open && Boolean(document.querySelector('#sp-nav-mods'))`, 10_000, 'Settings');
+    // The Mods page lists the mods, where a rail panel of yours is
     await app.click('#sp-nav-mods');
-    // The Mods tab (the general mods), where a rail panel of yours is listed
-    await app.click('#sp-modtab-mods');
     await app.waitFor(`Boolean(document.querySelector('#sp-row-mod-word-count .sp-mod-expand'))`, 10_000, 'the Word count row');
     await app.click('#sp-row-mod-word-count .sp-mod-expand');
     await sleep(500);
