@@ -983,10 +983,12 @@
   }
 
   // The next-step card that ends a turn (the next_step tool): the recap in grey and the question, as text. A live card
-  // keeps its replies as buttons (a tap sends the label, as typed); once anything is sent it goes quiet, the chosen
-  // reply kept as a grey pill. A stored card is quiet.
+  // keeps its replies as buttons: a tap sends the label as plain text, never while the run goes on, and leaves a draft
+  // in the chat bar alone; once anything is sent it goes quiet, the chosen reply kept as a grey pill. A stored card is
+  // quiet. Control, zero-width and direction characters go, as on the desktop (next-step.ts).
   function stepText(v, max) {
-    return typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '';
+    // eslint-disable-next-line no-control-regex
+    return typeof v === 'string' ? [...v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '';
   }
 
   function nextStepEl(step, chosen, live) {
@@ -1001,7 +1003,7 @@
     const recap = stepText(step.recap, 300);
     if (!recap) return null;
     const question = stepText(step.question, 100);
-    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(typeof r === 'string' ? r.replace(/\s*\(recommended\)\s*$/i, '') : r, 40)).filter(Boolean).slice(0, 2) : [];
+    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(typeof r === 'string' ? r.replace(/\s*\(recommended\)\s*$/i, '') : r, 40)).filter((r) => r && !/^[/#@!]/.test(r)).slice(0, 2) : [];
     const card = h('div', 'next-step' + (live ? ' live' : ''));
     const p = h('p', 'next-step-recap');
     p.textContent = recap;
@@ -1020,10 +1022,14 @@
         b.textContent = label;
         b.dataset.reply = label;
         b.disabled = !live;
-        b.onclick = () => {
-          if (!card.classList.contains('live')) return;
-          setInput(label);
-          void send();
+        b.onclick = async () => {
+          if (!card.classList.contains('live') || S.running || S.dead || !S.current) return;
+          const res = await api('send', { session: S.current, text: label }).catch((err) => ({ ok: false, error: err.message }));
+          if (!res.ok) toast(res.error || 'Could not send.');
+          else if (res.queued) {
+            S.queue.push({ id: res.id, text: label });
+            renderQueue();
+          }
         };
         row.append(b);
       });
