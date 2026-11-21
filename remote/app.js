@@ -798,22 +798,22 @@
   }
 
   /**
-   * A call Auto mode's safety check blocked: one of the turn's tool rows, as on the desktop ("Blocked Push the release
-   * branch", the call's own description, else its command); opened, the whole command, the check's reason and Allow.
+   * A call Auto mode's safety check blocked: one of the turn's tool rows, as on the desktop ("Blocked git push origin
+   * main", what was blocked, never the call's description of it); opened, the whole command, the check's reason and Allow.
    * `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed). The turn's line
    * counts the blocks (countBlocked).
    */
   function blockedEl(block, state) {
     const n = h('details', 'tool blocked');
     n.dataset.id = block.id;
-    const desc = typeof block.desc === 'string' ? block.desc.trim() : '';
     const what = block.what || block.name;
     const sum = h('summary');
     sum.innerHTML =
       `<span class="chev">${icon('chevron', 14)}</span>` +
       `<span class="tool-status warn">${icon('shield', 14)}</span>` +
       '<span class="tool-verb">Blocked</span>' +
-      `<span class="tool-arg${desc ? '' : ' mono'}">${esc(desc || what)}</span>` +
+      // What was blocked, never the call's own description of it
+      `<span class="tool-arg mono">${esc(what)}</span>` +
       '<span class="tool-meta"></span>';
     const body = h('div', 'tool-body');
     body.append(h('pre', 'out', `<span class="label">Command</span>${esc(block.full || what)}`));

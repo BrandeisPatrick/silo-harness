@@ -441,13 +441,13 @@ async function main() {
   check('the delivered message appears once', (await js(win, `[...document.querySelectorAll('.msg.user .bubble')].filter(b => b.textContent === 'Also add a test for three attempts').length`)) === 1);
   await shot(win, '6-done');
 
-  // 6b. Calls Auto mode blocked: one of the turn's tool rows each ("Blocked <description>", else the command), the
+  // 6b. Calls Auto mode blocked: one of the turn's tool rows each ("Blocked <command>", never its description), the
   // count on the turn's line under its message, Allow inside the opened row.
   f.emit(A, { type: 'auto_blocked', block: { id: 'bk1', sessionId: A, name: 'bash', what: 'git push --force origin main', desc: 'Push the rewritten history', full: 'git push --force origin main', reason: '[Destructive Git] force-pushes over remote history', at: Date.now() } });
   f.emit(A, { type: 'auto_blocked', block: { id: 'bk2', sessionId: A, name: 'bash', what: 'npm publish --access public', reason: '[Publishing] publishes the package', at: Date.now() } });
   check('blocked: two rows', await waitFor(win, `document.querySelectorAll('#transcript .tool.blocked').length === 2`));
   const blocked = await js(win, `({ rows: [...document.querySelectorAll('#transcript .tool.blocked')].map((d) => (d.querySelector('.tool-verb').textContent + ' ' + d.querySelector('.tool-arg').textContent).trim()), lines: [...document.querySelectorAll('#transcript .turn-line:not([hidden])')].map((n) => n.innerText.trim()), allow: [...document.querySelectorAll('#transcript .tool.blocked .blocked-end button')].length, reason: document.querySelector('#transcript .tool.blocked .blocked-reason')?.textContent ?? '' })`);
-  check('blocked: "Blocked <description>", else the command; Allow in each; the reason inside', JSON.stringify(blocked.rows) === JSON.stringify(['Blocked Push the rewritten history', 'Blocked npm publish --access public']) && blocked.allow === 2 && blocked.reason === '[Destructive Git] force-pushes over remote history', blocked);
+  check('blocked: "Blocked <command>", never the call\'s description; Allow in each; the reason inside', JSON.stringify(blocked.rows) === JSON.stringify(['Blocked git push --force origin main', 'Blocked npm publish --access public']) && blocked.allow === 2 && blocked.reason === '[Destructive Git] force-pushes over remote history', blocked);
   check('blocked: the turn\'s line counts them', JSON.stringify(blocked.lines) === JSON.stringify(['2 blocked']), blocked.lines);
   await js(win, `document.querySelector('#transcript .tool.blocked').open = true; document.querySelector('#transcript .tool.blocked').scrollIntoView({ block: 'center' })`);
   await sleep(200);

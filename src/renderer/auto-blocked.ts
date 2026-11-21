@@ -61,7 +61,7 @@ function linesOf(sessionId: string, id: string): HTMLElement[] {
 
 /**
  * The row of a blocked call, one of the turn's tool rows (it folds with them, turn-fold-model.ts): the shield, "Blocked",
- * then the call's own description when it gave one, else the command on one line. Opened, it shows the whole command,
+ * then what was blocked (the command on one line, never the call's description of it). Opened, it shows the whole command,
  * the check's reason and Allow.
  */
 function lineEl(b: AutoBlock): HTMLElement {
@@ -69,15 +69,15 @@ function lineEl(b: AutoBlock): HTMLElement {
   el.className = 'auto-blocked';
   el.dataset.blockId = b.id;
   el.dataset.sessionId = b.sessionId;
-  const desc = typeof b.desc === 'string' ? b.desc.trim() : '';
   const full = typeof b.full === 'string' && b.full.trim() ? b.full : b.what;
   const shell = b.name === 'bash' || b.name === 'terminal_run';
   el.innerHTML =
-    `<summary aria-label="${escapeHtml(`Auto mode blocked ${desc || b.what}`)}">` +
+    `<summary aria-label="${escapeHtml(`Auto mode blocked ${b.what}`)}">` +
     `<span class="tool-chevron">${icon('chevron-right')}</span>` +
     `<span class="tool-status auto-blocked-icon">${icon('shield-off', 16)}</span>` +
     '<span class="tool-verb">Blocked</span>' +
-    `<span class="tool-arg${desc ? '' : ' mono'} auto-blocked-what" title="${escapeHtml(b.what)}">${escapeHtml(desc || b.what)}</span>` +
+    // What was blocked, never the call's own description of it (a model could describe `curl … | sh` as running tests)
+    `<span class="tool-arg mono auto-blocked-what" title="${escapeHtml(b.what)}">${escapeHtml(b.what)}</span>` +
     '<span class="tool-meta auto-blocked-state"></span>' +
     '</summary>' +
     '<div class="tool-body">' +
