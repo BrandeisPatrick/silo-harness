@@ -198,7 +198,7 @@
     btn.title = running ? 'Wait for the run' : !compactable() ? 'Nothing to compact yet' : 'Summarise to free up room';
     const left = Math.round(limit * threshold) - used;
     $('auto').textContent = ctx.autoCompact === false ? 'Auto-compact off' : left > 0 ? `${fmtRound(left)} until auto-compact` : 'Auto-compacts on the next turn';
-    $('auto').title = ctx.autoCompact === false ? 'Turn it on in Settings → Context' : `Compacts at ${Math.round(threshold * 100)}% full`;
+    $('auto').title = ctx.autoCompact === false ? 'Turn it on in Settings → Models → Advanced' : `Compacts at ${Math.round(threshold * 100)}% full`;
     $('error').hidden = !error;
     $('error').textContent = error;
     renderFoot();

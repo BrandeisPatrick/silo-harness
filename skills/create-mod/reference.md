@@ -42,7 +42,7 @@ Commands:
 - `view`: id of a view of this mod, brought to the front when the command runs.
 - `/name args` delivers the `command` event `{ name, args }` to the mod's views. Commands register only while the mod is on; if two mods use one name, the first wins (bundled, then user, then project).
 
-Settings (`contributes.settings`), shown under the mod in Settings → Mods:
+Settings (`contributes.settings`), shown under the mod in Settings → Mods (a look's, on its tab in Settings → Appearance):
 - `key`: `^[A-Za-z][\w.-]{0,63}$`, unique. `title`: required. `description`: optional.
 - `type`: `boolean` (`default` true or false), `string` (`default`, `placeholder`), `number` (`default`, `min`, `max`, `step` > 0), `select` (`options`: non-empty list of distinct strings; `default` one of them).
 - Read with `harness.settings.get()`; `settings.changed` follows each change. Looks read them as `data-set-<key>` (key lower-cased, other characters as `-`).

@@ -863,5 +863,12 @@ async function readyPage(hello = HELLO) {
     check('rules: a reserved seat is a warning', reserved.some((p) => p.level === 'warning' && /reserved/.test(p.message)) && !reserved.some((p) => p.level === 'error'));
   }
 
+  // The words a mod author and a bundled page read name the Settings pages as they are now
+  {
+    const texts = ['skills/create-mod/SKILL.md', 'skills/create-mod/reference.md', 'docs/mods.md', ...fs.readdirSync(path.join(ROOT, 'mods')).flatMap((m) => fs.readdirSync(path.join(ROOT, 'mods', m)).filter((f) => f.endsWith('.html')).map((f) => `mods/${m}/${f}`))];
+    const stale = texts.filter((f) => /Settings → Mods → (Background|Chat bar|Conversation)|Settings → Context\b/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+    check('no page or guide sends people to Settings → Mods → Background or Settings → Context (Appearance and Models → Advanced now)', stale.length === 0, stale);
+  }
+
   done();
 })().catch((e) => { console.error(e); process.exit(1); });
