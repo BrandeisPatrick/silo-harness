@@ -7,6 +7,8 @@ export interface SettingsFileInfo {
   /** Absolute path, whether or not the file exists */
   path: string;
   exists: boolean;
+  /** It is a symbolic link (a write goes to the file it points to; a full reset moves the link only) */
+  link?: true;
   /** Its values are in effect */
   applied: boolean;
   /** project scope: the user has agreed to this exact content. The user's own file is always trusted. */

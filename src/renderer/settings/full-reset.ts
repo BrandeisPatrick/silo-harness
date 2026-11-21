@@ -3,6 +3,7 @@
 // the Trash and what is not touched, and then relaunches the app (src/main/reset.ts). Only this page can ask: the
 // main window's own preload (window.oc.reset), never an RPC.
 
+import type { SettingsInfo } from '../../shared/settings-info';
 import type { Ctx } from './ctx.js';
 import { button, row, type Row } from './ui.js';
 
@@ -36,7 +37,10 @@ export function resetRows(ctx: Ctx): Row[] {
   const fullBtn = button(
     'Reset…',
     async (b) => {
-      const checkbox = { label: 'Also my settings.json (providers and keys)', checked: false };
+      // A linked settings.json (a dotfiles repo): only the link goes, the file it points to stays
+      const info = (await ctx.call('settings.info').catch(() => null)) as SettingsInfo | null;
+      const link = Boolean(info?.files?.some((f) => f.scope === 'user' && f.link));
+      const checkbox = { label: link ? 'Also my settings.json (providers and keys): it is a link, so only the link goes; the file it points to stays' : 'Also my settings.json (providers and keys)', checked: false };
       const ok = await ctx.confirm({
         title: 'Full reset?',
         description: 'The app goes back to its first launch and relaunches. Your projects and their files are not touched. These move to the Trash:',

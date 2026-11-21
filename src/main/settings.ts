@@ -330,6 +330,7 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
     return out;
   }
   info.exists = true;
+  if (fs.lstatSync(file).isSymbolicLink()) info.link = true;
   const hash = contentHash(raw);
   if (scope === 'project') {
     info.trusted = opts.trustedHash === hash;

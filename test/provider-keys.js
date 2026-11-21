@@ -87,6 +87,13 @@ const SECRET = 'sk-or-SECRET-0123456789abcd';
     fs.chmodSync(f, 0o644);
     K.editUserSettings(f, (d) => K.setIn(d, ['theme'], 'dark'));
     check('an existing one becomes 600 when the app writes it, its other fields kept', modeOf(f) === 0o600 && JSON.parse(fs.readFileSync(f, 'utf8')).providers.x.apiKey === 'v');
+    // A settings.json that is a link (a dotfiles repo) stays one: the write goes to the file it points to
+    const dotfiles = path.join(tmp(), 'settings.json');
+    fs.writeFileSync(dotfiles, '{"theme":"light"}');
+    const linked = path.join(tmp(), 'settings.json');
+    fs.symlinkSync(dotfiles, linked);
+    K.editUserSettings(linked, (d) => K.setIn(d, ['providers', 'x', 'apiKey'], 'w'));
+    check('a linked settings.json stays a link; the key is written to the file it points to', fs.lstatSync(linked).isSymbolicLink() && JSON.parse(fs.readFileSync(dotfiles, 'utf8')).providers.x.apiKey === 'w' && JSON.parse(fs.readFileSync(dotfiles, 'utf8')).theme === 'light');
     K.editUserSettings(f, (d) => K.setIn(d, ['providers', 'x', 'apiKey'], undefined));
     check('setIn with undefined removes the field', !('apiKey' in JSON.parse(fs.readFileSync(f, 'utf8')).providers.x));
     fs.writeFileSync(f, '{ not json');

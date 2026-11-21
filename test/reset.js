@@ -90,6 +90,19 @@ const standItems = () => ls(stand);
     await R.finishReset(p.userData, log);
   }
 
+  // --- Full reset with settings.json, when it is a link: the link goes, the file it points to stays ---
+  {
+    const p = profile();
+    const dotfiles = path.join(root, `dotfiles-${n}.json`);
+    fs.renameSync(path.join(p.config, 'settings.json'), dotfiles);
+    fs.symlinkSync(dotfiles, path.join(p.config, 'settings.json'));
+    R.markReset(p.userData, { kind: 'full', settingsJson: true, at: 2500 });
+    R.stageReset(p.userData, log, p.config);
+    const moved = path.join(p.userData, '.silo-reset-2500', 'your-settings.json');
+    check('a linked settings.json: the link moves aside, the file it points to stays where it is', !ls(p.config).includes('settings.json') && fs.lstatSync(moved).isSymbolicLink() && fs.readFileSync(dotfiles, 'utf8') === '{"providers":{}}');
+    await R.finishReset(p.userData, log);
+  }
+
   // --- Reset settings ---
   {
     const p = profile();

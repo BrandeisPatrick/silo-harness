@@ -118,10 +118,17 @@ export function editUserSettings(file: string, mutate: (data: Record<string, unk
   }
   mutate(data);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = path.join(path.dirname(file), `.settings.json.${process.pid}.${Date.now()}.tmp`);
+  // A link (a dotfiles repo's settings.json) stays a link: the write goes to the file it points to
+  let target = file;
+  try {
+    target = fs.realpathSync(file);
+  } catch {
+    /* no file yet */
+  }
+  const tmp = path.join(path.dirname(target), `.settings.json.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
   fs.chmodSync(tmp, 0o600); // the mode applies only when the file is created; a stale temp file keeps its own
-  fs.renameSync(tmp, file);
+  fs.renameSync(tmp, target);
 }
 
 /** Sets (or, with undefined, deletes) the value at `keys` in a plain object, making the objects on the way. */
