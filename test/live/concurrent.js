@@ -9,7 +9,9 @@ const path = require('node:path');
 const { launch, checker, sleep } = require('./rig.js');
 
 /** The transcript rows that count: messages, tool rows and cards (notices excluded). */
-const ROWS = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden && !e.matches('.msg.system')).map((e) => ({ cls: e.className.replace(/\\bfade-in\\b/g, '').trim(), text: (e.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 300) }))`;
+// A message reads as its own words (a reply's row also holds Copy and its time, "Just now" then "5 min ago"); a
+// thinking row is left out (a real model thinks, the mock does not)
+const ROWS = `[...document.querySelectorAll('#messages > *')].filter((e) => e.id !== 'empty-state' && !e.hidden && !e.matches('.msg.system, .thinking')).map((e) => ({ cls: e.className.replace(/\\bfade-in\\b/g, '').trim(), text: ((e.matches('.msg') && e.querySelector('.md, .bubble')) || e).innerText.replace(/\\s+/g, ' ').trim().slice(0, 300) }))`;
 
 (async () => {
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'oa-live-shots-'));
