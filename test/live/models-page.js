@@ -162,6 +162,17 @@ const LOCAL_KEY = 'local-SECRET-key-0123456789';
     await confirmYes();
     const removed = await until(async () => JSON.parse(fs.readFileSync(configFile, 'utf8')).portkey?.apiKey === '' && (await status()) === 'No key');
     check('Remove (after a confirmation) takes the saved key away', Boolean(removed), await status());
+    // A key typed and not saved never carries over to the next provider (Groq has no key either: its field opens)
+    const setProvider = (name) => app.evaluate(`(async () => { const c = await oc.getConfig(); c.provider = ${JSON.stringify(name)}; await oc.setConfig(c); })()`);
+    await app.fill('#provider-apiKey-input', 'typed-for-the-gateway-0000');
+    await setProvider('groq');
+    const onGroq = await until(async () => (await cfg()).provider === 'groq' && (await shown('#provider-apiKey-input')), 5000);
+    const groqField = await app.evaluate(`document.querySelector('#provider-apiKey-input').value`);
+    await setProvider('portkey');
+    await until(async () => (await cfg()).provider === 'portkey', 5000);
+    await sleep(200);
+    const backField = await app.evaluate(`document.querySelector('#provider-apiKey-input').value`);
+    check('a key typed but not saved is gone once the provider changes: Groq\'s field opens empty, and so does the gateway\'s again', Boolean(onGroq) && groqField === '' && backField === '' && !(await cfg()).providers.groq.apiKey, { groqField, backField });
     await app.fill('#provider-apiKey-input', GW_KEY);
     await app.evaluate(`document.querySelector('#provider-apiKey-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
     check('Enter saves a key too', Boolean(await until(async () => (await status()) === 'Ready')));

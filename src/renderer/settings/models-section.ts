@@ -267,6 +267,11 @@ export function modelSection(ctx: Ctx): Section {
 
   async function saveKey(): Promise<void> {
     const p = active();
+    // The field belongs to the provider it was opened for: one switched since (not yet synced) gets nothing
+    if (p.name !== lastActive) {
+      keyInput.value = '';
+      return;
+    }
     const value = keyInput.value.trim();
     if (!value) {
       keyRow.problem('Paste the key.');
@@ -703,6 +708,9 @@ export function modelSection(ctx: Ctx): Section {
     if (activeName() !== lastActive) {
       lastActive = activeName();
       editing = false;
+      // A key typed for one provider never reopens for the next one
+      keyInput.value = '';
+      keyRow.problem(null);
     }
     renderCard();
     renderThinking();
