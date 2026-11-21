@@ -105,8 +105,8 @@
      frosted (--code-blur). In dark mode they are a faint lift, 4.5% white, on the plain page, and over a picture the
      page's colour so lifted, about three quarters strong, so code stays readable on any picture.
      --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. Inline
-     code keeps a faint tint of the text colour (--code-inline): it has no hairline to carry it. A look can set any
-     of these on #messages. */
+     code keeps a faint tint of the text colour (--code-inline): it has no hairline to carry it. Under a conversation
+     look code takes --code-bg, unless the look sets --code-panel or --code-inline on #messages (docs/mods.md). */
   --panel-veil: rgba(255, 255, 255, 0.68);
   --code-panel: transparent;
   --code-panel-solid: var(--bg-100);
@@ -643,8 +643,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md td + td, .md th + th { border-left: 1px solid var(--border-subtle); }
 .md tbody tr:last-child td { border-bottom: none; }
 
-/* Over a background or a look the panels are the veil (light: white; dark: the faint lift) */
-:root.mod-bg, #messages[data-look] { --code-panel: var(--panel-veil); }
+/* Over a background the panels are the veil (light: white; dark: the faint lift). Under a conversation look code is
+   filled from --code-bg, as before these panels (a look written for it keeps its code), unless the look sets
+   --code-panel or --code-inline itself: :where() leaves this rule no weight against the look's :scope. */
+:root.mod-bg { --code-panel: var(--panel-veil); }
+:where(#messages[data-look]) { --code-panel: var(--code-bg); --code-panel-solid: var(--code-bg); --code-inline: var(--code-bg); }
 .code-block { background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 4px 0 12px; margin-bottom: -8px; }
 .code-lang { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }

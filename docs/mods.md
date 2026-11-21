@@ -187,6 +187,8 @@ They are removed when the look goes away. A setting is how a look offers a choic
 | `#composer-foot` | the quiet row under the box, outside it |
 | `.foot-btn`: `#model-btn`, `#mode-btn`, `#context-meter` | its buttons: the model, the permission mode (`.plan`, `.bypass` for those modes) and the context ring |
 
+**Code under a conversation look.** Code blocks, inline code, and the command and output boxes take their fill from `--code-bg`, so a look that sets it on `:scope` colours its code. A look may also set two optional tokens (added in 0.21) to fill them apart: `--code-panel` (code blocks, command and output boxes) and `--code-inline` (inline code). Without a conversation look the app draws its own panels.
+
 Anything else in the markup can change between releases. Keep the conversation readable: the app's text size and line height are part of the reading experience, so a look dresses the text rather than shrinking it, and it has to work in the light and the dark scheme.
 
 A minimal look, with a choice in Settings:

@@ -57,6 +57,13 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     // …and a name of its own, which must still work
     ' @keyframes escape-look-own { from { opacity: 0.25; } to { opacity: 0.75; } } .msg.user .bubble { animation: escape-look-own 1s linear -0.5s infinite paused; }');
 
+  // A protocol-1 look written for 0.20.0 that sets only --code-bg, and one that also sets the newer panel tokens
+  const codeLook = path.join(home, 'mods', 'code-look');
+  fs.mkdirSync(codeLook, { recursive: true });
+  fs.writeFileSync(path.join(codeLook, 'mod.json'), js({ protocol: 1, id: 'code-look', name: 'Code look', version: '0.1.0', contributes: { looks: [{ id: 'dark', title: 'Dark code', target: 'conversation', styles: ['dark.css'] }, { id: 'panel', title: 'Panel code', target: 'conversation', styles: ['panel.css'] }] } }));
+  fs.writeFileSync(path.join(codeLook, 'dark.css'), ':scope { --code-bg: rgb(20, 24, 40); }');
+  fs.writeFileSync(path.join(codeLook, 'panel.css'), ':scope { --code-bg: rgb(20, 24, 40); --code-panel: rgb(1, 2, 3); --code-inline: rgb(4, 5, 6); }');
+
   const app = await launch({ mode: 'bypass', config: { theme: 'dark' }, env: { SILO_HARNESS_CONFIG_DIR: home } });
   const ev = app.evaluate;
   const rpc = (m, ...a) => ev(`window.oc.rpc(${js(m)}, ...${js(a)})`);
@@ -131,6 +138,8 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     await use('conversation', 'hyperspace/holo');
     await app.waitFor(`document.querySelector('#messages').dataset.look === 'hyperspace/holo'`, 10_000, 'the conversation look');
     const conv = await probe();
+    const holoCode = await ev(`(() => { const m = document.querySelector('#messages'); const p = m.appendChild(document.createElement('span')); p.style.background = 'color-mix(in srgb, var(--holo) 4%, var(--code-bg))'; const want = getComputedStyle(p).backgroundColor; p.remove(); return { want, got: getComputedStyle(m.querySelector('.code-block')).backgroundColor }; })()`);
+    check('… its code blocks are filled from --code-bg, as in 0.20.0', holoCode.got === holoCode.want, holoCode);
     check('the conversation look changes the transcript', conv.holo && !same(conv.bubble, before.bubble) && !same(conv.status, before.status), { holo: conv.holo, bubble: conv.bubble });
     check('… keeps the quiet tool lines as they are (size, line height, colour, height)', same(conv.toolLine, before.toolLine) && same(conv.verb, before.verb), { before: before.toolLine, now: conv.toolLine });
     check('… keeps the reading size and line height', same(conv.reply['font-size'], before.reply['font-size']) && same(conv.reply['line-height'], before.reply['line-height']) && same(conv.bubble['font-size'], before.bubble['font-size']));
@@ -218,6 +227,24 @@ const attrs = (app, sel) => app.evaluate(`Object.fromEntries([...document.queryS
     await rpc('mods.setEnabled', 'escape-look', false);
     await app.waitFor(`document.querySelector('#messages').dataset.look === undefined`, 10_000, 'the look to go with its mod');
     check('turning its mod off removes the look and the attributes', !(await lookStyles()).some((s) => s.startsWith('conversation')) && !('data-running' in (await attrs(app, '#messages'))));
+
+    // ---------- Code under a look written for 0.20.0: --code-bg fills it, in the light scheme too ----------
+    await ev(`(async () => { const c = await oc.getConfig(); c.theme = 'light'; await oc.setConfig(c); document.documentElement.dataset.theme = 'light'; })()`);
+    await rpc('mods.setEnabled', 'code-look', true);
+    await rpc('mods.setLayout', { looks: { conversation: 'code-look/dark' } });
+    await app.waitFor(`document.querySelector('#messages').dataset.look === 'code-look/dark'`, 10_000, 'the code look');
+    await ev(`(() => { const p = document.querySelector('#messages .msg.assistant .md p'); if (!p.querySelector('code')) p.insertAdjacentHTML('beforeend', ' <code>hello</code>'); })()`);
+    const fills = () => ev(`(() => { const bg = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).backgroundColor : null; }; return { block: bg('#messages .code-block'), inline: bg('#messages .md p code'), cmd: bg('#messages .cmd') }; })()`);
+    let codeFill = await fills();
+    check('a protocol-1 look that sets only --code-bg (dark, in the light scheme): code blocks, inline code and command boxes take it', codeFill.block === 'rgb(20, 24, 40)' && codeFill.inline === 'rgb(20, 24, 40)' && (codeFill.cmd === null || codeFill.cmd === 'rgb(20, 24, 40)'), codeFill);
+    await rpc('mods.setLayout', { looks: { conversation: 'code-look/panel' } });
+    await app.waitFor(`document.querySelector('#messages').dataset.look === 'code-look/panel'`, 10_000, 'the panel code look');
+    codeFill = await fills();
+    check('… a look that sets --code-panel and --code-inline itself gets those', codeFill.block === 'rgb(1, 2, 3)' && codeFill.inline === 'rgb(4, 5, 6)', codeFill);
+    await rpc('mods.setEnabled', 'code-look', false);
+    await app.waitFor(`document.querySelector('#messages').dataset.look === undefined`, 10_000, 'the code look to go');
+    await ev(`(async () => { const c = await oc.getConfig(); c.theme = 'dark'; await oc.setConfig(c); document.documentElement.dataset.theme = 'dark'; })()`);
+    await sleep(400);
 
     // ---------- Default restores everything ----------
     await useSet();
