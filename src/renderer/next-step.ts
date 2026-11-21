@@ -1,7 +1,10 @@
 // The next-step card under a turn's final reply (the next_step tool, src/main/tools/next-step.ts): the recap in grey,
 // the question, and one or two replies, the first the primary one with its ⌘↵ hint. A click on a reply sends its
-// label as the user's next message; ⌘↵ with an empty chat bar picks the first. Once the user sends anything the card
-// goes quiet: no buttons, the chosen reply marked. The model writes its reply after the call: the card follows it there. A stored card is always quiet (sessions.ts marks its chosen reply).
+// label as the user's next message, as plain text (never a command, note or mention); ⌘↵ with an empty chat bar picks
+// the first. Neither does anything while the run goes on (the reply is not written yet). Once the user sends anything
+// the card goes quiet: no buttons, the chosen reply marked; a pick that could not be sent leaves it live. The model
+// writes its reply after the call: the card follows it there. A stored card is live while it is the last thing in its
+// session (sessions.ts marks it open), else quiet with its chosen reply marked.
 // Everything on it is the model's words, drawn as text, never markup. Wired from renderer.ts (setupNextStep).
 
 import type { NextStep } from '../shared/next-step';
@@ -14,6 +17,8 @@ const MAX_QUESTION = 100;
 const MAX_REPLY = 40;
 const RECOMMENDED = /\s*\(recommended\)\s*$/i;
 const MAX_REPLIES = 2;
+/** What the tool refuses at the start of a reply (a command, a note, a mention, a shell line); a stored one is dropped */
+const NOT_PLAIN = /^[/#@!]/;
 
 /** Plain text on one line, at most `max` characters. */
 function plain(v: unknown, max: number): string {
@@ -37,15 +42,17 @@ export function cardOf(args: unknown): NextStep | null {
   const recap = plain(a.recap, MAX_RECAP);
   if (!recap) return null;
   const question = plain(a.question, MAX_QUESTION);
-  const replies = question && Array.isArray(a.replies) ? a.replies.map((r) => plain(typeof r === 'string' ? r.replace(RECOMMENDED, '') : r, MAX_REPLY)).filter(Boolean).slice(0, MAX_REPLIES) : [];
+  const replies = question && Array.isArray(a.replies) ? a.replies.map((r) => plain(typeof r === 'string' ? r.replace(RECOMMENDED, '') : r, MAX_REPLY)).filter((r) => r && !NOT_PLAIN.test(r)).slice(0, MAX_REPLIES) : [];
   return { recap, question, replies };
 }
 
 interface Deps {
   messages: HTMLElement;
-  /** Sends text as the user's next message, through the chat bar's own path */
-  send(text: string): void;
-  /** True when ⌘↵ may pick the first reply: nothing typed or attached, no dialog or menu open, no run going */
+  /** Sends a reply's label as the user's next message, as plain text; false when it was not sent */
+  send(text: string): Promise<boolean>;
+  /** True when a reply may be picked: no run going */
+  ready(): boolean;
+  /** True when ⌘↵ may pick the first reply: nothing typed or attached, no dialog or menu open */
   canPick(e: KeyboardEvent): boolean;
 }
 
@@ -63,6 +70,19 @@ function quiet(card: HTMLElement, chosen?: string): void {
     b.classList.toggle('chosen', picked);
     if (picked) b.setAttribute('aria-pressed', 'true');
   }
+}
+
+/** Gives a card its buttons back (a pick that was not sent) */
+function liven(card: HTMLElement): void {
+  if (live && live !== card) return;
+  card.classList.remove('quiet');
+  for (const b of card.querySelectorAll<HTMLButtonElement>('.next-step-reply')) {
+    b.disabled = false;
+    b.removeAttribute('tabindex');
+    b.classList.remove('chosen');
+    b.removeAttribute('aria-pressed');
+  }
+  live = card;
 }
 
 /** Puts the card under a reply's words, above its actions row. False when the reply has no actions row. */
@@ -85,9 +105,11 @@ function cardEl(step: NextStep, interactive: boolean, chosen: string | undefined
       const b = h('button', { type: 'button', class: `btn next-step-reply${i === 0 ? ' primary' : ''}`, 'data-reply': label }, h('span', {}, label));
       if (i === 0) b.appendChild(h('span', { class: 'next-step-keys', 'aria-hidden': 'true' }, h('kbd', {}, '⌘'), h('kbd', {}, '↵')));
       b.addEventListener('click', () => {
-        if (card !== live) return;
+        if (card !== live || !deps.ready()) return;
         quiet(card, label);
-        deps.send(label);
+        void deps.send(label).then((sent) => {
+          if (!sent && card.isConnected) liven(card);
+        });
       });
       row.appendChild(b);
     });
@@ -105,7 +127,7 @@ export function setupNextStep(deps: Deps): void {
     const step = item.live === true ? cardOf(item.args) : cardOf((item as { step?: unknown }).step);
     if (!step) return null;
     const chosen = typeof item.chosen === 'string' ? item.chosen : undefined;
-    const card = cardEl(step, item.live === true, chosen, deps);
+    const card = cardEl(step, item.live === true || (item as { open?: unknown }).open === true, chosen, deps);
     // Under the reply it closes, above that reply's Copy row; on its own when no reply came right before it. The
     // reply usually comes after the call: the card then moves under it (below).
     const reply = deps.messages.lastElementChild;
@@ -128,7 +150,8 @@ export function setupNextStep(deps: Deps): void {
     for (const r of records) {
       for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.matches('.msg.user') && live) quiet(live, n.querySelector('.bubble')?.textContent ?? '');
+        // Only a message after the card (a stored transcript drawn at once adds the earlier ones in the same batch)
+        if (n.matches('.msg.user') && live && live.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) quiet(live, n.querySelector('.bubble')?.textContent ?? '');
         else if (n.matches('.msg.assistant')) followReply(n);
       }
       for (const n of r.removedNodes) if (n instanceof HTMLElement && live && n.contains(live)) live = null;
@@ -139,7 +162,7 @@ export function setupNextStep(deps: Deps): void {
     (e) => {
       if (e.key !== 'Enter' || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return;
       const card = live;
-      if (!card?.isConnected || !deps.canPick(e)) return;
+      if (!card?.isConnected || !deps.ready() || !deps.canPick(e)) return;
       const first = card.querySelector<HTMLButtonElement>('.next-step-reply');
       if (!first) return;
       e.preventDefault();

@@ -89,6 +89,7 @@ const SCRIPTS = [
   { name: 'browser-hardening' },
   { name: 'browser-drag-regions', shots: 'none' },
   { name: 'chat-cards' },
+  { name: 'next-step' },
   { name: 'mcp-servers', shots: 'none' },
   { name: 'cost' },
 ];

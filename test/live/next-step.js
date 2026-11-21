@@ -161,6 +161,43 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
     await app.screenshot(path.join(shots, 'next-step-long-labels.png'));
     await app.evaluate(`[...document.querySelectorAll('#messages .next-step')].pop().style.width = ''`);
 
+    // 9. While the turn still runs (the card is drawn at the call, the reply not written yet) a click or ⌘↵ does nothing
+    replies.push({ content: '', toolCalls: [{ id: 'n9', name: 'next_step', args: { recap: 'The plan is ready.', question: 'Start on it?', replies: ['Start', 'Stop here'] } }] });
+    replies.push({ content: 'Here is the plan in full: tokens first, then the page.', delayMs: 3000 });
+    await app.send('Plan it.');
+    await app.waitFor(`document.querySelectorAll('#messages .next-step').length === 7`, 10_000, 'the card while the run goes on');
+    await realClick(`[...document.querySelectorAll('#messages .next-step')].pop().querySelector('.next-step-reply')`);
+    await app.evaluate(`document.querySelector('#input').focus()`);
+    await app.key('Enter', { meta: true });
+    await sleep(300);
+    const during = await app.evaluate(`(async () => ({ running: !(await oc.sessions.list()).every((m) => !m.status?.running), last: [...document.querySelectorAll('#messages > .msg.user .bubble')].pop().textContent.trim(), quiet: [...document.querySelectorAll('#messages .next-step')].pop().classList.contains('quiet') }))()`);
+    check('9: while the run goes on a click and ⌘↵ send nothing; the card stays live', during.running && during.last === 'Plan it.' && !during.quiet, during);
+    await app.waitFor(nothingRuns, 30_000, 'the ninth run to end');
+
+    // 10. After a reload the last card, with nothing after it, keeps its buttons; a pick sends its label alone, as
+    // plain text: the draft stays in the chat bar and the image waiting in the tray stays there
+    await app.evaluate('location.reload()');
+    await app.waitFor(`document.querySelectorAll('#messages .next-step').length === 7`, 15_000, 'the stored cards (9)');
+    await sleep(800);
+    c = await cards();
+    check('10: stored, the last card (no message after it) is live with both replies; the ones before are quiet', !c[6].quiet && c[6].buttons.length === 2 && c[6].buttons.every((b) => !b.disabled) && c.slice(0, 6).every((x) => x.quiet), c.map((x) => [x.quiet, x.buttons.length]));
+    await app.evaluate(`(() => {
+      const i = document.querySelector('#input');
+      i.value = 'my draft';
+      const bin = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+      const dt = new DataTransfer();
+      dt.items.add(new File([Uint8Array.from(bin, (ch) => ch.charCodeAt(0))], 'dot.png', { type: 'image/png' }));
+      i.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    })()`);
+    await app.waitFor(`document.querySelectorAll('#attachments .attachment:not(.pending)').length === 1`, 10_000, 'the image in the tray');
+    replies.push({ content: 'Stopping here.' });
+    await realClick(`[...document.querySelectorAll('.next-step-reply')].find((b) => b.dataset.reply === 'Stop here')`);
+    await app.waitFor(nothingRuns, 30_000, 'the tenth run to end');
+    await sleep(400);
+    const pick = await app.evaluate(`(() => { const u = [...document.querySelectorAll('#messages > .msg.user')].pop(); return { text: u.querySelector('.bubble').textContent.trim(), images: u.querySelectorAll('.bubble-image').length, draft: document.querySelector('#input').value, tray: document.querySelectorAll('#attachments .attachment').length }; })()`);
+    const sentImages = app.mock.state.requests.filter((q) => q.url === '/v1/chat/completions').pop()?.payload.messages.filter((m) => m.role === 'user').pop()?.content;
+    check('10: the pick sent "Stop here" alone: no image with it, the draft and the image left where they were', pick.text === 'Stop here' && pick.images === 0 && pick.draft === 'my draft' && pick.tray === 1 && !JSON.stringify(sentImages ?? '').includes('image_url'), { pick, sentImages });
+
     const errors = app.console.filter((l) => /^\[(error|exception)\]/.test(l));
     check('no renderer errors', errors.length === 0, errors.slice(0, 3));
   } finally {

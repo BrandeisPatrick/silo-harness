@@ -1086,10 +1086,10 @@ export type TranscriptItem =
   /** A call Auto mode's safety check blocked is shown as one quiet line instead of a tool row */
   | { role: 'auto_blocked'; block: AutoBlock }
   /**
-   * A next_step call is shown as its card, quiet (no buttons): `chosen` is the reply the user's next message was,
-   * when it was one of them
+   * A next_step call is shown as its card: `chosen` is the reply the user's next message was, when it was one of
+   * them; `open` when no user message came after it and no card after it (it keeps its buttons), else it is quiet
    */
-  | { role: 'next_step'; step: NextStep; chosen?: string };
+  | { role: 'next_step'; step: NextStep; chosen?: string; open?: true };
 
 export interface SessionsApi {
   list(): Promise<SessionMeta[]>;

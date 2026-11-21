@@ -57,6 +57,7 @@ export function parseNextStep(args: unknown): NextStep {
   if (replies.some((r) => !r)) throw new Error('Each reply needs a label.');
   if (replies.length > MAX_REPLIES) throw new Error(`Give at most ${MAX_REPLIES} replies (got ${replies.length}).`);
   for (const r of replies) if (chars(r) > MAX_REPLY) throw new Error(`The reply "${r}" is ${chars(r)} characters; keep each to ${MAX_REPLY}.`);
+  for (const r of replies) if (/^[/#@!]/.test(r)) throw new Error(`The reply "${r}" starts with ${r[0]}; a reply is plain words the user would say, not a command, mention or note.`);
   if (replies.length === 2 && replies[0].toLowerCase() === replies[1].toLowerCase()) throw new Error('The two replies are the same; give two different answers.');
   if (replies.length && !question) throw new Error('Replies answer a question: add the question, or leave the replies out.');
   return { recap, question, replies };

@@ -50,6 +50,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   check('a trailing "(Recommended)" is dropped before measuring', JSON.stringify(rec.replies) === JSON.stringify(['ESLint + tsc', 'Only tsc']) && parseNextStep({ recap: 'r', question: 'q?', replies: ['x'.repeat(40) + ' (Recommended)'] }).replies[0].length === 40, rec.replies);
   check('three replies: refused', /at most 2 replies/.test(throws(() => parseNextStep({ ...CARD, replies: ['A', 'B', 'C'] }))));
   check('replies that are not a list: refused', /must be a list/.test(throws(() => parseNextStep({ ...CARD, replies: 'Yes' }))));
+  check('a reply that starts with /, #, @ or ! (after trimming): refused, as it would run a command, a note or a mention', ['/dream', ' /effort max', '#remember', '@file', '!ls'].every((r) => /starts with/.test(throws(() => parseNextStep({ ...CARD, replies: [r] })))) && parseNextStep({ ...CARD, replies: ['Yes /now'] }).replies[0] === 'Yes /now');
   check('an empty reply: refused', /needs a label/.test(throws(() => parseNextStep({ ...CARD, replies: ['Yes', '  '] }))) && /needs a label/.test(throws(() => parseNextStep({ ...CARD, replies: [3] }))));
   check('the same reply twice: refused', /the same/.test(throws(() => parseNextStep({ ...CARD, replies: ['Yes', 'yes'] }))));
   check('replies without a question: refused', /add the question/.test(throws(() => parseNextStep({ recap: 'r', replies: ['Yes'] }))));
@@ -120,6 +121,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   const at = items.indexOf(card);
   const answerAt = items[at - 1]?.at;
   check('1: the stored reply has the time it was written (its turn\'s end)', typeof answerAt === 'number' && Math.abs(Date.now() - answerAt) < 60_000 && items.filter((i) => i.role === 'user').every((u) => typeof u.at !== 'number'), answerAt);
+  check('1: the last card with no user message after it is stored open (it keeps its buttons)', card.open === true, card);
   check('1: the card comes right after the reply it closes', items[at - 1]?.role === 'assistant' && items[at - 1].text === 'The importer now resumes.');
 
   // 2. The user's next message is a reply's label: the stored card marks it
@@ -128,7 +130,7 @@ const CARD = { recap: 'The importer resumes after a crash and its tests pass. No
   await idle();
   items = toTranscript(app.store.get(A));
   card = items.find((i) => i.role === 'next_step');
-  check('2: the stored card marks the chosen reply', card?.chosen === 'Yes, new branch', card);
+  check('2: the stored card marks the chosen reply, and is open no more', card?.chosen === 'Yes, new branch' && !card.open, card);
 
   // 1b. The call first, then the reply (as the tool asks): the card's turn has its reply after the card
   state.replies.push({ content: '', toolCalls: [{ id: 'n1b', name: 'next_step', args: { recap: 'Lint is not set up yet.', question: 'Which checks should CI run?', replies: ['ESLint + tsc (Recommended)', 'Only tsc'] } }] });

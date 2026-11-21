@@ -414,11 +414,16 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
   markChosenReplies(items);
 }
 
-/** A next_step card's chosen reply: the user's next message, when it was one of the card's replies. */
+/**
+ * A next_step card's chosen reply: the user's next message, when it was one of the card's replies. The last card with
+ * no user message after it is still open: the window gives it its buttons.
+ */
 function markChosenReplies(items: TranscriptItem[]): void {
   items.forEach((item, i) => {
     if (item.role !== 'next_step' || !item.step.replies.length) return;
     const next = items.slice(i + 1).find((x) => x.role === 'user');
+    if (!next && !items.slice(i + 1).some((x) => x.role === 'next_step')) item.open = true;
+    else delete item.open;
     const said = next?.role === 'user' ? next.text.trim().toLowerCase() : '';
     const chosen = said ? item.step.replies.find((r) => r.toLowerCase() === said) : undefined;
     if (chosen) item.chosen = chosen;

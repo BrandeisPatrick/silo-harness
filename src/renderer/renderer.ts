@@ -2340,14 +2340,24 @@ setupAutoBlocked({ messages: messagesEl });
 import { setupNextStep } from './next-step.js';
 setupNextStep({
   messages: messagesEl,
-  // A reply's label goes as the user's message by the chat bar's path; what was typed meanwhile stays in the chat bar
-  send: (label) => {
-    const draft = inputEl.value;
-    inputEl.value = label;
-    void send().finally(() => {
-      if (draft && !inputEl.value) restoreComposerText(draft);
-    });
+  // A reply's label goes straight to the agent as plain text: never a command, note or mention, no images from the
+  // tray, the chat bar untouched. Not sent (a run going, an error): false, and the card stays live.
+  send: async (label) => {
+    if (running() || rewinding || sending) return false;
+    if (activePlan?.pending()) await activePlan.decide('keep');
+    const bubble = addUserMessage(label, []);
+    endAssistant();
+    const res = await sendToAgent(label, []);
+    if (res.ok && res.queued && res.id) {
+      bubble.remove();
+      queueList.add({ id: res.id, text: label, attachments: [], createdAt: Date.now() });
+    }
+    if (res.ok) return true;
+    bubble.remove();
+    addSystemMessage(res.error ?? 'Could not start the run.', 'error');
+    return false;
   },
+  ready: () => !running() && !rewinding && !sending,
   canPick: (e) => {
     if (dialogOpen() || isMenuOpen() || !slashMenu.hidden || titleEditing() || approvals.pending() || rewinding) return false;
     const t = e.target as HTMLElement;
