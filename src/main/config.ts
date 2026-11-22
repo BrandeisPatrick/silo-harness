@@ -179,6 +179,12 @@ export function resetBundledDefaults(): void {
   bundled = undefined;
 }
 
+/** The named providers the bundle defines (without keys): Settings → Models neither removes them nor saves a key under a variable one names. */
+export function bundledProviders(): Record<string, unknown> {
+  const p = bundledDefaults().providers;
+  return isRecord(p) ? p : {};
+}
+
 /** defaultConfig() with the bundled defaults merged over it, section by section the way a config.json is. */
 export function baseConfig(): AppConfig {
   const d = defaultConfig();
@@ -437,5 +443,11 @@ export function saveConfig(cfg: AppConfig): void {
   const owned = withoutSettings(cfg);
   const stored = Object.keys(bundle).length ? (withoutBundled(owned as unknown as Record<string, unknown>, bundle as Record<string, unknown>) as unknown as AppConfig) : owned;
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify({ ...stored, schemaVersion: SCHEMA_VERSION }, null, 2));
+  // Owner-only: it may hold a key (the gateway's, a provider's) saved in Settings → Models
+  fs.writeFileSync(configPath(), JSON.stringify({ ...stored, schemaVersion: SCHEMA_VERSION }, null, 2), { mode: 0o600 });
+  try {
+    fs.chmodSync(configPath(), 0o600); // the mode applies only when the file is created
+  } catch {
+    /* a file system without modes */
+  }
 }

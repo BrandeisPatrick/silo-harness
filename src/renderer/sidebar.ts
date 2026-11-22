@@ -718,7 +718,8 @@ export function createSidebar(d: SidebarDeps): SidebarView {
   // ---------- Navigation rows and footer ----------
 
   scheduledRow.addEventListener('click', () => d.openPage('scheduled'));
-  customizeRow.addEventListener('click', () => d.openSettings('mods'));
+  // Customize: the looks (Appearance's tabs, at the one last open); the mods themselves are a click away in its nav
+  customizeRow.addEventListener('click', () => d.openSettings('appearance'));
   dreamingRow.addEventListener('click', () => d.openPage('dreaming'));
   /** The row of the page in the main column shows selected, like a session on screen */
   function syncNav(): void {

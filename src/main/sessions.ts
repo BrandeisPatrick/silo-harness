@@ -10,10 +10,14 @@ import { CONTEXT_NOTE_PREFIX, FAILED_RESULT, HOOK_NOTE_PREFIX, isCompactPreamble
 import { imagesByCall } from './images/store';
 import { FILE_BLOCK_RE, mentionedPaths } from './mentions';
 import { PROPOSAL_ID_RE, PROPOSAL_TOOLS } from './dreaming/names';
-import { actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
+import { actionDetails, actionLine, AUTO_NOTE_PREFIX, blockedReason } from './agent/auto-rules';
 import { LOAD_TOOLS } from './tools/groups';
+import { nextStepOrNull } from './tools/next-step';
 
 export type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+
+/** When a reply was written (ms), kept on its stored message under this key for the window; never sent to a model */
+export const WRITTEN_AT = 'written_at';
 
 export interface Session {
   id: string;
@@ -269,7 +273,7 @@ export function toTranscript(s: Session, opts: { running?: boolean } = {}): Tran
   const turnByAt = new Map<number, number>();
   (s.turns ?? []).forEach((t, i) => turnByAt.set(t.at, i));
   appendTranscript(s, s.messages, items, turnByAt, opts.running === true, shown);
-  // Each user message carries how long its turn worked, when that was recorded
+  // Each user message carries how long its turn worked, when that was recorded (a reply, when it was written: WRITTEN_AT)
   let n = 0;
   for (const it of items) {
     if (it.role !== 'user') continue;
@@ -353,7 +357,8 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
       items.push(item);
     } else if (m.role === 'assistant') {
       const text = typeof m.content === 'string' ? m.content : '';
-      if (text) items.push({ role: 'assistant', text });
+      const at = (m as unknown as Record<string, unknown>)[WRITTEN_AT];
+      if (text) items.push({ role: 'assistant', text, ...(typeof at === 'number' && at > 0 ? { at } : {}) });
       for (const call of m.tool_calls ?? []) {
         if (call.type !== 'function') continue;
         // Loading a tool group is the agent's own business: the tools it loaded show their rows when they are used
@@ -385,7 +390,13 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         // A call Auto mode's check blocked is one quiet line (auto-blocked.ts in the window)
         const blocked = blockedReason(result);
         if (blocked !== null) {
-          items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
+          items.push({ role: 'auto_blocked', block: { id: call.id, sessionId: s.id, name: call.function.name, what: actionLine(call.function.name, call.function.arguments), ...actionDetails(call.function.name, call.function.arguments), reason: blocked, at: 0 } });
+          continue;
+        }
+        // A next_step call is its card (one the tool refused stays a tool row with the reason)
+        const step = call.function.name === 'next_step' && ok ? nextStepOrNull(call.function.arguments) : null;
+        if (step) {
+          items.push({ role: 'next_step', step });
           continue;
         }
         // A show_image call is the image itself (a failed one stays a tool row with its error)
@@ -398,6 +409,24 @@ function appendTranscript(s: Session, messages: Msg[], items: TranscriptItem[], 
         items.push({ role: 'tool', name: call.function.name, args: call.function.arguments, result, ok, ...(sandbox ? { sandbox } : {}) });
       }
     }
+  });
+  markChosenReplies(items);
+}
+
+/**
+ * A next_step card's chosen reply: the user's next message, when it was one of the card's replies. The last card with
+ * no user message after it is still open: the window gives it its buttons.
+ */
+function markChosenReplies(items: TranscriptItem[]): void {
+  items.forEach((item, i) => {
+    if (item.role !== 'next_step' || !item.step.replies.length) return;
+    const next = items.slice(i + 1).find((x) => x.role === 'user');
+    if (!next && !items.slice(i + 1).some((x) => x.role === 'next_step')) item.open = true;
+    else delete item.open;
+    const said = next?.role === 'user' ? next.text.trim().toLowerCase() : '';
+    const chosen = said ? item.step.replies.find((r) => r.toLowerCase() === said) : undefined;
+    if (chosen) item.chosen = chosen;
+    else delete item.chosen;
   });
 }
 

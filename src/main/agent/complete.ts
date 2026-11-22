@@ -9,7 +9,7 @@ import type { AgentEvent, AppConfig, EffortLevel } from '../../shared/types';
 import { isContextLengthError } from '../compact';
 import { contextSize, ollamaChat, type ToolCall, type ToolSpec, type Usage } from '../ollama';
 import { ollamaOf, resolveProvider } from '../providers';
-import type { Msg } from '../sessions';
+import { WRITTEN_AT, type Msg } from '../sessions';
 import { completeAnthropic, withoutNative, type ThinkingBlock, type ThinkingMode } from './anthropic';
 import { compatEffortFields, effortRefused, effortRefusedNotice, isEffortRefusal } from './effort';
 import { cacheFields, cacheShape, isFieldRefusal, refusedCacheFields, type CacheShape } from './gateway-cache';
@@ -206,8 +206,12 @@ async function completeAttempt(
   const providerName = cfg.provider || 'ollama';
   // Anthropic's own API: the Messages path, which caches (agent/anthropic.ts)
   if (native) return completeAnthropic({ ...host, effort: () => host.effort?.(providerName) }, native, model, history, specs, signal, turn);
-  // The thinking blocks kept for that path go to no other provider
-  history = withoutNative(history);
+  // The thinking blocks kept for that path go to no other provider; when a reply was written goes to none
+  history = withoutNative(history).map((m) => {
+    if (!(WRITTEN_AT in m)) return m;
+    const { [WRITTEN_AT]: _at, ...rest } = m as unknown as Record<string, unknown>;
+    return rest as unknown as Msg;
+  });
   if (!client) {
     const ol = ollamaOf(cfg);
     const chat = (tools: ToolSpec[]) =>

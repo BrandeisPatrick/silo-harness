@@ -89,7 +89,7 @@ const userTexts = (payload) => (payload.messages ?? []).filter((m) => m.role ===
     const shown = await app
       .waitFor(
         `(() => {
-          const bubbles = [...document.querySelectorAll('#messages .msg.user')].map((e) => e.innerText.trim());
+          const bubbles = [...document.querySelectorAll('#messages .msg.user')].map((e) => (e.querySelector('.bubble') ?? e).innerText.trim());
           const rows = [...document.querySelectorAll('#queue .queue-item .queue-text')].map((e) => e.textContent.trim());
           const bash = document.querySelector('.tool[data-tool="bash"]');
           const cut = bash && !bash.querySelector('.tool-status.spin');
@@ -118,7 +118,7 @@ const userTexts = (payload) => (payload.messages ?? []).filter((m) => m.role ===
     const end = await app.evaluate(`(async () => ({
       idle: (await oc.sessions.list()).every((m) => !m.status?.running),
       queue: document.querySelectorAll('#queue .queue-item').length, hidden: document.querySelector('#queue').hidden,
-      bubbles: [...document.querySelectorAll('#messages .msg.user')].map((e) => e.innerText.trim()),
+      bubbles: [...document.querySelectorAll('#messages .msg.user')].map((e) => (e.querySelector('.bubble') ?? e).innerText.trim()),
       interrupted: /\\bInterrupted\\./.test(document.querySelector('#messages').innerText),
       composer: document.querySelector('#input').value,
       bashRow: document.querySelector('.tool[data-tool="bash"]')?.dataset.state ?? null,

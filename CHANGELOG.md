@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.21.0 — 2026-11-21
+
+A redesigned Settings with API keys on the Models page, a calmer session view in two text sizes, and a next-step card with buttons that answer the assistant's question.
+
+### Highlights
+
+- **Settings redesigned.** Eleven pages show everyday settings in cards and keep the rest under "Advanced"; Models is one card with the provider, model and API key.
+  ![Settings, Models: provider, model and API key in one card, with Connection and Add provider](docs/releases/0.21.0/settings-models.png)
+- **A calmer session.** Replies are larger and dark, activity is smaller and grey, and a turn's steps fold into one line that opens as a card.
+  ![A session: the activity line and its card of steps, the reply, and the next-step card](docs/releases/0.21.0/session.png)
+- **Next-step card.** When a turn leaves you a decision, a card under the reply gives a recap, one question and buttons that answer it; ⌘↵ picks the first ([details](docs/reference.md#next-step)).
+
+### New
+
+- **API keys in Settings.** Paste, replace or remove a provider's key on the Models page; it shows as dots and its last four characters.
+- **Add provider.** A short form on the Models page adds a provider without editing `settings.json`.
+- **Developer page.** Configuration files, hooks, folders and resets are on one page.
+- **Full reset.** "Full reset…" moves sessions, settings, browser data and your mods to the Trash and restarts the app as new.
+- **Reply time.** Each reply shows when it was written, next to Copy.
+
+### Improved
+
+- **Models page.** The model picker searches the provider's list, and "Test" sends one request to the chosen model.
+- **Appearance.** The colour scheme is picked from thumbnails, and the Background, Chat bar and Conversation looks are chosen here.
+- **Blocked actions.** Actions Auto mode blocked are rows in the turn's activity, counted on its line, each with its command, reason and "Allow".
+- **Code panels.** Code blocks and tool output sit on bordered panels, and code words in a sentence get a faint tint.
+- **Shorter Settings text.** Rows have short titles, Skills is one line per skill, and an empty list shows only its add field.
+- **Phone page.** The remote page shows blocked actions and the next-step card as the window does.
+
+### Fixed
+
+- **Command line tool.** The `silo` command installed from the app starts; in 0.19.0 and 0.20.0 it stopped with an error.
+- **Settings hover.** A hovered page in Settings no longer looks like the selected one.
+- **Copy button.** Copy sits under a reply and no longer covers its text.
+
+### Security
+
+- **Keys stay hidden.** A saved key never returns to the window whole and is written only to your own files, readable by you alone.
+- **Errors passed to mods.** A failed model call reaches a mod in plain words with any key removed.
+- **Private history log.** The history log is readable only by you.
+- **Resets need a click.** A reset starts only from Settings in the main window, never from the phone, a mod or the agent.
+
+### For developers
+
+- **`next_step` tool.** The model calls `next_step` with a recap, an optional question and up to two replies ([details](docs/reference.md#next-step)).
+- **Type variables.** `--fs-reply` and `--fs-act` size replies and activity; `--fs-body` and `--fs-title` are unchanged for mods.
+- **Panel variables.** A look may set `--code-panel` and `--code-inline`; `--code-bg` still works as before.
+- **Live scripts report failure.** Eight live scripts that always exited 0 now fail when one of their checks fails.
+- **Bundled defaults.** A repackaged app can ship a `defaults.json` that pre-fills settings, never keys; people add their key under Settings → Models ([details](docs/configure.md#bundled-defaults)).
+
+### Upgrade notes
+
+- **Settings moved.** Context settings are under Models → Advanced, configuration files and hooks under Developer, and looks under Appearance.
+
+### Known issues
+
+- **Other copies of the app.** Quit any other running copy of Silo Harness before a full reset.
+- **Gateway caching untested.** The check's cache marks are tested against a stand-in service, not yet against a real gateway.
+- **Files written by commands.** Outside a Git repository, files the agent writes through shell commands do not appear in Changes or Rewind.
+
 ## 0.20.0 — 2026-11-20
 
 A Models page with a live test for every model, a choice of model for the safety check, reasoning before acting, and a session log that records cost.

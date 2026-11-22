@@ -10,9 +10,14 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Type scale, the app's: rows 14/20 (--fs-ui), secondary text 13/18 (--fs-small), captions and badges 12/16
-     (--fs-micro), reading text 15/21 (--fs-body), code 13/20 (--fs-code) */
+     (--fs-micro), reading text 15/21 (--fs-body), the conversation's replies 16/24 (--fs-reply), what the agent did
+     14/20 (--fs-act), code 13/20 (--fs-code) */
   --fs-body: 15px;
   --lh-body: 21px;
+  --fs-reply: 16px;
+  --lh-reply: 24px;
+  --fs-act: 14px;
+  --lh-act: 20px;
   --fs-head: 17px;
   --lh-head: 24px;
   --fs-title: 15px;

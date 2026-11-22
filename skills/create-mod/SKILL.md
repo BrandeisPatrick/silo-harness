@@ -99,7 +99,7 @@ Fix every problem it lists and call it again until it says `mod.json: valid`. Wh
 
 ## 6. Tell the user how to turn it on
 - A mod with views or commands: they turn it on from the card in the chat or in Settings → Mods.
-- A look or background: they press Preview on the card (or open Settings → Mods → Background, Chat bar or Conversation), then Use. The first Use of their own look asks for approval once.
+- A look or background: they press Preview on the card (or open Settings → Appearance → Background, Chat bar or Conversation), then Use. The first Use of their own look asks for approval once.
 - Never edit config files to turn a mod on or apply a look yourself.
 - Adding a permission to a mod that is on pauses it until they approve. Adding a look does not; its first Use asks.
 - Once on, every save reloads the page (a look reloads in the preview as well).

@@ -117,11 +117,11 @@ function logoPng(size = 240) {
       await imagesLoaded(app);
       // The finished turn is folded under its "Worked for" line: open it, so its tool rows are laid out
       await app.unfold();
-      // The browser calls fold into one line (Tool activity: Summary), which carries the screenshot's thumbnail;
-      // opened, it shows the screenshot's own row
+      // The thumbnail is where the calls show: a turn's one group is drawn flat, its calls as the card's rows, and the
+      // screenshot's own row carries it; several groups each fold into one line (Tool activity: Summary), which does
       // (the row that carries a picture: in a hidden window a first attempt can fail, and the model then takes another)
-      const folded = await app.evaluate(`(() => { const g = [...document.querySelectorAll('.tool[data-tool="browser_screenshot"]')].find((r) => r.querySelector(':scope > summary img.tool-thumb'))?.closest('.tool-group'); if (!g) return null; const t = g.querySelector(':scope > summary .group-thumbs img.tool-thumb'); return { open: g.open, thumb: Boolean(t), thumbH: t ? t.getBoundingClientRect().height : 0 }; })()`);
-      check('(c) the folded line shows the screenshot as a 20 px thumbnail', !folded || (!folded.open && folded.thumb && Math.round(folded.thumbH) === 20), folded);
+      const folded = await app.evaluate(`(() => { const r = [...document.querySelectorAll('.tool[data-tool="browser_screenshot"]')].find((x) => x.querySelector(':scope > summary img.tool-thumb')); const g = r?.closest('.tool-group'); if (!g) return null; const flat = g.classList.contains('flat'); const t = flat ? r.querySelector(':scope > summary img.tool-thumb') : g.querySelector(':scope > summary .group-thumbs img.tool-thumb'); return { flat, open: g.open, thumb: Boolean(t), thumbH: t ? t.getBoundingClientRect().height : 0 }; })()`);
+      check('(c) the screenshot shows as a 20 px thumbnail: on its own row in a flat group, else on the group\'s folded line', !folded || ((folded.flat || !folded.open) && folded.thumb && Math.round(folded.thumbH) === 20), folded);
       await app.evaluate(`[...document.querySelectorAll('.tool[data-tool="browser_screenshot"]')].find((r) => r.querySelector(':scope > summary img.tool-thumb'))?.closest('.tool-group')?.setAttribute('open', '')`);
       const shot = await app.evaluate(`(() => { const f = [...document.querySelectorAll('.reply-image')].pop(); const thumb = document.querySelector('.tool[data-tool="browser_screenshot"] > summary img.tool-thumb'); return { fig: f && f.querySelector('img').getAttribute('src'), thumb: Boolean(thumb), thumbH: thumb ? thumb.getBoundingClientRect().height : 0 }; })()`);
       check('(c) the screenshot is in the reply', shot.fig && /images\/img-3\.png$/.test(shot.fig), shot);
@@ -166,9 +166,12 @@ function logoPng(size = 240) {
     await sleep(300);
     const group = await app.evaluate(`(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); if (!g) return null; return { thumbs: g.querySelectorAll(':scope > summary .group-thumbs img.tool-thumb').length, more: g.querySelector(':scope > summary .thumb-more')?.innerText, open: g.open }; })()`);
     check('(e) a group row shows three thumbnails and +2', group && group.thumbs === 3 && group.more === '+2', group);
-    await app.evaluate(`[...document.querySelectorAll('.tool-group')].pop().querySelector(':scope > summary .group-thumbs img').click()`);
+    // A turn's one group is drawn flat (open, its line hidden): there the thumbnail to click is on a call's own row
+    const rowOpen = `(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); return g.classList.contains('flat') ? g.querySelector(':scope > .group-body > .tool').open : g.open; })()`;
+    const openBefore = await app.evaluate(rowOpen);
+    await app.evaluate(`(() => { const g = [...document.querySelectorAll('.tool-group')].pop(); (g.classList.contains('flat') ? g.querySelector(':scope > .group-body > .tool > summary img.tool-thumb') : g.querySelector(':scope > summary .group-thumbs img')).click(); })()`);
     await sleep(300);
-    check('(e) a group thumbnail opens the lightbox without opening the group', await app.evaluate(`document.getElementById('lightbox').open && ![...document.querySelectorAll('.tool-group')].pop().open`));
+    check('(e) a thumbnail opens the lightbox without toggling its group (or, flat, its row)', (await app.evaluate(`document.getElementById('lightbox').open`)) && (await app.evaluate(rowOpen)) === openBefore);
     await app.evaluate(`document.getElementById('lightbox').close()`);
     await app.evaluate(`document.getElementById('messages').scrollTop = 1e9`);
     await both(app, 'e-group', await last(app, '.tool-group'), 16);

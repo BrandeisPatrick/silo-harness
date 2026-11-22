@@ -3,6 +3,7 @@
 // First: carry over the folders of the app's older names, before any other module reads them.
 import { setAppDataDir } from './guard';
 import './carry-over';
+import './reset-at-launch';
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, net, Notification, protocol, shell, webContents } from 'electron';
 import path from 'node:path';
 import type { AgentEvent, BrowserState, McpServerInfo } from '../shared/types';
@@ -32,6 +33,7 @@ import { setupUpdates } from './updates';
 import { setupTiming } from './timing-service';
 import { setupCost } from './cost-service';
 import { setupReport } from './report-service';
+import { finishReset, resetNotices, setupReset } from './reset';
 
 let host: AppHost | null = null;
 let win: BrowserWindow | null = null;
@@ -151,6 +153,10 @@ function createWindow(): void {
   };
   servers?.on('servers', onServers);
   if (servers) w.webContents.once('did-finish-load', () => onServers(servers.list()));
+  // A reset refused or not finished at this launch (reset.ts): said once
+  w.webContents.once('did-finish-load', () => {
+    for (const message of resetNotices.splice(0)) w.webContents.send('agent:event', { type: 'error', kind: 'notice', message } satisfies AgentEvent, a.runtime.foregroundId());
+  });
   const onTermData = (id: string, data: string) => {
     if (!w.isDestroyed()) w.webContents.send('terminal:data', id, data);
   };
@@ -319,6 +325,9 @@ app.whenReady().then(() => {
   setupTiming(a);
   setupCost(a);
   setupReport(a);
+  setupReset(a);
+  // What a reset moved aside at this launch (or one before that could not finish) goes to the Trash
+  void finishReset(app.getPath('userData'), (line) => console.log(line));
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

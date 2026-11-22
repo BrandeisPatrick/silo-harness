@@ -2,7 +2,7 @@
 // (CDP Input events, not el.click()) in the hidden window against the mock model. One user turn of several model
 // replies, each with slow shell calls, keeps the line live for seconds. Checks: a click opens the list and it stays
 // open while more calls join, a second click shuts it and it stays shut, and the run's end keeps that choice; no row
-// opens by itself (a lone call opens to its details only once the run is over); the line does not jump under the
+// opens by itself; once the run is over and the turn unfolded, a turn's only group shows its calls as rows; the line does not jump under the
 // pointer (no chevron riding on the end of the changing words, no scroll away from it); a mouse click leaves no focus
 // ring and the composer keeps the focus (on the line, on a row in it and on the turn's header); keyboard focus still
 // shows the ring, and Enter and Space toggle the line. Opened while live, the line heads its list in the present
@@ -48,7 +48,7 @@ const { check, done } = checker();
     app.evaluate(`(() => {
       const g = ${G}; if (!g) return null;
       const s = g.querySelector(':scope > summary');
-      return { open: g.open, live: g.classList.contains('live'), rows: [...g.querySelectorAll(':scope > .group-body > .tool')].map((r) => r.open), words: s.querySelector('.group-verb').textContent, ring: s.matches(':focus-visible'), focused: document.activeElement === s, top: Math.round(s.getBoundingClientRect().top) };
+      return { open: g.open, live: g.classList.contains('live'), rows: [...g.querySelectorAll(':scope > .group-body > .tool')].map((r) => r.open), words: s.querySelector('.group-verb').textContent, flat: g.classList.contains('flat'), ring: s.matches(':focus-visible'), focused: document.activeElement === s, top: Math.round(s.getBoundingClientRect().top) };
     })()`);
   /** Samples the last line every 50 ms: open, its rows, where its chevron is drawn (null: not drawn) and its top */
   const record = () =>
@@ -87,7 +87,8 @@ const { check, done } = checker();
     await sleep(300);
     s = await state();
     check('1: a call joins: the list stays open, no row opened by itself', s.open && s.rows.every((r) => !r), s);
-    check('1: the line moved at most a row as the view followed the bottom', before.top - s.top <= 30, { before: before.top, now: s.top });
+    // (a row, and the 8 px the opened list keeps under it inside the turn's card)
+    check('1: the line moved at most a row as the view followed the bottom', before.top - s.top <= 36, { before: before.top, now: s.top });
     await idle();
     const log1 = await stop();
     const live1 = log1.filter((e) => e.live);
@@ -116,7 +117,7 @@ const { check, done } = checker();
     check('2: it stays shut while the next call joins and the run ends', log2.length > 10 && log2.every((e) => !e.open), log2.filter((e) => e.open).slice(0, 2));
     await app.unfold();
     s = await state();
-    check('2: after the run "Ran 2 commands", still shut', s.words === 'Ran 2 commands' && !s.open, s);
+    check('2: after the run, unfolded, the turn\'s one group "Ran 2 commands" shows its calls as rows, none opened', s.words === 'Ran 2 commands' && s.flat && s.rows.length === 2 && s.rows.every((r) => !r), s);
 
     // ---------- 3. Keyboard: the ring shows, Enter and Space toggle ----------
     replies.push({ content: '', toolCalls: [{ id: 'c1', name: 'bash', args: { command: 'sleep 3; echo c1' } }] });
@@ -149,6 +150,8 @@ const { check, done } = checker();
     s = await state();
     check('4: a click between two calls opens the line', s.open && s.live && s.rows.every((r) => !r), s);
     await app.waitFor(liveWith(2), 15_000, 'the second call (4)');
+    // Let the new row settle where it lands (it fades in) before the mouse goes to it
+    await sleep(300);
     await realClick(`${G}.querySelector(':scope > .group-body > .tool:last-child > summary')`);
     await press('h');
     const row = await app.evaluate(`(() => { const r = ${G}.querySelector(':scope > .group-body > .tool:last-child'); const s = r.querySelector(':scope > summary'); return { open: r.open, ring: s.matches(':focus-visible'), focused: document.activeElement === s, typed: document.querySelector('#input').value }; })()`);
@@ -174,9 +177,11 @@ const { check, done } = checker();
     await app.unfold();
     await app.evaluate(`${G}.scrollIntoView({ block: 'center' })`);
     await sleep(200);
-    await realClick(`${G}.querySelector(':scope > summary')`);
     s = await state();
-    check('5: a finished one-call line opens to its row', s.open && s.rows.length === 1 && s.rows[0], s);
+    check('5: unfolded, the lone call is the card\'s row, shut', s.flat && s.rows.length === 1 && !s.rows[0], s);
+    await realClick(`${G}.querySelector(':scope > .group-body > .tool > summary')`);
+    s = await state();
+    check('5: a click opens it to its details', s.rows.length === 1 && s.rows[0], s);
 
     // ---------- 6. Scrolled up a little: opening the live line and the calls after it do not move it ----------
     replies.push({ content: '', toolCalls: [{ id: 'g1', name: 'bash', args: { command: 'sleep 3; echo g1' } }] });

@@ -616,7 +616,7 @@ function doctor() {
   for (const f of info.files) {
     const label = f.scope === 'user' ? 'settings.json' : "the project's settings.json";
     if (f.error) problems.push(`${label} ${f.error}`);
-    if (f.scope === 'project' && f.exists && !f.applied) problems.push(`${label} (${f.path}) is not applied: ${f.changed ? 'it changed since you trusted it' : 'you have not trusted it'} (Settings → Configuration files).`);
+    if (f.scope === 'project' && f.exists && !f.applied) problems.push(`${label} (${f.path}) is not applied: ${f.changed ? 'it changed since you trusted it' : 'you have not trusted it'} (Settings → Developer → Configuration files).`);
     if (f.applied || f.scope === 'user') for (const i of f.invalid) problems.push(`${label}: ${i.key}: ${i.message}`);
   }
   for (const r of rows) for (const p of r.problems || []) if (r.definedIn === 'config.json') problems.push(`config.json: ${p}`);

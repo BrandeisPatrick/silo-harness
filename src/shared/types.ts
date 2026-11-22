@@ -5,6 +5,7 @@ import type { ModsConfig } from './mods';
 import type { ImageInfo } from './images';
 import type { DreamingConfig } from './dreaming';
 import type { AutoBlock } from './auto-mode';
+import type { NextStep } from './next-step';
 import type { CallRecord, RunInfo, RunResult } from './history';
 
 import type { RpcEvents, RpcMethods } from './rpc';
@@ -92,6 +93,16 @@ export interface ProviderView {
   headers: string[];
   /** The settings file that defines it, when one does (its fields are read-only in Settings) */
   owner?: 'user' | 'project';
+  /** The last four characters of a key that is set and long enough to keep them hidden (12 or more); never more */
+  keyTail?: string;
+  /** Where the key in effect comes from: the app's settings (config.json), your settings.json, your shell, a project's settings.json */
+  keyFrom?: 'app' | 'settings' | 'shell' | 'project';
+  /** A key typed in Settings → Models can be saved for it (in your own files) */
+  keyEditable?: boolean;
+  /** The key in effect is kept in your own files, so Settings → Models can remove it */
+  keyRemovable?: boolean;
+  /** Added by you (an entry of config.json or your settings.json), so Settings → Models can remove it */
+  removable?: boolean;
   /** Why it cannot be used as it is (no key, no model, no base URL), in plain words */
   error?: string;
   /** The effort pill; absent where the model or the service takes no effort setting */
@@ -930,6 +941,12 @@ export interface SiloHarnessApi {
   homeDir: string;
   getConfig(): Promise<AppConfig>;
   setConfig(cfg: AppConfig): Promise<AppConfig>;
+  /**
+   * Full reset (the app back to its first launch; with settingsJson your settings.json too) or Reset settings (the
+   * app's saved settings back to defaults). Everything that goes is moved to the Trash and the app relaunches. Only the
+   * main window's own page may ask (Settings → Developer, after a confirmation).
+   */
+  reset(kind: 'full' | 'settings', opts?: { settingsJson?: boolean }): Promise<{ relaunching: boolean }>;
   chooseDirectory(): Promise<string | null>;
   listOllamaModels(): Promise<string[]>;
   /** Absolute path of a File dropped onto the window (Electron's webUtils) */
@@ -1053,7 +1070,8 @@ export type TranscriptItem =
    * started worked, in ms, when that was recorded (the "Worked for 53s" line)
    */
   | { role: 'user'; text: string; images?: string[]; mentions?: string[]; turn?: number; origin?: MessageOrigin; from?: string; worked?: number }
-  | { role: 'assistant'; text: string }
+  /** at: when the reply was written, in ms, when known (a session from before 0.21 has none) */
+  | { role: 'assistant'; text: string; at?: number }
   | { role: 'tool'; name: string; args: string; result: string; ok: boolean; sandbox?: SandboxMark }
   /** A submit_plan call is shown as a plan card instead of a tool row */
   | { role: 'plan'; plan: PlanInfo }
@@ -1066,7 +1084,12 @@ export type TranscriptItem =
   /** A dream's propose_* call is shown as its proposal's card (the window has the proposal from dreaming.list) */
   | { role: 'proposal'; proposalId: string; name: string; args: string; result: string }
   /** A call Auto mode's safety check blocked is shown as one quiet line instead of a tool row */
-  | { role: 'auto_blocked'; block: AutoBlock };
+  | { role: 'auto_blocked'; block: AutoBlock }
+  /**
+   * A next_step call is shown as its card: `chosen` is the reply the user's next message was, when it was one of
+   * them; `open` when no user message came after it and no card after it (it keeps its buttons), else it is quiet
+   */
+  | { role: 'next_step'; step: NextStep; chosen?: string; open?: true };
 
 export interface SessionsApi {
   list(): Promise<SessionMeta[]>;

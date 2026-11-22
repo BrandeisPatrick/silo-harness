@@ -42,7 +42,7 @@ Commands:
 - `view`: id of a view of this mod, brought to the front when the command runs.
 - `/name args` delivers the `command` event `{ name, args }` to the mod's views. Commands register only while the mod is on; if two mods use one name, the first wins (bundled, then user, then project).
 
-Settings (`contributes.settings`), shown under the mod in Settings → Mods:
+Settings (`contributes.settings`), shown under the mod in Settings → Mods (a look's, on its tab in Settings → Appearance):
 - `key`: `^[A-Za-z][\w.-]{0,63}$`, unique. `title`: required. `description`: optional.
 - `type`: `boolean` (`default` true or false), `string` (`default`, `placeholder`), `number` (`default`, `min`, `max`, `step` > 0), `select` (`options`: non-empty list of distinct strings; `default` one of them).
 - Read with `harness.settings.get()`; `settings.changed` follows each change. Looks read them as `data-set-<key>` (key lower-cased, other characters as `-`).
@@ -108,7 +108,7 @@ Always available:
 
 Classes: `h-row`, `h-label`, `h-value`, `h-muted`, `h-title`, `h-list` + `h-item`, `h-btn` (`.primary`, `.danger`, `.ghost`, `.sm`, `.icon`), `h-input`, `h-switch` (on `<input type="checkbox">`), `h-chip` (`.accent`, `.success`, `.danger`), `h-bar` + `h-bar-seg`, `h-bar-mark`, `h-dot`, `h-chev`, `h-icon` (`.sm`), `h-segmented` (buttons with `aria-pressed`), `h-empty`, `h-spin`, `h-mono`, `h-md` (holds `ui.markdown()` html with working Copy buttons and links; `.compact` for the rail).
 
-Tokens: `--bg-000` to `--bg-400`, `--text-100`, `--text-200`, `--text-400`, `--border`, `--border-subtle`, `--accent`, `--danger`, `--success`, `--warn`, `--attention`, `--switch-on`, `--button-fill`, `--button-fill-hover`, `--button-text`, `--spinner`, `--segment-on`, `--code-bg`, `--code-hover`, `--bubble`, `--tok-kw`, `--tok-str`, `--tok-com`, `--tok-num`, `--tok-pun`, `--font`, `--mono`, `--r-control`, `--r-card`, `--h-inset-x`, `--h-inset-top`, `--h-inset-bottom`, and the type scale `--fs-ui`/`--lh-ui` (14/20), `--fs-small`/`--lh-small` (13/18), `--fs-micro`/`--lh-micro` (12/16), `--fs-body`/`--lh-body` (15/21), `--fs-code`/`--lh-code` (13/20), `--fs-title`/`--lh-title`, `--fs-head`/`--lh-head`.
+Tokens: `--bg-000` to `--bg-400`, `--text-100`, `--text-200`, `--text-400`, `--border`, `--border-subtle`, `--accent`, `--danger`, `--success`, `--warn`, `--attention`, `--switch-on`, `--button-fill`, `--button-fill-hover`, `--button-text`, `--spinner`, `--segment-on`, `--code-bg`, `--code-hover`, `--bubble`, `--tok-kw`, `--tok-str`, `--tok-com`, `--tok-num`, `--tok-pun`, `--font`, `--mono`, `--r-control`, `--r-card`, `--h-inset-x`, `--h-inset-top`, `--h-inset-bottom`, and the type scale `--fs-ui`/`--lh-ui` (14/20), `--fs-small`/`--lh-small` (13/18), `--fs-micro`/`--lh-micro` (12/16), `--fs-body`/`--lh-body` (15/21), `--fs-reply`/`--lh-reply` (16/24: the conversation's replies), `--fs-act`/`--lh-act` (14/20: what the agent did), `--fs-code`/`--lh-code` (13/20), `--fs-title`/`--lh-title`, `--fs-head`/`--lh-head`.
 
 Scale: rows 14 px on a 32 px pitch (`h-item`), dense rows 13 px on 24 px, secondary text 13 px, nothing under 12 px; 8 px gaps; no page padding beyond the kit's. Rail and composer views size to their content by themselves; call `ui.resize()` after an animation.
 

@@ -3,8 +3,33 @@
 //
 // A turn is what follows a user message. Its process is the interim replies, thinking, tool rows and groups (with the
 // approvals decided in them), sub-session and message lines; the answer is the reply after its last call. Everything
-// else (shown images, cards, a plan, a card still waiting, a call Auto mode blocked with its Allow, notices, errors,
-// compaction markers) is never part of the process.
+// else (shown images, cards, a plan, a card still waiting, notices, errors, compaction markers) is never part of the
+// process. A call Auto mode blocked is one of the turn's rows: it folds with them, and the header counts it.
+
+/** At most this many kinds are named on a folded turn's line, then "and N more" */
+export const FOLD_KINDS = 3;
+
+/**
+ * The words of a finished turn's line from the phrases of what it did (tool-activity.ts, in the order things first
+ * happened): "Ran 3 commands, read 2 files, edited job.ts", at most FOLD_KINDS of them, then "and 2 more".
+ */
+export function foldWords(phrases: readonly string[]): string {
+  const list = phrases.filter(Boolean);
+  if (!list.length) return '';
+  const text = list.length <= FOLD_KINDS ? list.join(', ') : `${list.slice(0, FOLD_KINDS).join(', ')} and ${list.length - FOLD_KINDS} more`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A turn's line in parts: while it runs "Working for 18s"; after, what it did, the blocked count (a part of its own,
+ * drawn in the warning tint), and the time: "Ran 3 commands, read 2 files · 1 blocked · 2m 10s". A turn that did
+ * nothing nameable reads "Worked for 2m 10s · 1 blocked".
+ */
+export function foldLine(running: boolean, ms: number | undefined, words: string, blocked: number): { words: string; blocked: string; time: string } {
+  const b = blocked > 0 ? `${blocked} blocked` : '';
+  if (running || !words) return { words: '', blocked: b, time: headText(running, ms) };
+  return { words, blocked: b, time: typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? elapsedText(ms) : '' };
+}
 
 /** "18s", "1m 05s": the status line's format, which the header shares */
 export function elapsedText(ms: number): string {
@@ -24,8 +49,7 @@ export type NodeKind = 'call' | 'text' | 'process' | 'keep';
 /** What a top-level transcript node is to its turn, from its classes. */
 export function nodeKind(classes: readonly string[]): NodeKind {
   const has = (c: string) => classes.includes(c);
-  // A call Auto mode blocked is not: its line offers Allow, which waits for the user like a card
-  if (has('tool') || has('tool-group') || (has('session-msg') && has('sent'))) return 'call';
+  if (has('tool') || has('tool-group') || has('auto-blocked') || (has('session-msg') && has('sent'))) return 'call';
   if (has('msg') && has('assistant')) return 'text';
   if (has('thinking') || (has('approval') && has('done'))) return 'process';
   return 'keep';

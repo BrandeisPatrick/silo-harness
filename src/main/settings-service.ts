@@ -32,6 +32,16 @@ export interface SettingsHandle {
   dispose(): void;
 }
 
+/** The running feature's recompute, for a change the app itself made to your settings.json (providers-service.ts) */
+let recomputeNow: (() => SettingsInfo) | null = null;
+
+/** Reads the settings files again at once and applies them; false when the settings feature is not running. */
+export function reloadSettingsNow(): boolean {
+  if (!recomputeNow) return false;
+  recomputeNow();
+  return true;
+}
+
 /** Order-insensitive deep equality of two JSON-like values. */
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -116,7 +126,7 @@ export function setupSettings(app: App, opts: SettingsServiceOptions = {}): Sett
     if (configChanged || !same(info, before)) app.push('settings:changed', info);
     // The files changed but the config did not (an env block, which fields are owned): the window's resolved
     // providers (key set or not, who owns an entry) may still have changed.
-    if (!configChanged && !same(info, before)) app.push('config:changed', windowConfig(app.config(), info.owned));
+    if (!configChanged && !same(info, before)) app.push('config:changed', windowConfig(app.config(), info.owned, layer.envOwners()));
     return info;
   }
 
@@ -150,7 +160,8 @@ export function setupSettings(app: App, opts: SettingsServiceOptions = {}): Sett
     }),
     app.rpc.handle('app.info', () => appInfo(app)),
     app.rpc.handle('app.reveal', async (which) => {
-      const dir = which === 'userData' ? app.userData : which === 'project' ? app.config().workingDirectory : configDir();
+      // skills: your own skills folder (made when it is not there yet, so the button always opens something)
+      const dir = which === 'userData' ? app.userData : which === 'project' ? app.config().workingDirectory : which === 'skills' ? path.join(configDir(), 'skills') : configDir();
       fs.mkdirSync(dir, { recursive: true });
       const err = await openPath(dir);
       if (err) throw new Error(`Could not open ${dir}: ${err}`);
@@ -160,12 +171,16 @@ export function setupSettings(app: App, opts: SettingsServiceOptions = {}): Sett
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    if (recomputeNow === mine) recomputeNow = null;
     if (timer) clearTimeout(timer);
     for (const stop of watched.values()) stop();
     watched.clear();
     for (const d of disposers) d();
   };
   app.onQuit(dispose);
+
+  const mine = () => recompute();
+  recomputeNow = mine;
 
   // config.ts applied the files at launch; this picks up a layer that was not loaded through it and starts the watches.
   recompute();

@@ -8,9 +8,8 @@
 import type { AppConfig } from '../../shared/types';
 import type { BrowserBuiltIns, BrowserListField, SavedPermission } from '../../shared/browser';
 import { h } from '../dom.js';
-import { icon } from '../icons.js';
 import { parseSitePattern, parseText, parseUrl } from './model.js';
-import { actions, button, group, note, row, sectionTitle, tildePath, type Choice, type Row } from './ui.js';
+import { actions, advanced, button, card, disclosure, note, pathDesc, row, sectionTitle, tildePath, type Choice, type Row } from './ui.js';
 import type { Ctx, Section } from './ctx.js';
 
 
@@ -34,13 +33,13 @@ export function browserSection(ctx: Ctx): Section {
   const keepCookies = ctx.switchField({
     id: 'browser-keepCookies',
     title: 'Keep cookies after quitting',
-    desc: 'Stay signed in to sites between launches.',
-    keywords: 'cookies sign in signed session site data profile quit browser pane',
+    desc: 'Stay signed in between launches.',
+    keywords: 'cookies sign in signed session site data profile quit browser pane stay signed in to sites',
     field: 'browser.keepCookies',
   });
 
   const clearRow = row(
-    { id: 'browser-clearData', title: 'Clear browsing data', desc: 'Sign out of every site in the Browser pane.', keywords: 'clear cookies cache history sign out reset browsing data browser' },
+    { id: 'browser-clearData', title: 'Clear browsing data', desc: 'Signs you out of every site.', keywords: 'clear cookies cache history sign out reset browsing data browser pane' },
     button('Clear…', async (b) => {
       const ok = await ctx.confirm({ title: 'Clear browsing data?', description: 'This signs you out of every site and cannot be undone.', confirmLabel: 'Clear', danger: true });
       if (!ok) return;
@@ -75,19 +74,21 @@ export function browserSection(ctx: Ctx): Section {
   // The main window's window-open handler reads it (browser/feature.ts openChatLink)
   const chatLinks = ctx.switchField({
     id: 'browser-openChatLinksInPane',
-    title: 'Open chat links in the Browser pane',
-    keywords: 'links chat replies open default browser pane safari chrome',
+    title: 'Open chat links here',
+    desc: 'In the Browser pane, not your browser.',
+    keywords: 'links chat replies open default browser pane safari chrome open chat links in the browser pane',
     field: 'browser.openChatLinksInPane',
   });
 
   // ---------- The lists ----------
 
-  /** One editable list: a row per entry with Remove, then a field to add one. */
-  function listBlock(o: { id: string; field: BrowserListField; title: string; empty: string; addTitle: string; addDesc: string; placeholder: string; keywords: string; prefixes?: boolean; folders?: boolean; schemes?: boolean }) {
+  /** One editable list: a row per entry with Remove, then one field (its placeholder says what goes in) to add one. */
+  function listBlock(o: { id: string; field: BrowserListField; title: string; addTitle: string; addDesc: string; placeholder: string; keywords: string; prefixes?: boolean; folders?: boolean; schemes?: boolean }) {
     const rowsEl = h('div', { class: 'sp-rows' });
-    const input = h('input', { type: 'text', class: 'sp-input mono', placeholder: o.placeholder, spellcheck: 'false', autocomplete: 'off', 'aria-label': o.addTitle });
-    const addBtn = button('Add', () => void add(), { icon: 'plus' });
-    const addRow = row({ id: `${o.id}-add`, title: o.addTitle, desc: o.addDesc, keywords: o.keywords }, actions(h('span', { class: 'sp-text', style: 'width:220px' }, input), addBtn));
+    const input = h('input', { type: 'text', class: 'sp-input mono', placeholder: o.placeholder, spellcheck: 'false', autocomplete: 'off', 'aria-label': o.addTitle, title: o.addDesc });
+    const addBtn = button('Add', () => void add(), { icon: 'plus', aria: o.addTitle });
+    // The add row shows its field and button only; its words are for the search and screen readers
+    const addRow = row({ id: `${o.id}-add`, title: o.addTitle, desc: o.addDesc, keywords: o.keywords, bare: true }, actions(h('span', { class: 'sp-text sp-add-field' }, input), addBtn));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -139,7 +140,6 @@ export function browserSection(ctx: Ctx): Section {
         if (folder) r.el.title = item;
         rowsEl.append(r.el);
       });
-      if (!items.length) rowsEl.append(note(o.empty));
       ctx.refreshSearch();
     }
 
@@ -150,11 +150,10 @@ export function browserSection(ctx: Ctx): Section {
     id: 'browser-alwaysAllowed',
     field: 'alwaysAllowed',
     title: 'Sites the agent may always use',
-    empty: 'None yet.',
     addTitle: 'Add a site',
     addDesc: 'The agent uses it without asking, unless it is sensitive. Without http:// it covers https only.',
-    placeholder: 'example.com',
-    keywords: 'always allow allowed sites agent approve approval card trust browser',
+    placeholder: 'Add a site, like example.com',
+    keywords: 'always allow allowed sites agent approve approval card trust browser without asking unless it is sensitive http https only',
     schemes: true,
   });
 
@@ -162,34 +161,27 @@ export function browserSection(ctx: Ctx): Section {
     id: 'browser-sensitive',
     field: 'sensitive',
     title: 'Sites that always ask',
-    empty: 'None of your own.',
     addTitle: 'Add a site that always asks',
     addDesc: 'Every action there asks first, except in Bypass.',
-    placeholder: 'mybank.example',
-    keywords: 'sensitive always ask bank email sign in login financial payment sites agent browser',
+    placeholder: 'Add a site, like mybank.example',
+    keywords: 'sensitive always ask bank email sign in login financial payment sites agent browser every action asks first bypass',
     prefixes: true,
   });
-  const builtInSensitive = h('div', { class: 'sp-advanced-rows' });
-  const sensitiveToggle = h('button', { type: 'button', class: 'sp-disclosure', 'aria-expanded': 'false' });
-  const sensitiveFold = h('div', { class: 'sp-advanced' }, h('div', { class: 'sp-disclosure-row' }, sensitiveToggle), builtInSensitive);
-  sensitiveToggle.addEventListener('click', () => {
-    const open = !sensitiveFold.classList.contains('open');
-    sensitiveFold.classList.toggle('open', open);
-    sensitiveToggle.setAttribute('aria-expanded', String(open));
-  });
+  // The built-in sites that always ask, folded under their count
+  const sensitiveFold = disclosure('Built-in', { cls: 'sp-inner-fold' });
+  const builtInSensitive = sensitiveFold.body;
 
   const exempt = listBlock({
     id: 'browser-exempt',
     field: 'exempt',
     title: 'Exempt hosts',
-    empty: 'None of your own.',
     addTitle: 'Add an exempt host',
     addDesc: 'Your dev servers; the agent may type test passwords there.',
-    placeholder: 'myapp.local:8080',
-    keywords: 'exempt localhost development dev server local hosts folder files agent browser',
+    placeholder: 'Add a host, like myapp.local:8080',
+    keywords: 'exempt localhost development dev server local hosts folder files agent browser test passwords',
     folders: true,
   });
-  const builtInExempt = row({ id: 'browser-exempt-builtin', title: 'Built-in', desc: '', keywords: 'exempt localhost 127.0.0.1 local test development' });
+  const builtInExempt = row({ id: 'browser-exempt-builtin', title: 'Built-in', desc: '', keywords: 'exempt localhost 127.0.0.1 local test development any port' });
   builtInExempt.descEl.classList.add('sp-mono-list');
 
   // ---------- Web search (web_search's backend, AppConfig.webSearch) ----------
@@ -212,7 +204,7 @@ export function browserSection(ctx: Ctx): Section {
     read: (v) => (typeof v === 'string' && v ? (v as SearchProvider) : 'duckduckgo'),
     onSaved: () => syncSearch(ctx.config()),
   });
-  const searchKey = ctx.textField({ id: 'webSearch-apiKey', inputId: 'webSearch-apiKey', title: 'API key', keywords: 'web search key token secret brave tavily exa', field: 'webSearch.apiKey', type: 'password', placeholder: 'Key', parse: parseText });
+  const searchKey = ctx.textField({ id: 'webSearch-apiKey', inputId: 'webSearch-apiKey', title: 'Search API key', keywords: 'web search key token secret brave tavily exa api', field: 'webSearch.apiKey', type: 'password', placeholder: 'Key', parse: parseText });
   const searchBase = ctx.textField({ id: 'webSearch-baseUrl', inputId: 'webSearch-baseUrl', title: 'SearXNG address', keywords: 'web search searxng url address instance', field: 'webSearch.baseUrl', placeholder: 'http://localhost:8888', mono: true, parse: parseUrl });
   function syncSearch(cfg: AppConfig): void {
     const p = searchProvider(cfg);
@@ -236,7 +228,9 @@ export function browserSection(ctx: Ctx): Section {
       b.disabled = false;
     }
   });
-  const resetAllRow = row({ id: 'browser-permissions-reset', title: 'Reset all permissions', desc: 'Every site asks again.', keywords: 'reset permissions camera microphone notifications location allow block' }, resetAll);
+  const resetAllRow = row({ id: 'browser-permissions-reset', title: 'Reset all permissions', desc: 'Every site asks again.', keywords: 'reset permissions camera microphone notifications location allow block saved' }, resetAll);
+  const permsCard = card('Saved permissions', permsEl, resetAllRow);
+  permsCard.hidden = true;
 
   function renderPermissions(list: SavedPermission[]): void {
     permsEl.replaceChildren();
@@ -257,24 +251,26 @@ export function browserSection(ctx: Ctx): Section {
       r.el.title = p.key;
       permsEl.append(r.el);
     });
-    if (!list.length) permsEl.append(note('No saved permissions.'));
     resetAllRow.el.hidden = !list.length;
+    permsCard.hidden = !list.length;
     ctx.refreshSearch();
   }
 
   el.append(
-    group(null, keepCookies, clearRow, dirRow, chatLinks),
-    group(null, searchRow, searchKey, searchBase),
-    group(allowed.title, allowed.rowsEl, allowed.addRow),
-    group(sensitive.title, sensitiveFold, sensitive.rowsEl, sensitive.addRow),
-    group(exempt.title, builtInExempt, exempt.rowsEl, exempt.addRow),
-    group('Permissions', permsEl, resetAllRow),
+    card(null, keepCookies, chatLinks, dirRow, searchRow, searchKey, searchBase, clearRow),
+    advanced(
+      'browser',
+      card(allowed.title, allowed.rowsEl, allowed.addRow),
+      card(sensitive.title, sensitive.rowsEl, sensitive.addRow, sensitiveFold),
+      card(exempt.title, exempt.rowsEl, exempt.addRow, builtInExempt),
+      permsCard,
+    ),
   );
 
   function renderBuiltIns(): void {
     const b = builtIns;
     if (!b) return;
-    sensitiveToggle.innerHTML = `${icon('chevron-right', 14)}<span>Built-in (${b.sensitive.length})</span>`;
+    sensitiveFold.querySelector('.sp-disclosure span')!.textContent = `Built-in (${b.sensitive.length})`;
     builtInSensitive.replaceChildren();
     const kinds = [...new Set(b.sensitive.map((s) => s.kind))];
     for (const kind of kinds) {
@@ -283,7 +279,8 @@ export function browserSection(ctx: Ctx): Section {
       r.descEl.classList.add('sp-mono-list');
       builtInSensitive.append(r.el);
     }
-    builtInExempt.setDesc(`${b.exempt.join(', ')}, with any port`);
+    builtInExempt.setDesc(`${b.exempt.join(', ')}, any port`);
+    builtInExempt.descEl.title = `${b.exempt.join(', ')}, with any port`;
     renderDir(ctx.config());
     ctx.refreshSearch();
   }
@@ -291,8 +288,8 @@ export function browserSection(ctx: Ctx): Section {
   function renderDir(cfg: AppConfig): void {
     const own = lists(cfg).downloadsDir;
     const shown = own || builtIns?.downloadsDir || '';
-    dirRow.setDesc(shown ? `${tildePath(shown)}${own ? '' : ', the default'}` : 'The Downloads folder');
-    dirRow.descEl.title = shown;
+    if (shown) pathDesc(dirRow, shown);
+    else dirRow.setDesc('The Downloads folder');
     resetDir.hidden = !own;
   }
 
@@ -320,7 +317,8 @@ export function browserSection(ctx: Ctx): Section {
       try {
         renderPermissions(await ctx.call('browser.savedPermissions'));
       } catch (err) {
-        permsEl.replaceChildren(note(`Couldn't read the saved answers: ${ctx.cleanError(err)}`, 'error'));
+        permsCard.hidden = false;
+      permsEl.replaceChildren(note(`Couldn't read the saved answers: ${ctx.cleanError(err)}`, 'error'));
       }
       return 'ok';
     },

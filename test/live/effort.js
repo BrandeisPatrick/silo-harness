@@ -177,5 +177,5 @@ const { startMock } = require('../support/mock-model.js');
     mock.close();
   }
   console.log(`screenshots: ${shots}`);
-  done();
+  process.exit(done() ? 1 : 0);
 })();

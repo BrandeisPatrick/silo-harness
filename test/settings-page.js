@@ -18,12 +18,16 @@ const { check, done } = require('./support/check.js');
 
   // --- sections ---------------------------------------------------------------
   const nav = m.SECTIONS.filter((s) => !s.searchOnly);
-  check('fourteen sections in four groups in the navigation', nav.length === 14 && new Set(nav.map((s) => s.group)).size === 4, nav.map((s) => s.id));
+  const groups = [0, 1, 2].map((g) => nav.filter((s) => s.group === g).map((s) => s.id).join());
+  check('eleven pages in three groups in the navigation', nav.length === 11 && groups.join(' | ') === 'general,model,permissions,appearance | browser,remote,mods,mcp,skills | history,developer', groups);
   check('Scheduled and Dreaming are pages now, not sections; a search-only Pages section stands for them', !m.SECTIONS.some((s) => s.id === 'scheduled' || s.id === 'dreaming') && m.SECTIONS.filter((s) => s.searchOnly).map((s) => s.id).join() === 'pages' && !m.isSectionId('pages') && !m.isSectionId('scheduled') && JSON.stringify(m.PAGE_SECTIONS) === JSON.stringify(['scheduled', 'dreaming']));
-  check('Hooks sits after Configuration files', m.SECTIONS.findIndex((s) => s.id === 'hooks') === m.SECTIONS.findIndex((s) => s.id === 'files') + 1);
-  check('section ids are recognised', m.isSectionId('mods') && !m.isSectionId('nope'));
+  check('Context, Configuration files, Hooks and About are pages no more', ['context', 'files', 'hooks', 'about'].every((id) => !m.isSectionId(id)));
+  check('… and each lands where its rows are now', JSON.stringify(['context', 'files', 'hooks', 'about'].map((t) => m.landingFor(t))) === JSON.stringify([{ section: 'model', row: 'autoCompact' }, { section: 'developer', row: 'file-user' }, { section: 'developer', row: 'hooks-open' }, { section: 'developer', row: 'cli' }]), ['context', 'files', 'hooks', 'about'].map((t) => m.landingFor(t)));
+  check('section ids are recognised', m.isSectionId('mods') && m.isSectionId('developer') && !m.isSectionId('nope'));
   check('old targets map to sections', m.sectionForTarget('mcp-section') === 'mcp' && m.sectionForTarget('rules-section') === 'permissions' && m.sectionForTarget('mods') === 'mods');
   check('a field id is not a section (the page looks it up)', m.sectionForTarget('ollama-baseURL') === null);
+  check('moved rows name where they are now', m.movedRow('history-delete-all') === 'reset-sessions' && m.movedRow('sp-row-mods-remove-all') === 'reset-mods' && m.movedRow('appearance-background') === 'background' && m.movedRow('portkey-apiKey') === 'provider-apiKey' && m.movedRow('keepAwake') === '');
+  check('cutMiddle keeps both ends', m.cutMiddle('/Users/me/Documents/projects/a-very-long-folder-name/app', 30) === '/Users/me/Docum…older-name/app' && m.cutMiddle('short', 30) === 'short' && m.cutMiddle('abcdefghij', 6, 3).endsWith('hij'), m.cutMiddle('/Users/me/Documents/projects/a-very-long-folder-name/app', 30));
 
   // --- search -----------------------------------------------------------------
   check('every word must start a word of the haystack', m.matchesQuery(['API key', 'Your gateway key'], 'api k') && !m.matchesQuery(['API key'], 'pi'));
@@ -166,7 +170,7 @@ const { check, done } = require('./support/check.js');
     const L = { looks: { conversation: null, composer: 'hyperspace/cockpit' }, background: 'backgrounds/aurora', backgroundImage: null, theme: 'paper' };
     check('choiceWords: what Appearance shows for each kind', m.choiceWords(list, L, 'background') === 'Backgrounds: Aurora' && m.choiceWords(list, L, 'composer') === 'Hyperspace: Cockpit' && m.choiceWords(list, L, 'conversation') === 'Default', [m.choiceWords(list, L, 'background'), m.choiceWords(list, L, 'composer')]);
     check('choiceWords: your picture, Default, a choice whose mod is gone', m.choiceWords(list, { ...L, background: null, backgroundImage: '/p.png' }, 'background') === 'Your picture' && m.choiceWords(list, { ...L, background: null }, 'background') === 'Default' && m.choiceWords(list, { ...L, background: 'gone/x' }, 'background') === 'gone/x (not installed)' && m.choiceWords([], null, 'background') === 'Default');
-    check('a section and a tab as one target', m.sectionForTarget('mods:backgrounds') === 'mods' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null);
+    check('a look tab as one target lands on Appearance (it was a tab of Mods)', m.sectionForTarget('mods:backgrounds') === 'appearance' && m.sectionForTarget('appearance:chat-bar') === 'appearance' && m.tabForTarget('mods:backgrounds') === 'backgrounds' && m.tabForTarget('mods/chat-bar') === 'chat-bar' && m.tabForTarget('mods') === null && m.sectionForTarget('mods:nope') === null && m.tabForTarget('mods:nope') === null && m.sectionForTarget('mods:mods') === 'mods');
     check('refMod', m.refMod('hyperspace/holo') === 'hyperspace' && m.refMod('a@/x/y/holo') === 'a@/x/y');
   }
 
@@ -180,25 +184,48 @@ const { check, done } = require('./support/check.js');
     const view = (o = {}) => ({ name: 'gw', type: 'portkey', label: 'Gateway', builtIn: true, baseURL: 'http://gw.example/v1', model: 'claude-opus-5-5', models: [], contextWindow: 200000, key: 'set', keySource: 'PORTKEY_API_KEY', headers: [], ...o });
     const cat = (o = {}) => ({ name: 'gw', models: ['claude-opus-5-5', 'claude-haiku-5-5'], own: ['claude-opus-5-5'], listed: true, ...o });
 
-    // "Think before acting": what it does on Anthropic's own API, and what applies elsewhere
+    // "Think before acting": what it does on Anthropic's own API, else where it applies (one short line)
     const thinkLine = (o) => M.thinkingWords(view(o));
-    check('thinking: on Anthropic\'s own API, says what it does, as Claude Code does, and what off saves', thinkLine({ name: 'claude', type: 'anthropic', builtIn: false, native: true }) === 'The model reasons before it acts, as Claude Code does. Off is faster and costs less.');
-    check('thinking: a provider with an effort pill: does not apply, the effort control does', /^Doesn't apply to this provider, only to Anthropic's own API: the effort control after the model under the chat bar does\.$/.test(thinkLine({ name: 'or', type: 'openrouter', builtIn: false, effort: { levels: ['low', 'medium', 'high'], chosen: null, default: null } })));
-    check('thinking: Ollama: its own Thinking setting does', thinkLine({ name: 'ollama', type: 'ollama' }) === "Doesn't apply to Ollama: its Thinking setting under Connection does." && /Thinking setting/.test(thinkLine({ name: 'local', type: 'ollama', builtIn: false })));
-    check('thinking: the built-in gateway (no effort pill): does not apply, and says so plainly', /^Doesn't apply to this provider, only to Anthropic's own API\. It takes no effort setting either\.$/.test(thinkLine({})));
+    check('thinking: on Anthropic\'s own API, says what it does, as Claude Code does', thinkLine({ name: 'claude', type: 'anthropic', builtIn: false, native: true }) === 'Reasons first, as Claude Code does.');
+    check('thinking: Ollama: its own Thinking under Connection', /Thinking is under Connection/.test(thinkLine({ name: 'ollama', type: 'ollama' })) && /Thinking/.test(thinkLine({ name: 'local', type: 'ollama', builtIn: false })));
+    check('thinking: elsewhere, where it applies', thinkLine({}) === "Only for Anthropic's own API." && thinkLine({ name: 'or', type: 'openrouter', builtIn: false, effort: { levels: ['low'], chosen: null, default: null } }) === "Only for Anthropic's own API.");
+    check('thinking: every line is one short sentence', [thinkLine({ native: true }), thinkLine({ name: 'ollama', type: 'ollama' }), thinkLine({})].every((l) => l.split(/\s+/).length <= 8));
 
-    // The state in plain words
-    let st = M.providerState(view(), cat(), true);
-    check('state: ready, with how many models', st.label === 'Ready' && st.tone === 'ok' && st.detail === '2 models offered.', st);
-    st = M.providerState(view({ key: 'missing' }), null, true);
-    check('state: no key found, naming the variable (the gateway: or under Connection)', st.label === 'No key found' && /Set PORTKEY_API_KEY, or enter the key under Connection/.test(st.detail) && st.tone === 'warn', st);
-    st = M.providerState(view({ name: 'groq', builtIn: false, key: 'missing', keySource: 'GROQ_API_KEY', label: 'Groq' }), cat({ noKey: true, listed: false }), false);
-    check('state: a named provider without its key names its variable; not in use, it is not in colour', st.label === 'No key found' && /Set GROQ_API_KEY in your environment or in settings\.json/.test(st.detail) && st.tone === 'neutral', st);
-    st = M.providerState(view({ name: 'ollama', type: 'ollama', label: 'Ollama', key: 'none' }), cat({ listed: false, unreachable: true, models: [], own: [], error: 'Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.' }), true);
-    check('state: not reachable, with the reason; red only for the provider in use', st.label === 'Not reachable' && st.tone === 'danger' && /Is Ollama running/.test(st.detail), st);
-    st = M.providerState(view(), cat({ listed: false, error: 'Gateway answered 404: no route.', models: ['claude-opus-5-5'] }), true);
-    check("state: can't list, says why, and that the configured model shows", st.label === "Can't list models" && /404/.test(st.detail) && /Showing the model in your settings/.test(st.detail), st);
-    check('state: checking while nothing came yet', M.providerState(view(), null).label === 'Checking…');
+    // The status beside the Provider picker: one word, the reason only when not ready
+    let st = M.providerStatus(view(), cat());
+    check('status: ready', st.word === 'Ready' && st.tone === 'ok' && st.reason === '', st);
+    st = M.providerStatus(view({ key: 'missing', keyEditable: true }), null);
+    check('status: no key, and where it goes', st.word === 'No key' && st.tone === 'warn' && st.reason === 'Paste its key under API key.', st);
+    st = M.providerStatus(view({ name: 'groq', builtIn: false, key: 'missing', keySource: 'GROQ_API_KEY', label: 'Groq' }), cat({ noKey: true, listed: false }));
+    check('status: no key that can be saved here names its variable', st.word === 'No key' && /Set GROQ_API_KEY in your environment/.test(st.reason), st);
+    st = M.providerStatus(view({ name: 'ollama', type: 'ollama', label: 'Ollama', key: 'none' }), cat({ listed: false, unreachable: true, models: [], own: [], error: 'Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.' }));
+    check('status: not reachable, with the reason', st.word === 'Not reachable' && st.tone === 'danger' && /Is Ollama running/.test(st.reason), st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway refused the key (HTTP 401): bad key' }));
+    check('status: a refused key', st.word === 'Key refused' && st.tone === 'danger', st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway has no list of models at http://x/v1/models (HTTP 404).' }));
+    check('status: a service without a list of models is still ready (the model is typed)', st.word === 'Ready' && !st.reason, st);
+    st = M.providerStatus(view(), cat({ listed: false, error: 'Gateway returned HTTP 500: boom' }));
+    check('status: any other error', st.word === 'Error' && /500/.test(st.reason), st);
+    check('status: checking while nothing came yet', M.providerStatus(view(), null).word === 'Checking…');
+
+    // Which providers the picker lists: set-up ones only (the one in use always)
+    const all = [view({ name: 'ollama', type: 'ollama', key: 'none' }), view({ name: 'portkey', key: 'missing' }), view({ name: 'or', builtIn: false, key: 'set' }), view({ name: 'gq', builtIn: false, key: 'missing' })];
+    let names = M.pickableProviders(all, new Map(), 'or').map((p) => p.name).join();
+    check('picker: a provider without its key and an Ollama not heard from are not listed', names === 'or', names);
+    names = M.pickableProviders(all, new Map([['ollama', cat({ name: 'ollama' })]]), 'gq').map((p) => p.name).join();
+    check('picker: Ollama once it answered; the one in use always, even without its key', names === 'ollama,or,gq', names);
+    names = M.pickableProviders(all, new Map([['ollama', cat({ name: 'ollama', unreachable: true, listed: false })]]), 'or').map((p) => p.name).join();
+    check('picker: an Ollama that is not running is not listed', names === 'or', names);
+
+    // The key as the row shows it, and where it comes from
+    check('key: dots and the last four', M.keyShown({ key: 'set', keyTail: '3f2a' }) === '••••••••3f2a' && M.keyShown({ key: 'set' }) === '••••••••' && M.keyShown({ key: 'missing' }) === 'None');
+    check('key: where from, as one phrase', M.keyFromWords({ key: 'set', keyFrom: 'app' }) === 'Saved in your settings' && M.keyFromWords({ key: 'set', keyFrom: 'shell' }) === 'From your shell' && M.keyFromWords({ key: 'set', keyFrom: 'settings' }) === 'Saved in your settings.json' && M.keyFromWords({ key: 'missing', keyFrom: 'app' }) === '');
+
+    // A long id keeps its end readable
+    const longId = 'some-provider/an-unusually-long-model-identifier-preview-with-tools';
+    const cut = M.cutId(longId, 30);
+    check('cutId: cut in the middle to the length asked, the end kept', cut.length === 30 && cut.includes('…') && cut.endsWith('with-tools') && cut.startsWith('some-') && M.cutId('short', 30) === 'short', cut);
+    check('suggestName: the type, then -2, never a built-in name', M.suggestName('openrouter', []) === 'openrouter' && M.suggestName('openrouter', ['openrouter']) === 'openrouter-2' && M.suggestName('portkey', []) === 'portkey-2' && M.suggestName('openai-compatible', []) === 'custom');
 
     // The list requests: only the latest request's answer counts, a change of key or address while one is out asks
     // again, and the provider is busy (the spinner turns) until the latest lands
@@ -232,27 +259,23 @@ const { check, done } = require('./support/check.js');
       check('requests: …and the older answer landing after it changes nothing', (await rc) === 'forced' && (await rd) === 'forced' && shown.join() === 'forced', { shown });
     }
 
-    // The list a group shows
+    // What a model picker shows
     const ids = M.modelIds(view({ model: 'b' }), cat({ models: ['a', 'b', 'c'] }), ['b']);
-    check('modelIds: the marked model first, no repeats', ids.join() === 'b,a,c', ids);
+    check('modelIds: the model in use first, no repeats', ids.join() === 'b,a,c', ids);
     check('modelIds: without a list, the configured model and the entry’s list', M.modelIds(view({ model: 'x', models: ['y', 'x'] }), null).join() === 'x,y');
     const many = Array.from({ length: 300 }, (_, i) => `vendor/model-${i}`);
-    let s = M.shownModels(many, '', false);
-    check('shownModels: the first eight of a long list, and how many more', s.shown.length === M.MODELS_SHOWN && s.more === 292 && s.matched === 300, s.more);
-    s = M.shownModels(many, '', true);
-    check('shownModels: Show all shows all', s.shown.length === 300 && s.more === 0);
-    s = M.shownModels(many, 'model-29', false);
-    check('shownModels: a filter shows the matches', s.matched === 11 && s.shown.length === 11 && s.shown.every((x) => x.includes('model-29')), s.shown);
-    s = M.shownModels(many, 'model', false);
-    check('shownModels: a broad filter shows fifty, then Show all', s.shown.length === M.MATCHES_SHOWN && s.more === 250);
-    s = M.shownModels(many, 'nothing-like-it', false, new Set(['vendor/model-299']));
-    check('shownModels: the model in use stays whatever the filter says', s.matched === 0 && s.shown.join() === 'vendor/model-299', s);
+    let pm = M.pickerMatches(many, '');
+    check('picker: the first fifty, and how many there are', pm.shown.length === M.MATCHES_SHOWN && M.MATCHES_SHOWN === 50 && pm.matched === 300 && pm.typed === '', pm.matched);
+    pm = M.pickerMatches(many, 'model-29');
+    check('picker: what was typed filters as it is typed, and is offered as it is when no id is that', pm.matched === 11 && pm.shown.every((x) => x.includes('model-29')) && pm.typed === 'model-29', pm);
+    pm = M.pickerMatches(many, 'vendor/model-7');
+    check('picker: an id typed in full is not offered twice', pm.typed === '' && pm.shown[0] === 'vendor/model-7', pm);
+    check('picker: words with spaces are a filter, not an id', M.pickerMatches(many, 'model 29').typed === '');
     check('matchesModel: every word, any case', M.matchesModel('anthropic/claude-OPUS-5.5', 'opus 5.5') && !M.matchesModel('claude-haiku-5-5', 'opus'));
 
     // A test's words
     check('testWords: "Answered in 840 ms", "Answered in 1.2 s"', M.testWords({ ok: true, ms: 840 }).text === 'Answered in 840 ms' && M.testWords({ ok: true, ms: 1234 }).text === 'Answered in 1.2 s' && M.testWords({ ok: true, ms: 840 }).ok);
     check('testWords: the plain error as it came', M.testWords({ ok: false, ms: 3, error: 'Gateway refused the key (HTTP 401): bad key' }).text === 'Gateway refused the key (HTTP 401): bad key' && !M.testWords({ ok: false, ms: 0 }).ok && M.testWords({ ok: false, ms: 0 }).text === 'It did not answer.');
-    check('rowKey: one per provider and model', M.rowKey('a', 'b:c') !== M.rowKey('a:b', 'c'));
     // The safety check's select: its values are what autoMode.model takes
     const groups = [
       { name: 'portkey', label: 'Gateway', usable: true, models: ['@anthropic/claude-opus-5-5', '@anthropic/claude-haiku-5-5', '@anthropic/claude-opus-5-5'] },
@@ -271,7 +294,29 @@ const { check, done } = require('./support/check.js');
     check('check words: the session’s own model', M.checkModelWords({ spec: '', none: false, automatic: false, providerLabel: 'Gateway', model: '@anthropic/claude-opus-5-5', testCount: 24 }) === "Runs on Claude Opus 5.5 through Gateway, the session's model.");
     check('check words: a chosen model', M.checkModelWords({ spec: 'ollama:qwen3:8b', none: false, automatic: false, providerLabel: 'Ollama', model: 'qwen3:8b', testCount: 24 }) === 'Runs on qwen3:8b through Ollama.');
     check('check words: none', /No model can run the check now: risky actions ask you instead/.test(M.checkModelWords({ spec: '', none: true, automatic: false, testCount: 24 })));
-    check('check words: the eval line names the one model that passed', /Only Claude Haiku 5\.5 on Anthropic's own API has passed the app's check eval\. Another model may judge worse\./.test(M.CHECK_EVAL_NOTE));
+    check('check words: the eval line names the one model that passed, in eight words', M.CHECK_EVAL_NOTE === 'Only Claude Haiku 5.5 has passed the eval.' && M.CHECK_EVAL_NOTE.split(' ').length <= 8);
+    check('check caution: for any model but Claude Haiku 5.5, none while no model can run the check', M.checkNeedsCaution('claude-opus-5-5') && M.checkNeedsCaution('qwen3:8b') && !M.checkNeedsCaution('claude-haiku-5-5') && !M.checkNeedsCaution('@anthropic/claude-haiku-5.5') && !M.checkNeedsCaution(undefined));
+    // The line under the select: the caution only for a model picked by hand; "Same as the session" says something only
+    // when the check runs elsewhere
+    const cv = (o) => M.checkDesc({ spec: '', none: false, automatic: false, testCount: 24, ...o });
+    check('check line: Same as the session, on the session’s own model: none (not the eval caution)', cv({ model: 'claude-opus-5-5', providerLabel: 'Gateway' }) === '' && cv({ model: 'qwen3:8b' }) === '');
+    check('check line: Same as the session, automatic: "Runs on Claude Haiku 5.5, automatic."', cv({ automatic: true, model: 'claude-haiku-5-5', providerLabel: 'Anthropic' }) === 'Runs on Claude Haiku 5.5, automatic.');
+    check('check line: a model picked by hand other than Claude Haiku 5.5: the eval caution', cv({ spec: 'portkey:claude-opus-5-5', model: 'claude-opus-5-5' }) === M.CHECK_EVAL_NOTE && cv({ spec: 'portkey:claude-haiku-5-5', model: 'claude-haiku-5-5' }) === '');
+    check('check line: no model can run it: says so, in eight words at most', cv({ none: true }) === M.CHECK_NONE_NOTE && M.CHECK_NONE_NOTE.split(' ').length <= 8 && M.checkDesc(null) === '');
+    // A provider's error in one short line
+    const long404 = 'Gateway answered 404: The model does not exist or you do not have access to it. Check the model id ("anthropic/claude-opus-5-5") and the base URL (http://127.0.0.1:54190/v1).';
+    check('short reason: a 404 is one plain line without the model id or the address', M.shortReason(long404) === '404: this model does not exist or your key cannot use it.');
+    check('short reason: a refused key, a rate limit, an overload', M.shortReason('OpenRouter refused the key (HTTP 401): invalid key … Check OPENROUTER_API_KEY.') === '401: the key was refused.' && M.shortReason('Groq is rate limiting or out of credit (HTTP 429): slow down') === '429: rate limited or out of credit.' && M.shortReason('Anthropic is overloaded (HTTP 529). Try again shortly.') === '529: the service is overloaded. Try again shortly.');
+    check('short reason: not reachable, without the address; Ollama’s own hint kept', M.shortReason('Could not reach Lab at http://127.0.0.1:9/v1 (ECONNREFUSED). Check the base URL and your connection.') === 'Could not reach it. Check its address.' && M.shortReason('Could not reach Ollama at http://localhost:11434/v1. Is Ollama running? Start it with ollama serve.') === 'Could not reach it. Is Ollama running?');
+    check('short reason: a timeout', M.shortReason('Gateway did not answer in time (http://x/v1).') === 'It did not answer in time.');
+    check('short reason: a short reason stays as it is; a long one is cut at twelve words', M.shortReason('Paste its key under API key.') === 'Paste its key under API key.' && M.shortReason('one two three four five six seven eight nine ten eleven twelve thirteen fourteen.') === 'one two three four five six seven eight nine ten eleven twelve…');
+    check('short reason: every line is at most about twelve words', [long404, 'Could not reach Ollama at http://localhost:11434/v1 (ECONNREFUSED).', 'Gateway returned HTTP 502: bad gateway upstream'].every((t) => M.shortReason(t).split(' ').length <= 12));
+    // Add provider: Add can be clicked only once the form can be sent
+    const form = (o) => M.addFormReady({ type: 'openrouter', askName: true, name: 'openrouter', taken: ['ollama', 'portkey'], keyNeeded: true, key: 'sk-x', askUrl: false, url: '', ...o });
+    check('add form: ready with a type, a free name and the key it needs', form({}));
+    check('add form: not without the key it needs, a name, a free name or a well-formed one', !form({ key: '' }) && !form({ name: ' ' }) && !form({ name: 'portkey' }) && !form({ taken: ['openrouter'] }) && !form({ name: 'has space' }));
+    check('add form: a key that is not needed may stay empty; a type that fills a block asks no name', form({ keyNeeded: false, key: '' }) && form({ askName: false, name: '' }));
+    check('add form: OpenAI-compatible needs an http(s) base URL', !form({ askUrl: true, url: '' }) && !form({ askUrl: true, url: 'example.com' }) && form({ askUrl: true, url: 'http://127.0.0.1:1234/v1' }));
     check('check plan: says how many requests before it runs', M.checkTestPlan({ spec: '', none: false, automatic: false, model: 'claude-opus-5-5', testCount: 24 }) === 'Sends 24 made-up actions to Claude Opus 5.5, one request each, and scores how it judges them.' && /Needs a model/.test(M.checkTestPlan(null)));
     // A test's result in plain words
     const rep = { total: 24, done: 24, cancelled: false, right: 21, blockLabelled: 18, falseAllows: [{ id: 'a', action: 'git push --force origin main' }], falseBlocks: [{ id: 'b', action: 'npm run build' }], noAnswer: [{ id: 'c', action: 'cat ~/.aws/credentials', error: 'Gateway did not answer in time' }], medianMs: 1234 };
@@ -284,6 +329,11 @@ const { check, done } = require('./support/check.js');
     tw = M.checkTestWords({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 4 });
     check('check result: stopped part way says so', tw.headline === 'Judged 5 of 5 right.' && tw.lines[0].text === 'Stopped after 5 of 24.', tw);
     check('check result: stopped before any risky one was checked', M.checkTestWords({ ...rep, cancelled: true, done: 2, right: 2, falseAllows: [], falseBlocks: [], noAnswer: [], blockLabelled: 0 }).lines[1].text === 'No risky action was among those checked.');
+    // The result in one line
+    check('check line: a clean run', M.checkLine({ ...rep, right: 23, falseAllows: [], falseBlocks: [{ id: 'b', action: 'x' }], noAnswer: [] }).text === '23 of 24 right, none let through' && M.checkLine({ ...rep, falseAllows: [], noAnswer: [] }).tone === 'ok');
+    check('check line: the failure that matters', M.checkLine(rep).text === '21 of 24 right, let 1 risky action through' && M.checkLine(rep).tone === 'danger');
+    check('check line: no answer at all says why', M.checkLine({ ...rep, done: 2, right: 0, falseAllows: [], falseBlocks: [], noAnswer: [{ id: 'a', action: 'x', error: 'Gateway did not answer in time' }, { id: 'b', action: 'y' }] }).text === 'No answer: Gateway did not answer in time');
+    check('check line: stopped part way', /^Stopped at 5 of 24: 5 of 5 right/.test(M.checkLine({ ...rep, cancelled: true, done: 5, right: 5, falseAllows: [], falseBlocks: [], noAnswer: [] }).text));
     check('check result: stopped before any', M.checkTestWords({ ...rep, cancelled: true, done: 0, right: 0, medianMs: null }).headline === 'Stopped before any check.');
     check('modelWords: Claude ids in words, others as they are', M.modelWords('claude-haiku-5-5') === 'Claude Haiku 5.5' && M.modelWords('@anthropic/claude-opus-5-5') === 'Claude Opus 5.5' && M.modelWords('anthropic/claude-sonnet-5.5') === 'Claude Sonnet 5.5' && M.modelWords('claude-opus-5') === 'Claude Opus 5' && M.modelWords('claude-haiku-4-5-20251001') === 'Claude Haiku 4.5' && M.modelWords('claude-sonnet-4-20250514') === 'Claude Sonnet 4' && M.modelWords('gpt-5-mini') === 'gpt-5-mini', [M.modelWords('claude-haiku-4-5-20251001'), M.modelWords('claude-sonnet-4-20250514')]);
   }

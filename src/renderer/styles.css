@@ -1,9 +1,17 @@
 /* =====================================================================
    Silo Harness renderer styles
    Tokens follow docs/ui-audit.md (Claude desktop reference values).
-   Spacing is on a 4px grid. Type (the tokens below): what you read 15/21,
-   rows and controls 14/20, secondary 13/18, captions and badges 12/16,
-   code 13/20; display 28/34. Nothing under 12px but keyboard glyphs.
+   Spacing is on a 4px grid. Type comes in two tiers, as in Claude Code:
+   what the assistant says (replies, the user's bubble, the chat bar) 16/24
+   (--fs-reply), and what it did (the fold line, tool, group and blocked
+   rows, notices, the status line) 14/20 in the muted colour (--fs-act),
+   the thing acted on one step darker. Headings in a reply 17/24 (h1-h2),
+   16 below; inline code 14, code blocks 13/20 (--fs-code). Rows and
+   controls 14/20, secondary 13/18, captions and badges 12/16; display
+   28/34. Nothing under 12px but keyboard glyphs.
+   One step smaller (the other set the owner weighed): --fs-body 14px /
+   --lh-body 20px, --fs-act 13px / --lh-act 18px, --fs-head 15px /
+   --lh-head 22px, --fs-code 12.5px, --col 648px.
    ===================================================================== */
 
 /* ---------- Tokens ---------- */
@@ -12,10 +20,17 @@
   --font-display: ui-serif, "New York", Georgia, serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Type scale. body: replies, the user's bubble, tool and status lines, the chat bar's text. ui: rows, menus,
-     buttons, inputs. small: rail headings, notes, hints, counts. micro: date groups, captions, badges. */
+  /* Type scale. reply: the conversation's reading text (replies, the user's bubble, the chat bar's text, the next-step
+     question). body: other text to read (plan cards, proposals, a mod's page). ui: rows, menus, buttons, inputs.
+     small: rail headings, notes, hints, counts. micro: date groups, captions, badges. body and title stay as they
+     were in 0.20 (15/21, 15): mod pages read them. */
+  --fs-reply: 16px;
+  --lh-reply: 24px;
   --fs-body: 15px;
   --lh-body: 21px;
+  /* What the agent did: the fold line, tool, group and blocked rows, notices, the status line */
+  --fs-act: 14px;
+  --lh-act: 20px;
   --fs-head: 17px;
   --lh-head: 24px;
   --fs-title: 15px;
@@ -88,6 +103,20 @@
   --surface-hover: #f5f5f5;
   --code-bg: #f5f5f5;
   --code-hover: var(--bg-300);
+  /* Panels in the conversation (code blocks, tool output, the turn's activity card, the next-step card), as Claude
+     Code draws its cards: in light mode the plain page gives them no fill at all, the hairline (--code-panel-line)
+     alone draws them; over a background or a look they are a white veil (--panel-veil, about two thirds white),
+     frosted (--code-blur). In dark mode they are a faint lift, 4.5% white, on the plain page, and over a picture the
+     page's colour so lifted, about three quarters strong, so code stays readable on any picture.
+     --code-panel-solid: the same panel on the plain page, opaque, for what must hide what scrolls under it. Inline
+     code keeps a faint tint of the text colour (--code-inline): it has no hairline to carry it. Under a conversation
+     look code takes --code-bg, unless the look sets --code-panel or --code-inline on #messages (docs/mods.md). */
+  --panel-veil: rgba(255, 255, 255, 0.68);
+  --code-panel: transparent;
+  --code-panel-solid: var(--bg-100);
+  --code-panel-line: var(--border-subtle);
+  --code-inline: color-mix(in srgb, var(--text-100) 6%, transparent);
+  --code-blur: 16px;
   --diff-bg: var(--bg-000);
   --bubble: #f3f3f3;
   --field-bg: var(--bg-000);
@@ -112,7 +141,7 @@
   --r-composer: 12px;
   --r-card-lg: 10px;
   --sidebar-w: 256px;
-  --col: 736px;
+  --col: 728px;
   color-scheme: light;
 }
 
@@ -156,6 +185,10 @@
     --surface-hover: #262626;
     --code-bg: #212121;
     --code-hover: #2e2e2e;
+    --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
+    --panel-veil: color-mix(in srgb, color-mix(in srgb, #ffffff 4.5%, var(--bg-100)) 72%, transparent);
+    --code-panel: rgba(255, 255, 255, 0.045);
+    --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
     --diff-bg: var(--bg-000);
     --bubble: #242424;
     --field-bg: var(--bg-300);
@@ -212,6 +245,10 @@
   --surface-hover: #262626;
   --code-bg: #212121;
   --code-hover: #2e2e2e;
+  --code-inline: color-mix(in srgb, var(--text-100) 9%, transparent);
+  --panel-veil: color-mix(in srgb, color-mix(in srgb, #ffffff 4.5%, var(--bg-100)) 72%, transparent);
+  --code-panel: rgba(255, 255, 255, 0.045);
+  --code-panel-solid: color-mix(in srgb, #ffffff 4.5%, var(--bg-100));
   --diff-bg: var(--bg-000);
   --bubble: #242424;
   --field-bg: var(--bg-300);
@@ -264,6 +301,12 @@ kbd {
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: padding-box; border: 1px solid transparent; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+/* Inside code (code blocks, tool output, the file view, a diff): a 6px bar with no track whose rounded, muted thumb
+   shows only while the panel is hovered or holds focus; scrolling by keys or the trackpad is untouched. */
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar { width: 6px; height: 6px; }
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar-thumb { background: transparent; border: 0; border-radius: 3px; }
+:is(.code-block:is(:hover, :focus-within) > pre, .out:is(:hover, :focus-within) > pre, pre.args:is(:hover, :focus), .cmd:is(:hover, :focus-within), .code-view:is(:hover, :focus-within), .diff:is(:hover, :focus-within) .diff-body)::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-400) 40%, transparent); }
+:is(.code-block pre, .out pre, pre.args, .cmd, .code-view, .diff-body)::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-400) 65%, transparent); }
 
 /* ---------- Controls ---------- */
 .btn {
@@ -474,10 +517,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* ---------- Transcript ---------- */
 .transcript { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 32px 0 56px; display: flex; flex-direction: column; }
-/* One reading column, 736px at most, at least 24px from the pane's edges; cards take its full width and running
+/* One reading column, 728px at most (720px of text: about 90 to 95 characters a line at 16px), at least 24px from the pane's edges; cards take its full width and running
    text (replies, tool lines, the user's bubble) sits 4px in from each side. 16px between blocks. */
 .transcript > * { width: min(var(--col), calc(100% - 48px)); margin-left: auto; margin-right: auto; flex: none; }
-.fade-in { animation: fade-in 0.12s ease-out both; }
+/* Fill backwards, not both: a finished animation that still holds its end state keeps the message a backdrop root, and
+   the frosted code panels inside it would then stop blurring what is behind the transcript */
+.fade-in { animation: fade-in 0.12s ease-out backwards; }
 
 .empty { margin-top: auto; margin-bottom: auto; padding-bottom: 48px; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .empty-mark { margin-bottom: 20px; display: flex; }
@@ -486,27 +531,63 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .msg { margin-bottom: 16px; }
 .msg.user { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 24px; padding: 0 4px; }
 .msg.user .bubble {
-  max-width: 85%; padding: 12px 16px;
+  max-width: 85%; padding: 10px 16px;
   background: var(--bubble); color: var(--text-100);
-  border-radius: 12px;
-  font-size: var(--fs-body); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere;
+  border-radius: 18px 18px 4px 18px;
+  font-size: var(--fs-reply); line-height: var(--lh-reply); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 /* A bubble holding another session's words (a report, a merged summary): Markdown, laid out like a reply */
 .msg.user .bubble.rich { white-space: normal; }
 .msg.user .bubble.rich .md p, .msg.user .bubble.rich .md ul, .msg.user .bubble.rich .md ol, .msg.user .bubble.rich .md .code-block { margin-bottom: 8px; }
 .msg.user .bubble.rich .md > :last-child { margin-bottom: 0; }
-.msg.user .bubble.rich .md h1, .msg.user .bubble.rich .md h2 { margin: 12px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); }
+.msg.user .bubble.rich .md h1, .msg.user .bubble.rich .md h2 { margin: 12px 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); }
 .msg.user .bubble.rich .md > :first-child { margin-top: 0; }
-.msg.assistant { position: relative; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); }
+.msg.assistant { position: relative; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); }
+/* A message's actions (Copy; Rewind on the user's): a quiet row of icon buttons under it, never over its words. Under a
+   reply it is in the flow, left-aligned with the text (the buttons' glyphs line up with it), shown on hover and always
+   for the latest reply; under the user's bubble it sits in the bubble's bottom margin, at its right edge. */
 .msg-actions {
-  position: absolute; top: -14px; right: -4px; display: flex; gap: 2px; padding: 2px;
-  background: var(--bg-000); border: 1px solid var(--border-subtle); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
+  display: flex; gap: 2px;
   opacity: 0; pointer-events: none; transition: opacity 0.12s;
 }
-.msg.assistant:hover .msg-actions, .msg-actions:focus-within { opacity: 1; pointer-events: auto; }
+.msg.assistant > .msg-actions { margin: 4px 0 0 -5px; height: 24px; }
+/* An interim reply (a sentence between the run's lines) has no row: the space under it stays the space over it */
+.transcript > .msg.assistant:has(+ :is(.tool, .tool-group, .thinking, .auto-blocked, .session-msg.sent)) > .msg-actions { display: none; }
+.msg.assistant > .msg-actions .icon-btn { color: var(--text-400); }
+.msg.assistant > .msg-actions .icon-btn:hover { color: var(--text-100); }
+.msg.assistant:hover .msg-actions, .msg-actions:focus-within,
+.transcript > .msg.assistant:nth-last-child(1 of .msg.assistant:not(.turn-hidden)) > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions .icon-btn.copied { color: var(--success); }
+/* When the reply was written, after Copy, in caption size (reply-time.ts) */
+.msg-actions .msg-time { align-self: center; margin-left: 6px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
 
-.msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); text-align: center; }
+/* The next-step card (next-step.ts): under the reply that closes a turn, above its Copy row. The recap in the activity
+   tier's grey, the question a step up (15/22, the text colour), then one or two replies: the first a dark fill with its
+   ⌘↵ hint, the other a grey one. Quiet once the user answered: no buttons, only the chosen reply, as a grey pill. */
+.next-step {
+  margin: 18px 0 6px; padding: 16px 18px 18px;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: 14px;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400);
+}
+:root.mod-bg .next-step, #messages[data-look] .next-step { -webkit-backdrop-filter: blur(var(--code-blur)); backdrop-filter: blur(var(--code-blur)); }
+.next-step p { margin: 0; overflow-wrap: anywhere; }
+.next-step-question { margin-top: 12px !important; font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); }
+.next-step-replies { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.next-step-reply.btn { height: 32px; padding: 0 12px; gap: 8px; border: 0; border-radius: 9px; box-shadow: none; background: var(--button-fill); color: var(--text-100); }
+.next-step-reply.btn:hover { background: var(--button-fill-hover); }
+/* Two long replies that do not fit side by side wrap to a second row; one too long for the card is cut with an ellipsis */
+.next-step-reply.btn { max-width: 100%; min-width: 0; }
+.next-step-reply > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.next-step-reply.btn.primary { background: var(--text-100); color: var(--bg-000); }
+.next-step-reply.btn.primary:hover { background: color-mix(in srgb, var(--text-100) 88%, var(--bg-000)); }
+.next-step-keys { display: inline-flex; gap: 2px; margin-right: -2px; }
+.next-step-reply.btn .next-step-keys kbd { height: 16px; min-width: 16px; margin: 0; padding: 0 3px; border-color: color-mix(in srgb, currentColor 35%, transparent); color: inherit; opacity: 0.85; }
+.next-step.quiet .next-step-reply:not(.chosen) { display: none; }
+.next-step.quiet .next-step-reply.chosen { opacity: 1; background: var(--button-fill); color: var(--text-400); }
+.next-step.quiet .next-step-keys { display: none; }
+.next-step.quiet .next-step-replies:not(:has(.chosen)) { display: none; }
+
+.msg.system { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 16px; padding: 0 4px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); text-align: center; }
 .msg.system .icon { flex: none; }
 .msg.system.error {
   justify-content: flex-start; align-items: flex-start; gap: 8px; text-align: left;
@@ -528,16 +609,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md { overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
-.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 16px; }
+.md p, .md ul, .md ol, .md blockquote, .md .code-block, .md .table-wrap { margin: 0 0 12px; }
+/* Headings read as text with weight, not as a form's sections: the top two levels a step larger (16/24), the rest
+   the text size; more room above than below, so each belongs to what follows it */
 .md h1, .md h2 { margin: 24px 0 8px; font-size: var(--fs-head); line-height: var(--lh-head); font-weight: 600; }
-.md h3, .md h4, .md h5, .md h6 { margin: 16px 0 4px; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 600; }
+.md h3, .md h4, .md h5, .md h6 { margin: 20px 0 4px; font-size: var(--fs-reply); line-height: var(--lh-reply); font-weight: 600; }
 .md strong { font-weight: 600; }
-.md ul, .md ol { padding-left: 24px; }
-.md li { margin: 4px 0; }
+/* Lists: tight items, a modest indent, a muted marker */
+.md ul, .md ol { padding-left: 22px; }
+.md li { margin: 4px 0; padding-left: 2px; }
 .md li > p:last-child { margin-bottom: 0; }
 .md li::marker { color: var(--text-400); }
+.md ol > li::marker { font-variant-numeric: tabular-nums; }
 .md li > ul, .md li > ol { margin: 4px 0 0; }
-.md li > p { margin: 0 0 8px; }
+.md li > p { margin: 0 0 4px; }
 .md li > .code-block { margin: 8px 0; }
 .md ul.tasks { padding-left: 4px; list-style: none; }
 .md li.task { display: flex; align-items: flex-start; gap: 8px; }
@@ -547,7 +632,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .md li.task.done .task-box { background: var(--text-100); border-color: var(--text-100); color: var(--bg-000); }
 .md .task-text { min-width: 0; }
-.md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4.5px; border-radius: 4px; background: var(--code-bg); }
+/* Inline code: the mono face on a soft patch of tint, no outline, so a sentence with several stays even */
+.md code { font-family: var(--mono); font-size: 0.875em; padding: 1px 4.5px; border-radius: 5px; background: var(--code-inline); }
 .md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .md a:hover { text-decoration-color: currentColor; }
 .md a code { color: inherit; }
@@ -561,7 +647,13 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .md td + td, .md th + th { border-left: 1px solid var(--border-subtle); }
 .md tbody tr:last-child td { border-bottom: none; }
 
-.code-block { background: var(--code-bg); border-radius: var(--r-card); overflow: hidden; }
+/* Over a background the panels are the veil (light: white; dark: the faint lift). Under a conversation look code is
+   filled from --code-bg, as before these panels (a look written for it keeps its code), unless the look sets
+   --code-panel or --code-inline itself: :where() leaves this rule no weight against the look's :scope. */
+:root.mod-bg { --code-panel: var(--panel-veil); }
+/* …and no hairline of ours either: a look written for 0.20.0 drew its code boxes as fills only; it may set the line itself */
+:where(#messages[data-look]) { --code-panel: var(--code-bg); --code-panel-solid: var(--code-bg); --code-inline: var(--code-bg); --code-panel-line: transparent; }
+.code-block { background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 4px 0 12px; margin-bottom: -8px; }
 .code-lang { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); }
 .code-copy {
@@ -571,7 +663,14 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .code-copy:hover { background: var(--code-hover); color: var(--text-100); }
 .code-copy.copied { color: var(--success); }
 .code-block pre { margin: 0; padding: 12px; overflow-x: auto; font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); tab-size: 4; }
-.md .code-block code { padding: 0; border: none; background: none; font-size: inherit; }
+.md .code-block code { padding: 0; border: none; background: none; box-shadow: none; font-size: inherit; }
+/* Frosted only where something shows through (a background, or a look on the conversation): on the plain page a blur
+   has nothing to blur and would cost paint time for every block on screen. The filter is on the panel itself, never
+   on its lines. */
+:is(:root.mod-bg, #messages[data-look]) :is(.code-block, .cmd, .out pre, pre.args, .out-more) {
+  -webkit-backdrop-filter: blur(var(--code-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--code-blur)) saturate(1.4);
+}
 
 /* Syntax tokens */
 .tok-kw { color: var(--tok-kw); }
@@ -590,7 +689,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thinking > summary, .tool > summary, .tool-group > summary {
   list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0;
   height: 24px; padding: 0 4px; border-radius: var(--r-control);
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); cursor: pointer; user-select: none;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); cursor: pointer; user-select: none;
   transition: color 0.1s;
 }
 .thinking > summary::-webkit-details-marker, .tool > summary::-webkit-details-marker, .tool-group > summary::-webkit-details-marker { display: none; }
@@ -620,7 +719,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .group-icon.spin::after { content: ''; position: absolute; inset: 1px; border-radius: 50%; border: 1.5px solid var(--border); border-top-color: var(--spinner); transform: rotate(var(--spin, 0deg)); will-change: transform; }
 .group-icon.err { color: var(--danger); }
 .tool-verb { flex: none; white-space: nowrap; }
-.tool-arg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-arg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-200); }
 .tool-arg.mono { font-family: var(--mono); font-size: 0.9em; }
 .tool-meta { flex: none; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tool-meta:empty { display: none; }
@@ -657,20 +756,53 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 @media (prefers-reduced-motion: reduce) {
   .tool-group.live > summary :is(.group-verb, .group-arg) { animation: none; color: var(--text-400); background: none; }
 }
-/* The line over a turn's process: "Working for 18s" while it runs, then "Worked for 53s", the button that folds the
-   process away and brings it back; a hairline under it, the width of the column. */
-.transcript > .turn-head { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+/* The line over a turn's process: "Working for 18s" while it runs, then what it did ("Ran 3 commands, read 2 files ·
+   1 blocked · 2m 10s"), the button that folds the process away and brings it back. Unfolded, the process sits in a
+   card right under it (.turn-act). */
+.transcript > .turn-head { margin-bottom: 12px; }
+.transcript > .turn-head.has-card { margin-bottom: 8px; }
 .turn-head-btn {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: var(--r-control);
-  font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 24px; padding: 0 4px; border-radius: var(--r-control);
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); font-variant-numeric: tabular-nums; transition: color 0.1s;
 }
 .turn-head-btn:hover:not(:disabled) { color: var(--text-200); }
 .turn-head-btn:active:not(:disabled) { background: var(--pressed); }
 .turn-head-chevron { display: inline-flex; flex: none; opacity: 0.8; transition: transform 0.12s ease; }
 .turn-head-chevron .icon { width: 12px; height: 12px; }
 .turn-head.live .turn-head-chevron { display: none; }
+.turn-head-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "1 blocked": calls Auto mode blocked in the turn, in a quiet warning tint (their rows are in the fold) */
+.turn-head-blocked { color: color-mix(in srgb, var(--warn) 70%, var(--text-400)); }
 .turn-head-btn[aria-expanded="true"] .turn-head-chevron { transform: rotate(90deg); }
 .transcript > .turn-hidden { display: none !important; }
+/* A turn's process, unfolded: one card (the code panels' surface, a hairline, 12px corners) with a hairline between
+   its rows; every row keeps its own behaviour (it opens in place). The rows are the transcript's own nodes, marked by
+   turn-fold.ts: the transcript stays flat. */
+#messages > .turn-act {
+  margin-top: 0; margin-bottom: 0;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-bottom-width: 0; border-radius: 0;
+}
+#messages > .turn-act-first { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+#messages > .turn-act-last { margin-bottom: 16px; border-bottom-width: 1px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+#messages > .turn-act > summary { height: auto; min-height: 36px; padding: 8px 12px; border-radius: 0; }
+#messages > .turn-act-first > summary { border-radius: 11px 11px 0 0; }
+#messages > .turn-act-last:not([open]) > summary { border-radius: 0 0 11px 11px; }
+#messages > .turn-act-first.turn-act-last:not([open]) > summary { border-radius: 11px; }
+#messages > .turn-act > .tool-body { margin: 0 12px 12px 36px; }
+#messages > .turn-act > .group-body { padding: 0 0 8px; }
+#messages > .turn-act > .group-body > :is(.tool, .thinking, .session-msg) > summary { padding: 0 12px; }
+#messages > .turn-act.msg.assistant { padding: 8px 12px; }
+/* A turn's only group, unfolded (turn-fold.ts): no line of its own, its calls are the card's rows, a hairline between them */
+#messages > .tool-group.flat > summary { display: none; }
+#messages > .tool-group.flat > .group-body { max-height: none; overflow: visible; padding: 0; -webkit-mask-image: none; mask-image: none; }
+#messages > .tool-group.flat > .group-body > * + * { border-top: 1px solid var(--code-panel-line); }
+#messages > .tool-group.flat > .group-body > :is(.tool, .thinking, .session-msg) > summary { height: auto; min-height: 36px; padding: 8px 12px; }
+#messages > .tool-group.flat > .group-body > .tool:not([open]) > summary .tool-chevron { visibility: visible; }
+#messages > .tool-group.flat > .group-body > .tool > .tool-body { margin: 0 12px 12px 36px; }
+#messages > .tool-group.flat > .group-body > .approval.done > .decided { height: auto; min-height: 36px; padding: 8px 12px; }
+#messages > .turn-act.approval.done > .decided { height: auto; min-height: 36px; padding: 8px 12px; }
+#messages > .turn-act.thinking > .body { margin: 0 12px 12px 16px; }
+:root.mod-bg #messages > .turn-act { -webkit-backdrop-filter: blur(var(--code-blur)) saturate(1.4); backdrop-filter: blur(var(--code-blur)) saturate(1.4); }
 /* A folded run: the summary takes the room and is cut last; the diff total, failed and denied sit on its right */
 .group-verb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .group-verb.mono { font-family: var(--mono); font-size: 0.9em; }
@@ -682,7 +814,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 .cmd {
   display: flex; gap: 8px; padding: 8px 12px;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-100); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .cmd code { min-width: 0; }
@@ -691,10 +823,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* 746px: 40 lines of 18px (BODY_LINES in tools.ts cuts longer output) with padding, borders and a scrollbar; only wrapped lines scroll */
 .out pre {
   margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.out-copy { position: absolute; top: 4px; right: 4px; background: var(--code-bg); color: var(--text-400); opacity: 0; }
+/* Opaque: it sits on the output's text */
+.out-copy { position: absolute; top: 4px; right: 4px; background: var(--code-panel-solid); color: var(--text-400); opacity: 0; }
 .out-copy:hover { background: var(--code-hover); color: var(--text-100); }
 .out:hover .out-copy, .out-copy:focus-visible, .out-copy.copied { opacity: 1; }
 .out-copy.copied { color: var(--success); }
@@ -703,16 +836,18 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .tool-note { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--text-400); white-space: pre-wrap; }
 pre.args {
   margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* A file view stays opaque: its line numbers stick to the left while long lines scroll under them, and only a solid
+   gutter hides the text going by (it is the panel's colour on the plain page, so it reads as the same surface). */
 .code-view {
   display: flex; max-height: 746px; overflow: auto;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
+  background: var(--code-panel-solid); border: 1px solid var(--code-panel-line); border-radius: var(--r-card);
   font: var(--fs-code)/var(--lh-code) var(--mono);
 }
 .code-view pre { margin: 0; padding: 8px 0; }
-.code-view .gutter { position: sticky; left: 0; flex: none; min-width: 40px; padding-left: 8px; padding-right: 8px; text-align: right; color: var(--text-400); background: var(--code-bg); border-right: 1px solid var(--border-subtle); user-select: none; }
+.code-view .gutter { position: sticky; left: 0; flex: none; min-width: 40px; padding-left: 8px; padding-right: 8px; text-align: right; color: var(--text-400); background: var(--code-panel-solid); border-right: 1px solid var(--code-panel-line); user-select: none; }
 .code-view .code { flex: 1; padding-left: 12px; padding-right: 12px; color: var(--text-100); white-space: pre; tab-size: 4; }
 .code-view.no-gutter .gutter { display: none; }
 img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border: 1px solid var(--border-subtle); }
@@ -796,7 +931,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 }
 /* A call without a row of its own keeps its answer as a line (in the run, like the row would be) */
 .approval.done { padding: 0; margin-top: 0; margin-bottom: 16px; background: none; border: none; border-radius: 0; box-shadow: none; overflow: visible; }
-.approval .decided { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 0; padding-left: 4px; margin-top: 0; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); }
+.approval .decided { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 0; padding-left: 4px; margin-top: 0; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); }
 .approval .decided .ok { color: var(--text-400); display: inline-flex; }
 .approval .decided .no { color: var(--danger); display: inline-flex; }
 .approval .decided code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 0.9em; color: var(--text-200); }
@@ -864,7 +999,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .plan-body { max-height: 480px; overflow-y: auto; padding: 12px 12px 16px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); }
 .plan-foot { }
 .plan-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
-.plan-status { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 12px 12px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); }
+.plan-status { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 12px 12px; font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); }
 .plan-status > span:first-child { display: inline-flex; flex: none; }
 .plan-status .ok { color: var(--success); }
 .plan-status .back, .plan-status .muted { color: var(--text-400); }
@@ -880,7 +1015,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .status-line {
   position: absolute; left: 0; right: 0; bottom: 100%; height: 44px; padding: 0 21px 12px;
   display: flex; align-items: center; gap: 12px;
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-400); user-select: none;
+  font-size: var(--fs-act); line-height: var(--lh-act); color: var(--text-400); user-select: none;
   background: linear-gradient(to bottom, transparent, var(--bg-100) 35%);
 }
 .status-line .spinner { margin: 0 2px 0 1px; }
@@ -926,7 +1061,7 @@ img.shot { display: block; max-width: 100%; border-radius: var(--r-card); border
 .composer textarea {
   display: block; flex: 1; min-width: 0; min-height: 44px; max-height: 240px; margin: 0 8px; padding: 11px 0 12px;
   border: none; outline: none; background: transparent; resize: none;
-  font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-100); caret-color: var(--text-100);
+  font-size: var(--fs-reply); line-height: var(--lh-reply); color: var(--text-100); caret-color: var(--text-100);
 }
 .composer textarea::placeholder { color: var(--text-400); }
 .send {
@@ -1371,6 +1506,11 @@ dialog.dialog.confirm-dialog { width: 440px; }
 .confirm-text { min-width: 0; padding-top: 6px; }
 .confirm-text h2 { margin: 0; font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 600; overflow-wrap: anywhere; }
 .confirm-text p { margin: 4px 0 0; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-400); }
+/* What a confirmation acts on, as a short list; and a choice it offers (off unless ticked) */
+.confirm-list { margin: 8px 0 0; padding: 0 0 0 18px; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-200); }
+.confirm-list[hidden], .confirm-check[hidden] { display: none; }
+.confirm-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: var(--fs-ui); line-height: var(--lh-ui); color: var(--text-100); cursor: pointer; }
+.confirm-check input { margin: 0; accent-color: var(--danger); }
 .confirm-dialog .dialog-foot { border-top: none; padding-top: 8px; padding-bottom: 16px; }
 
 /* ---------- Motion ---------- */
@@ -1842,8 +1982,9 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 
 /* ---------- Tick 2: message actions on user bubbles, rewind, the task list ---------- */
 
-/* User bubbles: Copy and Rewind appear on hover or focus at the bubble's top-right, like a reply's Copy */
+/* User bubbles: Copy and Rewind appear on hover or focus under the bubble's right edge (.msg-actions above) */
 .msg.user { position: relative; }
+.msg.user > .msg-actions { position: absolute; top: 100%; right: 0; height: 24px; }
 .msg.user:hover .msg-actions { opacity: 1; pointer-events: auto; }
 .msg.user .msg-actions:empty { display: none; }
 /* Rewind needs an idle agent: hidden during a run, a compaction or another rewind */
@@ -1958,7 +2099,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .out-cut > .out > pre, .out-cut > .code-view, .out-cut > .cmd, .out-cut > pre.args, .out-cut > .diff { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .out-more {
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
-  background: var(--code-bg); border: 1px solid var(--border-subtle); border-top: none;
+  background: var(--code-panel); border: 1px solid var(--code-panel-line); border-top: none;
   border-radius: 0 0 var(--r-card) var(--r-card);
   font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text-400);
   transition: background-color 0.12s, color 0.12s;
@@ -1968,6 +2109,7 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
 .out-more:focus-visible { outline-offset: -2px; }
 .out-cut > .diff + .out-more { background: var(--diff-bg); }
 .out-cut > .diff + .out-more:hover { background: var(--code-hover); }
+.out-cut > .code-view + .out-more { background: var(--code-panel-solid); }
 .out-cut > .out.error + .out-more { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 .out-cut > .out.error + .out-more:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .tool-body .diff-body { max-height: 746px; }

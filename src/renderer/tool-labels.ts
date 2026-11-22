@@ -26,7 +26,7 @@ export function setNameLookup(l: Partial<NameLookup>): void {
 export const AGENT_TOOLS = new Set([
   'session_spawn', 'session_send', 'session_list', 'session_read', 'session_merge', 'session_rename',
   'schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete',
-  'mod_check', 'submit_plan',
+  'mod_check', 'submit_plan', 'next_step',
   'history_read', 'history_search', 'propose_skill', 'propose_memory', 'propose_mod', 'withdraw_proposal',
 ]);
 
@@ -116,6 +116,8 @@ export function agentToolLabel(name: string, a: Args, now = Date.now()): AgentRo
       return row('Check mod', id || 'all mods', 'puzzle', Boolean(id));
     }
     case 'submit_plan': return row('Plan', str(a, 'title'), 'clipboard');
+    // A next_step card that could not be shown (one that was is the card itself)
+    case 'next_step': return row('Next step', str(a, 'question') || str(a, 'recap'), 'arrow-right');
     // A dream's tools (a proposal that was made is a card; these rows are what was refused, and the reading)
     case 'history_read': return row('Read history', sessionName(str(a, 'session')), 'eye');
     case 'history_search': return row('Search history', str(a, 'query'), 'search');
@@ -237,6 +239,8 @@ export function agentToolMeta(name: string, a: Args, result: string): AgentMeta 
     }
     case 'submit_plan':
       return { text: /^Plan "/.test(r) ? 'submitted' : 'not submitted' };
+    case 'next_step':
+      return { text: /^The card is shown/.test(r) ? 'shown' : 'not shown' };
     case 'history_read':
       return (m = /^Session "[\s\S]*?" \([^)]+\), (\d+) messages:/.exec(r)) ? { text: `${plural(Number(m[1]), 'message')} in all` } : { text: 'read' };
     case 'history_search':
@@ -267,6 +271,7 @@ export function agentStatusVerb(name: string): string | null {
     case 'schedule_delete': return 'Deleting the schedule…';
     case 'mod_check': return 'Checking the mod…';
     case 'submit_plan': return 'Writing the plan…';
+    case 'next_step': return 'Writing the next step…';
     case 'history_read': return 'Reading a session…';
     case 'history_search': return 'Searching the sessions…';
     case 'propose_skill': return 'Proposing a skill…';

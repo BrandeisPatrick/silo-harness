@@ -45,7 +45,9 @@ There is no telemetry and no account.
 
 ## Removing it
 
-- Sessions: Settings → History → Delete all sessions.
-- Mods: Settings → Mods → Delete all custom mods.
+- Sessions: Settings → Developer → Reset → Delete all sessions.
+- Mods: Settings → Developer → Reset → Delete all custom mods.
 - MCP sign-ins: Sign out on each server under Settings → MCP servers.
+- The app's settings: Settings → Developer → Reset → Reset settings… moves `config.json` to the Trash; sessions, mods and your `settings.json` stay. The app relaunches.
+- Back to the first launch: Settings → Developer → Reset → Full reset… moves everything in `~/Library/Application Support/Silo Harness` and your mods to the Trash, and your `settings.json` too if you tick its box (off by default). Your projects and skills stay. The app relaunches.
 - Everything: quit, then move the two folders above and the app to the Trash.

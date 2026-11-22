@@ -441,6 +441,60 @@ async function main() {
   check('the delivered message appears once', (await js(win, `[...document.querySelectorAll('.msg.user .bubble')].filter(b => b.textContent === 'Also add a test for three attempts').length`)) === 1);
   await shot(win, '6-done');
 
+  // 6b. Calls Auto mode blocked: one of the turn's tool rows each ("Blocked <command>", never its description), the
+  // count on the turn's line under its message, Allow inside the opened row.
+  f.emit(A, { type: 'auto_blocked', block: { id: 'bk1', sessionId: A, name: 'bash', what: 'git push --force origin main', desc: 'Push the rewritten history', full: 'git push --force origin main', reason: '[Destructive Git] force-pushes over remote history', at: Date.now() } });
+  f.emit(A, { type: 'auto_blocked', block: { id: 'bk2', sessionId: A, name: 'bash', what: 'npm publish --access public', reason: '[Publishing] publishes the package', at: Date.now() } });
+  check('blocked: two rows', await waitFor(win, `document.querySelectorAll('#transcript .tool.blocked').length === 2`));
+  const blocked = await js(win, `({ rows: [...document.querySelectorAll('#transcript .tool.blocked')].map((d) => (d.querySelector('.tool-verb').textContent + ' ' + d.querySelector('.tool-arg').textContent).trim()), lines: [...document.querySelectorAll('#transcript .turn-line:not([hidden])')].map((n) => n.innerText.trim()), allow: [...document.querySelectorAll('#transcript .tool.blocked .blocked-end button')].length, reason: document.querySelector('#transcript .tool.blocked .blocked-reason')?.textContent ?? '' })`);
+  check('blocked: "Blocked <command>", never the call\'s description; Allow in each; the reason inside', JSON.stringify(blocked.rows) === JSON.stringify(['Blocked git push --force origin main', 'Blocked npm publish --access public']) && blocked.allow === 2 && blocked.reason === '[Destructive Git] force-pushes over remote history', blocked);
+  check('blocked: the turn\'s line counts them', JSON.stringify(blocked.lines) === JSON.stringify(['2 blocked']), blocked.lines);
+  await js(win, `document.querySelector('#transcript .tool.blocked').open = true; document.querySelector('#transcript .tool.blocked').scrollIntoView({ block: 'center' })`);
+  await sleep(200);
+  await shot(win, '6b-blocked');
+
+  // 6c. The next-step card (next_step): recap and question as text, the replies as buttons; a tap sends the label as
+  // a typed message would; the user's message quiets the card, the chosen reply kept. The call has no row.
+  f.emit(A, { type: 'tool_start', id: 'ns1', name: 'next_step', args: { recap: 'The login test passes; nothing is pushed.', question: 'Open a <b>pull request</b>?', replies: ['Yes, open it', 'Not yet'] } });
+  f.emit(A, { type: 'tool_end', id: 'ns1', name: 'next_step', result: 'The card is shown under your reply. End your turn now; the user answers with their next message.', ok: true });
+  check('next step: the card shows', await waitFor(win, `Boolean(document.querySelector('#transcript .next-step'))`));
+  const step = await js(win, `(() => { const c = document.querySelector('#transcript .next-step'); return { recap: c.querySelector('.next-step-recap').textContent, question: c.querySelector('.next-step-question').textContent, markup: c.querySelectorAll('b').length, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent + (b.classList.contains('primary') ? '*' : '')), row: [...document.querySelectorAll('#transcript .tool')].some((t) => /next_step|Next step/.test(t.textContent)) }; })()`);
+  check('next step: recap, question as text, two replies (the first primary), no tool row', step.recap === 'The login test passes; nothing is pushed.' && step.question === 'Open a <b>pull request</b>?' && step.markup === 0 && JSON.stringify(step.buttons) === JSON.stringify(['Yes, open it*', 'Not yet']) && !step.row, step);
+  // The reply comes after the call (as the tool asks): the card moves under it
+  for (const chunk of ['The suite ', 'passes; ', 'opening a pull request is up to you.']) f.emit(A, { type: 'text_delta', text: chunk });
+  f.emit(A, { type: 'text_done' });
+  f.emit(A, { type: 'assistant_message', text: 'The suite passes; opening a pull request is up to you.', toolCalls: 0 });
+  check('next step: the reply written after the call sits above the card', await waitFor(win, `(() => { const c = document.querySelector('#transcript .next-step'); const p = c.previousElementSibling; return p && p.classList.contains('assistant') && p.innerText.includes('opening a pull request is up to you'); })()`));
+  await js(win, `document.querySelector('#transcript .next-step').scrollIntoView({ block: 'center' })`);
+  await sleep(200);
+  await shot(win, '6c-next-step');
+  const sendsBefore = f.calls.filter((c) => c[0] === 'send').length;
+  await js(win, `(() => { const i = document.getElementById('input'); i.value = 'my draft'; i.dispatchEvent(new Event('input')); })()`);
+  await js(win, `[...document.querySelectorAll('#transcript .next-step button')].find((b) => b.textContent === 'Not yet').click()`);
+  check('next step: a tap sends the label', await waitFor(win, `true`) && (await (async () => { for (let i = 0; i < 40 && f.calls.filter((c) => c[0] === 'send').length === sendsBefore; i++) await sleep(50); const last = f.calls.filter((c) => c[0] === 'send').pop(); return last && last[2] === 'Not yet'; })()), f.calls.filter((c) => c[0] === 'send').pop());
+  f.emit(A, { type: 'user_message', text: 'Not yet', images: 0, origin: 'remote' });
+  check('next step: the tap left the draft in the chat bar', (await js(win, `document.getElementById('input').value`)) === 'my draft');
+  await js(win, `(() => { const i = document.getElementById('input'); i.value = ''; i.dispatchEvent(new Event('input')); })()`);
+  check('next step: the message quiets the card, "Not yet" kept', await waitFor(win, `(() => { const c = document.querySelector('#transcript .next-step'); const b = [...c.querySelectorAll('button')]; return !c.classList.contains('live') && b.length === 1 && b[0].textContent === 'Not yet' && b[0].disabled && b[0].classList.contains('chosen'); })()`));
+
+  // 6d. A card while the run goes on: a tap sends nothing; a reply that would run a command is not offered; hidden
+  // direction and zero-width characters are gone from its words
+  live.running = true;
+  f.status.set(A, { running: true });
+  f.emit(A, { type: 'run_start' });
+  f.emit(A, { type: 'tool_start', id: 'ns2', name: 'next_step', args: { recap: 'Ready\u200b to \u202eship\u202c.', question: 'Ship it?', replies: ['Ship it', '/compact'] } });
+  f.emit(A, { type: 'tool_end', id: 'ns2', name: 'next_step', result: 'ok', ok: true });
+  await waitFor(win, `document.querySelectorAll('#transcript .next-step').length === 2`);
+  const sends2 = f.calls.filter((c) => c[0] === 'send').length;
+  const card2 = await js(win, `(() => { const c = [...document.querySelectorAll('#transcript .next-step')].pop(); c.querySelector('button').click(); return { recap: c.querySelector('.next-step-recap').textContent, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent) }; })()`);
+  await sleep(300);
+  check('next step, running: a tap sends nothing', f.calls.filter((c) => c[0] === 'send').length === sends2, f.calls.filter((c) => c[0] === 'send').slice(sends2));
+  check('next step: no reply that starts with "/", and the words without hidden characters', JSON.stringify(card2.buttons) === JSON.stringify(['Ship it']) && card2.recap === 'Ready to ship .', card2);
+  live.running = false;
+  f.status.set(A, { running: false });
+  f.emit(A, { type: 'run_end', reason: 'done' });
+  await waitFor(win, `document.getElementById('stop').hidden`);
+
   // 7. Desktop width.
   win.setSize(1100, 800);
   await sleep(300);

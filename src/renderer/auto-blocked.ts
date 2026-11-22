@@ -1,15 +1,16 @@
-// Auto mode's blocked actions in the window: the quiet line that stands for a call the safety check blocked ("Auto mode
-// blocked git push --force · Allow"), and Settings → Permissions → Recently blocked. Allow lets the action run once when
+// Auto mode's blocked actions in the window: the row that stands for a call the safety check blocked, one of its turn's
+// tool rows ("Blocked Push the release branch", opened: the command, the reason and Allow), and Settings → Permissions → Recently blocked. Allow lets the action run once when
 // the agent tries it again (the agent is told it may). Wired from renderer.ts (setupAutoBlocked) and
 // settings/config-sections.ts (recentlyBlocked, learnedAnswers); the rest arrives through the bus and the transcript item registry.
 
 import type { AutoBlock, LearnedAnswer, RecentBlock } from '../shared/auto-mode';
 import { bus } from './bus.js';
 import { escapeHtml, h } from './dom.js';
+import { highlight } from './highlight.js';
 import { icon } from './icons.js';
 import { rpc } from './rpc.js';
 import type { Ctx } from './settings/ctx.js';
-import { button, note, row } from './settings/ui.js';
+import { button, row } from './settings/ui.js';
 import { appendTranscriptItem, registerTranscriptItem } from './transcript-items.js';
 
 /** The transcript (#messages): where the call's row is found and hidden. */
@@ -58,34 +59,54 @@ function linesOf(sessionId: string, id: string): HTMLElement[] {
   return [...messages.querySelectorAll<HTMLElement>(`.auto-blocked[data-block-id="${CSS.escape(id)}"]`)].filter((el) => el.dataset.sessionId === sessionId);
 }
 
+/**
+ * The row of a blocked call, one of the turn's tool rows (it folds with them, turn-fold-model.ts): the shield, "Blocked",
+ * then what was blocked (the command on one line, never the call's description of it). Opened, it shows the whole command,
+ * the check's reason and Allow.
+ */
 function lineEl(b: AutoBlock): HTMLElement {
-  const el = document.createElement('div');
+  const el = document.createElement('details');
   el.className = 'auto-blocked';
   el.dataset.blockId = b.id;
   el.dataset.sessionId = b.sessionId;
+  const full = typeof b.full === 'string' && b.full.trim() ? b.full : b.what;
+  const shell = b.name === 'bash' || b.name === 'terminal_run';
   el.innerHTML =
-    `<span class="auto-blocked-icon">${icon('shield-off', 16)}</span>` +
-    `<span class="auto-blocked-words" data-tip="${escapeHtml(b.reason)}">Auto mode blocked <span class="auto-blocked-what">${escapeHtml(b.what)}</span></span>` +
-    `<span class="auto-blocked-end"></span>`;
-  el.setAttribute('aria-label', `Auto mode blocked ${b.what}: ${b.reason}`);
+    `<summary aria-label="${escapeHtml(`Auto mode blocked ${b.what}`)}">` +
+    `<span class="tool-chevron">${icon('chevron-right')}</span>` +
+    `<span class="tool-status auto-blocked-icon">${icon('shield-off', 16)}</span>` +
+    '<span class="tool-verb">Blocked</span>' +
+    // What was blocked, never the call's own description of it (a model could describe `curl … | sh` as running tests)
+    `<span class="tool-arg mono auto-blocked-what" title="${escapeHtml(b.what)}">${escapeHtml(b.what)}</span>` +
+    '<span class="tool-meta auto-blocked-state"></span>' +
+    '</summary>' +
+    '<div class="tool-body">' +
+    (shell
+      ? `<div class="cmd"><span class="cmd-prompt">$</span><code>${highlight(full, 'sh')}</code></div>`
+      : `<div class="cmd"><code>${escapeHtml(full)}</code></div>`) +
+    `<div class="auto-blocked-reason">${escapeHtml(b.reason)}</div>` +
+    '<div class="auto-blocked-end"></div>' +
+    '</div>';
   return el;
 }
 
-/** What follows the words: Allow, Allowed, or nothing. */
+/** Whether the action may run once more: Allow (in the opened row), Allowed (also on the row's line), or neither. */
 function setEnd(el: HTMLElement, state: 'allow' | 'allowed' | null): void {
   const end = el.querySelector<HTMLElement>('.auto-blocked-end')!;
+  const meta = el.querySelector<HTMLElement>('.auto-blocked-state');
   end.replaceChildren();
   el.classList.toggle('allowed', state === 'allowed');
+  if (meta) meta.textContent = state === 'allowed' ? 'Allowed' : '';
   if (!state) return;
-  end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-sep" aria-hidden="true">·</span>');
   if (state === 'allowed') {
-    end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-done">Allowed</span>');
+    end.insertAdjacentHTML('beforeend', '<span class="auto-blocked-done">Allowed: it runs once when the agent tries it again</span>');
     return;
   }
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'auto-blocked-allow';
+  btn.className = 'btn sm auto-blocked-allow';
   btn.textContent = 'Allow';
+  btn.setAttribute('aria-label', 'Allow it once');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     const r = await rpc('auto.allow', el.dataset.sessionId ?? '', el.dataset.blockId ?? '').catch(() => null);
@@ -93,13 +114,13 @@ function setEnd(el: HTMLElement, state: 'allow' | 'allowed' | null): void {
     else if (r) setEnd(el, null);
     else btn.disabled = false;
   });
-  end.append(btn);
+  end.append(btn, Object.assign(document.createElement('span'), { className: 'auto-blocked-hint', textContent: 'lets it run once when the agent tries it again' }));
 }
 
 // ---------- Settings → Permissions → Recently blocked ----------
 
 /** The list of the latest blocks of every session, each with Allow; refreshed when Settings opens and as blocks come. */
-export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise<void> } {
+export function recentlyBlocked(ctx: Ctx, onCount?: (n: number) => void): { el: HTMLElement; refresh(): Promise<void> } {
   const el = h('div', { class: 'sp-rows auto-blocked-list' });
   let seq = 0;
   async function refresh(): Promise<void> {
@@ -139,7 +160,8 @@ export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise
       r.el.querySelector('.sp-row-name')?.classList.add('auto-blocked-what');
       el.append(r.el);
     });
-    if (!list.length) el.append(note('Nothing blocked.'));
+    // An empty list shows nothing: the page hides its card
+    onCount?.(list.length);
     ctx.refreshSearch();
   }
   bus.on('agent-event', (ev) => {
@@ -151,7 +173,7 @@ export function recentlyBlocked(ctx: Ctx): { el: HTMLElement; refresh(): Promise
 // ---------- Settings → Permissions → Auto mode: what it learned from your answers ----------
 
 /** The answers Auto mode learned from, newest first, each with Remove; Forget all on `forgetAll`. */
-export function learnedAnswers(ctx: Ctx): { el: HTMLElement; forgetAll: HTMLButtonElement; refresh(): Promise<void> } {
+export function learnedAnswers(ctx: Ctx, onCount?: (n: number) => void): { el: HTMLElement; forgetAll: HTMLButtonElement; refresh(): Promise<void> } {
   const el = h('div', { class: 'sp-rows auto-learned-list' });
   let seq = 0;
   let count = 0;
@@ -187,7 +209,7 @@ export function learnedAnswers(ctx: Ctx): { el: HTMLElement; forgetAll: HTMLButt
       r.el.querySelector('.sp-row-name')?.classList.add('auto-blocked-what');
       el.append(r.el);
     });
-    if (!list.length) el.append(note('Nothing learned yet.'));
+    onCount?.(list.length);
     ctx.refreshSearch();
   }
   const forgetAll = button('Forget all', async (btn) => {

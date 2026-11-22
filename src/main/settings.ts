@@ -330,6 +330,7 @@ function analyse(file: string, scope: Scope, opts: { trustedHash?: string; apply
     return out;
   }
   info.exists = true;
+  if (fs.lstatSync(file).isSymbolicLink()) info.link = true;
   const hash = contentHash(raw);
   if (scope === 'project') {
     info.trusted = opts.trustedHash === hash;
@@ -567,6 +568,8 @@ export class SettingsLayer {
   private fileInfo: SettingsFileInfo[] = [];
   /** Variables a file set, with the value each had before any file touched it (undefined: it did not exist) */
   private envSaved = new Map<string, string | undefined>();
+  /** Which file set each variable (names only): a key from a variable no file set comes from the shell */
+  private envBy: Record<string, Scope> = {};
   private cwd = '';
 
   constructor(private readonly opts: LayerOptions = {}) {}
@@ -604,15 +607,17 @@ export class SettingsLayer {
     const base = structuredClone(this.withoutSettings(current));
     this.restoreEnv();
     this.ownedBy = {};
-    const applyEnv = (entries: [string, string][]) => {
+    this.envBy = {};
+    const applyEnvOf = (scope: Scope) => (entries: [string, string][]) => {
       for (const [name, v] of entries) {
         if (!this.envSaved.has(name)) this.envSaved.set(name, process.env[name]);
         process.env[name] = expandEnvRefs(v);
+        this.envBy[name] = scope;
       }
     };
 
     const userFile = this.userFile();
-    const user = analyse(userFile, 'user', { applyEnv, willApply: () => true });
+    const user = analyse(userFile, 'user', { applyEnv: applyEnvOf('user'), willApply: () => true });
     let cfg: AppConfig = base;
     for (const { path: p, value } of user.values) {
       cfg = setPath(cfg, p, value);
@@ -626,7 +631,7 @@ export class SettingsLayer {
     // A user file whose workingDirectory is its own config folder's parent would otherwise be read twice.
     if (path.resolve(projectFile) !== path.resolve(userFile)) {
       const trustedHash = (cfg.settingsTrusted ?? {})[this.cwd];
-      const project = analyse(projectFile, 'project', { trustedHash, applyEnv, willApply: (hash) => trustedHash === hash });
+      const project = analyse(projectFile, 'project', { trustedHash, applyEnv: applyEnvOf('project'), willApply: (hash) => trustedHash === hash });
       if (project.info.applied) {
         for (const { path: p, value } of project.values) {
           cfg = setPath(cfg, p, value);
@@ -691,6 +696,11 @@ export class SettingsLayer {
   /** The files and the fields they own. Keys only, never a value. */
   info(): SettingsInfo {
     return { files: this.fileInfo.map((f) => ({ ...f, keys: [...f.keys], invalid: f.invalid.map((i) => ({ ...i })) })), owned: { ...this.ownedBy } };
+  }
+
+  /** Which file set each variable of an env block now (names only, never a value). */
+  envOwners(): Record<string, Scope> {
+    return { ...this.envBy };
   }
 
   /** Field paths owned now, e.g. ["portkey.model"]. */

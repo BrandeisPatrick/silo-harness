@@ -1,4 +1,4 @@
-// Live checks of the look tabs of Settings → Mods (Background, Chat bar, Conversation), in the real window:
+// Live checks of the look tabs of Settings → Appearance (Background, Chat bar, Conversation; on Mods before), in the real window:
 // each tab's preview shows what is in use; a click on another version previews it there and leaves the window as it
 // is; Use applies it to the window; Default undoes it; the first Use of a look of yours asks once (and Cancel leaves
 // everything as it was); "Use the set" applies a set's parts together; New ⌄ (the only button of the Versions head)
@@ -298,7 +298,7 @@ function writeMod(root, id, manifest, files) {
     await sleep(1200);
     const now = await ev(`window.__oc_debug.settings.state()`);
     s = await st('conversation');
-    check("the card's Preview opens Settings → Mods → Conversation with it previewed", now.open && now.section === 'mods' && now.tab === 'conversation' && s.previewing && s.shown === 'dusk-chat/main', { now, s });
+    check("the card's Preview opens Settings → Appearance → Conversation with it previewed", now.open && now.section === 'appearance' && now.tab === 'conversation' && s.previewing && s.shown === 'dusk-chat/main', { now, s });
     check('… in the preview only', (await inPane('conversation', `getComputedStyle(r.querySelector('.msg.user .bubble')).backgroundColor`)) === 'rgb(120, 60, 40)' && (await ev(`document.querySelector('#messages').dataset.look ?? null`)) === null);
     await shotSettings('tab-conversation-previewing-card-light');
     await closeSettings();

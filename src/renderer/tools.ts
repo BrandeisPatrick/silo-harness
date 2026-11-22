@@ -931,6 +931,10 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
   el.dataset.tool = name;
   el.dataset.icon = label.icon;
   if (label.server) el.dataset.server = label.server;
+  // What the turn's fold line counts the call by (turn-fold.ts): the same file twice is one file, a URL tells a page
+  // from a search
+  if (typeof a.path === 'string' && a.path) el.dataset.path = a.path;
+  if (typeof a.url === 'string' && a.url) el.dataset.url = a.url;
   const summary = document.createElement('summary');
   summary.innerHTML =
     `<span class="tool-chevron">${icon('chevron-right')}</span>` +
@@ -1041,6 +1045,7 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
         const st = editRows ? diffStats(editRows) : { added: typeof a.content === 'string' ? fileLines(a.content).length : 0, removed: 0 };
         card.diff = { added: st.added, removed: st.removed };
         card.created = name === 'write_file' && /^Created\b/.test(res.result);
+        if (card.created) el.dataset.created = 'true';
       }
       if (failed || denied) {
         el.classList.toggle('denied', denied);

@@ -53,7 +53,7 @@
   function freshView() {
     // attempt: the reply and thinking nodes of the model call in flight (a failed attempt's go); retry: the status text
     // while a failed call waits to be tried again
-    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', attempt: [], retry: null, tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
+    return { assistant: null, assistantText: '', thinking: null, thinkingText: '', attempt: [], retry: null, tools: new Map(), approvals: new Map(), questions: new Map(), plans: new Map(), steps: new Map(), compacting: null, pendingPrs: [], pendingDocs: [] };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -798,25 +798,68 @@
   }
 
   /**
-   * A call Auto mode's safety check blocked: one quiet line, as on the desktop ("Auto mode blocked git push --force ·
-   * Allow"); `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed).
+   * A call Auto mode's safety check blocked: one of the turn's tool rows, as on the desktop ("Blocked git push origin
+   * main", what was blocked, never the call's description of it); opened, the whole command, the check's reason and Allow.
+   * `state` is 'allow', 'allowed' or null (a block from before the app started cannot be allowed). The turn's line
+   * counts the blocks (countBlocked).
    */
   function blockedEl(block, state) {
-    const n = h('div', 'note blocked');
+    const n = h('details', 'tool blocked');
     n.dataset.id = block.id;
-    n.title = block.reason || '';
-    n.innerHTML = `${icon('shield', 14)}<span class="blocked-words">Auto mode blocked <code>${esc(block.what || block.name)}</code></span><span class="blocked-end"></span>`;
+    const what = block.what || block.name;
+    const sum = h('summary');
+    sum.innerHTML =
+      `<span class="chev">${icon('chevron', 14)}</span>` +
+      `<span class="tool-status warn">${icon('shield', 14)}</span>` +
+      '<span class="tool-verb">Blocked</span>' +
+      // What was blocked, never the call's own description of it
+      `<span class="tool-arg mono">${esc(what)}</span>` +
+      '<span class="tool-meta"></span>';
+    const body = h('div', 'tool-body');
+    body.append(h('pre', 'out', `<span class="label">Command</span>${esc(block.full || what)}`));
+    body.append(h('div', 'blocked-reason', esc(block.reason || '')));
+    body.append(h('div', 'blocked-end'));
+    n.append(sum, body);
     setBlocked(n, state);
     return n;
   }
 
+  /**
+   * The count of blocked calls on each turn's line, as on the desktop ("· 4 blocked" after "Worked for …"): the
+   * phone has no fold, so the line is a quiet note right under the turn's message, there only while a block is.
+   */
+  function countBlocked() {
+    const t = el.transcript;
+    let line = null;
+    let count = 0;
+    const settle = () => {
+      if (!line) return;
+      if (count) line.querySelector('.turn-blocked-count').textContent = `${count} blocked`;
+      line.hidden = !count;
+    };
+    for (const n of [...t.children]) {
+      if (n.classList.contains('msg') && n.classList.contains('user')) {
+        settle();
+        line = n.nextElementSibling && n.nextElementSibling.classList.contains('turn-line') ? n.nextElementSibling : null;
+        count = 0;
+        if (!line) {
+          line = h('div', 'note turn-line', `${icon('shield', 14)}<span class="turn-blocked-count"></span>`);
+          line.hidden = true;
+          n.after(line);
+        }
+      } else if (n.classList.contains('blocked')) count++;
+    }
+    settle();
+  }
+
   function setBlocked(n, state) {
     const end = n.querySelector('.blocked-end');
+    const meta = n.querySelector('.tool-meta');
     end.textContent = '';
+    meta.textContent = state === 'allowed' ? 'Allowed' : '';
     if (!state) return;
-    end.append(document.createTextNode(' · '));
     if (state === 'allowed') {
-      end.append(document.createTextNode('Allowed'));
+      end.append(document.createTextNode('Allowed: it runs once when the agent tries it again'));
       return;
     }
     const b = h('button', 'link', 'Allow');
@@ -939,6 +982,90 @@
     card.querySelector('.card-actions').hidden = status !== 'proposed' || !card._plan.id;
   }
 
+  // The next-step card that ends a turn (the next_step tool): the recap in grey and the question, as text. A live card
+  // keeps its replies as buttons: a tap sends the label as plain text, never while the run goes on, and leaves a draft
+  // in the chat bar alone; once anything is sent it goes quiet, the chosen reply kept as a grey pill. A stored card is
+  // quiet. Control, zero-width and direction characters go, as on the desktop (next-step.ts).
+  function stepText(v, max) {
+    // eslint-disable-next-line no-control-regex
+    return typeof v === 'string' ? [...v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '';
+  }
+
+  function nextStepEl(step, chosen, live) {
+    if (typeof step === 'string') {
+      try {
+        step = JSON.parse(step);
+      } catch {
+        return null;
+      }
+    }
+    if (!step || typeof step !== 'object') return null;
+    const recap = stepText(step.recap, 300);
+    if (!recap) return null;
+    const question = stepText(step.question, 100);
+    const replies = question && Array.isArray(step.replies) ? step.replies.map((r) => stepText(typeof r === 'string' ? r.replace(/\s*\(recommended\)\s*$/i, '') : r, 40)).filter((r) => r && !/^[/#@!]/.test(r)).slice(0, 2) : [];
+    const card = h('div', 'next-step' + (live ? ' live' : ''));
+    const p = h('p', 'next-step-recap');
+    p.textContent = recap;
+    card.append(p);
+    if (question) {
+      const q = h('p', 'next-step-question');
+      q.textContent = question;
+      card.append(q);
+    }
+    const shown = live ? replies : replies.filter((r) => typeof chosen === 'string' && r.toLowerCase() === chosen.trim().toLowerCase());
+    if (shown.length) {
+      const row = h('div', 'next-step-replies');
+      shown.forEach((label, i) => {
+        const b = h('button', 'btn' + (live && i === 0 ? ' primary' : '') + (live ? '' : ' chosen'));
+        b.type = 'button';
+        b.textContent = label;
+        b.dataset.reply = label;
+        b.disabled = !live;
+        b.onclick = async () => {
+          if (!card.classList.contains('live') || S.running || S.dead || !S.current) return;
+          const res = await api('send', { session: S.current, text: label }).catch((err) => ({ ok: false, error: err.message }));
+          if (!res.ok) toast(res.error || 'Could not send.');
+          else if (res.queued) {
+            S.queue.push({ id: res.id, text: label });
+            renderQueue();
+          }
+        };
+        row.append(b);
+      });
+      card.append(row);
+    }
+    return card;
+  }
+
+  /**
+   * The model calls next_step, then writes its reply: each card goes under the last reply of its turn (the replies
+   * after it, before the next user message).
+   */
+  function settleNextSteps() {
+    for (const card of el.transcript.querySelectorAll('.next-step')) {
+      let last = null;
+      for (let n = card.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) if (n.classList.contains('assistant')) last = n;
+      if (last) last.after(card);
+    }
+  }
+
+  /** Anything the user sent quiets the live cards: only the reply they sent stays, as a grey pill. */
+  function quietNextSteps(text) {
+    const said = typeof text === 'string' ? text.trim().toLowerCase() : '';
+    for (const card of el.transcript.querySelectorAll('.next-step.live')) {
+      card.classList.remove('live');
+      for (const b of card.querySelectorAll('button')) {
+        b.disabled = true;
+        b.classList.remove('primary');
+        if (said && b.dataset.reply.toLowerCase() === said) b.classList.add('chosen');
+        else b.remove();
+      }
+      const row = card.querySelector('.next-step-replies');
+      if (row && !row.children.length) row.remove();
+    }
+  }
+
   function itemEl(item) {
     switch (item.role) {
       case 'user': return userEl(item.text, item.images, item.origin, item.from);
@@ -953,6 +1080,7 @@
       case 'image': return note(`Image: ${item.image.caption || item.image.name} (on your Mac)`);
       case 'compaction': return h('div', 'divider', 'Earlier messages summarised');
       case 'auto_blocked': return blockedEl(item.block, item.block.allowed ? 'allowed' : item.allowable ? 'allow' : null);
+      case 'next_step': return nextStepEl(item.step, item.chosen, false);
       default: return null;
     }
   }
@@ -979,6 +1107,7 @@
     // Calls no reply came after
     const left = takeCards('');
     if (left) t.append(left);
+    settleNextSteps();
     if (live.thinking) {
       V.thinking = thinkingEl(live.running);
       V.thinkingText = live.thinking;
@@ -992,7 +1121,7 @@
       t.append(V.assistant);
     }
     for (const tool of live.tools) {
-      if (tool.name === 'submit_plan') continue; // the plan card stands for it, as with tool_start
+      if (tool.name === 'submit_plan' || tool.name === 'next_step') continue; // the plan card stands for it, as with tool_start
       const row = toolEl(tool.name, tool.args, undefined, undefined);
       V.tools.set(tool.id, row);
       t.append(row);
@@ -1007,6 +1136,7 @@
       V.questions.set(q.id, card);
       t.append(card);
     }
+    countBlocked();
     if (!t.childElementCount) t.append(emptyEl());
     S.queue = live.queue.map((q) => ({ id: q.id, text: q.text }));
     renderQueue();
@@ -1092,6 +1222,7 @@
       case 'user_message':
         endStreaming();
         V.assistant = null;
+        quietNextSteps(ev.text);
         append(userEl(ev.text, ev.images, ev.origin, ev.from));
         break;
       case 'thinking_delta':
@@ -1146,6 +1277,7 @@
           endStreaming();
         } else if (ev.text) append(assistantEl(ev.text));
         V.assistant = null;
+        if (ev.text) settleNextSteps();
         // The cards it names, and those the calls before it were waiting with, go under it
         if (ev.text) {
           const cards = takeCards(ev.text);
@@ -1156,12 +1288,29 @@
         endStreaming();
         V.assistant = null;
         if (ev.name === 'submit_plan') break; // the plan card stands for it
+        // The next-step card stands for it once the call is done
+        if (ev.name === 'next_step') {
+          V.steps.set(ev.id, ev.args);
+          break;
+        }
         const row = toolEl(ev.name, ev.args, undefined, undefined);
         V.tools.set(ev.id, row);
         append(row);
         break;
       }
       case 'tool_end': {
+        if (ev.name === 'next_step' && V.steps.has(ev.id)) {
+          const args = V.steps.get(ev.id);
+          V.steps.delete(ev.id);
+          const card = ev.ok ? nextStepEl(args, undefined, true) : null;
+          if (card) {
+            quietNextSteps('');
+            append(card);
+            break;
+          }
+          append(toolEl(ev.name, args, ev.result, ev.ok));
+          break;
+        }
         const row = V.tools.get(ev.id);
         if (row) {
           setToolState(row, ev.result, ev.ok);
@@ -1178,10 +1327,11 @@
           V.tools.delete(ev.block.id);
         }
         append(blockedEl(ev.block, 'allow'));
+        countBlocked();
         break;
       }
       case 'auto_allowed':
-        for (const n of el.transcript.querySelectorAll('.note.blocked')) if (n.dataset.id === ev.id) setBlocked(n, 'allowed');
+        for (const n of el.transcript.querySelectorAll('.tool.blocked')) if (n.dataset.id === ev.id) setBlocked(n, 'allowed');
         break;
       case 'approval_request': {
         endStreaming();

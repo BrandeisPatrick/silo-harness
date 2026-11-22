@@ -1,6 +1,7 @@
 // Live check of Auto mode's safety check in the real window, with the mock model scripted for the agent and for the
-// check: a blocked command shows one quiet line ("Auto mode blocked … · Allow") and no card, the call's row gives way
-// to it, and the agent reads the reason; Allow lets the command run once when the agent tries it again, and Settings →
+// check: a blocked command is one of the turn's rows ("Blocked touch blocked.txt", never the call's description), folded
+// with the turn and counted in its header ("Worked for 0s · 1 blocked"), no card; the call's own row gives way to it,
+// opening it shows the whole command, the reason and Allow, and the agent reads the reason; Allow lets the command run once when the agent tries it again, and Settings →
 // Permissions → Recently blocked lists it; after three blocks in a row Auto mode pauses and the card comes back.
 // Run: npm run build && node test/live/auto-mode.js [screenshot-dir]
 const fs = require('node:fs');
@@ -36,8 +37,12 @@ const userSays = (text) => (p) => {
     }
     await theme('light');
   };
+  // A blocked row: its line ("Blocked <command>", never the call's description, " · Allowed" once allowed), what it shows opened
+  // (the whole command, the reason, Allow), and whether it is in sight (a finished turn folds it away)
   const lines = () =>
-    app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => ({ text: e.innerText.replace(/\\s+/g, ' ').trim(), tip: e.querySelector('.auto-blocked-words')?.dataset.tip ?? '', allow: Boolean(e.querySelector('.auto-blocked-allow')), shown: Boolean(e.offsetParent) }))`);
+    app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => { const t = (s) => (e.querySelector(s)?.textContent ?? '').replace(/\\s+/g, ' ').trim(); const state = t('.auto-blocked-state'); return { text: [t('.tool-verb'), t('.auto-blocked-what')].join(' ') + (state ? ' · ' + state : ''), command: t('.tool-body .cmd code'), reason: t('.auto-blocked-reason'), allow: Boolean(e.querySelector('.auto-blocked-allow')), shown: Boolean(e.offsetParent) }; })`);
+  const head = () => app.evaluate(`[...document.querySelectorAll('#messages .turn-head')].map((e) => e.innerText.replace(/\\s+/g, ' ').trim())`);
+  const unfold = () => app.evaluate(`document.querySelectorAll('.turn-head-btn[aria-expanded="false"]').forEach((b) => b.click())`);
   const visibleRows = (needle) => app.evaluate(`[...document.querySelectorAll('#messages .tool')].filter((e) => !e.hidden && e.offsetParent && e.textContent.includes(${JSON.stringify(needle)})).length`);
   try {
     if (await app.evaluate(`!document.querySelector('.shell').classList.contains('pane-hidden')`)) await app.click('#pane-toggle');
@@ -49,17 +54,22 @@ const userSays = (text) => (p) => {
     await app.send('Make blocked.txt, but no new files.');
     await app.waitIdle(30_000);
     let l = await lines();
-    check('block: one quiet line with the command and Allow', l.length === 1 && l[0].text === 'Auto mode blocked touch blocked.txt · Allow' && l[0].allow && l[0].shown, l);
-    check('block: the reason is the line\'s tooltip', l[0]?.tip === '[User Boundary] the user said not to create files', l[0]);
+    check('block: the turn folds the blocked row away and its header counts it', l.length === 1 && !l[0].shown && (await head()).length === 1 && /^Worked for \d+s · 1 blocked$/.test((await head())[0]), { l, head: await head() });
+    await unfold();
+    await sleep(150);
+    l = await lines();
+    check('block: unfolded, one row with the command (not the call\'s description of it), Allow inside it', l.length === 1 && l[0].text === 'Blocked touch blocked.txt' && l[0].allow && l[0].shown, l);
+    check('block: the opened row has the whole command and the reason', l[0]?.command === 'touch blocked.txt' && l[0]?.reason === '[User Boundary] the user said not to create files', l[0]);
     check('block: no approval card, and the call\'s row gave way', !(await app.exists('.approval')) && (await visibleRows('blocked.txt')) === 0);
+    await app.evaluate(`document.querySelector('#messages .auto-blocked').open = true`);
     check('block: nothing ran, the agent read the reason', !fs.existsSync(path.join(project, 'blocked.txt')) && /^Blocked by Auto mode: \[User Boundary\] the user said not to create files\. Do not try to get around it/.test(toolResult('a1') ?? ''), toolResult('a1'));
     await both('auto-blocked-line', '#messages .auto-blocked');
 
     // ---------- 2. Allow: the agent is told, and its retry runs once without the check ----------
     await app.click('.auto-blocked-allow');
-    await app.waitFor(`document.querySelector('#messages .auto-blocked')?.innerText.includes('Allowed')`, 5000, 'the line to say Allowed');
+    await app.waitFor(`document.querySelector('#messages .auto-blocked.allowed')`, 5000, 'the row to say Allowed');
     l = await lines();
-    check('Allow: the line says Allowed', l[0]?.text === 'Auto mode blocked touch blocked.txt · Allowed' && !l[0].allow, l);
+    check('Allow: the row says Allowed', l[0]?.text === 'Blocked touch blocked.txt · Allowed' && !l[0].allow, l);
     const before = checks();
     replies.push({ content: '', toolCalls: [{ id: 'a2', name: 'bash', args: { command: 'touch blocked.txt' } }], when: userSays('Go ahead') });
     replies.push({ content: 'Made it.', when: afterTool });
@@ -84,9 +94,9 @@ const userSays = (text) => (p) => {
     await app.waitFor(`document.querySelector('#empty-state') && !document.querySelector('#empty-state').hidden`, 10_000, 'the new session');
     await app.click(`.session-item[data-id="${firstId}"]`);
     await app.waitFor(`Boolean(document.querySelector('#messages .auto-blocked'))`, 10_000, 'the stored line');
-    await app.waitFor(`document.querySelector('#messages .auto-blocked')?.innerText.includes('Allowed')`, 5000, 'the stored line to know it was allowed').catch(() => undefined);
+    await app.waitFor(`document.querySelector('#messages .auto-blocked.allowed')`, 5000, 'the stored row to know it was allowed').catch(() => undefined);
     l = await lines();
-    check('stored: the line comes back from the transcript, still Allowed', l.length === 1 && l[0].text === 'Auto mode blocked touch blocked.txt · Allowed', l);
+    check('stored: the row comes back from the transcript (description and all), still Allowed', l.length === 1 && l[0].text === 'Blocked touch blocked.txt · Allowed' && l[0].command === 'touch blocked.txt', l);
 
     // ---------- 3. Three blocks in a row pause Auto mode: the card comes back ----------
     replies.push({

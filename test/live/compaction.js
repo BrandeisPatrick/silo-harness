@@ -9,7 +9,9 @@ const path = require('node:path');
 const { launch, checker, sleep, LIVE_MODEL, liveSource } = require('./rig.js');
 
 const WORDS = ['Apple', 'Banana', 'Cherry', 'Damson', 'Elderberry'];
-const WINDOW = 10500;
+// Sized so that the prompt and tool definitions leave room for about two file reads before compaction comes due. It
+// grows with them: 10250 until 0.18.0, 10500 until 0.20.0, 10900 since the next_step tool and its sentence.
+const WINDOW = 10900;
 const FILLER = 'This line is filler text that pads the file so that reading it takes a fair share of a small context window. ';
 
 (async () => {

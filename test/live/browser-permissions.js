@@ -150,9 +150,12 @@ const { check, done } = checker();
 
     // ---------- Settings → Browser ----------
     await app.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-browser').click(); })()`);
-    await app.waitFor(`document.querySelector('#sp-sec-browser.current [data-permission]')`, 10_000, 'Settings → Browser with its permissions');
-    const nav = await app.evaluate(`[...document.querySelectorAll('.sp-nav-item')].map((b) => b.dataset.section)`);
-    check('Settings has a Browser section after Permissions', nav.indexOf('browser') === nav.indexOf('permissions') + 1, nav);
+    // The site lists and the saved permissions are under Browser → Advanced, closed by default
+    await app.evaluate(`(() => { const adv = document.querySelector('#sp-sec-browser .sp-page-advanced'); if (!adv.classList.contains('open')) adv.querySelector('.sp-disclosure').click(); })()`);
+    await app.waitFor(`[...document.querySelectorAll('#sp-sec-browser.current [data-permission]')].some((r) => r.offsetParent)`, 10_000, 'Settings → Browser with its permissions');
+    const nav = await app.evaluate(`[...document.querySelectorAll('#settings-nav .sp-nav-item')].map((b) => b.dataset.section)`);
+    const sep = await app.evaluate(`Boolean(document.querySelector('#sp-nav-browser').previousElementSibling?.classList.contains('sp-nav-sep'))`);
+    check('Settings has a Browser page, first of the second group (after Appearance)', nav.indexOf('browser') === nav.indexOf('appearance') + 1 && sep, nav);
     const sec = await app.evaluate(`(() => {
       const q = (s) => document.querySelector('#sp-sec-browser ' + s);
       const rows = [...document.querySelectorAll('#sp-sec-browser [data-permission]')].map((r) => ({ key: r.dataset.permission, title: r.querySelector('.sp-row-name').textContent, desc: r.querySelector('.sp-row-desc').textContent }));
@@ -161,7 +164,7 @@ const { check, done } = checker();
         links: q('#sp-row-browser-openChatLinksInPane input.switch')?.checked,
         clear: !!q('#sp-row-browser-clearData button'),
         dir: q('#sp-row-browser-downloadsDir .sp-row-desc')?.textContent,
-        builtIn: q('.sp-disclosure')?.textContent,
+        builtIn: q('.sp-inner-fold .sp-disclosure')?.textContent,
         exempt: q('#sp-row-browser-exempt-builtin .sp-row-desc')?.textContent,
         rows,
       };

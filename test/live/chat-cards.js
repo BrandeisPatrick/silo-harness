@@ -101,12 +101,12 @@ echo "unknown command" >&2; exit 1
     check('1: the file count and the diff stat', pr3.files === '198 files' && pr3.add === '+12,349' && pr3.del === '−8,032', pr3);
     check('1: the footer says what the checks say', pr3.foot === 'All 3 checks passed', pr3.foot);
     check('1: a link like any in the chat (the pane or the default browser, as Settings → Browser says)', pr3.href === PR(3) && pr3.target === '_blank', pr3);
-    const style = await app.evaluate(`(() => { const c = document.querySelector('.pr-card'); const s = getComputedStyle(c); const add = getComputedStyle(c.querySelector('.pr-add')); const del = getComputedStyle(c.querySelector('.pr-del')); return { radius: s.borderTopLeftRadius, border: s.borderTopWidth, pad: s.paddingTop, title: getComputedStyle(c.querySelector('.pr-card-title')).fontSize, meta: getComputedStyle(c.querySelector('.pr-card-meta')).fontSize, add: add.color, del: del.color }; })()`);
-    check('1: the card takes the column (736px)', Math.round(pr3.w) === 736, pr3.w);
+    const style = await app.evaluate(`(() => { const c = document.querySelector('.pr-card'); const s = getComputedStyle(c); const add = getComputedStyle(c.querySelector('.pr-add')); const del = getComputedStyle(c.querySelector('.pr-del')); return { radius: s.borderTopLeftRadius, border: s.borderTopWidth, pad: s.paddingTop, title: getComputedStyle(c.querySelector('.pr-card-title')).fontSize, meta: getComputedStyle(c.querySelector('.pr-card-meta')).fontSize, add: add.color, del: del.color, ...Object.fromEntries(['success', 'danger'].map((k) => { const p = document.body.appendChild(document.createElement('span')); p.style.color = 'var(--' + k + ')'; const v = getComputedStyle(p).color; p.remove(); return [k, v]; })), col: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--col')) }; })()`);
+    check('1: the card takes the column (--col)', Math.round(pr3.w) === style.col, [pr3.w, style.col]);
     const cols = await app.evaluate(`(() => { const b = document.querySelector('#messages > .chat-cards'); const r = b.previousElementSibling.getBoundingClientRect(); return { block: Math.round(b.getBoundingClientRect().left), reply: Math.round(r.left), card: Math.round(b.querySelector('.pr-card').getBoundingClientRect().left) }; })()`);
     check('1: the block sits in the reading column, like the reply', cols.block === cols.reply && cols.card === cols.reply, cols);
     check('1: white card, 1px border, 12px radius, 16px padding; 14px title, 13px meta', style.radius === '12px' && style.border === '1px' && style.pad === '16px' && style.title === '14px' && style.meta === '13px', style);
-    check('1: the diff stat in green and red', style.add !== style.del && /rgb\(47, 118, 19\)/.test(style.add) && /rgb\(181, 51, 51\)/.test(style.del), style);
+    check('1: the diff stat in green and red (the scheme\'s success and danger)', style.add !== style.del && style.add === style.success && style.del === style.danger, style);
     check('1: gh was asked once', calls(3) === 1, calls(3));
     await app.screenshotOf(path.join(shots, 'pr-card-light.png'), '.chat-cards', 16);
 
@@ -218,5 +218,5 @@ echo "unknown command" >&2; exit 1
     await app.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  done();
+  process.exit(done() ? 1 : 0);
 })();

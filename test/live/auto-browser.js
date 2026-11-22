@@ -66,7 +66,7 @@ const WATCH = `(() => {
     await pending;
     return { result, cards };
   }
-  const quietLines = () => app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => e.innerText.replace(/\\s+/g, ' ').trim())`);
+  const quietLines = () => app.evaluate(`[...document.querySelectorAll('#messages .auto-blocked')].map((e) => { const t = (s) => (e.querySelector(s)?.textContent ?? '').replace(/\\s+/g, ' ').trim(); return [t('.tool-verb'), t('.auto-blocked-what')].join(' ') + (e.querySelector('.auto-blocked-allow') ? ' · Allow' : ''); })`);
   const has = (text) => (p) => JSON.stringify(p.messages ?? []).includes(text);
 
   try {
@@ -89,7 +89,7 @@ const WATCH = `(() => {
     check('block: no card, a blocked result', r.cards.length === 0 && (r.result ?? '').startsWith('Blocked by Auto mode: [Other Site] not needed for the task.') && checks() === n + 1, r);
     await app.waitFor(`document.querySelectorAll('#messages .auto-blocked').length > 0`, 10_000, 'the quiet line');
     const lines = await quietLines();
-    check('block: the quiet line names the action', lines.some((l) => l === `Auto mode blocked open fixture.example:${Q} · Allow`), lines);
+    check('block: the quiet line names the action', lines.some((l) => l === `Blocked open fixture.example:${Q} · Allow`), lines);
 
     // ---------- ask: the card, and the user's answer is honoured ----------
     n = checks();
@@ -142,7 +142,9 @@ const WATCH = `(() => {
     const onDisk = JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers;
     check('learning: kept in the profile folder, its own file', onDisk.length === 4, onDisk.map((e) => `${e.decision} ${e.line}`));
     await app.evaluate(`(() => { if (!document.querySelector('#settings').open) document.querySelector('#settings-btn').click(); document.querySelector('#sp-nav-permissions')?.click(); })()`);
-    await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 4`, 10_000, 'the learned list');
+    // Learning and what it learned are under Permissions → Advanced, closed by default
+    await app.evaluate(`(() => { const adv = document.querySelector('#sp-sec-permissions .sp-page-advanced'); if (!adv.classList.contains('open')) adv.querySelector('.sp-disclosure').click(); })()`);
+    await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 4 && Boolean(document.querySelector('.auto-learned-list').offsetParent)`, 10_000, 'the learned list');
     const rows = () => app.evaluate(`[...document.querySelectorAll('.auto-learned-list .sp-row')].map((r) => r.innerText.replace(/\\s+/g, ' ').trim())`);
     let listed = await rows();
     check('Settings: the switch is on, the list shows what was learned, newest first', (await app.evaluate(`document.querySelector('#sp-row-autoMode-learn input').checked`)) && listed[0].startsWith(`click "Pay now" on fixture.example:${P}`) && listed[0].includes('Denied'), listed);
@@ -151,8 +153,8 @@ const WATCH = `(() => {
       await app.evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(t)}`);
       await sleep(250);
       await app.screenshotOf(path.join(shots, `auto-learned-${t}.png`), '#sp-row-autoMode-learn', 0).catch(() => undefined);
-      await app.evaluate(`(() => { const g = document.querySelector('#sp-row-autoMode-learn').parentElement; g.scrollIntoView(); })()`);
-      const box = await app.evaluate(`(() => { const r = document.querySelector('#sp-row-autoMode-learn').parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
+      await app.evaluate(`(() => { const g = document.querySelector('.auto-learned-list').closest('.sp-card-group'); g.scrollIntoView(); })()`);
+      const box = await app.evaluate(`(() => { const r = document.querySelector('.auto-learned-list').closest('.sp-card-group').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       await app.screenshot(path.join(shots, `auto-learned-group-${t}.png`), { x: Math.max(0, box.x - 16), y: Math.max(0, box.y - 40), width: box.width + 32, height: box.height + 56 });
     }
     await app.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -165,7 +167,8 @@ const WATCH = `(() => {
     await app.waitFor(`document.querySelector('#confirm-dialog').open`, 3000, 'the confirmation');
     await app.click('#confirm-ok');
     await app.waitFor(`document.querySelectorAll('.auto-learned-list .sp-row').length === 0`, 5000, 'the list to empty');
-    check('Settings: Forget all empties it', JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers.length === 0 && (await app.text('.auto-learned-list')).includes('Nothing learned yet.'));
+    // An empty list has no note: its card hides
+    check('Settings: Forget all empties it, and its card hides', JSON.parse(fs.readFileSync(path.join(app.profile, 'auto-learned.json'), 'utf8')).answers.length === 0 && (await app.evaluate(`document.querySelector('.auto-learned-list').closest('.sp-card-group').hidden`)));
     // The switch off: an answer is not recorded and the check gets none
     await app.evaluate(`document.querySelector('#sp-row-autoMode-learn input').click()`);
     await app.waitFor(`window.oc.getConfig().then((c) => c.autoMode && c.autoMode.learn === false)`, 5000, 'learning off');

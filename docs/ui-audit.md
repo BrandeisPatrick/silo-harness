@@ -18,7 +18,7 @@ Fonts (Claude → Silo Harness):
 | Code | ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas | same stack |
 | Weights | regular 400, medium 500, semibold 580, bold 600 | 400 / 500 / 600 / 600 (never 700) |
 
-Type scale (size/line-height): xs 12/16, sm 14/20, base 16/24, lg 18/28, xl 20/28, 2xl 24/32. The transcript body is sm (14/20); chrome (sidebar, top bar, chips, tool rows) is 13/18 to 14/20; captions and meta are xs (12/16). Letter-spacing is normal everywhere except uppercase group labels (0.04em).
+Type scale (size/line-height): xs 12/16, sm 14/20, base 16/24, lg 18/28, xl 20/28, 2xl 24/32. The transcript body is sm (14/20); chrome (sidebar, top bar, chips, tool rows) is 13/18 to 14/20; captions and meta are xs (12/16). Silo Harness uses two tiers, as measured on a later Claude Code screenshot (2026-11-20): what the assistant says (replies, the user's bubble, the chat bar) 16/24 (`--fs-body`), what it did (the fold line, tool, group and blocked rows, notices, the status line) 14/20 muted (`--fs-act`); reply headings 17/24 semibold for h1–h2 (`--fs-head`) and 16 semibold below; inline code 14, code blocks 13/20 (`--fs-code`); session titles, rows and controls 14/20, secondary 13/18, captions 12/16. Letter-spacing is normal everywhere except uppercase group labels (0.04em).
 
 Colours (hex, converted from the HSL tokens):
 

@@ -1,7 +1,6 @@
 // The images a session showed (show_image): copies under <userData>/artifacts/<sessionId>/images/img-<n>.<ext>,
 // recorded on the session by id (session.images) and served as artifact://view/<session>/images/<file>.
 
-import { nativeImage } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,6 +68,8 @@ export function loadImage(file: string, shown = file): LoadedImage {
 function pixelSize(buf: Buffer, kind: ImageKind): { width?: number; height?: number } {
   if (kind.ext === 'svg') return {};
   try {
+    // Asked for here, not at load: the silo command loads this module in Node mode, where there is no electron
+    const { nativeImage } = require('electron') as Partial<typeof import('electron')>;
     if (typeof nativeImage?.createFromBuffer === 'function') {
       const img = nativeImage.createFromBuffer(buf);
       if (!img.isEmpty()) {

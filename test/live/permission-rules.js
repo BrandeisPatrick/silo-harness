@@ -140,5 +140,5 @@ const userSays = (text) => (p) => {
   } finally {
     await app.close();
   }
-  done();
+  process.exit(done() ? 1 : 0);
 })();

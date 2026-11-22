@@ -131,6 +131,8 @@ async function launch(opts = {}) {
     // The app's own config directory (settings.json, skills, mods) is redirected too, so a test never reads yours.
     SILO_HARNESS_CONFIG_DIR: home,
     PORTKEY_API_KEY: key || 'mock-key',
+    // Nothing a test moves to the Trash lands in yours: a stand-in folder beside the profile (trash.ts)
+    SILO_HARNESS_TRASH_DIR: `${profile}-trash`,
     ...(ant ? { SILO_HARNESS_LIVE_RELAY_KEY: ant.key } : {}),
     ...(opts.env || {}),
   };
@@ -222,6 +224,8 @@ async function launch(opts = {}) {
   const api = {
     root,
     profile,
+    /** The stand-in for the Trash this launch uses (SILO_HARNESS_TRASH_DIR) */
+    trashDir: `${profile}-trash`,
     project,
     port,
     /** true when the run talks to the real API, false with the mock model */
@@ -356,7 +360,7 @@ async function launch(opts = {}) {
     /** Opens every folded turn (its "Worked for 53s" header), so the process under it is on screen again. */
     unfold: () => evaluate(`[...document.querySelectorAll('#messages > .turn-head.folded button')].forEach((b) => b.click())`),
     /** The last assistant reply's text. */
-    lastReply: () => evaluate(`(() => { const all = document.querySelectorAll('.msg.assistant'); const e = all[all.length - 1]; return e ? e.innerText.trim() : ''; })()`),
+    lastReply: () => evaluate(`(() => { const all = document.querySelectorAll('.msg.assistant'); const e = all[all.length - 1]; return e ? (e.querySelector('.md') ?? e).innerText.trim() : ''; })()`),
     /** Answers the open approval card: 'allow' or 'deny'. */
     async approve(answer = 'allow') {
       await waitFor(`Boolean(document.querySelector('.approval:not(.decided) .btn'))`, 60_000, 'an approval card');
@@ -395,7 +399,10 @@ async function launch(opts = {}) {
         if (!exited) child.kill('SIGKILL');
       }
       mock?.close();
-      if (ownsProfile) fs.rmSync(profile, { recursive: true, force: true });
+      if (ownsProfile) {
+        fs.rmSync(profile, { recursive: true, force: true });
+        fs.rmSync(`${profile}-trash`, { recursive: true, force: true });
+      }
     },
   };
   // The page is usable once the composer has taken focus at the end of its start-up.

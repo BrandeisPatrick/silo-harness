@@ -31,6 +31,8 @@ const SCRIPTS = [
   { name: 'settings-delete' },
   { name: 'providers' },
   { name: 'models-page' },
+  { name: 'bundled-models' },
+  { name: 'settings-reset' },
   { name: 'effort' },
   { name: 'model-menu' },
   { name: 'sidebar' },
@@ -88,6 +90,7 @@ const SCRIPTS = [
   { name: 'browser-hardening' },
   { name: 'browser-drag-regions', shots: 'none' },
   { name: 'chat-cards' },
+  { name: 'next-step' },
   { name: 'mcp-servers', shots: 'none' },
   { name: 'cost' },
 ];

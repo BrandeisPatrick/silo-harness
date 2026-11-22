@@ -10,6 +10,10 @@ export interface AutoBlock {
   name: string;
   /** What it would have done, on one line: the command, the file, the MCP tool */
   what: string;
+  /** The call's own short description, when it gave one (bash's `description`): the row in the turn reads it */
+  desc?: string;
+  /** The whole command or target, as the call sent it (what the opened row shows; `what` is cut to one line) */
+  full?: string;
   /** The check's reason, its category first: "[Destructive Git] force-pushes over remote history" */
   reason: string;
   /** When it was blocked (0 when only the stored transcript knows it) */

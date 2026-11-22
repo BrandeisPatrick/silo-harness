@@ -85,6 +85,16 @@ const fileOf = (layer, scope) => layer.info().files.find((f) => f.scope === scop
     check('info: project file path under the folder', fileOf(layer, 'project').path === path.join(cwd, PROJECT));
   }
 
+  // --- a user settings.json that is a link: info says so (Full reset's confirmation names it) --------------------
+  {
+    const target = write(tmp(), 'settings.json', { theme: 'dark' });
+    const userFile = path.join(tmp(), 'settings.json');
+    fs.symlinkSync(target, userFile);
+    const layer = new SettingsLayer({ userFile });
+    layer.load(base(tmp()));
+    check('info marks a linked user settings.json as a link', fileOf(layer, 'user').link === true && fileOf(layer, 'user').exists, fileOf(layer, 'user'));
+  }
+
   // --- user scope overrides config.json (unchanged) ----------------------------
   {
     const cwd = tmp();
