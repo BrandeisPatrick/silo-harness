@@ -26,7 +26,7 @@ export function resetRows(ctx: Ctx): Row[] {
   const settingsBtn = button('Reset…', async (b) => {
     const ok = await ctx.confirm({
       title: 'Reset settings?',
-      description: "The app's saved settings go back to defaults and move to the Trash. Sessions, mods and your settings.json stay. The app relaunches.",
+      description: "The app's saved settings go back to defaults and move to the Trash, API keys saved in Settings among them. Sessions, mods and your settings.json stay. The app relaunches.",
       confirmLabel: 'Reset and relaunch',
       danger: true,
     });

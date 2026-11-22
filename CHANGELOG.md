@@ -48,6 +48,7 @@ A redesigned Settings with API keys on the Models page, a calmer session view in
 - **Type variables.** `--fs-reply` and `--fs-act` size replies and activity; `--fs-body` and `--fs-title` are unchanged for mods.
 - **Panel variables.** A look may set `--code-panel` and `--code-inline`; `--code-bg` still works as before.
 - **Live scripts report failure.** Eight live scripts that always exited 0 now fail when one of their checks fails.
+- **Bundled defaults.** A repackaged app can ship a `defaults.json` that pre-fills settings, never keys; people add their key under Settings → Models ([details](docs/configure.md#bundled-defaults)).
 
 ### Upgrade notes
 
