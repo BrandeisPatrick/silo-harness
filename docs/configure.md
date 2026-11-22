@@ -328,6 +328,34 @@ The cost estimate (see [Cost](reference.md#cost)) knows Claude's list prices on 
 }
 ```
 
+### Bundled defaults
+
+Someone who repackages the app can ship it with settings already filled in. Put a `defaults.json` in the app's Resources folder, `<App>.app/Contents/Resources/defaults.json` (with electron-builder, an `extraResources` entry, or `-c.extraResources` on the command line). The public build has no such file and behaves exactly as described above. `SILO_HARNESS_DEFAULTS` (an absolute path) points at one for a local trial, and `silo` finds the one in its own app.
+
+The file has the shape of config.json, not settings.json, and may hold just the fields to pre-fill. It is read once at launch and never written.
+
+```json
+{
+  "provider": "acme",
+  "providers": {
+    "acme": {
+      "type": "openai-compatible",
+      "baseURL": "https://gateway.example.com/v1",
+      "model": "example/model-a",
+      "models": ["example/model-a", "example/model-b"]
+    }
+  },
+  "autoMode": { "model": "example/model-b" }
+}
+```
+
+Precedence: defaults < bundled defaults < config.json < your settings.json < the project's. A provider in config.json with the same name as a bundled one changes only the fields it sets.
+
+- Keys never ship this way. An `env` block, `portkey.apiKey`, `portkey.providerApiKey`, `webSearch.apiKey` and every provider's `apiKey` and `providerApiKey` are dropped (one warning in the log); keys come from the person's own settings.json or the key variable.
+- A bundle sets defaults, not consent: trust records, approvals, allow rules, the bypass mode and MCP servers' `env` and `headers` are dropped.
+- An unreadable file, or one that is not a JSON object, is ignored with a warning, and unknown keys are skipped.
+- A bundled value the person has not changed is not written into config.json, so a newer app with a longer `models` list reaches existing installs. A value they changed, such as the model picked in the model picker, is kept.
+
 ### The other settings
 
 `permissionMode`, `maxTurns`, `sendScreenshotsToModel`, `systemPromptExtra`, `theme`, `autoTitles`, `autoCompact`, `compactThreshold`, `pruneToolResults`, `toolSet`, `toolActivity`, `thinking` (see [Thinking](#thinking)), `notifications`, `keepAwake`, `historyTrashDays`; the `ollama` block (`baseURL`, `model`, `numCtx`, `think`), the `portkey` block (`baseURL`, `apiKey`, `model`, `virtualKey`, `provider`, `providerApiKey`, `configId`, `contextWindow`), `dreaming` (`daily`, `time`, `mode`, `skills`, `mods`, `memory`); `browser` (see [The browser](#the-browser)); `env`; `hooks`, commands run before and after the agent acts, in Claude Code's format (a project's run only once you trust its file; see [hooks.md](hooks.md)), and `disableAllHooks`; and in your own file `workingDirectory`, the folder the app opens in. The schema has the allowed values of each.
