@@ -31,6 +31,7 @@ const SCRIPTS = [
   { name: 'settings-delete' },
   { name: 'providers' },
   { name: 'models-page' },
+  { name: 'bundled-models' },
   { name: 'settings-reset' },
   { name: 'effort' },
   { name: 'model-menu' },
