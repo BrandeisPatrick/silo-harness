@@ -31,5 +31,22 @@ try {
   /* not JSON */
 }
 check('silo provider list --json runs without electron', r.status === 0 && list !== null, (r.stderr || r.stdout).slice(0, 400));
+
+// A repackaged app's bundled defaults (SILO_HARNESS_DEFAULTS): still no electron, the bundled provider is listed and in
+// use, and its shipped key is dropped
+const bundle = path.join(tmp, 'defaults.json');
+fs.writeFileSync(bundle, JSON.stringify({ provider: 'acme', providers: { acme: { type: 'openai-compatible', baseURL: 'http://127.0.0.1:9/v1', model: 'example/model-a', models: ['example/model-a'], apiKey: 'shipped-SECRET-0123456789' } } }));
+env.SILO_HARNESS_DEFAULTS = bundle;
+const b = run(`process.argv = [process.argv[0], ${JSON.stringify(silo)}, ...process.argv.slice(1)]; require(${JSON.stringify(silo)});`, ['provider', 'list', '--json']);
+let blist = null;
+try {
+  blist = JSON.parse(b.stdout);
+} catch {
+  /* not JSON */
+}
+const acme = blist?.providers?.find((p) => p.name === 'acme');
+check('with a bundle: silo provider list --json runs without electron and lists the bundled provider in use', b.status === 0 && blist?.active === 'acme' && acme?.model === 'example/model-a', (b.stderr || b.stdout).slice(0, 400));
+check("… without the bundle's key", acme?.key === 'none' && !b.stdout.includes('shipped-SECRET'), acme);
+check('… and writes nothing', !fs.existsSync(path.join(tmp, 'data', 'config.json')));
 fs.rmSync(tmp, { recursive: true, force: true });
 done();

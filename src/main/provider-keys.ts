@@ -20,6 +20,7 @@ import path from 'node:path';
 import type { AppConfig, NamedProviderConfig } from '../shared/types';
 import { isRecord } from './json';
 import { PRESETS } from './provider-presets';
+import { bundledProviders } from './config';
 
 /** A place a key can be kept: a field of config.json or of the user's settings.json (path from the top) */
 export interface KeySpot {
@@ -41,9 +42,9 @@ const fromOf = (spot: KeySpot): 'app' | 'settings' => (spot.file === 'config' ? 
 
 /**
  * Where `name`'s key is kept and where one would be saved. `owned`: the fields a settings file sets (SettingsLayer);
- * `envBy`: which file set a variable (none: a value comes from the shell).
+ * `envBy`: which file set a variable (none: a value comes from the shell); `bundled`: the bundle's named providers (config.ts).
  */
-export function keyPlace(cfg: AppConfig, name: string, owned: Record<string, 'user' | 'project'>, envBy: Record<string, 'user' | 'project'>, env: NodeJS.ProcessEnv = process.env): KeyPlace {
+export function keyPlace(cfg: AppConfig, name: string, owned: Record<string, 'user' | 'project'>, envBy: Record<string, 'user' | 'project'>, env: NodeJS.ProcessEnv = process.env, bundled: Record<string, unknown> = bundledProviders()): KeyPlace {
   const envSpot = (v: string): KeySpot => ({ file: 'settings', path: ['env', v] });
   /** The key comes from variable `v` when it is set: your settings.json's env block (editable), a project's, or the shell */
   const fromVar = (v: string, newSpot: KeySpot | null): KeyPlace => {
@@ -79,9 +80,11 @@ export function keyPlace(cfg: AppConfig, name: string, owned: Record<string, 'us
   }
   const entrySpot: KeySpot = { file: owner === 'user' ? 'settings' : 'config', path: ['providers', name, 'apiKey'] };
   if (entry.apiKey) return { from: fromOf(entrySpot), save: entrySpot, remove: entrySpot };
-  // The variable the entry names is where its key belongs; without one, the entry's own apiKey field
+  // The variable the entry names is where its key belongs; without one, the entry's own apiKey field. So is a variable
+  // a bundled defaults.json named: your key goes in the entry's apiKey in config.json, not into every process the app starts
   if (!variable) return { from: null, save: entrySpot, remove: null };
-  return fromVar(variable, entry.apiKeyEnv ? envSpot(entry.apiKeyEnv) : entrySpot);
+  const bundledVar = isRecord(bundled[name]) && bundled[name].apiKeyEnv === entry.apiKeyEnv;
+  return fromVar(variable, entry.apiKeyEnv && !bundledVar ? envSpot(entry.apiKeyEnv) : entrySpot);
 }
 
 /** A key as typed: trimmed; one line, no spaces, not absurdly long. Throws in plain words otherwise. */

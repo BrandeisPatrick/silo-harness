@@ -355,6 +355,8 @@ Precedence: defaults < bundled defaults < config.json < your settings.json < the
 - A bundle sets defaults, not consent: trust records, approvals, allow rules, the bypass mode and MCP servers' `env` and `headers` are dropped.
 - An unreadable file, or one that is not a JSON object, is ignored with a warning, and unknown keys are skipped.
 - A bundled value the person has not changed is not written into config.json, so a newer app with a longer `models` list reaches existing installs. A value they changed, such as the model picked in the model picker, is kept.
+- The person adds their key under Settings → Models → API key: it is saved in their config.json as that provider's `apiKey` alone (even when the bundle names an `apiKeyEnv`), and the rest of the entry keeps following the bundle. A bundled provider cannot be removed there.
+- Settings → Developer → Reset settings… goes back to the bundle's values and takes the saved key with it; Full reset… does the same and more. Neither touches the bundled file, which is inside the app.
 
 ### The other settings
 

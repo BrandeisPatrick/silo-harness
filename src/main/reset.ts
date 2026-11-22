@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { App } from './app';
-import { configDir, envVar } from './paths';
+import { bundledDefaultsPath, configDir, envVar } from './paths';
 import { trashItem } from './trash';
 
 export type ResetKind = 'full' | 'settings';
@@ -124,10 +124,13 @@ export function stageReset(userData: string, log: (line: string) => void = () =>
     }
   };
   const cfg = real(configFolder);
-  const holdsConfig = (n: string) => {
+  // So may a bundled defaults.json SILO_HARNESS_DEFAULTS names there (a trial): it is the app's, not the data folder's
+  const bundle = bundledDefaultsPath();
+  const holds = (n: string, inner: string) => {
     const p = real(path.join(userData, n));
-    return cfg === p || cfg.startsWith(p + path.sep);
+    return inner === p || inner.startsWith(p + path.sep);
   };
+  const holdsConfig = (n: string) => holds(n, cfg) || (bundle !== null && holds(n, real(bundle)));
   const moves: [string, string][] =
     plan.kind === 'full'
       ? fs

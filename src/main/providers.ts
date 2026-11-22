@@ -22,6 +22,7 @@ import path from 'node:path';
 import { configDir } from './paths';
 import type { ProviderCatalog } from '../shared/providers';
 import { keyPlace, type KeyPlace } from './provider-keys';
+import { bundledProviders } from './config';
 
 /** The user's settings.json as messages show it (~/… when it is under the home folder). */
 function shownSettingsPath(): string {
@@ -334,8 +335,8 @@ export function providerView(r: ResolvedProvider, owner?: 'user' | 'project', pl
     ...(tail ? { keyTail: tail } : {}),
     ...(place?.from ? { keyFrom: place.from } : {}),
     ...(place ? { keyEditable: Boolean(place.save), keyRemovable: Boolean(place.remove) } : {}),
-    // An entry of your own (config.json or your settings.json); never a built-in block or a project's entry
-    ...(!r.builtIn && owner !== 'project' && !r.error?.startsWith('There is no provider') ? { removable: true } : {}),
+    // An entry of your own (config.json or your settings.json); never a built-in block, a project's entry or one the app ships with
+    ...(!r.builtIn && owner !== 'project' && !(owner !== 'user' && r.name in bundledProviders()) && !r.error?.startsWith('There is no provider') ? { removable: true } : {}),
     ...(r.error ? { error: scrubSecrets(r.error) } : {}),
     ...withEffort(r),
     ...(isNativeAnthropic(r) ? { native: true } : {}),

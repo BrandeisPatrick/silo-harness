@@ -179,6 +179,12 @@ export function resetBundledDefaults(): void {
   bundled = undefined;
 }
 
+/** The named providers the bundle defines (without keys): Settings → Models neither removes them nor saves a key under a variable one names. */
+export function bundledProviders(): Record<string, unknown> {
+  const p = bundledDefaults().providers;
+  return isRecord(p) ? p : {};
+}
+
 /** defaultConfig() with the bundled defaults merged over it, section by section the way a config.json is. */
 export function baseConfig(): AppConfig {
   const d = defaultConfig();

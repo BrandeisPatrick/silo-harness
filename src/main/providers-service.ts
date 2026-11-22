@@ -18,6 +18,7 @@ import { PRESETS, PROVIDER_TYPES, providerNameProblem, validateProviderEntry } f
 import { settingsLayer } from './settings';
 import { reloadSettingsNow } from './settings-service';
 import { isRecord } from './json';
+import { bundledProviders } from './config';
 
 /** The command's name (it was open-harness before the rename) */
 export const CLI_NAME = 'silo';
@@ -264,6 +265,8 @@ export function setupProviders(app: App, opts: ProvidersServiceOptions = {}): ()
     if (!cfg.providers?.[n]) throw new Error(`There is no provider named "${n}".`);
     const owner = owned()[`providers.${n}`];
     if (owner === 'project') throw new Error("This provider comes from this project's settings.json. Remove it there.");
+    // It would come back at the next launch
+    if (owner !== 'user' && n in bundledProviders()) throw new Error(`"${n}" comes with this copy of the app and cannot be removed.`);
     // The one in use goes: the first other provider that is ready takes its place (else Ollama)
     if ((cfg.provider || 'ollama') === n) {
       const next = providerNames(cfg).find((x) => x !== n && !resolveProvider(cfg, x).error) ?? 'ollama';
