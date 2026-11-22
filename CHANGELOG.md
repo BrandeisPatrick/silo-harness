@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.21.0 — 2026-11-20
+## 0.21.0 — 2026-11-21
 
 A redesigned Settings with API keys on the Models page, a calmer session view in two text sizes, and a next-step card with buttons that answer the assistant's question.
 
